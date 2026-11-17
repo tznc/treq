@@ -1,0 +1,14 @@
+id: gpui-shell-guarded-block-on
+language: rust
+severity: error
+message: >
+  Use crate::gpui_shell::block_on, not tauri::async_runtime::block_on, in
+  gpui_shell. Host methods block on async backend calls and must run on
+  GPUI's background executor; the gpui_shell wrapper fails debug builds
+  when it is reached from the main thread, which would freeze the window.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+ignores:
+  - "src-tauri/src/gpui_shell/mod.rs"
+rule:
+  pattern: tauri::async_runtime::block_on($$$)

@@ -7,11 +7,15 @@
 //! GPUI reads and changes everything else through `gh` and the local
 //! database itself.
 
-use std::collections::{HashMap, HashSet};
+use std::{
+  collections::{HashMap, HashSet},
+  sync::LazyLock,
+};
 
 use serde::{Deserialize, Serialize};
 
 use super::workspace_data::WorkspaceHost;
+pub use crate::github_filters::*;
 use crate::{
   core::{self, RunSummary, SetupScriptStatus, WorkflowInfo},
   github::{GhIssue, GhListPage, GhPullRequest, GitRemoteInfo, PrCiStatus, PrInfo},
@@ -19,7 +23,7 @@ use crate::{
   local_db::Workspace,
 };
 
-/// `GitHubTab`, without the merge queue, which React still draws.
+/// `GitHubTab`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Tab {
@@ -72,14 +76,6 @@ impl StateFilter {
   }
 }
 
-/// The Merge Queue tab, while the build offers it.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MergeQueueTab {
-  /// A Pro subscription hides the tab's PRO badge.
-  pub pro: bool,
-}
-
 /// What React sends: where in the GitHub view the URL points.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -91,11 +87,13 @@ pub struct Route {
   pub selected: Option<u64>,
   /// The new issue form or new pull request dialog is open (`/new`).
   pub creating: bool,
-  pub merge_queue: Option<MergeQueueTab>,
   /// Workflow checks running from this window (`useRunningChecks` keys:
   /// `<workspace id>:<file>[:<job>]`).
   #[serde(default)]
   pub running_checks: Vec<String>,
+  /// Bumped to read the selected issue or PR again (a review was submitted).
+  #[serde(default)]
+  pub reload: u64,
 }
 
 /// A change to one issue.
@@ -131,6 +129,13 @@ pub struct TreqChecks {
   pub setup: Option<SetupScriptStatus>,
 }
 
+impl TreqChecks {
+  /// Whether the repository declares any workflow or a setup script.
+  pub fn configured(&self) -> bool {
+    !self.workflows.is_empty() || self.setup.as_ref().is_some_and(|s| s.configured)
+  }
+}
+
 /// One line of a job's logs (`getRunLogs`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct LogLine {
@@ -142,6 +147,8 @@ pub struct LogLine {
 /// `notify`, `open_url` and `refresh_pr_status` block, so they are called
 /// off the main thread.
 pub trait GithubHost: WorkspaceHost {
+  /// The image at `url`: a reviewer's avatar.
+  fn avatar(&self, url: &str) -> Result<Vec<u8>, String>;
   fn remote(&self, repo_path: &str) -> Result<Option<GitRemoteInfo>, String>;
   fn list_issues(
     &self,
@@ -163,7 +170,6 @@ pub trait GithubHost: WorkspaceHost {
   /// Adds (`on`) or removes the user's `content` reaction on a comment.
   fn react(&self, comment_id: &str, content: &str, on: bool) -> Result<(), String>;
   fn create_issue(&self, repo: &str, title: &str, body: &str) -> Result<u64, String>;
-  #[allow(clippy::too_many_arguments)]
   fn create_pr(
     &self,
     repo: &str,
@@ -205,16 +211,13 @@ pub trait GithubHost: WorkspaceHost {
   ) -> Result<Vec<crate::core::checks::JobResult>, String>;
 }
 
-fn gh() -> Result<(String, String), String> {
-  let gh = crate::binary_paths::get_binary_path("gh")
-    .or_else(|| crate::binary_paths::detect_binary("gh"))
-    .ok_or_else(|| "gh CLI not found".to_string())?;
-  Ok((gh, crate::binary_paths::get_extended_path()))
-}
-
 impl GithubHost for Backend {
+  fn avatar(&self, url: &str) -> Result<Vec<u8>, String> {
+    super::settings_data::SettingsHost::fetch_image(self, url)
+  }
+
   fn remote(&self, repo_path: &str) -> Result<Option<GitRemoteInfo>, String> {
-    crate::github::get_git_remote_url_impl(repo_path)
+    core::github_cli::remote(repo_path)
   }
 
   fn list_issues(
@@ -223,15 +226,7 @@ impl GithubHost for Backend {
     state: &str,
     after: Option<&str>,
   ) -> Result<GhListPage<GhIssue>, String> {
-    let (gh, path) = gh()?;
-    crate::github::gh_list_issues_impl(
-      &gh,
-      repo,
-      state,
-      crate::github::GH_LIST_PAGE_SIZE,
-      after,
-      &path,
-    )
+    core::github_cli::list_issues(repo, state, after)
   }
 
   fn list_prs(
@@ -240,69 +235,48 @@ impl GithubHost for Backend {
     state: &str,
     page: u32,
   ) -> Result<GhListPage<GhPullRequest>, String> {
-    let (gh, path) = gh()?;
-    crate::github::gh_list_prs_impl(
-      &gh,
-      repo,
-      state,
-      crate::github::GH_LIST_PAGE_SIZE,
-      page,
-      &path,
-    )
+    core::github_cli::list_prs(repo, state, page)
   }
 
   fn issue(&self, repo: &str, number: u64) -> Result<GhIssue, String> {
-    let (gh, path) = gh()?;
-    let mut issue = crate::github::gh_view_issue_impl(&gh, repo, number, &path)?;
-    crate::github::fill_comment_reactions(&gh, issue.comments.as_mut(), &path);
-    Ok(issue)
+    core::github_cli::issue(repo, number)
   }
 
   fn pr(&self, repo: &str, number: u64) -> Result<GhPullRequest, String> {
-    let (gh, path) = gh()?;
-    let mut pr = crate::github::gh_view_pr_impl(&gh, repo, number, &path)?;
-    crate::github::fill_comment_reactions(&gh, pr.comments.as_mut(), &path);
-    Ok(pr)
+    core::github_cli::pr(repo, number)
   }
 
   fn pr_checks(&self, repo: &str, number: u64) -> Result<Option<PrCiStatus>, String> {
-    let (gh, path) = gh()?;
-    crate::github::get_pr_checks_for_pr_impl(&gh, repo, number, &path)
+    core::github_cli::pr_checks(repo, number)
   }
 
   fn change_issue(&self, repo: &str, number: u64, change: &IssueChange) -> Result<(), String> {
-    use crate::github as g;
-    let (gh, path) = gh()?;
+    use core::github_cli as gh;
     match change {
-      IssueChange::Comment(body) => g::gh_create_issue_comment_impl(&gh, repo, number, body, &path),
-      IssueChange::Close(reason) => g::gh_close_issue_impl(&gh, repo, number, Some(reason), &path),
-      IssueChange::Reopen => g::gh_reopen_issue_impl(&gh, repo, number, &path),
-      IssueChange::Edit { title, body } => {
-        g::gh_edit_issue_impl(&gh, repo, number, title, body, &path)
-      }
-      IssueChange::Delete => g::gh_delete_issue_impl(&gh, repo, number, &path),
+      IssueChange::Comment(body) => gh::comment_on_issue(repo, number, body),
+      IssueChange::Close(reason) => gh::close_issue(repo, number, reason),
+      IssueChange::Reopen => gh::reopen_issue(repo, number),
+      IssueChange::Edit { title, body } => gh::edit_issue(repo, number, title, body),
+      IssueChange::Delete => gh::delete_issue(repo, number),
     }
   }
 
   fn change_pr(&self, repo: &str, number: u64, change: &PrChange) -> Result<(), String> {
-    use crate::github as g;
-    let (gh, path) = gh()?;
+    use core::github_cli as gh;
     match change {
-      PrChange::Comment(body) => g::gh_create_pr_comment_impl(&gh, repo, number, body, &path),
-      PrChange::Close => g::gh_close_pr_impl(&gh, repo, number, &path),
-      PrChange::Reopen => g::gh_reopen_pr_impl(&gh, repo, number, &path),
-      PrChange::Draft(draft) => g::gh_set_pr_draft_impl(&gh, repo, number, *draft, &path),
+      PrChange::Comment(body) => gh::comment_on_pr(repo, number, body),
+      PrChange::Close => gh::close_pr(repo, number),
+      PrChange::Reopen => gh::reopen_pr(repo, number),
+      PrChange::Draft(draft) => gh::set_pr_draft(repo, number, *draft),
     }
   }
 
   fn react(&self, comment_id: &str, content: &str, on: bool) -> Result<(), String> {
-    let (gh, path) = gh()?;
-    crate::github::gh_set_reaction_impl(&gh, comment_id, content, on, &path)
+    core::github_cli::set_reaction(comment_id, content, on)
   }
 
   fn create_issue(&self, repo: &str, title: &str, body: &str) -> Result<u64, String> {
-    let (gh, path) = gh()?;
-    crate::github::gh_create_issue_impl(&gh, repo, title, body, &path)
+    core::github_cli::create_issue(repo, title, body)
   }
 
   fn create_pr(
@@ -314,8 +288,7 @@ impl GithubHost for Backend {
     head: &str,
     draft: bool,
   ) -> Result<u64, String> {
-    let (gh, path) = gh()?;
-    crate::github::gh_create_pr_impl(&gh, repo, title, body, base, head, draft, &path)
+    core::github_cli::create_pr(repo, title, body, base, head, draft)
   }
 
   fn workspaces(&self, repo_path: &str) -> Result<Vec<Workspace>, String> {
@@ -335,16 +308,20 @@ impl GithubHost for Backend {
   }
 
   fn open_pr_workspace(&self, repo_path: &str, pr: &GhPullRequest) -> Result<(i64, bool), String> {
-    let description = format!("From GitHub PR #{}", pr.number);
+    let body = pr.body.as_deref().map(str::trim).filter(|b| !b.is_empty());
     let (workspace, created) = core::open_or_create_workspace_from_pr(
       repo_path,
       &pr.head_ref_name,
       &pr.base_ref_name,
       Some(&pr.title),
-      Some(&description),
+      body,
+      Some(pr.number),
     )?;
     if created {
       crate::commands::workspace::spawn_setup_script_if_configured(&workspace);
+      // The list's PRs carry no body; the poll fills it in.
+      crate::pr_status::global()
+        .queue_branch_refresh(repo_path.to_string(), pr.head_ref_name.clone());
     }
     Ok((workspace.id, created))
   }
@@ -356,8 +333,7 @@ impl GithubHost for Backend {
   }
 
   fn logs_enabled(&self) -> bool {
-    use core::feature_preview::{is_enabled, PreviewFeature};
-    self.with_db(|db| is_enabled(db, PreviewFeature::Logs))
+    true
   }
 
   fn treq_checks(&self, repo_path: &str, workspace_id: i64) -> TreqChecks {
@@ -376,7 +352,7 @@ impl GithubHost for Backend {
       })
       .collect();
     TreqChecks {
-      trusted: crate::local_db::is_repo_trusted(repo_path),
+      trusted: core::repo::is_repo_trusted(repo_path),
       workflows,
       latest,
       setup: core::get_setup_script_status_sync(repo_path, workspace_id).ok(),
@@ -413,7 +389,7 @@ impl GithubHost for Backend {
   }
 
   fn trust_repo(&self, repo_path: &str) -> Result<(), String> {
-    crate::local_db::trust_repo(repo_path)?;
+    core::repo::trust_repo(repo_path)?;
     WorkspaceHost::notify(
       self,
       NativeEvent::WorkspaceChanged {
@@ -446,176 +422,6 @@ pub fn unique_by_number<T>(items: Vec<T>, number: impl Fn(&T) -> u64) -> Vec<T> 
     .collect()
 }
 
-/// `PrFilters`: every set field must match.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct PrFilters {
-  /// Free text matched against title, number, branches and author.
-  pub query: String,
-  pub author: Option<String>,
-  pub head: Option<String>,
-  pub base: Option<String>,
-  pub stack_level: Option<u32>,
-  pub opened_within_days: Option<i64>,
-  /// "conflicting" or "clean".
-  pub conflict: Option<String>,
-  pub label: Option<String>,
-}
-
-impl PrFilters {
-  /// `activePrFilterCount`: set filters, without the search text.
-  pub fn active_count(&self) -> usize {
-    [
-      self.author.is_some(),
-      self.head.is_some(),
-      self.base.is_some(),
-      self.stack_level.is_some(),
-      self.opened_within_days.is_some(),
-      self.conflict.is_some(),
-      self.label.is_some(),
-    ]
-    .into_iter()
-    .filter(|set| *set)
-    .count()
-  }
-
-  /// "Clear filters": everything but the search text.
-  pub fn cleared(&self) -> Self {
-    Self {
-      query: self.query.clone(),
-      ..Self::default()
-    }
-  }
-}
-
-/// `prStackLevels`: 1 at the bottom, +1 for each listed PR below it.
-pub fn stack_levels(prs: &[GhPullRequest]) -> HashMap<u64, u32> {
-  let by_head: HashMap<&str, &GhPullRequest> = prs
-    .iter()
-    // A fork PR from its own `main` into `main` is no parent of every PR into `main`.
-    .filter(|pr| pr.head_ref_name != pr.base_ref_name)
-    .map(|pr| (pr.head_ref_name.as_str(), pr))
-    .collect();
-  prs
-    .iter()
-    .map(|pr| {
-      let mut seen = HashSet::new();
-      let mut level = 1;
-      let mut parent = by_head.get(pr.base_ref_name.as_str());
-      while let Some(p) = parent {
-        if p.number == pr.number || !seen.insert(p.number) {
-          break;
-        }
-        level += 1;
-        parent = by_head.get(p.base_ref_name.as_str());
-      }
-      (pr.number, level)
-    })
-    .collect()
-}
-
-fn matches_query(pr: &GhPullRequest, query: &str) -> bool {
-  let q = query.trim().to_lowercase();
-  if q.is_empty() {
-    return true;
-  }
-  [
-    pr.title.as_str(),
-    &format!("#{}", pr.number),
-    &pr.head_ref_name,
-    &pr.base_ref_name,
-    &pr.author.login,
-  ]
-  .iter()
-  .any(|field| field.to_lowercase().contains(&q))
-}
-
-fn matches_conflict(pr: &GhPullRequest, conflict: Option<&str>) -> bool {
-  let status = pr.merge_state_status.as_deref().map(str::to_uppercase);
-  match conflict {
-    None => true,
-    Some("conflicting") => status.as_deref() == Some("DIRTY"),
-    // An unknown status is no proof of "no conflicts".
-    Some(_) => status.is_some_and(|s| !s.is_empty() && s != "DIRTY" && s != "UNKNOWN"),
-  }
-}
-
-/// `filterPrs`, as of `now`.
-pub fn filter_prs<'a>(
-  prs: &'a [GhPullRequest],
-  filters: &PrFilters,
-  now: chrono::DateTime<chrono::Utc>,
-) -> Vec<&'a GhPullRequest> {
-  let levels = filters
-    .stack_level
-    .map(|_| stack_levels(prs))
-    .unwrap_or_default();
-  let opened = |pr: &GhPullRequest| match filters.opened_within_days {
-    None => true,
-    Some(days) => chrono::DateTime::parse_from_rfc3339(&pr.created_at)
-      .is_ok_and(|at| now.signed_duration_since(at) <= chrono::Duration::days(days)),
-  };
-  let is = |value: &Option<String>, actual: &str| value.as_deref().is_none_or(|v| v == actual);
-  prs
-    .iter()
-    .filter(|pr| {
-      matches_query(pr, &filters.query)
-        && is(&filters.author, &pr.author.login)
-        && is(&filters.head, &pr.head_ref_name)
-        && is(&filters.base, &pr.base_ref_name)
-        && filters
-          .stack_level
-          .is_none_or(|level| levels.get(&pr.number) == Some(&level))
-        && opened(pr)
-        && matches_conflict(pr, filters.conflict.as_deref())
-        && filters
-          .label
-          .as_deref()
-          .is_none_or(|label| pr.labels.iter().any(|l| l.name == label))
-    })
-    .collect()
-}
-
-/// `prFilterOptions`: the distinct values of the loaded PRs.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct FilterOptions {
-  pub authors: Vec<String>,
-  pub heads: Vec<String>,
-  pub bases: Vec<String>,
-  pub labels: Vec<String>,
-  pub stack_levels: Vec<u32>,
-}
-
-fn sorted<'a>(values: impl Iterator<Item = &'a str>) -> Vec<String> {
-  let mut values: Vec<String> = values
-    .collect::<HashSet<_>>()
-    .into_iter()
-    .map(str::to_string)
-    .collect();
-  // `localeCompare`: case-insensitive first.
-  values.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()).then(a.cmp(b)));
-  values
-}
-
-pub fn filter_options(prs: &[GhPullRequest]) -> FilterOptions {
-  let mut levels: Vec<u32> = stack_levels(prs)
-    .into_values()
-    .collect::<HashSet<_>>()
-    .into_iter()
-    .collect();
-  levels.sort_unstable();
-  FilterOptions {
-    authors: sorted(prs.iter().map(|pr| pr.author.login.as_str())),
-    heads: sorted(prs.iter().map(|pr| pr.head_ref_name.as_str())),
-    bases: sorted(prs.iter().map(|pr| pr.base_ref_name.as_str())),
-    labels: sorted(
-      prs
-        .iter()
-        .flat_map(|pr| pr.labels.iter().map(|l| l.name.as_str())),
-    ),
-    stack_levels: levels,
-  }
-}
-
 /// `CONVENTIONAL_TYPE_ALIASES`.
 fn conventional_type(word: &str) -> Option<&'static str> {
   Some(match word.to_lowercase().as_str() {
@@ -634,12 +440,11 @@ fn conventional_type(word: &str) -> Option<&'static str> {
   })
 }
 
+#[expect(clippy::expect_used, reason = "constant pattern")]
 fn humanize(slug: &str) -> String {
-  regex::Regex::new(r"[-_]+")
-    .expect("regex")
-    .replace_all(slug, " ")
-    .trim()
-    .to_string()
+  static SEPARATORS: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"[-_]+").expect("regex"));
+  SEPARATORS.replace_all(slug, " ").trim().to_string()
 }
 
 /// `buildGitHubComparePrUrl`: GitHub's "Open a pull request" form for
@@ -660,6 +465,8 @@ pub fn compare_pr_url(
       .replace("%28", "(")
       .replace("%29", ")")
       .replace("%2A", "*")
+      // A fork head is `owner:branch`.
+      .replace("%3A", ":")
   };
   let query = url::form_urlencoded::Serializer::new(String::new())
     .append_pair("expand", "1")
@@ -674,10 +481,12 @@ pub fn compare_pr_url(
 }
 
 /// `deriveConventionalPrTitle`.
+#[expect(clippy::expect_used, reason = "constant pattern")]
 pub fn conventional_pr_title(title: &str, branch: &str) -> String {
   let fallback = if title.is_empty() { branch } else { title };
-  let re = regex::Regex::new(r"(?i)^([a-z]+)(\([^)]+\))?(!)?:\s*(.+)$").expect("regex");
-  if let Some(caps) = re.captures(fallback) {
+  static CONVENTIONAL: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"(?i)^([a-z]+)(\([^)]+\))?(!)?:\s*(.+)$").expect("regex"));
+  if let Some(caps) = CONVENTIONAL.captures(fallback) {
     if let Some(kind) = conventional_type(&caps[1]) {
       let scope = caps.get(2).map_or("", |m| m.as_str());
       let breaking = caps.get(3).map_or("", |m| m.as_str());
@@ -741,6 +550,9 @@ pub enum CiState {
   Success,
   Failure,
   Pending,
+  /// A status that reports nothing about the code (the WIP app's): listed,
+  /// muted, never spinning.
+  Inactive,
 }
 
 impl CiState {
@@ -758,6 +570,7 @@ impl CiState {
     match bucket {
       "pass" | "skipping" => CiState::Success,
       "fail" | "cancel" => CiState::Failure,
+      crate::github::INACTIVE => CiState::Inactive,
       _ => CiState::Pending,
     }
   }
@@ -767,6 +580,7 @@ impl CiState {
       CiState::Success => "CI passed",
       CiState::Failure => "CI failed",
       CiState::Pending => "CI running",
+      CiState::Inactive => "CI inactive",
     }
   }
 
@@ -775,6 +589,7 @@ impl CiState {
       CiState::Failure => 0,
       CiState::Pending => 1,
       CiState::Success => 2,
+      CiState::Inactive => 3,
     }
   }
 }
@@ -799,151 +614,14 @@ pub fn check_duration(secs: u64) -> String {
   }
 }
 
-pub use crate::core::running_checks::{run_key, SETUP_KEY};
+pub use crate::core::running_checks::run_key;
+
+/// How tall the expanded checks list grows before it scrolls.
+pub const CHECKS_MAX_HEIGHT: f32 = 240.;
 
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::github::{GhAuthor, GhLabel};
-
-  pub(crate) fn pr(number: u64, head: &str, base: &str) -> GhPullRequest {
-    GhPullRequest {
-      number,
-      title: format!("PR {number}"),
-      state: "OPEN".into(),
-      url: format!("https://github.com/acme/treq/pull/{number}"),
-      body: None,
-      author: GhAuthor {
-        login: "zn".into(),
-        avatar_url: None,
-      },
-      labels: Vec::new(),
-      head_ref_name: head.into(),
-      base_ref_name: base.into(),
-      merge_state_status: None,
-      created_at: "2026-10-19T00:00:00Z".into(),
-      updated_at: "2026-10-19T00:00:00Z".into(),
-      comments: None,
-      is_draft: false,
-    }
-  }
-
-  fn now() -> chrono::DateTime<chrono::Utc> {
-    "2026-10-20T00:00:00Z".parse().expect("now")
-  }
-
-  fn numbers(prs: Vec<&GhPullRequest>) -> Vec<u64> {
-    prs.into_iter().map(|p| p.number).collect()
-  }
-
-  #[test]
-  fn stacks_count_the_listed_prs_below() {
-    let prs = [
-      pr(1, "a", "main"),
-      pr(2, "b", "a"),
-      pr(3, "c", "b"),
-      pr(4, "main", "main"),
-    ];
-    let levels = stack_levels(&prs);
-    assert_eq!(levels[&1], 1);
-    assert_eq!(levels[&2], 2);
-    assert_eq!(levels[&3], 3);
-    assert_eq!(levels[&4], 1);
-    // A cycle ends instead of looping.
-    let cycle = [pr(1, "a", "b"), pr(2, "b", "a")];
-    assert_eq!(stack_levels(&cycle)[&1], 2);
-  }
-
-  #[test]
-  fn filters_match_every_set_field() {
-    let mut fixed = pr(2, "fix/login", "main");
-    fixed.author.login = "ada".into();
-    fixed.labels = vec![GhLabel {
-      name: "bug".into(),
-      color: "ff0000".into(),
-    }];
-    fixed.merge_state_status = Some("dirty".into());
-    let mut old = pr(3, "feat/x", "fix/login");
-    old.created_at = "2026-09-01T00:00:00Z".into();
-    old.merge_state_status = Some("CLEAN".into());
-    let prs = [pr(1, "a", "main"), fixed, old];
-
-    let by = |f: PrFilters| numbers(filter_prs(&prs, &f, now()));
-    assert_eq!(by(PrFilters::default()), [1, 2, 3]);
-    let query = |q: &str| PrFilters {
-      query: q.into(),
-      ..PrFilters::default()
-    };
-    assert_eq!(by(query(" LOGIN ")), [2, 3]);
-    assert_eq!(by(query("#3")), [3]);
-    assert_eq!(by(query("ada")), [2]);
-    assert_eq!(
-      by(PrFilters {
-        label: Some("bug".into()),
-        ..PrFilters::default()
-      }),
-      [2]
-    );
-    assert_eq!(
-      by(PrFilters {
-        conflict: Some("conflicting".into()),
-        ..PrFilters::default()
-      }),
-      [2]
-    );
-    // No status is no proof of no conflicts.
-    assert_eq!(
-      by(PrFilters {
-        conflict: Some("clean".into()),
-        ..PrFilters::default()
-      }),
-      [3]
-    );
-    assert_eq!(
-      by(PrFilters {
-        opened_within_days: Some(7),
-        ..PrFilters::default()
-      }),
-      [1, 2]
-    );
-    assert_eq!(
-      by(PrFilters {
-        stack_level: Some(2),
-        base: Some("fix/login".into()),
-        ..PrFilters::default()
-      }),
-      [3]
-    );
-  }
-
-  #[test]
-  fn counts_and_clears_filters_but_not_the_search() {
-    let filters = PrFilters {
-      query: "x".into(),
-      author: Some("a".into()),
-      stack_level: Some(1),
-      ..PrFilters::default()
-    };
-    assert_eq!(filters.active_count(), 2);
-    assert_eq!(
-      filters.cleared(),
-      PrFilters {
-        query: "x".into(),
-        ..PrFilters::default()
-      }
-    );
-  }
-
-  #[test]
-  fn options_are_distinct_and_sorted() {
-    let mut b = pr(2, "Zeta", "main");
-    b.author.login = "bob".into();
-    let options = filter_options(&[pr(1, "alpha", "main"), b, pr(3, "beta", "alpha")]);
-    assert_eq!(options.authors, ["bob", "zn"]);
-    assert_eq!(options.heads, ["alpha", "beta", "Zeta"]);
-    assert_eq!(options.bases, ["alpha", "main"]);
-    assert_eq!(options.stack_levels, [1, 2]);
-  }
 
   #[test]
   fn keeps_the_first_copy_of_each_number() {
@@ -987,6 +665,7 @@ mod tests {
       base_ref_name: String::new(),
       merge_state_status: None,
       is_draft: false,
+      body: String::new(),
     };
     let statuses = HashMap::from([
       ("open".to_string(), Some(info("OPEN"))),
@@ -1013,6 +692,10 @@ mod tests {
     assert_eq!(CiState::of_bucket("skipping"), CiState::Success);
     assert_eq!(CiState::of_bucket("cancel"), CiState::Failure);
     assert_eq!(CiState::of_bucket("queued"), CiState::Pending);
+    assert_eq!(
+      CiState::of_bucket(crate::github::INACTIVE),
+      CiState::Inactive
+    );
     assert_eq!(CiState::parse("weird"), CiState::Pending);
     assert_eq!(check_duration(5), "5s");
     assert_eq!(check_duration(65), "1m 5s");
@@ -1027,11 +710,12 @@ mod tests {
       check("a", "pass"),
       check("b", "pending"),
       check("c", "fail"),
+      check("d", crate::github::INACTIVE),
     ];
     let names: Vec<_> = by_severity(&checks)
       .iter()
       .map(|c| c.name.as_str())
       .collect();
-    assert_eq!(names, ["c", "b", "a"]);
+    assert_eq!(names, ["c", "b", "a", "d"]);
   }
 }

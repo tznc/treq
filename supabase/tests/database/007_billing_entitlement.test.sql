@@ -178,7 +178,7 @@ select ok(
     where d.objid = 'public.get_current_user_subscription()'::regprocedure
       and n.nspname = 'treq_internal'
   )
-  and position('treq_internal' in pg_get_functiondef('public.get_current_user_subscription()'::regprocedure)) = 0,
+  and position('treq_internal.stripe_' in pg_get_functiondef('public.get_current_user_subscription()'::regprocedure)) = 0,
   'get_current_user_subscription no longer reads the Stripe foreign tables');
 
 set local role authenticated;

@@ -4,6 +4,7 @@
 use super::*;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use gpui_kit::base::TestSupportExt as _;
 
 impl FileBrowserView {
   /// `FileCommentSection`.
@@ -18,7 +19,7 @@ impl FileBrowserView {
       .debug_selector(|| "file-comment-section".into())
       .border_b_1()
       .border_color(p.border)
-      .bg(p.muted.opacity(0.2))
+      .bg(comment_section_fill(p))
       .px_4()
       .py_3()
       .flex()
@@ -42,7 +43,6 @@ impl FileBrowserView {
   ) -> gpui::AnyElement {
     let box_ = || {
       div()
-        .bg(p.background)
         .rounded(radius::MD)
         .p_3()
         .border_1()
@@ -51,6 +51,7 @@ impl FileBrowserView {
     if self.editing.as_deref() == Some(c.id.as_str()) {
       let discard = c.id.clone();
       return box_()
+        .bg(p.background)
         .child(self.edit_box(
           p,
           cx.listener(move |view, _, _, cx| view.delete_comment(&discard, cx)),
@@ -60,13 +61,15 @@ impl FileBrowserView {
     }
     let (edit, delete, body) = (c.id.clone(), c.id.clone(), c.text.clone());
     let muted = p.muted_foreground;
-    let accent = p.accent;
     box_()
       .id(SharedString::from(format!("comment-{}", c.id)))
       .debug_selector(|| "file-comment-card".into())
+      .role(gpui::Role::Button)
+      .aria_label("Edit comment")
+      .test_support()
       .group("comment-card")
       .cursor_pointer()
-      .hover(|s| s.shadow_md())
+      .hover(|s| s.bg(p.hover()))
       .on_click(cx.listener(move |view, _, _, cx| view.start_edit(&edit, &body, cx)))
       .child(
         div()
@@ -89,12 +92,14 @@ impl FileBrowserView {
               Side::Top,
               div()
                 .id(SharedString::from(format!("delete-comment-{}", c.id)))
+                .role(gpui::Role::Button)
+                .aria_label("Delete comment")
                 .debug_selector(|| "delete-comment".into())
                 .flex_none()
                 .p_1()
                 .rounded(radius::SM)
                 .cursor_pointer()
-                .hover(move |s| s.bg(accent))
+                .hover(move |s| s.bg(p.hover()))
                 .child(ui::icon(theme::ICON_X, 12., muted))
                 .on_click(cx.listener(move |view, _, _, cx| {
                   cx.stop_propagation();
@@ -214,114 +219,19 @@ impl FileBrowserView {
           .child(
             Button::new("comment-submit", p)
               .disabled(empty)
-              .label("Add Comment")
+              .label("Add comment")
               .on_click(cx.listener(|view, _, _, cx| view.submit_draft(cx))),
           ),
       )
   }
 
   /// `SearchOverlay`, top right of the code.
-  pub(super) fn search_bar(&self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
-    if !self.search.open {
-      return None;
-    }
-    let input = self.search.input.clone()?;
-    let empty = self.search.query.trim().is_empty();
-    let total = self.search.matches.len();
-    let shown = if total > 0 {
-      self.search.current + 1
-    } else {
-      0
-    };
-    let muted = p.muted_foreground;
-    Some(
-      div()
-        .id("file-search")
-        .debug_selector(|| "file-search".into())
-        .absolute()
-        .top_2()
-        .right_2()
-        .bg(p.background)
-        .border_1()
-        .border_color(p.border)
-        .rounded(radius::MD)
-        .shadow_lg()
-        .p_0p5()
-        .flex()
-        .items_center()
-        .gap_0p5()
-        .font_family(theme::SANS_FONT)
-        .capture_action(cx.listener(|view, _: &Escape, _, cx| {
-          view.close_search(cx);
-          cx.stop_propagation();
-        }))
-        .child(
-          ui::text(div(), TextSize::Sm)
-            .debug_selector(|| "file-search-input".into())
-            .h_6()
-            .w_48()
-            .px_2()
-            .flex()
-            .items_center()
-            .rounded(radius::MD)
-            .border_1()
-            .border_color(p.input)
-            .child(ui::input(&input).appearance(false).bordered(false)),
-        )
-        .child(
-          ui::text(div(), TextSize::Xs)
-            .debug_selector(|| "file-search-count".into())
-            .px_2()
-            .whitespace_nowrap()
-            .text_color(muted)
-            .child(format!("{shown} of {total}")),
-        )
-        .child(
-          self.tip(
-            "file-search-prev-tip",
-            "Previous (Shift+Enter)",
-            Side::Top,
-            ui::IconButton::new(
-              "file-search-prev",
-              theme::ICON_CHEVRON_UP,
-              "Previous match",
-              p,
-            )
-            .size(ui::IconButtonSize::Small)
-            .disabled(empty)
-            .on_click(cx.listener(|view, _, _, cx| view.step_match(-1, cx))),
-            cx,
-          ),
-        )
-        .child(
-          self.tip(
-            "file-search-next-tip",
-            "Next (Enter)",
-            Side::Top,
-            ui::IconButton::new(
-              "file-search-next",
-              theme::ICON_CHEVRON_DOWN,
-              "Next match",
-              p,
-            )
-            .size(ui::IconButtonSize::Small)
-            .disabled(empty)
-            .on_click(cx.listener(|view, _, _, cx| view.step_match(1, cx))),
-            cx,
-          ),
-        )
-        .child(
-          self.tip(
-            "file-search-close-tip",
-            "Close (Esc)",
-            Side::Top,
-            ui::IconButton::new("file-search-close", theme::ICON_X, "Close search", p)
-              .size(ui::IconButtonSize::Small)
-              .on_click(cx.listener(|view, _, _, cx| view.close_search(cx))),
-            cx,
-          ),
-        ),
-    )
+  pub(super) fn search_bar(
+    &mut self,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> Option<impl IntoElement> {
+    super::find::bar(self, "file-search", p, cx)
   }
 
   /// The Finish review popover, under its button.
@@ -340,6 +250,8 @@ impl FileBrowserView {
     let checked = self.use_idle;
     let checkbox = div()
       .id("use-idle-agent")
+      .role(gpui::Role::CheckBox)
+      .aria_label("Use an idle agent")
       .debug_selector(|| "use-idle-agent".into())
       .flex()
       .items_center()
@@ -360,7 +272,7 @@ impl FileBrowserView {
           }),
       )
       .child(
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
           .text_color(p.muted_foreground)
           .child("Send to idle agent if one is available"),
       )
@@ -423,22 +335,19 @@ impl FileBrowserView {
               .flex()
               .justify_between()
               .gap_2()
-              .child(
-                Button::new("copy-review", p)
-                  .variant(Variant::Outline)
-                  .size(Size::Sm)
-                  .gap_2()
-                  .icon(
-                    if self.copied_review {
-                      theme::ICON_CHECK
-                    } else {
-                      theme::ICON_COPY
-                    },
-                    12.,
-                  )
-                  .label(if self.copied_review { "Copied" } else { "Copy" })
-                  .on_click(cx.listener(|view, _, _, cx| view.copy_review(cx))),
-              )
+              .child(ui::copy_feedback::copyable("copy-review-feedback", {
+                let (p, copy) = (*p, cx.listener(|view, _, _, cx| view.copy_review(cx)));
+                move |copied| {
+                  Button::new("copy-review", &p)
+                    .variant(Variant::Outline)
+                    .size(Size::Sm)
+                    .gap_2()
+                    .copy_icon(copied, 12.)
+                    .label(if copied.copied { "Copied" } else { "Copy" })
+                    .on_click(copy)
+                    .into_any_element()
+                }
+              }))
               .child(
                 div()
                   .flex()
@@ -472,90 +381,34 @@ impl FileBrowserView {
     if !self.discard_dialog {
       return None;
     }
-    let viewport = window.viewport_size();
     let n = self.comments.len();
     let close = |view: &mut Self, cx: &mut Context<Self>| {
       view.discard_dialog = false;
       cx.notify();
     };
-    let panel = div()
-      .id("discard-review-dialog")
-      .debug_selector(|| "discard-review-dialog".into())
-      .w_full()
-      .max_w(zpx(512.))
-      .p_6()
-      .rounded(radius::LG)
-      .border_1()
-      .border_color(p.border.opacity(0.5))
-      .bg(p.popover)
-      .text_color(p.popover_foreground)
-      .shadow_2xl()
-      .capture_key_down(cx.listener(move |view, e: &KeyDownEvent, _, cx| {
-        if ui::is_escape(&e.keystroke) {
-          cx.stop_propagation();
-          close(view, cx);
-        }
-      }))
-      .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-      .child(
-        div()
-          .flex()
-          .flex_col()
-          .gap_1p5()
-          .child(
-            ui::text(div(), TextSize::Lg)
-              .font_weight(FontWeight::SEMIBOLD)
-              .child("Discard review?"),
-          )
-          .child(
-            ui::text(div(), TextSize::Sm)
-              .text_color(p.muted_foreground)
-              .child(format!(
-                "This will discard all {n} pending {}. This action cannot be undone.",
-                if n == 1 { "comment" } else { "comments" }
-              )),
-          ),
-      )
-      .child(
-        div()
-          .mt_4()
-          .flex()
-          .justify_end()
-          .gap_2()
-          .child(
-            Button::new("keep-reviewing", p)
-              .variant(Variant::Ghost)
-              .label("Keep reviewing")
-              .on_click(cx.listener(move |view, _, _, cx| close(view, cx))),
-          )
-          .child(
-            Button::new("confirm-discard-review", p)
-              .variant(Variant::Destructive)
-              .label("Discard")
-              .on_click(cx.listener(|view, _, _, cx| view.discard_review(cx))),
-          ),
-      );
     Some(
-      deferred(
-        anchored().position(point(px(0.), px(0.))).child(
-          div()
-            .id("discard-review-backdrop")
-            .w(viewport.width)
-            .h(viewport.height)
-            .p_4()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(p.scrim())
-            .occlude()
-            .on_mouse_down(
-              MouseButton::Left,
-              cx.listener(move |view, _, _, cx| close(view, cx)),
-            )
-            .child(panel),
-        ),
-      )
-      .with_priority(2),
+      ui::Dialog::new("discard-review-dialog", p)
+        .overlay(window.viewport_size())
+        .width(512.)
+        .title("Discard review?")
+        .description(format!(
+          "This will discard all {n} pending {}. This action cannot be undone.",
+          if n == 1 { "comment" } else { "comments" }
+        ))
+        .on_close(ui::handler(cx, move |view, _, cx| close(view, cx)))
+        .on_primary(ui::handler(cx, |view, _, cx| view.discard_review(cx)))
+        .footer([
+          Button::new("keep-reviewing", p)
+            .variant(Variant::Outline)
+            .label("Keep reviewing")
+            .on_click(cx.listener(move |view, _, _, cx| close(view, cx)))
+            .into_any_element(),
+          Button::new("confirm-discard-review", p)
+            .variant(Variant::Destructive)
+            .label("Discard")
+            .on_click(cx.listener(|view, _, _, cx| view.discard_review(cx)))
+            .into_any_element(),
+        ]),
     )
   }
 }

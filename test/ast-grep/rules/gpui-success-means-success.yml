@@ -1,0 +1,77 @@
+id: gpui-success-means-success
+language: rust
+severity: error
+message: >
+  Success green marks only a completed or passing state: checks passed,
+  saved, merged and done. Diff additions and removals use
+  `p.diff_added()`/`p.diff_removed()` or `Tone::DiffAdded`/`Tone::DiffRemoved`;
+  a current or selected item is neutral or the selected tint.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+  - "src-tauri/src/mobile/**/*.rs"
+ignores:
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+  - "src-tauri/src/mobile/**/tests.rs"
+  - "src-tauri/src/mobile/**/tests/**"
+rule:
+  all:
+    - any:
+        - all:
+            - kind: field_expression
+            - has:
+                field: field
+                regex: ^success$
+        - all:
+            - kind: scoped_identifier
+            - regex: (^|::)Tone::Success$
+    - any:
+        # A function about diffs, additions, or the current or selected item.
+        - inside:
+            stopBy: end
+            kind: function_item
+            has:
+              field: name
+              regex: (?i)diff|added|addition|current|selected|hunk|conflict|file_status|status_dot|status_letter
+        # A method of a diff view.
+        - inside:
+            stopBy: end
+            kind: impl_item
+            has:
+              field: type
+              regex: (?i)diff
+        # A match arm for an added file: "A", "added", or untracked "??".
+        - inside:
+            stopBy: end
+            kind: match_arm
+            has:
+              field: pattern
+              regex: '"(A|added|\?\?)"'
+        # A tuple that tags its row "current".
+        - inside:
+            stopBy: end
+            kind: tuple_expression
+            has:
+              stopBy: end
+              kind: string_literal
+              regex: '^"current"$'
+        # The branch for a `+` diff line.
+        - inside:
+            stopBy: end
+            kind: if_expression
+            has:
+              field: condition
+              regex: "'\\+'"
+        # A call that also takes "+", such as a diff line builder.
+        - inside:
+            kind: arguments
+            has:
+              kind: string_literal
+              regex: '^"\+"$'
+        # Text from a `+{n}` format string.
+        - inside:
+            stopBy: end
+            kind: call_expression
+            has:
+              field: arguments
+              regex: '^\(\s*format!\("\+\{'

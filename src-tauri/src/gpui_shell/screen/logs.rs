@@ -10,6 +10,8 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
+use crate::result_ext::ResultExt;
+use gpui_kit::base::TestSupportExt as _;
 use std::{cell::RefCell, collections::HashMap, ops::Range, rc::Rc, time::Duration};
 
 use gpui_kit::component::input::{Escape, InputEvent, InputState, Textarea, TextareaState};
@@ -22,8 +24,8 @@ use tauri_plugin_gpui::gpui::{
 use super::{
   logs_data::{
     agent_chat_records, chart, filter_label, find_matches, format_timestamp, log_lines_prompt,
-    sql_result_prompt, toggle, Host, LineSelection, Source, DEFAULT_QUERY, LEVELS, SERIES,
-    TEMPLATES,
+    sql_result_prompt, toggle, Chart, Host, LineSelection, Source, DEFAULT_QUERY, LEVELS, SERIES,
+    SETUP_SCRIPT_SOURCE, TEMPLATES,
   },
   ActionSink, ScreenAction,
 };
@@ -31,7 +33,7 @@ use crate::{
   core::{
     agent_chat::{AgentChat, AgentChatSummary},
     checks::WorkflowInfo,
-    checks_logs::{LogBucket, LogQuery, LogRecordView, SqlResult},
+    checks_logs::{LogQuery, LogRecordView, SqlResult},
   },
   gpui_shell::{
     popup::{native_entries, NativeMenuItem, PopupRequest, PopupSink},
@@ -57,6 +59,8 @@ enum Column {
   Job,
   Role,
   Source,
+  File,
+  Outcome,
 }
 
 impl Column {
@@ -66,12 +70,16 @@ impl Column {
       Column::Job => "Job",
       Column::Role => "Role",
       Column::Source => "Source",
+      Column::File => "File",
+      Column::Outcome => "Outcome",
     }
   }
 
   fn width(self) -> f32 {
     match self {
       Column::Run | Column::Role => 67.,
+      Column::Outcome => 80.,
+      Column::File => 197.,
       Column::Job => 96.,
       Column::Source => 197.,
     }
@@ -80,7 +88,8 @@ impl Column {
   fn cell(self, record: &LogRecordView) -> String {
     match self {
       Column::Run => format!("#{}", record.run_id),
-      Column::Job | Column::Role | Column::Source => record.job_id.clone(),
+      Column::Job | Column::Role | Column::Source | Column::File => record.job_id.clone(),
+      Column::Outcome => record.step_name.clone(),
     }
   }
 }
@@ -89,6 +98,8 @@ impl Column {
 struct FeedSpec {
   output: &'static str,
   line: &'static str,
+  /// What the feed is called, for assistive tech.
+  name: &'static str,
   columns: &'static [Column],
   /// Whose lines, in the prompt (`promptLabel`).
   prompt: &'static str,
@@ -98,27 +109,38 @@ fn feed_spec(source: Source) -> FeedSpec {
   match source {
     Source::Checks => FeedSpec {
       output: "repo-logs-output",
+      name: "Check logs",
       line: "repo-log-line",
       columns: &[Column::Run, Column::Job],
       prompt: "my check logs",
     },
     Source::Agent => FeedSpec {
       output: "agent-chat-output",
+      name: "Agent chat",
       line: "agent-chat-line",
       columns: &[Column::Role],
       prompt: "an agent chat",
     },
     Source::AppSetup => FeedSpec {
       output: "app-setup-logs-output",
+      name: "App setup logs",
       line: "app-setup-log-line",
       columns: &[Column::Run],
       prompt: "my app setup script logs",
     },
     Source::System => FeedSpec {
       output: "system-logs-output",
+      name: "System logs",
       line: "system-log-line",
       columns: &[Column::Source],
       prompt: "the Treq app's system logs",
+    },
+    Source::Reviews => FeedSpec {
+      output: "review-history-output",
+      name: "Review history",
+      line: "review-history-line",
+      columns: &[Column::Outcome, Column::File],
+      prompt: "my code review history",
     },
   }
 }
@@ -168,7 +190,10 @@ pub struct LogsView {
   search_input: Option<Entity<InputState>>,
   /// `None` while reading.
   records: Option<Vec<LogRecordView>>,
-  buckets: Vec<LogBucket>,
+  /// The source `records` were read for, while they are lines of checks.
+  records_for: Option<Source>,
+  /// The chart above the feed, built once per read.
+  chart: Chart,
   chats: Option<Vec<AgentChatSummary>>,
   chat_id: Option<i64>,
   chat: Option<AgentChat>,
@@ -182,6 +207,8 @@ pub struct LogsView {
   scroll: UniformListScrollHandle,
   debounce: Option<Task<()>>,
   find_key_watched: bool,
+  /// Hidden while another tab shows, so Cmd+F is another view's.
+  hidden: bool,
   /// The lines drawn, and the find bar's matches among them.
   visible: Rc<Vec<LogRecordView>>,
   matches: Vec<usize>,
@@ -207,12 +234,18 @@ impl LogsView {
       source: source.map(Source::parse).unwrap_or_default(),
       explorer_open: false,
       levels: Vec::new(),
-      checks: Vec::new(),
+      // The setup script's runs are stored as a check of their own.
+      checks: if source == Some(SETUP_SCRIPT_SOURCE) {
+        vec![crate::core::SETUP_SCRIPT_FILENAME.to_string()]
+      } else {
+        Vec::new()
+      },
       workflows: Vec::new(),
       search: String::new(),
       search_input: None,
       records: None,
-      buckets: Vec::new(),
+      records_for: None,
+      chart: Chart::default(),
       chats: None,
       chat_id: None,
       chat: None,
@@ -228,6 +261,7 @@ impl LogsView {
       scroll: UniformListScrollHandle::new(),
       debounce: None,
       find_key_watched: false,
+      hidden: false,
       visible: Rc::default(),
       matches: Vec::new(),
       _subscriptions: Vec::new(),
@@ -235,6 +269,11 @@ impl LogsView {
     this.read_workflows(cx);
     this.load(cx);
     this
+  }
+
+  /// Hidden while another tab shows; it keeps what it read.
+  pub fn set_shown(&mut self, shown: bool) {
+    self.hidden = !shown;
   }
 
   pub fn set_repo(&mut self, repo_path: String, dark: bool, cx: &mut Context<Self>) {
@@ -266,12 +305,14 @@ impl LogsView {
       let value = cx
         .background_spawn(async move { work(host.as_ref(), &repo) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if view.generation == generation {
-          apply(view, value, cx);
-          cx.notify();
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.generation == generation {
+            apply(view, value, cx);
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -282,13 +323,15 @@ impl LogsView {
       let workflows = cx
         .background_spawn(async move { host.workflows(&repo) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        match workflows {
-          Ok(workflows) => view.workflows = workflows,
-          Err(err) => log::warn!("Failed to list workflows: {err}"),
-        }
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          match workflows {
+            Ok(workflows) => view.workflows = workflows,
+            Err(err) => log::warn!("Failed to list workflows: {err}"),
+          }
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -307,38 +350,44 @@ impl LogsView {
     self.generation += 1;
     self.selection.clear();
     let query = self.query();
+    if self.source != Source::Checks {
+      self.records_for = None;
+    }
     match self.source {
       Source::Agent => return self.load_chats(cx),
       Source::Checks => {
-        self.records = None;
+        // A new filter keeps the lines shown until the new ones arrive.
+        if self.records_for != Some(Source::Checks) {
+          self.records = None;
+        }
         let chart_query = query.clone();
         self.run(
-          move |host, repo| {
-            let records = host.repo_logs(repo, &query);
-            let buckets = host.log_timeseries(repo, &chart_query);
-            (records, buckets)
-          },
-          |view, (records, buckets), _| {
+          move |host, repo| host.repo_logs(repo, &query),
+          |view, records, _| {
             view.records = Some(records.unwrap_or_else(|err| {
               log::warn!("Failed to read check logs: {err}");
               Vec::new()
             }));
-            view.buckets = buckets.unwrap_or_default();
+            view.records_for = Some(Source::Checks);
           },
           cx,
         );
-      }
-      Source::AppSetup | Source::System => {
-        self.records = None;
-        self.buckets.clear();
-        let system = self.source == Source::System;
+        // The chart is read on its own, so the lines paint first.
         self.run(
-          move |host, _| {
-            if system {
-              host.system_logs(&query)
-            } else {
-              host.app_setup_logs(&query)
-            }
+          move |host, repo| chart(&host.log_timeseries(repo, &chart_query).unwrap_or_default()),
+          |view, chart, _| view.chart = chart,
+          cx,
+        );
+      }
+      Source::AppSetup | Source::System | Source::Reviews => {
+        self.records = None;
+        self.chart = Chart::default();
+        let source = self.source;
+        self.run(
+          move |host, repo| match source {
+            Source::System => host.system_logs(&query),
+            Source::Reviews => host.review_history(repo, &query),
+            _ => host.app_setup_logs(&query),
           },
           |view, records, _| {
             view.records = Some(records.unwrap_or_else(|err| {
@@ -354,7 +403,7 @@ impl LogsView {
   }
 
   fn load_chats(&mut self, cx: &mut Context<Self>) {
-    self.buckets.clear();
+    self.chart = Chart::default();
     if self.chats.is_none() {
       self.records = None;
       self.run(
@@ -427,7 +476,7 @@ impl LogsView {
     }
     self.debounce = Some(cx.spawn(async move |this, cx| {
       cx.background_executor().timer(SEARCH_DEBOUNCE).await;
-      let _ = this.update(cx, |view, cx| view.load(cx));
+      this.update(cx, |view, cx| view.load(cx)).ignore_closed();
     }));
   }
 
@@ -475,17 +524,19 @@ impl LogsView {
       let result = cx
         .background_spawn(async move { host.run_sql(&repo, &sql) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        view.explorer.running = false;
-        match result {
-          Ok(result) => view.explorer.result = Some(result),
-          Err(err) => {
-            view.explorer.result = None;
-            view.explorer.error = Some(err);
+      this
+        .update(cx, |view, cx| {
+          view.explorer.running = false;
+          match result {
+            Ok(result) => view.explorer.result = Some(result),
+            Err(err) => {
+              view.explorer.result = None;
+              view.explorer.error = Some(err);
+            }
           }
-        }
-        cx.notify();
-      });
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
     cx.notify();
@@ -519,7 +570,9 @@ impl LogsView {
       .map(|source| {
         let entity = entity.clone();
         NativeMenuItem::item(source.label(), move |cx| {
-          let _ = entity.update(cx, |view, cx| view.set_source(source, cx));
+          entity
+            .update(cx, |view, cx| view.set_source(source, cx))
+            .ignore_closed();
         })
         .radio(source == current)
       })
@@ -537,12 +590,14 @@ impl LogsView {
       .map(|chat| {
         let (entity, id) = (entity.clone(), chat.session_id);
         NativeMenuItem::item(format!("{} · {}", chat.name, chat.agent), move |cx| {
-          let _ = entity.update(cx, |view, cx| {
-            view.chat_id = Some(id);
-            view.selection.clear();
-            view.read_chat(cx);
-            cx.notify();
-          });
+          entity
+            .update(cx, |view, cx| {
+              view.chat_id = Some(id);
+              view.selection.clear();
+              view.read_chat(cx);
+              cx.notify();
+            })
+            .ignore_closed();
         })
       })
       .collect();
@@ -554,6 +609,7 @@ impl LogsView {
       let placeholder = match self.source {
         Source::Agent => "Search this conversation…",
         Source::System => "Search system logs…",
+        Source::Reviews => "Search reviews…",
         _ => "Search all runs…",
       };
       let input = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
@@ -627,6 +683,7 @@ impl LogsView {
           && !crate::gpui_shell::keys::held(k.modifiers).shift
           && !crate::gpui_shell::keys::held(k.modifiers).alt
           && !view.explorer_open
+          && !view.hidden
         {
           view.find.open = true;
           view.find.focus = true;
@@ -686,22 +743,19 @@ fn cell(width: Option<f32>) -> Div {
 }
 
 /// A checkbox row of a filter's list (`DropdownMenuCheckboxItem`).
-fn check_row(id: SharedString, label: String, checked: bool, p: &Palette) -> gpui::Stateful<Div> {
-  let accent = p.accent;
-  ui::text(div(), TextSize::Sm)
-    .id(id.clone())
-    .debug_selector(move || id.to_string())
+fn check_row(id: SharedString, label: String, checked: bool, p: &Palette) -> ui::Row {
+  ui::Row::new(id, p)
+    .role(gpui::Role::MenuItemCheckBox)
+    .aria_toggled(if checked {
+      gpui::accesskit::Toggled::True
+    } else {
+      gpui::accesskit::Toggled::False
+    })
     .relative()
-    .flex()
-    .items_center()
-    .rounded(radius::SM)
-    .py_1p5()
     .pl_8()
     .pr_2()
-    .cursor_pointer()
-    .hover(move |s| s.bg(accent))
     .when(checked, |this| {
-      this.child(
+      this.leading(
         div()
           .absolute()
           .left_2()
@@ -712,7 +766,7 @@ fn check_row(id: SharedString, label: String, checked: bool, p: &Palette) -> gpu
           .child(ui::icon(theme::ICON_CHECK, 16., p.foreground)),
       )
     })
-    .child(label)
+    .title(label)
 }
 
 impl LogsView {
@@ -732,9 +786,12 @@ impl LogsView {
   }
 
   /// A native `<select>`: `h-8 rounded-md border bg-background px-2`.
+  /// A picker showing `label`, named "`name`: `label`"; the caller ends
+  /// it with `.test_support()`, after its handler.
   fn select(
     &self,
     key: &'static str,
+    name: &str,
     label: String,
     min_width: f32,
     disabled: bool,
@@ -743,6 +800,8 @@ impl LogsView {
     ui::text(div(), TextSize::Sm)
       .id(key)
       .debug_selector(move || key.into())
+      .role(gpui::Role::ComboBox)
+      .aria_label(SharedString::from(format!("{name}: {label}")))
       .relative()
       .h_8()
       .min_w(zpx(min_width))
@@ -767,6 +826,7 @@ impl LogsView {
       Source::Agent => "agent-chat-search",
       Source::System => "system-logs-search",
       Source::AppSetup => "app-setup-logs-search",
+      Source::Reviews => "review-history-search",
       Source::Checks => "repo-logs-search",
     };
     ui::text(div(), TextSize::Sm)
@@ -803,8 +863,16 @@ impl LogsView {
       .border_color(p.border)
       .child(
         self
-          .select("log-source", self.source.label().into(), 0., false, p)
-          .on_click(cx.listener(|view, _, _, cx| view.source_menu(cx))),
+          .select(
+            "log-source",
+            "Log source",
+            self.source.label().into(),
+            0.,
+            false,
+            p,
+          )
+          .on_click(cx.listener(|view, _, _, cx| view.source_menu(cx)))
+          .test_support(),
       )
       .when(self.source == Source::Checks, |this| {
         this.child(
@@ -838,7 +906,7 @@ impl LogsView {
                   Variant::Secondary
                 })
                 .icon(theme::ICON_DATABASE, 12.)
-                .label("Logs Explorer")
+                .label("Logs explorer")
                 .on_click(cx.listener(|view, _, _, cx| {
                   view.explorer_open = true;
                   view.find.open = false;
@@ -895,11 +963,23 @@ impl LogsView {
       .bg(p.muted.opacity(0.3))
       .child(self.filter_button("log-level-filter", level_label, Open::Levels, p, cx));
     match self.source {
-      Source::Checks if !self.workflows.is_empty() => {
+      Source::Checks if !self.workflows.is_empty() || !self.checks.is_empty() => {
         let options: Vec<(String, String)> = self
           .workflows
           .iter()
           .map(|w| (w.filename.clone(), w.name.clone()))
+          .chain(
+            self
+              .checks
+              .iter()
+              .any(|c| c == crate::core::SETUP_SCRIPT_FILENAME)
+              .then(|| {
+                (
+                  crate::core::SETUP_SCRIPT_FILENAME.to_string(),
+                  "Setup script".to_string(),
+                )
+              }),
+          )
           .collect();
         let label = filter_label(&self.checks, &options, "All checks", "checks");
         bar = bar.child(self.filter_button("check-workflow-filter", label, Open::Workflows, p, cx));
@@ -945,8 +1025,16 @@ impl LogsView {
       .bg(p.muted.opacity(0.3))
       .child(
         self
-          .select("agent-terminal", label, 192., chats.is_empty(), p)
-          .on_click(cx.listener(|view, _, _, cx| view.chat_menu(cx))),
+          .select(
+            "agent-terminal",
+            "Agent chat",
+            label,
+            192.,
+            chats.is_empty(),
+            p,
+          )
+          .on_click(cx.listener(|view, _, _, cx| view.chat_menu(cx)))
+          .test_support(),
       )
       .child(self.search_box(p))
   }
@@ -957,19 +1045,33 @@ impl LogsView {
       .child(ui::Loading::new("logs-loading", p).label(text))
   }
 
-  fn empty_message(&self) -> &'static str {
+  /// The empty feed's title and why it is empty.
+  fn empty_message(&self) -> (&'static str, &'static str) {
     match self.source {
-      Source::Checks if !self.checks.is_empty() => "No logs recorded for the selected checks yet.",
-      Source::Checks => {
-        "No check logs recorded yet. Run checks from the Checks button in a workspace header to populate this table."
-      }
-      Source::Agent => {
-        "No agent chat logs yet. Open an agent terminal (not a shell) to start recording the conversation."
-      }
-      Source::AppSetup => {
-        "No app setup script runs yet. Set a script in Application settings and click Run."
-      }
-      Source::System => "No system logs recorded yet.",
+      Source::Checks if !self.checks.is_empty() => (
+        "No logs for these checks",
+        "The selected checks have not written any logs yet.",
+      ),
+      Source::Checks => (
+        "No check logs yet",
+        "Run checks from the Checks button in a workspace header to fill this table.",
+      ),
+      Source::Agent => (
+        "No agent chat logs yet",
+        "Open an agent terminal (not a shell) to start recording the conversation.",
+      ),
+      Source::AppSetup => (
+        "No app setup runs yet",
+        "Set a script in Application settings and click Run.",
+      ),
+      Source::System => (
+        "No system logs yet",
+        "Treq has not written any system logs yet.",
+      ),
+      Source::Reviews => (
+        "No code reviews in the last 30 days",
+        "Review agent comments and reviews you send to an agent show here.",
+      ),
     }
   }
 
@@ -977,17 +1079,19 @@ impl LogsView {
   fn feed(&mut self, records: Rc<Vec<LogRecordView>>, p: &Palette, cx: &mut Context<Self>) -> Div {
     let spec = feed_spec(self.source);
     if records.is_empty() {
-      return ui::text(div(), TextSize::Xs)
+      let (title, why) = self.empty_message();
+      return div()
         .debug_selector(move || spec.output.into())
         .flex_1()
-        .font_family(theme::MONO_FONT)
-        .p_3()
-        .text_color(p.muted_foreground)
-        .child(self.empty_message());
+        .child(
+          ui::EmptyState::new("logs-empty", title, p)
+            .icon(theme::ICON_FILE_TEXT)
+            .message(why),
+        );
     }
     let selected = self.selection.selected.len();
     let multi = self.selection.multi;
-    let toolbar = ui::text(div(), TextSize::Xs)
+    let toolbar = ui::text(div(), TextSize::Sm)
       .flex()
       .items_center()
       .gap_2()
@@ -1034,9 +1138,13 @@ impl LogsView {
         this
           .child(
             div()
+              .id("selection-count")
               .debug_selector(|| "selection-count".into())
+              .role(gpui::Role::Status)
+              .aria_label(format!("{selected} selected"))
               .text_color(p.muted_foreground)
-              .child(format!("{selected} selected")),
+              .child(format!("{selected} selected"))
+              .test_support(),
           )
           .child(
             Button::new("clear-selection", p)
@@ -1090,14 +1198,18 @@ impl LogsView {
           .flex_1()
           .min_h_0()
           .child(
-            ui::text(div(), TextSize::Xs)
+            ui::text(div(), TextSize::Sm)
+              .id(spec.output)
               .debug_selector(move || spec.output.into())
+              .role(gpui::Role::List)
+              .aria_label(spec.name)
               .size_full()
               .flex()
               .flex_col()
               .font_family(theme::MONO_FONT)
               .child(header)
-              .child(list),
+              .child(list)
+              .test_support(),
           )
           .children(self.find_bar(p, cx)),
       )
@@ -1122,11 +1234,10 @@ impl LogsView {
       .filter_map(|i| records.get(i).map(|r| (i, r)))
       .map(|(i, record)| {
         let selected = self.selection.selected.contains(&i);
-        let hover = p.muted.opacity(0.5);
         let body: gpui::AnyElement = if query.is_empty() {
           record.body.clone().into_any_element()
         } else {
-          let marks: Vec<_> = super::changes::search::match_ranges(&record.body, &query)
+          let marks: Vec<_> = super::find::match_ranges(&record.body, &query)
             .into_iter()
             .map(|r| (r, mark))
             .collect();
@@ -1134,17 +1245,17 @@ impl LogsView {
             .with_highlights(marks)
             .into_any_element()
         };
-        div()
-          .id(("log-line", i))
+        ui::Row::new(SharedString::from(format!("log-line-{i}")), &p)
           .debug_selector(move || spec.line.into())
+          .label(record.body.clone())
+          .selected(selected)
           .h(zpx(ROW_HEIGHT))
+          .min_h(zpx(ROW_HEIGHT))
           .w_full()
           .overflow_hidden()
-          .flex()
-          .items_center()
-          .cursor_pointer()
-          .when(selected, |this| this.bg(p.primary.opacity(0.2)))
-          .when(!selected, |this| this.hover(move |s| s.bg(hover)))
+          .gap_0()
+          .px_0()
+          .rounded_none()
           .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |view, _, _, cx| {
@@ -1165,8 +1276,8 @@ impl LogsView {
           )
           .children(spec.columns.iter().map(|c| {
             let color = match c {
-              Column::Job | Column::Role => ui::Tone::Primary.text(&p),
-              Column::Run | Column::Source => p.muted_foreground,
+              Column::Job | Column::Role | Column::File => ui::Tone::Primary.text(&p),
+              Column::Run | Column::Source | Column::Outcome => p.muted_foreground,
             };
             cell(Some(c.width()))
               .text_color(color)
@@ -1184,7 +1295,7 @@ impl LogsView {
   }
 
   fn inspect_panel(&self, record: &LogRecordView, p: &Palette, cx: &mut Context<Self>) -> Div {
-    ui::text(div(), TextSize::Xs)
+    ui::text(div(), TextSize::Sm)
       .debug_selector(|| "log-inspect-panel".into())
       .flex_none()
       .border_t_1()
@@ -1279,6 +1390,8 @@ impl LogsView {
             .child(ui::input(&input).appearance(false).bordered(false)),
         )
         .child(
+          // Short label (['count']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .px_2()
             .whitespace_nowrap()
@@ -1320,7 +1433,7 @@ impl LogsView {
 
   /// `LogsTimeseriesChart`: stacked bars of records per second.
   fn chart(&self, p: &Palette) -> Option<impl IntoElement> {
-    let data = chart(&self.buckets);
+    let data = &self.chart;
     if data.labels.is_empty() {
       return None;
     }
@@ -1343,8 +1456,6 @@ impl LogsView {
       .borrow()
       .get("logs-chart")
       .map_or(600., |b| f32::from(b.size.width) - 60.);
-    let slot = width / data.labels.len() as f32;
-    let every = (56. / slot).ceil().max(1.) as usize;
     let legend = div()
       .absolute()
       .top(zpx(2.))
@@ -1354,6 +1465,8 @@ impl LogsView {
       .justify_center()
       .gap_3()
       .children(SERIES.iter().zip(colors).map(|((_, label), color)| {
+        // Short label (['legend label']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .flex()
           .items_center()
@@ -1418,6 +1531,8 @@ impl LogsView {
       .h(zpx(plot_height))
       .children(ticks.iter().map(|t| {
         let y = plot_height - plot_height * (*t as f32 / top as f32);
+        // Short label (['axis label']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .absolute()
           .right_0()
@@ -1425,20 +1540,36 @@ impl LogsView {
           .text_color(p.muted_foreground)
           .child(t.to_string())
       }));
+    // A handful of evenly spaced times, each wide enough to read in full,
+    // however many columns the bars are.
+    let columns = data.labels.len();
+    let label_width = 64.;
+    let labelled = ((width / (label_width + 24.)).floor() as usize)
+      .clamp(1, 8)
+      .min(columns);
     let x_labels = div()
       .absolute()
       .bottom(zpx(4.))
       .left(zpx(44.))
       .right(zpx(16.))
-      .flex()
-      .children(data.labels.iter().enumerate().map(|(i, label)| {
+      .h(zpx(16.))
+      .children((0..labelled).map(|k| {
+        let column = (((k as f32 + 0.5) * columns as f32 / labelled as f32 - 0.5).round() as usize)
+          .min(columns - 1);
+        let centre = (column as f32 + 0.5) / columns as f32;
+        // Short label (['axis label']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
-          .flex_1()
+          .absolute()
+          .top_0()
+          .left(gpui::relative(centre))
+          .ml(zpx(-label_width / 2.))
+          .w(zpx(label_width))
           .flex()
           .justify_center()
-          .overflow_hidden()
+          .whitespace_nowrap()
           .text_color(p.muted_foreground)
-          .when(i % every == 0, |this| this.child(label.clone()))
+          .child(data.labels[column].clone())
       }));
     Some(
       div()
@@ -1448,14 +1579,18 @@ impl LogsView {
         .border_color(p.border)
         .child(
           div()
+            .id("logs-timeseries-chart")
             .debug_selector(|| "logs-timeseries-chart".into())
+            .role(gpui::Role::Figure)
+            .aria_label("Log lines over time")
             .relative()
             .h(zpx(CHART_HEIGHT))
             .child(self.anchor("logs-chart"))
             .child(legend)
             .child(grid)
             .child(y_labels)
-            .child(x_labels),
+            .child(x_labels)
+            .test_support(),
         ),
     )
   }
@@ -1493,7 +1628,7 @@ impl LogsView {
         ),
       )
       .child(
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
           .flex()
           .gap_1()
           .text_color(p.muted_foreground)
@@ -1506,12 +1641,14 @@ impl LogsView {
       .border_b_1()
       .border_color(p.border)
       .child(
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
           .debug_selector(|| "sql-editor".into())
           .font_family(theme::MONO_FONT)
           .children(self.explorer.input.as_ref().map(|input| {
             ui::text(
-              Textarea::new(input).font_family(theme::MONO_FONT),
+              Textarea::new(input)
+                .aria_label("SQL query")
+                .font_family(theme::MONO_FONT),
               TextSize::Code,
             )
           })),
@@ -1559,8 +1696,11 @@ impl LogsView {
       .overflow_scroll();
     if let Some(error) = &self.explorer.error {
       results = results.child(
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
+          .id("sql-error")
           .debug_selector(|| "sql-error".into())
+          .role(gpui::Role::Alert)
+          .aria_label(error.clone())
           .m_3()
           .p_3()
           .flex()
@@ -1576,11 +1716,12 @@ impl LogsView {
             16.,
             ui::Tone::Danger.text(p),
           ))
-          .child(div().font_family(theme::MONO_FONT).child(error.clone())),
+          .child(div().font_family(theme::MONO_FONT).child(error.clone()))
+          .test_support(),
       );
     } else if let Some(result) = &self.explorer.result {
       results = results.child(
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
           .px_4()
           .py_2()
           .border_b_1()
@@ -1621,7 +1762,7 @@ impl LogsView {
       .child(results)
   }
 
-  fn result_table(&self, result: &SqlResult, p: &Palette) -> Div {
+  fn result_table(&self, result: &SqlResult, p: &Palette) -> impl IntoElement {
     // As wide as each column's longest cell, like an auto table.
     let widths: Vec<f32> = (0..result.columns.len())
       .map(|i| {
@@ -1643,9 +1784,11 @@ impl LogsView {
         longest as f32 * 6.6 + 24.
       })
       .collect();
-    let hover = p.muted.opacity(0.5);
-    ui::text(div(), TextSize::Xs)
+    ui::text(div(), TextSize::Sm)
+      .id("sql-results")
       .debug_selector(|| "sql-results".into())
+      .role(gpui::Role::Table)
+      .aria_label(format!("{} rows", result.row_count))
       .font_family(theme::MONO_FONT)
       .flex()
       .flex_col()
@@ -1671,7 +1814,7 @@ impl LogsView {
         div()
           .id(("sql-row", r))
           .flex()
-          .hover(move |s| s.bg(hover))
+          .hover(move |s| s.bg(p.hover()))
           .children(row.iter().zip(&widths).map(|(value, w)| {
             let cell = div()
               .flex_none()
@@ -1687,6 +1830,7 @@ impl LogsView {
             }
           }))
       }))
+      .test_support()
   }
 
   /// The open filter's or template list's popover, below its button.
@@ -1720,7 +1864,7 @@ impl LogsView {
         list = list.child(
           check_row(
             "log-level-option-all".into(),
-            "All Levels".into(),
+            "All levels".into(),
             self.levels.is_empty(),
             p,
           )
@@ -1764,11 +1908,12 @@ impl LogsView {
         }
       }
       Open::Templates => {
-        let accent = p.accent;
         for (i, (label, description, sql)) in TEMPLATES.iter().enumerate() {
           list = list.child(
             div()
               .id(("sql-template", i))
+              .role(gpui::Role::Button)
+              .aria_label(*label)
               .debug_selector(move || format!("sql-template-{label}"))
               .flex()
               .flex_col()
@@ -1777,14 +1922,14 @@ impl LogsView {
               .py_2()
               .rounded(radius::SM)
               .cursor_pointer()
-              .hover(move |s| s.bg(accent))
+              .hover(move |s| s.bg(p.hover()))
               .child(
                 ui::text(div(), TextSize::Sm)
                   .font_weight(FontWeight::MEDIUM)
                   .child(*label),
               )
               .child(
-                ui::text(div(), TextSize::Xs)
+                ui::text(div(), TextSize::Sm)
                   .text_color(p.muted_foreground)
                   .child(*description),
               )
@@ -1795,7 +1940,8 @@ impl LogsView {
                 }
                 view.open = None;
                 cx.notify();
-              })),
+              }))
+              .test_support(),
           );
         }
       }

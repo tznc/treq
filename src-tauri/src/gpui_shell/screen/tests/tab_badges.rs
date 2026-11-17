@@ -16,11 +16,15 @@ fn inside(h: &mut Harness, inner: &'static str, outer: &'static str) -> bool {
 #[gpui::test]
 fn the_tab_row_shows_the_loc_marker_and_change_count(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, feature_host(), workspace_route());
-  assert!(h.drawn("workspace-tab-row"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Tab).name("Code")),
+  )
+  .to_be_visible();
   assert!(inside(&mut h, "loc-diff-marker", "workspace-tab-row"));
   assert!(inside(
     &mut h,
-    "review-change-count",
+    "workspace-tab-changes-count",
     "workspace-tab-changes"
   ));
 }
@@ -42,9 +46,22 @@ fn a_workspace_without_changes_shows_neither_badge(cx: &mut TestAppContext) {
     ..FakeHost::default()
   };
   let (mut h, _) = workspace_harness(cx, host, workspace_route());
-  assert!(h.drawn("workspace-tab-changes"));
-  assert!(!h.drawn("loc-diff-marker"));
-  assert!(!h.drawn("review-change-count"));
+  let screen = h.rendered();
+  let changes = screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Tab).name("Changes"));
+  gpui_testing_library::expect(changes.clone()).to_be_visible();
+  assert!(
+    screen
+      .within(&changes)
+      .query_by_role(gpui_testing_library::by::role(gpui::Role::Image))
+      .is_none(),
+    "no count"
+  );
+  assert!(screen
+    .query_by_role(
+      gpui_testing_library::by::role(gpui::Role::Image)
+        .name(gpui_testing_library::TextMatch::regex(r"lines added")),
+    )
+    .is_none());
 }
 
 /// `sumWorkspaceLocFromLog`: the workspace's commits and its tentative
@@ -69,4 +86,99 @@ fn the_loc_marker_sums_own_commits_and_the_working_copy() {
   );
   let loc = tab_row.and_then(|row| row.loc).expect("loc");
   assert_eq!((loc.insertions, loc.deletions), (8, 1));
+}
+
+/// The Commits badge counts the list the Commits tab draws, not a second
+/// query read at another time: a status still holding the stack from before
+/// an outside rewrite doesn't change it.
+#[test]
+fn the_commits_badge_counts_the_commits_list() {
+  let mut target = commit("t", 1, 0);
+  target["on_target_only"] = true.into();
+  let mut loaded = feature_loaded();
+  // The status read 3 ahead; the list now holds 1 of the workspace's own.
+  loaded.commits = serde_json::from_value(serde_json::json!({
+    "commits": [commit("a", 5, 1), target],
+    "target_branch": "main",
+    "workspace_branch": "feature/login"
+  }))
+  .ok();
+  let (_, tab_row) = workspace_data::workspace_view(
+    route_of(&workspace_route()),
+    &loaded,
+    &open_pr(),
+    workspace_data::Pending::None,
+  );
+  match tab_row.and_then(|row| row.commits) {
+    Some(super::super::workspace::CommitsLabel::Count { count, .. }) => assert_eq!(count, 1),
+    other => panic!("expected a count, got {other:?}"),
+  }
+}
+
+/// A rewrite outside treq changes the checkout or the window's focus, which
+/// bump `changes_revision`: the header, and with it the tab badges, reads
+/// again as the Changes and Commits tabs do.
+#[gpui::test]
+fn the_tab_badges_read_again_when_the_checkout_changes(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, feature_host(), workspace_route());
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Tab).name("Code")),
+  )
+  .to_be_visible();
+  let reads = count_calls(&host, "read workspace 0");
+  bump_changes_revision(&mut h);
+  assert_eq!(count_calls(&host, "read workspace 0"), reads + 1);
+}
+
+/// The shown Commits list reads again with the badges when the checkout
+/// changes, so a commit made outside treq shows in both at once.
+#[gpui::test]
+fn the_shown_commits_list_reads_again_when_the_checkout_changes(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, commits_host(), commits_route());
+  let screen = h.rendered();
+  assert!(!screen
+    .query_all_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("work"))
+    .is_empty());
+  let reads = count_calls(&host, "read log Some(7)");
+  bump_changes_revision(&mut h);
+  assert_eq!(count_calls(&host, "read log Some(7)"), reads + 1);
+}
+
+/// A remote workspace can't merge (the capability notice says so), so the
+/// header offers no Merge… under it.
+#[test]
+fn a_remote_workspace_offers_no_merge() {
+  let mut route = route_of(&workspace_route()).clone();
+  route.remote_chrome = Some(Default::default());
+  let (header, _) = workspace_data::workspace_view(
+    &route,
+    &feature_loaded(),
+    &open_pr(),
+    workspace_data::Pending::None,
+  );
+  assert!(header.merge.is_none());
+}
+
+/// A status read that failed leaves no empty placeholder in the header.
+#[gpui::test]
+fn a_failed_status_read_draws_no_placeholder(cx: &mut TestAppContext) {
+  let mut loaded = feature_loaded();
+  loaded.status = None;
+  let host = FakeHost {
+    loaded,
+    pr: open_pr(),
+    ..FakeHost::default()
+  };
+  let (mut h, _) = workspace_harness(cx, host, workspace_route());
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Tab).name("Code")),
+  )
+  .to_be_visible();
+  assert!(screen
+    .query_by_role(gpui_testing_library::by::role(
+      gpui::Role::ProgressIndicator
+    ))
+    .is_none());
 }

@@ -3,6 +3,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, px, AnyElement, Context, KeyDownEvent, SharedString, Window,
 };
@@ -22,6 +23,9 @@ pub struct Spec {
   pub repo_path: String,
   /// The workspace's target branch, which gets the check mark.
   pub current: Option<String>,
+  /// The branch names, read ahead while the pointer rested on the button:
+  /// listed at once, and read again behind.
+  pub branches: Option<Vec<String>>,
 }
 
 pub struct State {
@@ -39,15 +43,19 @@ pub struct State {
 
 impl State {
   pub fn new(spec: Spec) -> Self {
-    Self {
+    let mut this = Self {
+      branches: spec.branches.clone(),
       spec,
-      branches: None,
       search: String::new(),
       field: None,
       selected: None,
       scroll: gpui::ScrollHandle::new(),
       rows: Vec::new(),
+    };
+    if this.branches.is_some() {
+      this.select_first();
     }
+    this
   }
 
   fn entries(&self) -> Vec<cmdk::Entry> {
@@ -86,17 +94,25 @@ impl Popover {
       let read = cx
         .background_spawn(async move { host.branches(&repo) })
         .await;
-      let _ = this.update(cx, |this, cx| {
-        if let super::Content::Target(state) = &mut this.content {
-          // A failed read lists nothing, as React's does.
-          let names = read
-            .map_err(|err| log::warn!("target branches: {err}"))
-            .unwrap_or_default();
-          state.branches = Some(names.into_iter().map(|b| b.name).collect());
-          state.select_first();
-          cx.notify();
-        }
-      });
+      this
+        .update(cx, |this, cx| {
+          if let super::Content::Target(state) = &mut this.content {
+            // A failed read lists nothing, as React's does.
+            let names: Vec<String> = read
+              .map_err(|err| log::warn!("target branches: {err}"))
+              .unwrap_or_default()
+              .into_iter()
+              .map(|b| b.name)
+              .collect();
+            // The list read ahead, read again: the selection stays put.
+            if state.branches.as_ref() != Some(&names) {
+              state.branches = Some(names);
+              state.select_first();
+              cx.notify();
+            }
+          }
+        })
+        .ignore_closed();
     }));
   }
 
@@ -133,21 +149,14 @@ impl Popover {
   pub(super) fn target_key_down(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
     let key = event.keystroke.key.as_str();
     let m = crate::gpui_shell::keys::held(event.keystroke.modifiers);
-    let step = match key {
-      "down" if m.platform => Some(cmdk::Move::Last),
-      "up" if m.platform => Some(cmdk::Move::First),
-      "down" => Some(cmdk::Move::Step(1)),
-      "up" => Some(cmdk::Move::Step(-1)),
-      "n" | "j" if m.control => Some(cmdk::Move::Step(1)),
-      "p" | "k" if m.control => Some(cmdk::Move::Step(-1)),
-      "home" => Some(cmdk::Move::First),
-      "end" => Some(cmdk::Move::Last),
-      _ => None,
-    };
+    let nav = ui::ListKey::from_key_with_emacs(key, m);
+    let step = nav
+      .filter(|k| *k != ui::ListKey::Open)
+      .map(cmdk::Move::from);
     if let Some(step) = step {
       self.target_step(step, cx);
       cx.stop_propagation();
-    } else if key == "enter" {
+    } else if nav == Some(ui::ListKey::Open) {
       let selected = match &self.content {
         super::Content::Target(state) => state.selected,
         _ => None,
@@ -179,7 +188,7 @@ impl Popover {
   ) -> AnyElement {
     let p = *p;
     if matches!(&self.content, super::Content::Target(s) if s.field.is_none()) {
-      let field = SearchField::new("Search branches...", window, cx, |this, search, cx| {
+      let field = SearchField::new("Search branches…", window, cx, |this, search, cx| {
         this.set_search(search, cx)
       });
       if let super::Content::Target(state) = &mut self.content {
@@ -193,34 +202,21 @@ impl Popover {
     let order = cmdk::visible(&entries, &state.search);
     let mut children: Vec<AnyElement> = Vec::new();
     state.rows.clear();
-    let message = |text: &'static str| {
-      ui::text(div(), TextSize::Sm)
-        .px_2()
-        .py_4()
-        .text_center()
-        .text_color(p.muted_foreground)
-        .child(text)
-    };
     match &state.branches {
       None => children.push(
-        message("Loading branches...")
-          .id("target-loading")
-          .debug_selector(|| "target-loading".into())
-          .flex()
-          .flex_col()
-          .items_center()
-          .child(
-            div()
-              .mb_1()
-              .child(ui::spinner("target-spin", 16., p.muted_foreground)),
-          )
-          .child("Loading branches...")
-          .into_any_element(),
+        ui::delayed(
+          "target-loading",
+          div()
+            .id("target-loading")
+            .debug_selector(|| "target-loading".into())
+            .py_4()
+            .child(ui::Loading::new("target-spin", &p).label("Loading branches…")),
+        )
+        .into_any_element(),
       ),
       Some(_) if order.is_empty() => children.push(
-        message("No branches found")
-          .id("target-empty")
-          .debug_selector(|| "target-empty".into())
+        ui::EmptyState::new("target-empty", "No branches match", &p)
+          .message("Try another branch name.")
           .into_any_element(),
       ),
       Some(names) => {
@@ -229,21 +225,15 @@ impl Popover {
           let selected = state.selected == Some(index);
           let checked = state.spec.current.as_deref() == Some(name.as_str());
           let id = SharedString::from(format!("branch-option-{index}"));
-          let selector = id.to_string();
           state.rows.push((index, children.len()));
           children.push(
-            ui::text(div(), TextSize::Sm)
-              .id(id)
-              .debug_selector(move || selector)
+            ui::Row::new(id, &p)
+              .role(gpui::Role::ListBoxOption)
+              .label(name.clone())
+              .selected(selected)
               .px_3()
-              .py_1p5()
-              .flex()
-              .items_center()
-              .gap_2()
-              .cursor_pointer()
+              .rounded_none()
               .font_family(theme::MONO_FONT)
-              .text_color(p.foreground)
-              .when(selected, |this| this.bg(p.menu_accent.opacity(0.5)))
               .on_mouse_move(cx.listener(move |this, _, _, cx| {
                 if let super::Content::Target(state) = &mut this.content {
                   if state.selected != Some(index) {
@@ -255,7 +245,7 @@ impl Popover {
               .on_click(cx.listener(move |this, _, _, cx| this.pick_target(index, cx)))
               .child(div().flex_1().min_w_0().truncate().child(name))
               .when(checked, |this| {
-                this.child(ui::icon(theme::ICON_CHECK, 16., p.foreground))
+                this.trailing(ui::icon(theme::ICON_CHECK, 16., p.foreground))
               })
               .into_any_element(),
           );

@@ -31,51 +31,8 @@ Those remain valuable engineering tests, but their existence does not add produc
 
 ## Real-environment testing
 
-Credential-gated Sprites/Supabase/SSH suites must continue to report skipped runs honestly. A harness that compiles and skips because credentials are absent is not evidence that the corresponding acceptance criterion passed.
+Credential-gated provider/Supabase/SSH suites must report skipped runs honestly. A harness that compiles and skips because credentials are absent is not evidence that the corresponding acceptance criterion passed.
 
-Operational setup, environment variables, cleanup safety gates, and provider-specific run instructions belong with the test harness (below) rather than in the product PRD.
+Operational setup, environment variables, cleanup safety gates, and provider-specific run instructions belong with the test harness rather than in the product PRD.
 
-## Running the real-provider suites
-
-The managed provider is Fly Sprites. The suites test what Sprites actually offers:
-
-- A Sprite has no region or machine size setting. The platform sizes it, so no test asserts on either.
-- A Sprite has no suspend call. It pauses by itself about 30 seconds after the last activity (`warm`, then `cold` later). The lifecycle tests stop all activity and wait, with a bound, for the pause.
-- Reading a Sprite's metadata does not wake it. Wake has to do work on the Sprite, so the lifecycle tests check that the Sprite reports `running` after wake. A wake that does nothing fails them.
-- Repair (`reprovision`) keeps the same Sprite and its files, so the generation and the pinned host keys stay the same.
-
-| Suite | What it covers | Command |
-|---|---|---|
-| `remote_e2e.rs` | Sprites adapter against the real API: idempotent create, readiness, exec reachability, idle pause then wake and reconnect with files intact, in-place repair, delete and inventory check | `TREQ_REMOTE_E2E=1 cargo test --test remote_e2e -- --ignored --test-threads=1` |
-| `remote_e2e_native.rs` | The managed flow desktop and mobile share, over native certificate SSH through the relay: status, ensure, key registration and replay, certificate issue and renewal, two repositories, mutations, PTY, reconnect, idle pause then wake, repair with host trust carried over, key-revoked cutoff. Local run against real Sprites: [`SPRITES_E2E.md`](SPRITES_E2E.md) | add `TREQ_REMOTE_E2E_NATIVE=1`, `--test remote_e2e_native` |
-| `supabase/functions/tests/remote_e2e.test.ts` | Deployed Edge Functions on the test project: provisioning, trust, wake, repair, audit, delete | `deno test --allow-net --allow-env supabase/functions/tests/remote_e2e.test.ts` (add `TREQ_REMOTE_E2E_SOAK=1` for the hours-long cold-Sprite soak) |
-
-`.github/workflows/remote-e2e.yml` runs the adapter and Edge suites nightly and on demand, and skips cleanly when the secrets below are absent. The native suite and the soak run only on demand. A final step sweeps leftover e2e resources whether or not the tests passed. `.github/workflows/remote-e2e-cleanup.yml` is the daily orphan scan.
-
-### Environment variables and repository secrets
-
-Every provider credential here must belong to a dedicated Sprites test organization. Sprites tokens are organization-scoped, so a production token would let tests and cleanup touch real user Sprites.
-
-| Variable (also the secret name) | Used by | Replaces |
-|---|---|---|
-| `TREQ_REMOTE_E2E` = `1` | all live suites; the workflow gate | unchanged |
-| `TREQ_SPRITES_TEST_API_TOKEN` | `remote_e2e.rs` | `SPRITES_TEST_API_TOKEN`, `FLY_TEST_API_TOKEN` |
-| `TREQ_SPRITES_TEST_API_URL` (optional, default `https://api.sprites.dev`) | `remote_e2e.rs` | `SPRITES_TEST_API_URL`, `FLY_TEST_API_BASE_URL` |
-| none | | `FLY_TEST_APP_NAME` (Sprites have no app) |
-| `TREQ_SPRITES_E2E_CLEANUP_API_TOKEN` | `scripts/remote-e2e-cleanup.ts` | `SPRITES_E2E_CLEANUP_API_TOKEN`, `FLY_E2E_CLEANUP_API_TOKEN` |
-| `TREQ_SPRITES_E2E_CLEANUP_API_URL` (optional, default `https://api.sprites.dev`) | `scripts/remote-e2e-cleanup.ts` | `SPRITES_E2E_CLEANUP_API_URL`, `FLY_E2E_CLEANUP_API_BASE_URL` |
-| none | | `FLY_E2E_CLEANUP_APP_NAME` (Sprites have no app) |
-| `SUPABASE_TEST_URL`, `SUPABASE_TEST_ANON_KEY`, `SUPABASE_TEST_SERVICE_ROLE_KEY`, `REMOTE_ADMIN_API_KEY_TEST` | native and Edge suites, cleanup | unchanged |
-| `TREQ_REMOTE_E2E_CLEANUP_TARGET` = `dedicated-test` | cleanup apply mode | unchanged |
-
-Local-only tuning, not secrets:
-
-- `TREQ_REMOTE_E2E_MAX_CONCURRENCY`: live Sprites `remote_e2e.rs` may hold at once (default 2).
-- `TREQ_REMOTE_E2E_IDLE_PAUSE_TIMEOUT_SECS`: how long `remote_e2e.rs` waits for a Sprite to pause (default 600).
-- `TREQ_REMOTE_E2E_IDLE_PAUSE_WAIT_SECS`: how long `remote_e2e_native.rs` idles before it wakes the VM (default 90).
-
-The Edge Functions on the Supabase test project read their own `TREQ_SPRITES_API_URL` and `TREQ_SPRITES_API_TOKEN` function secrets. Set those to the same test organization.
-
-The native and Edge suites grant their test users Pro through the billing RPCs (`billing_record_checkout_completed`, `billing_record_subscription_event`), because `ensure`, `wake` and `reprovision` answer 402 without it.
-
-Sprites created by `remote_e2e.rs` are named `dev-treq-treq-e2e-<uuid>`. Sprites created through the Edge Functions are named `dev-treq-<user id>` for an e2e-tagged test user. The cleanup script deletes only those two shapes and refuses anything else.
+There is no live managed-provider suite today. The Fly Sprites suites (`remote_e2e.rs`, `remote_e2e_native.rs`, `supabase/functions/tests/remote_e2e.test.ts`) were removed with the Sprites provider, which cannot run treq-gateway (`docs/design/sandbox-provider-adapter.md`). Boat and Daytona are covered by the Deno adapter and contract tests in `supabase/functions/tests/`, and the relay byte path by `remote_ssh_server_it.rs` against a real sshd.

@@ -101,6 +101,82 @@ pub fn text_lines(content: &str) -> Vec<&str> {
   content.split('\n').collect()
 }
 
+/// A Markdown text attachment draws rendered until its Source tab is picked.
+pub fn renders_markdown(asset: &SendAsset) -> bool {
+  asset.media_type == "text" && super::file_browser_data::is_markdown(&asset.path)
+}
+
+/// The top-level blocks of Markdown `lines`, as 1-based inclusive line
+/// ranges: runs of non-blank lines, with a fenced code block kept whole
+/// across its blank lines.
+pub fn markdown_blocks(lines: &[&str]) -> Vec<(usize, usize)> {
+  let mut blocks = Vec::new();
+  let mut start = None;
+  let mut fence: Option<&str> = None;
+  for (ix, line) in lines.iter().enumerate() {
+    let n = ix + 1;
+    let trimmed = line.trim_start();
+    if let Some(open) = fence {
+      if trimmed.starts_with(open) {
+        fence = None;
+        blocks.extend(start.take().map(|s| (s, n)));
+      }
+      continue;
+    }
+    if trimmed.is_empty() {
+      if let Some(s) = start.take() {
+        blocks.push((s, n - 1));
+      }
+      continue;
+    }
+    if start.is_none() {
+      start = Some(n);
+    }
+    fence = ["```", "~~~"].into_iter().find(|f| trimmed.starts_with(f));
+  }
+  if let Some(s) = start {
+    blocks.push((s, lines.len()));
+  }
+  blocks
+}
+
+/// The block a comment ending on `line` shows under: the one holding it,
+/// or for a blank line between blocks, the one above.
+pub fn block_at_or_before(blocks: &[(usize, usize)], line: usize) -> Option<usize> {
+  blocks.iter().rposition(|&(start, _)| start <= line)
+}
+
+/// Points relative link and image targets in `text` at `dir`, the
+/// attachment's folder, so they open and load from where the file lives.
+pub fn resolve_relative_links(text: &str, dir: &str) -> String {
+  #[expect(clippy::expect_used, reason = "constant pattern")]
+  static LINK: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| regex::Regex::new(r"\]\(([^)\s]+)").expect("regex"));
+  LINK
+    .replace_all(text, |c: &regex::Captures<'_>| {
+      let target = &c[1];
+      let external = target.starts_with(['#', '/', '<']) || target.contains(':');
+      if external {
+        c[0].to_string()
+      } else {
+        format!("]({}", Path::new(dir).join(target).display())
+      }
+    })
+    .into_owned()
+}
+
+/// Whether a text attachment's panel draws dark. The lightbox is dark, but
+/// rendered Markdown takes the app's theme, which gpui-kit's view follows.
+pub fn text_panel_dark(rendered: bool, app_dark: bool) -> bool {
+  !rendered || app_dark
+}
+
+/// "Suggest change": the picked lines as a ```` ```suggestion ```` block to
+/// edit into what they should read, as code review starts one.
+pub fn suggestion_for(lines: &[String]) -> String {
+  format!("```suggestion\n{}\n```\n", lines.join("\n"))
+}
+
 /// `hasUnsentSendAssetReview`.
 pub fn has_unsent(general: &str, highlights: &[Highlight], lines: &[LineComment]) -> bool {
   !general.trim().is_empty()
@@ -277,6 +353,82 @@ mod tests {
     };
     assert_eq!(ids(false), ["a"]);
     assert_eq!(ids(true), ["a", "c"]);
+  }
+
+  #[test]
+  fn renders_markdown_attachments_by_default() {
+    let mut md = asset("a", None, "text");
+    md.path = "/tmp/HANDOFF.MD".into();
+    assert!(renders_markdown(&md));
+    md.path = "/tmp/notes.markdown".into();
+    assert!(renders_markdown(&md));
+    md.path = "/tmp/notes.txt".into();
+    assert!(!renders_markdown(&md));
+    let mut img = asset("b", None, "image");
+    img.path = "/tmp/shot.md".into();
+    assert!(!renders_markdown(&img));
+  }
+
+  #[test]
+  fn maps_markdown_blocks_to_source_lines() {
+    let src =
+      "# Title\n\nPara one\nstill one\n\n```rs\nfn a() {}\n\nfn b() {}\n```\n- a\n- b\n\n\n> quote";
+    assert_eq!(
+      markdown_blocks(&text_lines(src)),
+      [(1, 1), (3, 4), (6, 10), (11, 12), (15, 15)]
+    );
+    assert!(markdown_blocks(&text_lines("")).is_empty());
+    // An unclosed fence runs to the end.
+    assert_eq!(markdown_blocks(&text_lines("~~~\na\n\nb")), [(1, 4)]);
+  }
+
+  #[test]
+  fn resolves_relative_links_against_the_file() {
+    let md = "![shot](img/a.png) [doc](../b.md) [web](https://x.io) [top](#h) [abs](/etc/c.md)";
+    assert_eq!(
+      resolve_relative_links(md, "/repo/docs"),
+      "![shot](/repo/docs/img/a.png) [doc](/repo/docs/../b.md) [web](https://x.io) [top](#h) [abs](/etc/c.md)"
+    );
+  }
+
+  #[test]
+  fn markdown_cards_get_the_markdown_icon() {
+    use super::super::terminal::send_asset_icon;
+    use crate::gpui_shell::theme;
+    let mut md = asset("a", None, "text");
+    md.path = "/tmp/handoff.md".into();
+    assert_eq!(send_asset_icon(&md), theme::ICON_FILE_MARKDOWN);
+    assert_eq!(
+      send_asset_icon(&asset("b", None, "text")),
+      theme::ICON_FILE_TEXT
+    );
+  }
+
+  #[test]
+  fn rendered_markdown_follows_the_app_theme() {
+    // Source stays dark like the rest of the lightbox.
+    assert!(text_panel_dark(false, false));
+    assert!(text_panel_dark(false, true));
+    assert!(!text_panel_dark(true, false));
+    assert!(text_panel_dark(true, true));
+  }
+
+  #[test]
+  fn places_line_ranges_under_their_block() {
+    let blocks = [(1, 1), (3, 4), (6, 10)];
+    assert_eq!(block_at_or_before(&blocks, 1), Some(0));
+    // A blank line between blocks goes with the block above it.
+    assert_eq!(block_at_or_before(&blocks, 2), Some(0));
+    assert_eq!(block_at_or_before(&blocks, 4), Some(1));
+    assert_eq!(block_at_or_before(&blocks, 99), Some(2));
+    assert_eq!(block_at_or_before(&blocks, 0), None);
+    assert_eq!(block_at_or_before(&[], 3), None);
+  }
+
+  #[test]
+  fn suggests_a_change_to_the_picked_lines() {
+    let lines = ["- a".to_string(), "- b".to_string()];
+    assert_eq!(suggestion_for(&lines), "```suggestion\n- a\n- b\n```\n");
   }
 
   #[test]

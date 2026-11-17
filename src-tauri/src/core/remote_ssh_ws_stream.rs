@@ -1,18 +1,18 @@
 //! WebSocket byte stream for managed SSH through the `remote-ssh-relay`
 //! Edge Function.
 //!
-//! Fly Sprites have no raw TCP ingress, so the client cannot dial sshd on a
-//! managed VM. Instead it opens a WebSocket to the relay, which checks the
-//! caller's Supabase session and forwards raw bytes to sshd through the
-//! Sprites TCP proxy. [`WsByteStream`] turns that WebSocket back into a plain
+//! Managed VMs have no raw TCP ingress, so the client cannot dial sshd on
+//! one. Instead it opens a WebSocket to the relay, which checks the caller's
+//! Supabase session and forwards raw bytes to sshd through treq-gateway
+//! inside the VM. [`WsByteStream`] turns that WebSocket back into a plain
 //! byte stream so `russh::client::connect_stream` can run the same SSH
 //! handshake, host-key pinning, and certificate auth it runs over TCP.
 //!
 //! Relay connections are short-lived by design: Supabase caps how long an
 //! Edge Function worker lives (minutes, not hours), and the cap includes an
 //! open WebSocket. A drop looks like any other dead connection to the pool,
-//! which reconnects on the next command; PTY sessions run inside tmux on the
-//! VM and reattach.
+//! which reconnects on the next command; PTY sessions are held by the treq
+//! terminal daemon on the VM (`core::pty_daemon`) and reattach.
 
 use std::io;
 use std::pin::Pin;
@@ -133,6 +133,7 @@ where
   }
 }
 
+#[expect(clippy::expect_used, reason = "ring supports the default TLS versions")]
 fn tls_connector() -> Connector {
   // Built explicitly with ring so this does not depend on which rustls
   // crypto provider happens to be installed process-wide.
@@ -197,7 +198,10 @@ mod tests {
     let server = tokio::spawn(async move {
       let (tcp, _) = listener.accept().await.unwrap();
       let mut auth_tx = Some(auth_tx);
-      #[allow(clippy::result_large_err)]
+      #[expect(
+        clippy::result_large_err,
+        reason = "the callback signature is fixed by tungstenite's handshake callback"
+      )]
       let callback = |request: &tokio_tungstenite::tungstenite::handshake::server::Request,
                       response| {
         let auth = request
@@ -282,9 +286,8 @@ mod tests {
         .write_all(b"HTTP/1.1 401 Unauthorized\r\ncontent-length: 0\r\n\r\n")
         .await;
     });
-    let error = match connect_relay(&format!("ws://{addr}/relay"), "secret-jwt").await {
-      Ok(_) => panic!("expected a refusal"),
-      Err(error) => error,
+    let Err(error) = connect_relay(&format!("ws://{addr}/relay"), "secret-jwt").await else {
+      panic!("expected a refusal")
     };
     assert!(error.contains("401"), "{error}");
     assert!(!error.contains("secret-jwt"), "{error}");

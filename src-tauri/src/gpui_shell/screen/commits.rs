@@ -10,11 +10,17 @@
 //! [`commits_data`]: super::commits_data
 
 mod rows;
+mod search;
 
+use crate::core::review::{selected_text, TextPoint};
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
+use crate::result_ext::ResultExt;
+use gpui_kit::base::TestSupportExt as _;
 use std::{
-  collections::{HashMap, HashSet},
+  cell::RefCell,
+  collections::{HashMap, HashSet, VecDeque},
   rc::Rc,
   time::Duration,
 };
@@ -22,25 +28,25 @@ use std::{
 use gpui_kit::component::input::{InputEvent, InputState, Textarea, TextareaState};
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
-  self, anchored, deferred, div, point, prelude::*, px, AnyElement, App, ClipboardItem, Context,
-  Div, Entity, FontWeight, KeyDownEvent, MouseButton, Pixels, SharedString, Stateful, Subscription,
-  Window,
+  self, deferred, div, prelude::*, AnyElement, App, ClipboardItem, Context, Div, Entity,
+  FontWeight, KeyDownEvent, MouseButton, Pixels, SharedString, Stateful, Subscription, Window,
 };
 
 use super::{
   code::Parent,
   code_data::Agent,
   commits_data::{
-    comment_prompt, comment_target, empty_diff, first_diff, first_file_diff, first_line, headline,
-    line_label, resolve_session_name, revisions, selection, CommentTarget, CommitsHost, History,
-    Host, LineRef, ShiftForm, HOME_PAGE, TARGET_PAGE,
+    comment_prompt, comment_target, empty_diff, first_diff, first_file_diff, first_line,
+    has_content, headline, line_label, resolve_session_name, revisions, selection, CommentTarget,
+    CommitsHost, History, Host, LineRef, ShiftForm, HOME_PAGE, TARGET_PAGE,
   },
+  prefetch::{self, CommitDiffs},
   ActionSink, ScreenAction,
 };
 use crate::{
   gpui_shell::{
     confirm::{self, Question},
-    native::{self, NativeEvent, ToastAction, ToastTone},
+    native::{self, NativeEvent, ToastAction},
     popup::{MenuIcon, NativeMenuItem, PopupRequest, PopupSink, Side, TooltipContent},
     theme::{self, Palette},
     time,
@@ -52,6 +58,8 @@ use crate::{
 
 /// `REMOVE_ANIMATION_MS`: how long a removed commit stays, its buttons
 /// disabled, before it leaves the list.
+/// Diffs of collapsed commits kept, so opening one again draws at once.
+const CLOSED_DIFFS: usize = 4;
 const REMOVE_DELAY: Duration = Duration::from_millis(220);
 const RESOLVE_DOCS_PATH: &str = "/docs/concepts/commit-management#resolve-commit-conflicts-inplace";
 const RESOLVE_HELP: &str = "Treq opens short-lived resolve directories for each conflicted \
@@ -61,15 +69,6 @@ const RESOLVE_HELP: &str = "Treq opens short-lived resolve directories for each 
 /// Tells React what the tab changed.
 fn tell(host: &dyn CommitsHost, event: NativeEvent) {
   super::workspace_data::WorkspaceHost::notify(host, event);
-}
-
-fn toast_event(tone: ToastTone, title: &str, description: impl Into<String>) -> NativeEvent {
-  NativeEvent::Toast {
-    title: title.into(),
-    description: description.into(),
-    tone,
-    action: None,
-  }
 }
 
 /// A commit's diff, as read, and what of it is open.
@@ -110,6 +109,19 @@ pub(super) struct Selection {
   pub lines: Vec<LineRef>,
   pub dragging: bool,
 }
+
+/// Code picked by dragging over a diff's text: what Copy takes.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct TextPick {
+  pub commit_id: String,
+  pub path: String,
+  pub anchor: TextPoint,
+  pub head: TextPoint,
+  pub dragging: bool,
+}
+
+/// Each drawn line's text layout, by commit, path and line.
+pub(super) type Layouts = Rc<RefCell<HashMap<(String, String, LineRef), gpui::TextLayout>>>;
 
 /// The comment box open under a diff line (`pendingComment`).
 pub(super) struct Comment {
@@ -163,19 +175,30 @@ pub struct CommitsView {
   tips: Tooltips,
   popups: PopupSink,
   pub(super) history: Option<History>,
+  /// Why the log could not be read, while there is no history to show.
+  history_error: Option<String>,
   loading_more: bool,
   pub(super) target_limit: usize,
   pub(super) home_limit: usize,
   /// Commits abandoned, stashed or undone, until the next read drops them.
   pub(super) removed: HashSet<String>,
   pub(super) removing: HashSet<String>,
+  /// Commits removed before the backend answered, which a read landing
+  /// meanwhile still lists.
+  unconfirmed: HashSet<String>,
   pub(super) hide_tentative: bool,
   pub(super) expanded: HashSet<String>,
   pub(super) diffs: HashMap<String, DiffState>,
+  /// Collapsed commits whose diff is still in `diffs`, the oldest first: a
+  /// diff can hold thousands of lines, so only the last few stay.
+  closed: VecDeque<String>,
   shifting: bool,
   /// The commit whose "Move commit" menu is open.
   pub(super) move_menu: Option<String>,
   pub(super) selection: Option<Selection>,
+  pub(super) text: Option<TextPick>,
+  pub(super) layouts: Layouts,
+  focus: gpui::FocusHandle,
   pub(super) comment: Option<Comment>,
   pub(super) dialog: Option<Dialog>,
   /// The change id React asked to show (`scrollToCommitId`).
@@ -183,6 +206,15 @@ pub struct CommitsView {
   /// The request last seen, so a repeat of it is not scrolled to again.
   requested: Option<String>,
   feed: rows::Feed,
+  /// Bumped when the history or any diff changes, which the rows lay out.
+  layout_gen: u64,
+  /// The revision the tab was hidden at, while another tab or workspace
+  /// shows.
+  hidden_at: Option<u64>,
+  /// The commit row the pointer rests on, whose diff is read ahead.
+  hovered: prefetch::Intent<String>,
+  pub(super) search: super::find::Find,
+  hits: search::Hits,
   _subscriptions: Vec<Subscription>,
 }
 
@@ -210,23 +242,34 @@ impl CommitsView {
       tips: Tooltips::new(popups.clone(), dark),
       popups,
       history: None,
+      history_error: None,
       loading_more: false,
       target_limit: TARGET_PAGE,
       home_limit: HOME_PAGE,
       removed: HashSet::new(),
       removing: HashSet::new(),
+      unconfirmed: HashSet::new(),
       hide_tentative: false,
       expanded: HashSet::new(),
       diffs: HashMap::new(),
+      closed: VecDeque::new(),
       shifting: false,
       move_menu: None,
       selection: None,
+      text: None,
+      layouts: Layouts::default(),
+      focus: cx.focus_handle(),
       comment: None,
       dialog: None,
       confirm: None,
       requested: scroll_to.clone(),
       scroll_to,
       feed: rows::Feed::default(),
+      layout_gen: 0,
+      hidden_at: None,
+      hovered: prefetch::Intent::default(),
+      search: super::find::Find::default(),
+      hits: search::Hits::default(),
       _subscriptions: Vec::new(),
     };
     this.load(cx);
@@ -257,22 +300,58 @@ impl CommitsView {
       return;
     }
     let moved = self.parent.key() != parent.key();
+    // The log depends on nothing else: the conflicted files or the
+    // workspace's record changing alone don't read it again.
+    let reread = moved
+      || self.parent.revision != parent.revision
+      || self.parent.default_branch != parent.default_branch;
     self.parent = parent;
     if moved {
       self.history = None;
+      self.history_error = None;
+      self.layout_gen += 1;
       self.target_limit = TARGET_PAGE;
       self.home_limit = HOME_PAGE;
       self.removed.clear();
       self.removing.clear();
+      self.unconfirmed.clear();
       self.expanded.clear();
       self.diffs.clear();
+      self.closed.clear();
       self.selection = None;
       self.comment = None;
       self.dialog = None;
       self.move_menu = None;
     }
-    self.load(cx);
+    if reread {
+      self.load(cx);
+    }
     cx.notify();
+  }
+
+  /// Its first read landed.
+  pub(super) fn ready(&self) -> bool {
+    self.history.is_some()
+  }
+
+  /// Hidden while another tab or workspace shows; shown again, it reads
+  /// again behind what it draws, unless a newer revision already did.
+  pub(super) fn set_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
+    match (shown, self.hidden_at) {
+      (false, None) => {
+        self.hidden_at = Some(self.parent.revision);
+        super::find::unwatch_key(self);
+      }
+      (true, Some(at)) => {
+        self.hidden_at = None;
+        // Until its first read lands (a view made ahead), that read is
+        // still on the way.
+        if at == self.parent.revision && self.ready() {
+          self.load(cx);
+        }
+      }
+      _ => {}
+    }
   }
 
   fn home(&self) -> bool {
@@ -293,12 +372,14 @@ impl CommitsView {
       let value = cx
         .background_spawn(async move { work(host.as_ref(), &parent) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if view.parent.key() == key {
-          apply(view, value, cx);
-          cx.notify();
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.parent.key() == key {
+            apply(view, value, cx);
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -328,13 +409,21 @@ impl CommitsView {
             if tentative(&view.history) != tentative(&Some(history.clone())) {
               view.hide_tentative = false;
             }
-            // A fresh read no longer lists what was removed.
-            view.removed.clear();
+            // A fresh read no longer lists what was removed, unless the
+            // removal is still on its way.
+            let unconfirmed = &view.unconfirmed;
+            view.removed.retain(|id| unconfirmed.contains(id));
             view.history = Some(history);
+            view.history_error = None;
+            view.layout_gen += 1;
           }
           Err(err) => {
             log::warn!("Failed to load commits: {err}");
-            view.history.get_or_insert_with(History::default);
+            // Keep what was read before; only an empty view says it failed.
+            if view.history.is_none() {
+              view.history_error = Some(err);
+            }
+            view.layout_gen += 1;
           }
         }
       },
@@ -368,10 +457,6 @@ impl CommitsView {
     );
   }
 
-  fn toast(&self, tone: ToastTone, title: &str, description: impl Into<String>) {
-    tell(self.host.as_ref(), toast_event(tone, title, description));
-  }
-
   /// Everything React read from the repository is stale.
   fn changed(host: &dyn CommitsHost, parent: &Parent) {
     tell(
@@ -382,41 +467,65 @@ impl CommitsView {
     );
   }
 
-  /// The commits listed: the tentative working copy, then the branch's own.
-  fn listed(&self) -> Vec<JjLogCommit> {
-    let Some(history) = &self.history else {
-      return Vec::new();
-    };
+  /// A listed commit: the tentative working copy, or one of the branch's
+  /// own or the target's not removed.
+  fn find(&self, commit_id: &str) -> Option<&JjLogCommit> {
+    let history = self.history.as_ref()?;
     history
       .tentative
       .iter()
-      .map(|(c, _)| c.clone())
+      .map(|(c, _)| c)
       .chain(
         history
           .own
           .iter()
           .chain(&history.target)
-          .filter(|c| !self.removed.contains(&c.commit_id))
-          .cloned(),
+          .filter(|c| !self.removed.contains(&c.commit_id)),
       )
-      .collect()
-  }
-
-  fn find(&self, commit_id: &str) -> Option<JjLogCommit> {
-    self.listed().into_iter().find(|c| c.commit_id == commit_id)
+      .find(|c| c.commit_id == commit_id)
   }
 
   pub(super) fn toggle(&mut self, commit_id: &str, cx: &mut Context<Self>) {
-    if !self.expanded.remove(commit_id) {
+    if self.expanded.remove(commit_id) {
+      self.keep_closed(commit_id);
+    } else {
       self.expand(commit_id, cx);
     }
     cx.notify();
   }
 
+  /// Remembers that `commit_id` closed with its diff read, and drops the
+  /// diffs of the commits closed longest ago. Opening one again reads it
+  /// from [`CommitDiffs`] or the backend.
+  fn keep_closed(&mut self, commit_id: &str) {
+    self.closed.push_back(commit_id.to_string());
+    while self.closed.len() > CLOSED_DIFFS {
+      if let Some(old) = self.closed.pop_front() {
+        if !self.expanded.contains(&old) {
+          self.diffs.remove(&old);
+        }
+      }
+    }
+  }
+
   /// `fetchAndExpand`.
   fn expand(&mut self, commit_id: &str, cx: &mut Context<Self>) {
     self.expanded.insert(commit_id.to_string());
+    self.closed.retain(|closed| closed != commit_id);
     if self.diffs.contains_key(commit_id) {
+      return;
+    }
+    self.layout_gen += 1;
+    // Read ahead while the pointer rested on the row: drawn at once.
+    let key = (self.parent.repo_path.clone(), commit_id.to_string());
+    if let Some(diff) = cx.default_global::<CommitDiffs>().0.get(&key).cloned() {
+      self.diffs.insert(
+        commit_id.to_string(),
+        DiffState {
+          diff: Some(diff),
+          ..DiffState::default()
+        },
+      );
       return;
     }
     self.diffs.insert(
@@ -426,7 +535,7 @@ impl CommitsView {
         ..DiffState::default()
       },
     );
-    let change = self.find(commit_id).map(|c| c.change_id);
+    let change = self.find(commit_id).map(|c| c.change_id.clone());
     let revs = revisions(commit_id, change.as_deref());
     let id = commit_id.to_string();
     self.run(
@@ -436,7 +545,11 @@ impl CommitsView {
         })
       },
       move |view, result, _| {
-        let state = view.diffs.entry(id).or_default();
+        view.layout_gen += 1;
+        // A diff dropped while it read is not kept.
+        let Some(state) = view.diffs.get_mut(&id) else {
+          return;
+        };
         state.loading = false;
         match result {
           Ok(diff) => state.diff = Some(diff),
@@ -450,6 +563,41 @@ impl CommitsView {
     );
   }
 
+  /// The pointer entered or left commit `commit_id`'s row.
+  fn hover_commit(&mut self, commit_id: String, hovered: bool, cx: &mut Context<Self>) {
+    let id = commit_id.clone();
+    self.hovered.hover(commit_id, hovered, cx, move |view, cx| {
+      view.prefetch_diff(id, cx)
+    });
+  }
+
+  /// Reads commit `commit_id`'s diff into [`CommitDiffs`], unless it is
+  /// open or kept there already. Nothing redraws.
+  fn prefetch_diff(&mut self, commit_id: String, cx: &mut Context<Self>) {
+    let key = (self.parent.repo_path.clone(), commit_id);
+    if self.diffs.contains_key(&key.1) || cx.default_global::<CommitDiffs>().0.get(&key).is_some() {
+      return;
+    }
+    let (host, workspace_id) = (self.host.clone(), self.parent.workspace_id());
+    cx.spawn(async move |this, cx| {
+      let (repo, commit_id) = key.clone();
+      let read = cx
+        .background_spawn(async move { host.commit_diff(&repo, workspace_id, &commit_id) })
+        .await;
+      let diff = match read {
+        Ok(diff) if has_content(&diff) => diff,
+        _ => return,
+      };
+      this
+        .update(cx, |_, cx| {
+          let now = cx.background_executor().now();
+          cx.default_global::<CommitDiffs>().0.insert(key, now, diff);
+        })
+        .ignore_closed();
+    })
+    .detach();
+  }
+
   fn load_file_diff(&mut self, commit_id: &str, path: &str, cx: &mut Context<Self>) {
     let Some(state) = self.diffs.get_mut(commit_id) else {
       return;
@@ -457,7 +605,7 @@ impl CommitsView {
     state.deferred_loading.insert(path.to_string());
     state.deferred_errors.remove(path);
     cx.notify();
-    let change = self.find(commit_id).map(|c| c.change_id);
+    let change = self.find(commit_id).map(|c| c.change_id.clone());
     let revs = revisions(commit_id, change.as_deref());
     let (id, file) = (commit_id.to_string(), path.to_string());
     self.run(
@@ -472,6 +620,7 @@ impl CommitsView {
           let Some(state) = view.diffs.get_mut(&id) else {
             return;
           };
+          view.layout_gen += 1;
           state.deferred_loading.remove(&path);
           match result {
             Ok(file) => {
@@ -493,6 +642,7 @@ impl CommitsView {
 
   fn toggle_file(&mut self, commit_id: &str, path: &str, cx: &mut Context<Self>) {
     if let Some(state) = self.diffs.get_mut(commit_id) {
+      self.layout_gen += 1;
       if !state.collapsed.remove(path) {
         state.collapsed.insert(path.to_string());
       }
@@ -505,12 +655,14 @@ impl CommitsView {
     self.removing.insert(commit_id.clone());
     cx.spawn(async move |this, cx| {
       cx.background_executor().timer(REMOVE_DELAY).await;
-      let _ = this.update(cx, |view, cx| {
-        if view.removing.remove(&commit_id) {
-          view.removed.insert(commit_id);
-        }
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.removing.remove(&commit_id) {
+            view.removed.insert(commit_id);
+          }
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -519,13 +671,12 @@ impl CommitsView {
     &mut view.confirm
   }
 
-  /// Asks `question`; its verb runs `act` off the main thread, unless the
-  /// tab has moved to another workspace meanwhile.
-  fn confirmed<T: Send + 'static>(
+  /// Asks `question`; its verb runs `go`, unless the tab has moved to
+  /// another workspace meanwhile.
+  fn confirmed(
     &mut self,
     question: Question,
-    act: impl FnOnce(&dyn CommitsHost, &Parent) -> T + Send + 'static,
-    apply: impl FnOnce(&mut Self, T, &mut Context<Self>) + 'static,
+    go: impl FnOnce(&mut Self, &mut Context<Self>) + 'static,
     cx: &mut Context<Self>,
   ) {
     let key = self.parent.key();
@@ -534,8 +685,35 @@ impl CommitsView {
       question,
       move |view, cx| {
         if view.parent.key() == key {
-          view.run(act, apply, cx);
+          go(view, cx);
         }
+      },
+      cx,
+    );
+  }
+
+  /// Removes commit `commit_id` from the list at once, not after the
+  /// backend answers, and runs `act` off the main thread; a failure puts
+  /// the commit back.
+  fn remove<T: Send + 'static>(
+    &mut self,
+    commit_id: String,
+    act: impl FnOnce(&dyn CommitsHost, &Parent) -> Result<T, String> + Send + 'static,
+    apply: impl FnOnce(&mut Self, Result<T, String>, &mut Context<Self>) + 'static,
+    cx: &mut Context<Self>,
+  ) {
+    self.unconfirmed.insert(commit_id.clone());
+    self.remove_later(commit_id.clone(), cx);
+    cx.notify();
+    self.run(
+      act,
+      move |view, result, cx| {
+        view.unconfirmed.remove(&commit_id);
+        if result.is_err() {
+          view.removing.remove(&commit_id);
+          view.removed.remove(&commit_id);
+        }
+        apply(view, result, cx);
       },
       cx,
     );
@@ -553,12 +731,12 @@ impl CommitsView {
     )
     .destructive();
     let change = commit.change_id.clone();
-    self.confirmed(
-      question,
-      move |host, parent| host.abandon(&parent.repo_path, ws, &change),
-      move |view, result, cx| match result {
+    let id = commit.commit_id.clone();
+    let act =
+      move |host: &dyn CommitsHost, parent: &Parent| host.abandon(&parent.repo_path, ws, &change);
+    let apply =
+      move |view: &mut Self, result: Result<String, String>, _: &mut Context<Self>| match result {
         Ok(operation) => {
-          view.remove_later(commit.commit_id.clone(), cx);
           let (host, parent) = (view.host.clone(), view.parent.clone());
           Self::changed(host.as_ref(), &parent);
           let short = commit.short_id.clone();
@@ -566,43 +744,55 @@ impl CommitsView {
             let event = match host.undo_operation(&parent.repo_path, ws, &operation) {
               Ok(()) => {
                 Self::changed(host.as_ref(), &parent);
-                toast_event(ToastTone::Success, &format!("Restored commit {short}"), "")
+                NativeEvent::from(Toast::success(format!("Restored commit {short}")))
               }
-              Err(err) => toast_event(ToastTone::Error, "Undo Failed", err),
+              Err(err) => NativeEvent::from(Toast::error("Undo failed").description(err)),
             };
             tell(host.as_ref(), event);
           });
           tell(
             view.host.as_ref(),
-            NativeEvent::Toast {
-              title: "Commit deleted".into(),
-              description: format!("Abandoned commit {}", commit.short_id),
-              tone: ToastTone::Success,
-              action: Some(ToastAction {
-                label: "Undo".into(),
-                id: undo,
-              }),
-            },
+            NativeEvent::from(
+              Toast::success("Commit deleted")
+                .description(format!("Abandoned commit {}", commit.short_id))
+                .action(ToastAction {
+                  label: "Undo".into(),
+                  id: undo,
+                }),
+            ),
           );
         }
-        Err(err) => view.toast(ToastTone::Error, "Failed to delete commit", err),
-      },
+        Err(err) => tell(
+          view.host.as_ref(),
+          Toast::error("Failed to delete commit")
+            .description(err)
+            .into(),
+        ),
+      };
+    self.confirmed(
+      question,
+      move |view, cx| view.remove(id, act, apply, cx),
       cx,
     );
   }
 
   fn stash(&mut self, commit: JjLogCommit, cx: &mut Context<Self>) {
     let change = commit.change_id.clone();
-    self.run(
+    self.remove(
+      commit.commit_id,
       move |host, parent| host.stash(&parent.repo_path, parent.workspace_id(), &change),
       move |view, result, cx| match result {
         Ok(_) => {
-          view.remove_later(commit.commit_id.clone(), cx);
           view.field("commits.stashed", serde_json::Value::Null, cx);
           Self::changed(view.host.as_ref(), &view.parent);
-          view.toast(ToastTone::Success, "Commit stashed", "");
+          tell(view.host.as_ref(), Toast::success("Commit stashed").into());
         }
-        Err(err) => view.toast(ToastTone::Error, "Failed to stash commit", err),
+        Err(err) => tell(
+          view.host.as_ref(),
+          Toast::error("Failed to stash commit")
+            .description(err)
+            .into(),
+        ),
       },
       cx,
     );
@@ -621,21 +811,29 @@ impl CommitsView {
       "Undo commit",
     );
     let change = commit.change_id.clone();
-    self.confirmed(
-      question,
-      move |host, parent| host.undo_commit(&parent.repo_path, ws, &change),
-      move |view, result, cx| match result {
+    let id = commit.commit_id.clone();
+    let act = move |host: &dyn CommitsHost, parent: &Parent| {
+      host.undo_commit(&parent.repo_path, ws, &change)
+    };
+    let apply =
+      move |view: &mut Self, result: Result<(), String>, _: &mut Context<Self>| match result {
         Ok(()) => {
-          view.remove_later(commit.commit_id.clone(), cx);
           Self::changed(view.host.as_ref(), &view.parent);
-          view.toast(
-            ToastTone::Success,
-            &format!("Undid commit {}", commit.short_id),
-            "",
+          tell(
+            view.host.as_ref(),
+            Toast::success(format!("Undid commit {}", commit.short_id)).into(),
           );
         }
-        Err(err) => view.toast(ToastTone::Error, "Failed to undo commit", err),
-      },
+        Err(err) => tell(
+          view.host.as_ref(),
+          Toast::error("Failed to undo commit")
+            .description(err)
+            .into(),
+        ),
+      };
+    self.confirmed(
+      question,
+      move |view, cx| view.remove(id, act, apply, cx),
       cx,
     );
   }
@@ -653,17 +851,26 @@ impl CommitsView {
     let change = commit.change_id.clone();
     self.confirmed(
       question,
-      move |host, parent| host.revert(&parent.repo_path, ws, &change),
-      move |view, result, _| match result {
-        Ok(()) => {
-          Self::changed(view.host.as_ref(), &view.parent);
-          view.toast(
-            ToastTone::Success,
-            &format!("Reverted commit {}", commit.short_id),
-            "",
-          );
-        }
-        Err(err) => view.toast(ToastTone::Error, "Failed to revert commit", err),
+      move |view, cx| {
+        view.run(
+          move |host, parent| host.revert(&parent.repo_path, ws, &change),
+          move |view, result, _| match result {
+            Ok(()) => {
+              Self::changed(view.host.as_ref(), &view.parent);
+              tell(
+                view.host.as_ref(),
+                Toast::success(format!("Reverted commit {}", commit.short_id)).into(),
+              );
+            }
+            Err(err) => tell(
+              view.host.as_ref(),
+              Toast::error("Failed to revert commit")
+                .description(err)
+                .into(),
+            ),
+          },
+          cx,
+        )
       },
       cx,
     );
@@ -694,7 +901,10 @@ impl CommitsView {
         view.shifting = false;
         match result {
           Ok(()) => {
-            view.toast(ToastTone::Success, "Timestamps updated", "");
+            tell(
+              view.host.as_ref(),
+              Toast::success("Timestamps updated").into(),
+            );
             Self::changed(view.host.as_ref(), &view.parent);
             if from_dialog {
               view.dialog = None;
@@ -705,7 +915,12 @@ impl CommitsView {
               *saving = false;
               *error = Some(err.clone());
             }
-            view.toast(ToastTone::Error, "Failed to shift timestamps", err);
+            tell(
+              view.host.as_ref(),
+              Toast::error("Failed to shift timestamps")
+                .description(err)
+                .into(),
+            );
           }
         }
       },
@@ -734,26 +949,30 @@ impl CommitsView {
             let event = match host.restore_snapshot(&path, &snapshot) {
               Ok(()) => {
                 Self::changed(host.as_ref(), &parent);
-                toast_event(ToastTone::Success, "Changes restored", "")
+                NativeEvent::from(Toast::success("Changes restored"))
               }
-              Err(err) => toast_event(ToastTone::Error, "Undo Failed", err),
+              Err(err) => NativeEvent::from(Toast::error("Undo failed").description(err)),
             };
             tell(host.as_ref(), event);
           });
           tell(
             view.host.as_ref(),
-            NativeEvent::Toast {
-              title: "Changes discarded".into(),
-              description: "Working copy changes were removed".into(),
-              tone: ToastTone::Success,
-              action: Some(ToastAction {
-                label: "Undo".into(),
-                id: undo,
-              }),
-            },
+            NativeEvent::from(
+              Toast::success("Changes discarded")
+                .description("Working copy changes were removed")
+                .action(ToastAction {
+                  label: "Undo".into(),
+                  id: undo,
+                }),
+            ),
           );
         }
-        Err(err) => view.toast(ToastTone::Error, "Failed to discard changes", err),
+        Err(err) => tell(
+          view.host.as_ref(),
+          Toast::error("Failed to discard changes")
+            .description(err)
+            .into(),
+        ),
       },
       cx,
     );
@@ -818,8 +1037,78 @@ impl CommitsView {
       lines: vec![at],
       dragging: true,
     });
+    self.text = None;
     self.comment = None;
     cx.notify();
+  }
+
+  /// The byte of `at`'s code under `position`, once the line was drawn.
+  fn text_index(
+    &self,
+    commit_id: &str,
+    path: &str,
+    at: LineRef,
+    position: gpui::Point<Pixels>,
+  ) -> Option<usize> {
+    let layouts = self.layouts.borrow();
+    let layout = layouts.get(&(commit_id.to_string(), path.to_string(), at))?;
+    Some(layout.index_for_position(position).unwrap_or_else(|i| i))
+  }
+
+  /// A press on the code: starts a text selection there.
+  pub(super) fn press_text(
+    &mut self,
+    commit_id: &str,
+    path: &str,
+    at: LineRef,
+    position: gpui::Point<Pixels>,
+    cx: &mut Context<Self>,
+  ) {
+    let Some(i) = self.text_index(commit_id, path, at, position) else {
+      return;
+    };
+    self.selection = None;
+    self.text = Some(TextPick {
+      commit_id: commit_id.into(),
+      path: path.into(),
+      anchor: (at, i),
+      head: (at, i),
+      dragging: true,
+    });
+    cx.notify();
+  }
+
+  /// Moves a text selection's head while dragging.
+  pub(super) fn drag_text(
+    &mut self,
+    commit_id: &str,
+    path: &str,
+    at: LineRef,
+    position: gpui::Point<Pixels>,
+    cx: &mut Context<Self>,
+  ) {
+    if !self
+      .text
+      .as_ref()
+      .is_some_and(|t| t.dragging && t.commit_id == commit_id && t.path == path)
+    {
+      return;
+    }
+    let Some(i) = self.text_index(commit_id, path, at, position) else {
+      return;
+    };
+    if let Some(t) = self.text.as_mut().filter(|t| t.head != (at, i)) {
+      t.head = (at, i);
+      cx.notify();
+    }
+  }
+
+  /// The selected code, as Copy takes it; `None` when nothing is selected.
+  fn selected_code(&self) -> Option<String> {
+    let t = self.text.as_ref()?;
+    let file = self.file_diff(&t.commit_id, &t.path)?;
+    let text = selected_text(&file.hunks, t.anchor, t.head);
+    (!text.is_empty()).then_some(text)
   }
 
   /// `handleLineMouseEnter` while dragging.
@@ -854,6 +1143,10 @@ impl CommitsView {
   fn end_drag(&mut self, cx: &mut Context<Self>) {
     if let Some(s) = self.selection.as_mut().filter(|s| s.dragging) {
       s.dragging = false;
+      cx.notify();
+    }
+    if let Some(t) = self.text.as_mut().filter(|t| t.dragging) {
+      t.dragging = false;
       cx.notify();
     }
   }
@@ -909,7 +1202,7 @@ impl CommitsView {
     let mode = if plan { "plan" } else { "acceptEdits" };
     self.run(
       move |host, parent| {
-        let name = "Code Comment";
+        let name = "Code comment";
         let id = host.create_session(&parent.repo_path, parent.workspace_id(), name)?;
         let repo = if parent.repo_path.is_empty() {
           parent.working_directory()
@@ -931,9 +1224,17 @@ impl CommitsView {
       },
       |view, result, _cx| match result {
         Ok(_) => {
-          view.toast(ToastTone::Success, "Comment sent to agent", "");
+          tell(
+            view.host.as_ref(),
+            Toast::success("Comment sent to agent").into(),
+          );
         }
-        Err(err) => view.toast(ToastTone::Error, "Failed to create agent", err),
+        Err(err) => tell(
+          view.host.as_ref(),
+          Toast::error("Failed to create agent")
+            .description(err)
+            .into(),
+        ),
       },
       cx,
     );
@@ -980,26 +1281,74 @@ impl CommitsView {
     if *saving || Some(&*text) == loaded.as_ref().ok() {
       return;
     }
-    *saving = true;
-    cx.notify();
     let (change, description) = (commit.change_id.clone(), text.clone());
+    // The row shows the new description at once; a failure puts the old one
+    // back.
+    let before = self.set_description(&change, &description);
+    self.dialog = None;
+    self.layout_gen += 1;
+    cx.notify();
     self.run(
       move |host, parent| host.describe(&parent.repo_path, ws, &change, &description),
       move |view, result, _| match result {
         Ok(()) => {
-          view.dialog = None;
-          view.toast(ToastTone::Success, "Description updated", "");
+          tell(
+            view.host.as_ref(),
+            Toast::success("Description updated").into(),
+          );
           Self::changed(view.host.as_ref(), &view.parent);
         }
         Err(err) => {
-          if let Some(Dialog::Describe { saving, .. }) = &mut view.dialog {
-            *saving = false;
+          for (commit_id, description) in before {
+            view.restore_description(&commit_id, description);
           }
-          view.toast(ToastTone::Error, "Failed to update description", err);
+          view.layout_gen += 1;
+          tell(
+            view.host.as_ref(),
+            Toast::error("Failed to update description")
+              .description(err)
+              .into(),
+          );
         }
       },
       cx,
     );
+  }
+
+  /// Sets the description of every loaded commit of change `change_id`;
+  /// returns what each had.
+  fn set_description(&mut self, change_id: &str, description: &str) -> Vec<(String, String)> {
+    let Some(history) = &mut self.history else {
+      return Vec::new();
+    };
+    history
+      .tentative
+      .iter_mut()
+      .map(|(c, _)| c)
+      .chain(history.own.iter_mut())
+      .chain(history.target.iter_mut())
+      .filter(|c| c.change_id == change_id)
+      .map(|c| {
+        let before = std::mem::replace(&mut c.description, description.to_string());
+        (c.commit_id.clone(), before)
+      })
+      .collect()
+  }
+
+  fn restore_description(&mut self, commit_id: &str, description: String) {
+    let Some(history) = &mut self.history else {
+      return;
+    };
+    if let Some(commit) = history
+      .tentative
+      .iter_mut()
+      .map(|(c, _)| c)
+      .chain(history.own.iter_mut())
+      .chain(history.target.iter_mut())
+      .find(|c| c.commit_id == commit_id)
+    {
+      commit.description = description;
+    }
   }
 
   pub(super) fn edit_timestamp(&mut self, commit: JjLogCommit, cx: &mut Context<Self>) {
@@ -1046,7 +1395,10 @@ impl CommitsView {
       move |view, result, _| match result {
         Ok(()) => {
           view.dialog = None;
-          view.toast(ToastTone::Success, "Timestamp updated", "");
+          tell(
+            view.host.as_ref(),
+            Toast::success("Timestamp updated").into(),
+          );
           Self::changed(view.host.as_ref(), &view.parent);
         }
         Err(err) => {
@@ -1054,7 +1406,12 @@ impl CommitsView {
             *saving = false;
             *error = Some(err.clone());
           }
-          view.toast(ToastTone::Error, "Failed to update timestamp", err);
+          tell(
+            view.host.as_ref(),
+            Toast::error("Failed to update timestamp")
+              .description(err)
+              .into(),
+          );
         }
       },
       cx,
@@ -1076,10 +1433,11 @@ impl CommitsView {
       move |host, parent| host.start_resolve(&parent.repo_path, parent.workspace_id(), Some(ids)),
       move |view, result, _| {
         if let Err(err) = &result {
-          view.toast(
-            ToastTone::Error,
-            "Failed to prepare resolve workspaces",
-            err.clone(),
+          tell(
+            view.host.as_ref(),
+            Toast::error("Failed to prepare resolve workspaces")
+              .description(err.clone())
+              .into(),
           );
         }
         if let Some(Dialog::Resolve {
@@ -1154,13 +1512,21 @@ impl CommitsView {
       |view, result, _cx| match result {
         Ok(_) => {
           view.dialog = None;
-          view.toast(ToastTone::Success, "Resolve session started", "");
+          tell(
+            view.host.as_ref(),
+            Toast::success("Resolve session started").into(),
+          );
         }
         Err(err) => {
           if let Some(Dialog::Resolve { submitting, .. }) = &mut view.dialog {
             *submitting = false;
           }
-          view.toast(ToastTone::Error, "Failed to start resolve", err);
+          tell(
+            view.host.as_ref(),
+            Toast::error("Failed to start resolve")
+              .description(err)
+              .into(),
+          );
         }
       },
       cx,
@@ -1236,7 +1602,7 @@ impl CommitsView {
   fn ensure_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     if self.comment.as_ref().is_some_and(|c| c.input.is_none()) {
       let input = self.textarea(
-        "Add a comment...",
+        "Add a comment…",
         3,
         "",
         |view, text| {
@@ -1260,7 +1626,7 @@ impl CommitsView {
       }) => {
         let text = text.clone();
         let state = self.textarea(
-          "Describe this commit...",
+          "Describe this commit…",
           7,
           &text,
           |view, value| {
@@ -1327,80 +1693,47 @@ impl CommitsView {
 }
 
 /// A diff with no files to list: too large to render, or empty.
-fn diff_message(diff: &JjRevisionDiff, p: &Palette) -> Div {
+fn diff_message(diff: &JjRevisionDiff, p: &Palette) -> ui::EmptyState {
   if diff.too_large_to_render {
-    return div()
-      .debug_selector(|| "commit-diff-blocked".into())
-      .p_3()
-      .text_color(p.muted_foreground)
-      .child(
-        diff
-          .render_block_reason
-          .clone()
-          .unwrap_or_else(|| "This commit diff is too large to render.".into()),
-      );
+    return ui::EmptyState::new("commit-diff-blocked", "Diff too large to show", p).message(
+      diff
+        .render_block_reason
+        .clone()
+        .unwrap_or_else(|| "This commit diff is too large to render.".into()),
+    );
   }
-  div()
-    .p_3()
-    .text_color(p.muted_foreground)
-    .child("No changes")
-}
-
-/// `ui/dialog.tsx`: the backdrop over the whole window and the panel.
-pub(super) fn dialog_panel(
-  id: &'static str,
-  max_width: f32,
-  viewport: gpui::Size<Pixels>,
-  p: &Palette,
-) -> (Stateful<Div>, Div) {
-  let backdrop = div()
-    .id(SharedString::from(format!("{id}-backdrop")))
-    .w(viewport.width)
-    .h(viewport.height)
-    .p_4()
-    .flex()
-    .items_center()
-    .justify_center()
-    .bg(p.scrim())
-    .occlude();
-  let panel = div()
-    .debug_selector(move || id.into())
-    .w_full()
-    .max_w(zpx(max_width))
-    .p_6()
-    .rounded(radius::LG)
-    .border_1()
-    .border_color(p.border.opacity(0.5))
-    .bg(p.popover)
-    .text_color(p.popover_foreground)
-    .shadow_2xl();
-  (backdrop, panel)
-}
-
-pub(super) fn dialog_title(title: impl IntoElement) -> Div {
-  ui::text(div(), TextSize::Lg)
-    .font_weight(FontWeight::SEMIBOLD)
-    .child(title)
-}
-
-pub(super) fn dialog_description(text: impl Into<SharedString>, p: &Palette) -> Div {
-  ui::text(div(), TextSize::Sm)
-    .text_color(p.muted_foreground)
-    .child(text.into())
+  ui::EmptyState::new("commit-diff-empty", "No changes", p).message("This commit changes no files.")
 }
 
 impl Render for CommitsView {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     self.tips.sync(cx);
     self.ensure_inputs(window, cx);
+    if self.hidden_at.is_none() {
+      super::find::watch_key(self, window, cx);
+    }
+    super::find::ensure_input(self, window, cx);
     self.sync_rows(window);
+    self.index_find();
+    self.reveal_find();
     self.scroll_to_commit(cx);
     let p = theme::palette(self.dark);
     let root = ui::text(div(), TextSize::Sm)
       .debug_selector(|| "workspace-commits".into())
+      .relative()
       .size_full()
       .bg(p.background)
       .text_color(p.foreground)
+      .track_focus(&self.focus)
+      .on_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
+        let held = crate::gpui_shell::keys::held(e.keystroke.modifiers);
+        if e.keystroke.key == "c" && (held.platform || held.control) && !held.shift {
+          if let Some(text) = view.selected_code() {
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
+            cx.stop_propagation();
+          }
+        }
+      }))
       .on_mouse_up(
         MouseButton::Left,
         cx.listener(|view, _, _, cx| view.end_drag(cx)),
@@ -1409,42 +1742,52 @@ impl Render for CommitsView {
         MouseButton::Left,
         cx.listener(|view, _, _, cx| view.end_drag(cx)),
       );
-    if self.history.is_none() {
+    if let (None, Some(err)) = (&self.history, self.history_error.clone()) {
       return root.child(
-        ui::text(div(), TextSize::Sm)
+        div()
+          .size_full()
+          .flex()
+          .items_center()
+          .justify_center()
+          .child(
+            ui::EmptyState::failed("commits-error", "Couldn't load commits", err.clone(), &p)
+              .action(ui::error_actions(
+                "commits",
+                err,
+                Some(Box::new(cx.listener(|view, _, _, cx| {
+                  view.history_error = None;
+                  view.load(cx);
+                  cx.notify();
+                }))),
+                &p,
+              )),
+          ),
+      );
+    }
+    if self.history.is_none() {
+      return root.child(ui::delayed(
+        "commits-loading-row",
+        div()
           .size_full()
           .flex()
           .items_center()
           .justify_center()
           .p_4()
-          .child(
-            div()
-              .mr_2()
-              .child(ui::spinner("commits-loading", 16., p.foreground)),
-          )
-          .child(
-            div()
-              .text_color(p.muted_foreground)
-              .child("Loading commits..."),
-          ),
-      );
+          .child(ui::Loading::new("commits-loading", &p).label("Loading commits…")),
+      ));
     }
     if self.feed_is_empty() {
       return root.child(
-        ui::text(div(), TextSize::Sm)
-          .p_4()
-          .flex()
-          .flex_col()
-          .items_center()
-          .text_color(p.muted_foreground)
-          .child("No commits yet.")
-          .child("Changes you commit will appear here."),
+        ui::EmptyState::new("commits-empty", "No commits yet", &p)
+          .icon(theme::ICON_COMMIT)
+          .message("Changes you commit will appear here."),
       );
     }
     let dialog = self.dialog_view(window, &p, cx);
     let confirm = confirm::render(Self::confirm_slot, self, window, &p, cx);
     root
       .child(self.feed_list(cx))
+      .children(self.find_bar(&p, cx))
       .children(dialog)
       .children(confirm)
   }
@@ -1511,38 +1854,18 @@ impl CommitsView {
     } else {
       "commits-load-more"
     };
-    let muted = p.muted_foreground;
-    let fg = p.foreground;
+    let loading = self.loading_more;
     div().pl_7().child(
-      ui::text(div(), TextSize::Sm)
-        .id(id)
-        .debug_selector(move || id.into())
-        .text_color(muted)
-        .when(!self.loading_more, |this| {
-          this
-            .cursor_pointer()
-            .hover(move |s| s.text_color(fg))
-            .on_click(cx.listener(move |view, _, _, cx| view.load_more(target, cx)))
-        })
-        .when(self.loading_more, |this| {
-          this
-            .flex()
-            .items_center()
-            .gap_1p5()
-            .child(ui::spinner(
-              SharedString::from(format!("{id}-spin")),
-              12.,
-              muted,
-            ))
-            .child("Loading...")
-        })
-        .when(!self.loading_more, |this| this.child("Load more commits")),
+      ui::Row::load_more(id, loading, p)
+        .title("Load more commits")
+        .when(!loading, |row| {
+          row.on_click(cx.listener(move |view, _, _, cx| view.load_more(target, cx)))
+        }),
     )
   }
 }
 
 impl CommitsView {
-  #[allow(clippy::too_many_arguments)]
   fn commit(
     &mut self,
     commit: &JjLogCommit,
@@ -1561,10 +1884,7 @@ impl CommitsView {
     } else {
       p.muted_foreground
     };
-    let (yellow, yellow_hover) = (
-      ui::Tone::Warning.tint(p),
-      ui::Tone::Warning.color(p).opacity(0.25),
-    );
+    let yellow = ui::Tone::Warning.tint(p);
     let ts = commit.timestamp.clone();
     let time = self.tips.wrap(
       format!("commits-time-{}", commit.commit_id),
@@ -1575,14 +1895,17 @@ impl CommitsView {
         .child(time::relative(&ts)),
       cx,
     );
-    let mut title = div().min_w_0().truncate().child(headline(commit));
+    let mut title = div()
+      .min_w_0()
+      .truncate()
+      .child(self.marked_headline(commit, p));
     if let Some(label) = label.filter(|l| !l.is_empty()) {
       // The workspace's label in mono after the headline.
       title = div()
         .min_w_0()
         .flex()
         .overflow_hidden()
-        .child(div().flex_none().child(headline(commit)))
+        .child(div().flex_none().child(self.marked_headline(commit, p)))
         .child(
           div()
             .ml_2()
@@ -1595,16 +1918,17 @@ impl CommitsView {
     // An unfolded own commit edits its description and timestamp in place.
     let own = expanded && matches!(kind, Kind::Own { .. });
     let short = &commit.change_id;
-    let edit_description = own.then(|| {
-      self.edit_icon(
-        format!("edit-description-{short}"),
-        "Edit description",
-        commit,
-        Self::edit_description,
-        p,
-        cx,
-      )
-    });
+    let edit_description =
+      (own && (self.parent.workspace.is_some() || !commit.is_immutable)).then(|| {
+        self.edit_icon(
+          format!("edit-description-{short}"),
+          "Edit description",
+          commit,
+          Self::edit_description,
+          p,
+          cx,
+        )
+      });
     let edit_timestamp =
       (own && self.parent.workspace.is_some() && !commit.is_immutable).then(|| {
         self.edit_icon(
@@ -1616,116 +1940,110 @@ impl CommitsView {
           cx,
         )
       });
-    let hover = if tentative { yellow_hover } else { p.muted };
-    let row = div()
-      .id(SharedString::from(format!(
-        "commit-row-{}",
-        commit.commit_id
-      )))
-      .debug_selector({
-        let id = format!("commit-row-{}", commit.commit_id);
-        move || id
-      })
-      .relative()
-      .flex()
-      .items_start()
-      .gap_3()
-      .py_2()
-      .px_2()
-      .mx_neg_2()
-      .w_full()
-      .rounded(radius::MD)
-      .cursor_pointer()
-      .when(tentative, |this| this.bg(yellow))
-      .hover(move |s| s.bg(hover))
-      .child(
-        div().relative().flex_none().child(
-          div()
-            .size(zpx(14.))
-            .rounded_full()
-            .border_2()
-            .border_color(p.background)
-            .bg(dot),
-        ),
-      )
-      .child(
+    // The working copy's commit moves as files change: never read ahead.
+    let read_ahead = (!tentative && !commit.is_working_copy).then(|| {
+      let id = commit.commit_id.clone();
+      cx.listener(move |view, hovered: &bool, _, cx| view.hover_commit(id.clone(), *hovered, cx))
+    });
+    let row = ui::Row::new(
+      SharedString::from(format!("commit-row-{}", commit.commit_id)),
+      p,
+    )
+    .label(headline(commit))
+    .relative()
+    .items_start()
+    .gap_3()
+    .py_2()
+    .mx_neg_2()
+    .w_full()
+    .rounded(radius::MD)
+    .when(tentative, |this| this.bg(yellow))
+    .leading(
+      div().relative().flex_none().child(
         div()
-          .flex_1()
-          .min_w_0()
-          .pt_0p5()
-          .child(
-            div()
-              .flex()
-              .items_center()
-              .gap_1p5()
-              .child(ui::icon(
-                if expanded {
-                  theme::ICON_CHEVRON_DOWN
-                } else {
-                  theme::ICON_CHEVRON_RIGHT
-                },
-                16.,
-                p.muted_foreground,
-              ))
-              .child(title)
-              .children(edit_description),
-          )
-          .child(
-            div()
-              .flex()
-              .items_center()
-              .gap_2()
-              .mt_0p5()
-              .pl_5()
-              .when(commit.has_conflicts, |this| {
-                this.child(
-                  div()
-                    .flex_none()
-                    .debug_selector({
-                      let id = format!("commit-conflict-badge-{}", commit.change_id);
-                      move || id
-                    })
-                    .child(ui::Badge::new("Conflict", p).tone(ui::Tone::Danger)),
-                )
-              })
-              .when(commit.is_immutable, |this| {
-                this.child(ui::Badge::new("Immutable", p))
-              })
-              .child(time)
-              .children(edit_timestamp)
-              .when(commit.insertions > 0 || commit.deletions > 0, |this| {
-                this.child(
-                  div()
-                    .ml_auto()
-                    .flex()
-                    .child(
-                      div()
-                        .text_color(ui::Tone::GitOpen.text(p))
-                        .child(format!("+{}", commit.insertions)),
-                    )
-                    .child("\u{a0}")
-                    .child(
-                      div()
-                        .text_color(ui::Tone::GitClosed.text(p))
-                        .child(format!("-{}", commit.deletions)),
-                    ),
-                )
-              }),
-          ),
-      )
-      .when(!tentative, |this| {
-        let commit = commit.clone();
-        this.on_mouse_down(
-          MouseButton::Right,
-          cx.listener(move |view, e: &gpui::MouseDownEvent, _, cx| {
-            view.commit_menu(&commit, kind, e.position, cx);
-          }),
+          .size(zpx(14.))
+          .rounded_full()
+          .border_2()
+          .border_color(p.background)
+          .bg(dot),
+      ),
+    )
+    .child(
+      div()
+        .flex_1()
+        .min_w_0()
+        .pt_0p5()
+        .child(
+          div()
+            .flex()
+            .items_center()
+            .gap_1p5()
+            .child(ui::icon(
+              if expanded {
+                theme::ICON_CHEVRON_DOWN
+              } else {
+                theme::ICON_CHEVRON_RIGHT
+              },
+              16.,
+              p.muted_foreground,
+            ))
+            .child(title)
+            .children(edit_description),
         )
-      })
-      .on_click({
-        let id = commit.commit_id.clone();
-        cx.listener(move |view, _, _, cx| view.toggle(&id, cx))
-      });
+        .child(
+          div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .mt_0p5()
+            .pl_5()
+            .when(commit.has_conflicts, |this| {
+              this.child(
+                div()
+                  .flex_none()
+                  .debug_selector({
+                    let id = format!("commit-conflict-badge-{}", commit.change_id);
+                    move || id
+                  })
+                  .child(ui::Badge::new("Conflict", p).tone(ui::Tone::Danger)),
+              )
+            })
+            .child(time)
+            .children(edit_timestamp)
+            .when(commit.insertions > 0 || commit.deletions > 0, |this| {
+              this.child(
+                div()
+                  .ml_auto()
+                  .flex()
+                  .child(
+                    div()
+                      .text_color(ui::Tone::DiffAdded.text(p))
+                      .child(format!("+{}", commit.insertions)),
+                  )
+                  .child("\u{a0}")
+                  .child(
+                    div()
+                      .text_color(ui::Tone::DiffRemoved.text(p))
+                      .child(format!("-{}", commit.deletions)),
+                  ),
+              )
+            }),
+        ),
+    )
+    .when_some(read_ahead, |this, listener| this.on_hover(listener))
+    .when(!tentative, |this| {
+      let commit = commit.clone();
+      this.on_mouse_down(
+        MouseButton::Right,
+        cx.listener(move |view, e: &gpui::MouseDownEvent, _, cx| {
+          view.commit_menu(&commit, kind, e.position, cx);
+        }),
+      )
+    })
+    .on_click({
+      let id = commit.commit_id.clone();
+      cx.listener(move |view, _, _, cx| view.toggle(&id, cx))
+    });
     div()
       .debug_selector({
         let id = format!("commit-{}", commit.commit_id);
@@ -1760,11 +2078,8 @@ impl CommitsView {
         .aria_label(name)
     };
     let destructive_outline = |id: String, name: &'static str| {
-      let red = p.destructive;
       outline(id, theme::ICON_TRASH, "Delete", name)
-        .border_color(red.opacity(0.3))
-        .text_color(red)
-        .hover_bg(red.opacity(0.1))
+        .variant(Variant::DestructiveOutline)
         .disabled(removing)
     };
     let short = &commit.change_id;
@@ -1813,11 +2128,11 @@ impl CommitsView {
           .shadow_md()
           .occlude()
           .child(
-            ui::MenuItem::new("move-commit-new", "Move to New Workspace", p)
+            ui::MenuItem::new("move-commit-new", "Move to new workspace", p)
               .on_click(cx.listener(move |view, _, _, cx| view.move_commit(&to_new, false, cx))),
           )
           .child(
-            ui::MenuItem::new("move-commit-existing", "Move to Existing Workspace", p).on_click(
+            ui::MenuItem::new("move-commit-existing", "Move to existing workspace", p).on_click(
               cx.listener(move |view, _, _, cx| view.move_commit(&to_existing, true, cx)),
             ),
           )
@@ -1903,26 +2218,35 @@ impl CommitsView {
         });
     }
     let content = match self.diffs.get(&commit.commit_id) {
-      Some(state) if state.loading => div()
-        .flex()
-        .items_center()
-        .gap_2()
-        .p_3()
-        .text_color(p.muted_foreground)
-        .child(ui::spinner(
-          SharedString::from(format!("diff-spin-{}", commit.commit_id)),
-          16.,
-          p.muted_foreground,
-        ))
-        .child("Loading diff...")
-        .into_any_element(),
+      Some(state) if state.loading => ui::delayed(
+        format!("diff-loading-{}", commit.commit_id),
+        div().flex().p_3().child(
+          ui::Loading::new(format!("diff-spin-{}", commit.commit_id), p).label("Loading diff…"),
+        ),
+      )
+      .into_any_element(),
       Some(DiffState {
         error: Some(err), ..
-      }) => div()
-        .p_3()
-        .text_color(p.destructive)
-        .child(format!("Failed to load diff: {err}"))
-        .into_any_element(),
+      }) => {
+        let id = commit.commit_id.clone();
+        ui::EmptyState::failed(
+          SharedString::from(format!("diff-error-{id}")),
+          "Couldn't load the diff",
+          err.clone(),
+          p,
+        )
+        .action(ui::error_actions(
+          &format!("diff-{id}"),
+          err.clone(),
+          Some(Box::new(cx.listener(move |view, _, _, cx| {
+            view.diffs.remove(&id);
+            view.expand(&id, cx);
+            cx.notify();
+          }))),
+          p,
+        ))
+        .into_any_element()
+      }
       Some(DiffState {
         diff: Some(diff), ..
       }) => diff_message(diff, p).into_any_element(),
@@ -1955,16 +2279,23 @@ impl CommitsView {
       let view = view.clone();
       NativeMenuItem::item(label, move |cx| {
         cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
-        let _ = view.update(cx, |view, _| {
-          view.toast(ToastTone::Success, &format!("{what} copied"), "")
-        });
+        view
+          .update(cx, |view, _| {
+            tell(
+              view.host.as_ref(),
+              Toast::success(format!("{what} copied")).into(),
+            )
+          })
+          .ignore_closed();
       })
       .icon(MenuIcon::Copy)
     };
     let run = |label: &str, f: fn(&mut Self, JjLogCommit, &mut Context<Self>)| {
       let (view, commit) = (view.clone(), commit.clone());
       NativeMenuItem::item(label, move |cx| {
-        let _ = view.update(cx, |view, cx| f(view, commit.clone(), cx));
+        view
+          .update(cx, |view, cx| f(view, commit.clone(), cx))
+          .ignore_closed();
       })
     };
     let own = matches!(kind, Kind::Own { .. });
@@ -1980,17 +2311,21 @@ impl CommitsView {
       ),
       NativeMenuItem::Separator,
     ];
-    if own {
+    // Immutable means on the workspace's target branch, or for the home repo
+    // pushed to origin: offer nothing that rewrites it. A workspace's commits
+    // pushed to its own branch stay mutable, so they stay editable.
+    let rewritable = own && !commit.is_immutable;
+    if rewritable {
       items.push(run("Edit description", Self::edit_description).icon(MenuIcon::Pencil));
     }
-    if matches!(kind, Kind::Own { first: true }) && workspace && !removing {
+    if matches!(kind, Kind::Own { first: true }) && rewritable && workspace && !removing {
       items.push(run("Undo commit", Self::undo));
     }
     items.push(run("Revert commit", Self::revert));
-    if own && workspace && !commit.is_immutable {
+    if rewritable && workspace {
       items.push(run("Edit timestamp", Self::edit_timestamp));
     }
-    if own && !removing {
+    if rewritable && !removing {
       items.push(run("Stash commit", Self::stash).icon(MenuIcon::Archive));
       items.push(NativeMenuItem::Separator);
       items.push(
@@ -2045,7 +2380,9 @@ impl CommitsView {
   ) -> impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static {
     let (c, view) = (commit.clone(), cx.entity().downgrade());
     move |_, _, cx| {
-      let _ = view.update(cx, |view, cx| f(view, c.clone(), cx));
+      view
+        .update(cx, |view, cx| f(view, c.clone(), cx))
+        .ignore_closed();
     }
   }
 
@@ -2065,8 +2402,9 @@ impl CommitsView {
     };
     let busy = state.deferred_loading.contains(&file.path);
     let (id, path) = (commit.commit_id.clone(), file.path.clone());
+    let spin = SharedString::from(format!("load-diff-{id}-spin"));
     let muted = p.muted_foreground;
-    let (fg, hover) = (p.foreground, p.muted);
+    let fg = p.foreground;
     div()
       .flex()
       .items_center()
@@ -2091,6 +2429,8 @@ impl CommitsView {
           .child(
             div()
               .id(SharedString::from(format!("load-diff-{}", file.path)))
+              .role(gpui::Role::Button)
+              .aria_label("Load diff")
               .debug_selector(|| "load-deferred-diff".into())
               .rounded(radius::MD)
               .border_1()
@@ -2102,10 +2442,14 @@ impl CommitsView {
               .when(!busy, |this| {
                 this
                   .cursor_pointer()
-                  .hover(move |s| s.bg(hover).text_color(fg))
+                  .hover(move |s| s.bg(p.hover()).text_color(fg))
                   .on_click(cx.listener(move |view, _, _, cx| view.load_file_diff(&id, &path, cx)))
               })
-              .child(if busy { "Loading..." } else { "Load diff" }),
+              .when(busy, |this| {
+                this.child(ui::Loading::new(spin, p).label("Loading diff…"))
+              })
+              .when(!busy, |this| this.child("Load diff"))
+              .test_support(),
           ),
       )
       .into_any_element()
@@ -2120,56 +2464,51 @@ impl CommitsView {
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
     let (fg, bg) = match file.status.as_str() {
-      "A" => (ui::Tone::GitOpen.text(p), ui::Tone::GitOpen.tint(p)),
+      "A" => (ui::Tone::DiffAdded.text(p), ui::Tone::DiffAdded.tint(p)),
       "M" => (ui::Tone::Primary.text(p), ui::Tone::Primary.tint(p)),
-      "D" => (ui::Tone::GitClosed.text(p), ui::Tone::GitClosed.tint(p)),
+      "D" => (ui::Tone::DiffRemoved.text(p), ui::Tone::DiffRemoved.tint(p)),
       _ => (p.foreground, gpui::transparent_black()),
     };
-    let hover = p.muted.opacity(0.4);
     let (id, path) = (commit.commit_id.clone(), file.path.clone());
-    div()
-      .id(SharedString::from(format!(
-        "commit-file-{}-{}",
-        commit.commit_id, file.path
-      )))
-      .debug_selector(|| "commit-file-row".into())
-      .flex()
-      .items_center()
-      .gap_2()
-      .px_3()
-      .py_1p5()
-      .w_full()
-      .cursor_pointer()
-      .hover(move |s| s.bg(hover))
-      .child(ui::icon(
-        if open {
-          theme::ICON_CHEVRON_DOWN
-        } else {
-          theme::ICON_CHEVRON_RIGHT
-        },
-        16.,
-        p.muted_foreground,
-      ))
-      .child(ui::icon(theme::ICON_FILE_TEXT, 16., p.muted_foreground))
-      .child(
-        div()
-          .flex_1()
-          .min_w_0()
-          .truncate()
-          .font_family(theme::MONO_FONT)
-          .child(file.path.clone()),
-      )
-      .child(
-        div()
-          .font_weight(FontWeight::MEDIUM)
-          .px_1p5()
-          .py_0p5()
-          .rounded(radius::SM)
-          .text_color(fg)
-          .bg(bg)
-          .child(file.status.clone()),
-      )
-      .on_click(cx.listener(move |view, _, _, cx| view.toggle_file(&id, &path, cx)))
+    ui::Row::new(
+      SharedString::from(format!("commit-file-{}-{}", commit.commit_id, file.path)),
+      p,
+    )
+    .debug_selector(|| "commit-file-row".into())
+    .label(file.path.clone())
+    .density(ui::RowDensity::Default)
+    .px_3()
+    .w_full()
+    .rounded_none()
+    .leading(ui::icon(
+      if open {
+        theme::ICON_CHEVRON_DOWN
+      } else {
+        theme::ICON_CHEVRON_RIGHT
+      },
+      16.,
+      p.muted_foreground,
+    ))
+    .leading(ui::icon(theme::ICON_FILE_TEXT, 16., p.muted_foreground))
+    .child(
+      div()
+        .flex_1()
+        .min_w_0()
+        .truncate()
+        .font_family(theme::MONO_FONT)
+        .child(file.path.clone()),
+    )
+    .trailing(
+      div()
+        .font_weight(FontWeight::MEDIUM)
+        .px_1p5()
+        .py_0p5()
+        .rounded(radius::SM)
+        .text_color(fg)
+        .bg(bg)
+        .child(file.status.clone()),
+    )
+    .on_click(cx.listener(move |view, _, _, cx| view.toggle_file(&id, &path, cx)))
   }
 
   /// `CommentInput` with Plan and Edit.
@@ -2250,24 +2589,7 @@ impl CommitsView {
     cx: &mut Context<Self>,
   ) -> Option<impl IntoElement> {
     let viewport = window.viewport_size();
-    let keys = cx.listener(|view, e: &KeyDownEvent, _, cx| {
-      let k = &e.keystroke;
-      if ui::is_escape(k) {
-        cx.stop_propagation();
-        view.close_dialog(cx);
-      } else if k.key == "enter"
-        && (crate::gpui_shell::keys::held(k.modifiers).platform
-          || crate::gpui_shell::keys::held(k.modifiers).control)
-      {
-        cx.stop_propagation();
-        match view.dialog {
-          Some(Dialog::Describe { .. }) => view.save_description(cx),
-          Some(Dialog::Timestamp { .. }) => view.apply_timestamp(cx),
-          Some(Dialog::Resolve { .. }) | None => {}
-        }
-      }
-    });
-    let (backdrop, panel) = match self.dialog.as_ref()? {
+    let dialog = match self.dialog.as_ref()? {
       Dialog::Describe {
         commit,
         loaded,
@@ -2275,38 +2597,26 @@ impl CommitsView {
         text,
         saving,
       } => {
-        let (backdrop, panel) = dialog_panel("edit-description-dialog", 560., viewport, p);
         let fetching = loaded.is_none();
         let unchanged = loaded.as_ref().and_then(|l| l.as_ref().ok()) == Some(text)
           || matches!(loaded, Some(Err(_))) && text.is_empty();
         let can_submit = !fetching && !saving && !unchanged;
         let error = loaded.as_ref().and_then(|l| l.as_ref().err()).cloned();
-        let panel = panel
-          .child(
-            div()
-              .flex()
-              .flex_col()
-              .gap_1p5()
-              .child(dialog_title("Edit Commit Description"))
-              .child(dialog_description(
-                format!("Editing {}", commit.short_id),
-                p,
-              )),
-          )
+        ui::Dialog::new("edit-description-dialog", p)
+          .width(560.)
+          .title("Edit commit description")
+          .description(format!("Editing {}", commit.short_id))
+          .on_primary(ui::handler(cx, |view, _, cx| view.save_description(cx)))
+          .primary_disabled(!can_submit)
           .child(
             div()
               .flex()
               .flex_col()
               .gap_4()
-              .py_4()
               .child(if fetching {
                 div()
                   .flex()
-                  .items_center()
-                  .gap_2()
-                  .text_color(p.muted_foreground)
-                  .child(ui::spinner("description-spin", 16., p.muted_foreground))
-                  .child("Loading description...")
+                  .child(ui::Loading::new("description-spin", p).label("Loading description…"))
                   .into_any_element()
               } else {
                 div()
@@ -2321,26 +2631,11 @@ impl CommitsView {
                 )
               }),
           )
-          .child(
-            div()
-              .flex()
-              .justify_end()
-              .gap_2()
-              .child(
-                Button::new("description-cancel", p)
-                  .variant(Variant::Outline)
-                  .disabled(*saving)
-                  .label("Cancel")
-                  .on_click(cx.listener(|view, _, _, cx| view.close_dialog(cx))),
-              )
-              .child(
-                Button::new("description-save", p)
-                  .disabled(!can_submit)
-                  .label(if *saving { "Saving..." } else { "Save" })
-                  .on_click(cx.listener(|view, _, _, cx| view.save_description(cx))),
-              ),
-          );
-        (backdrop, panel)
+          .footer([Button::new("description-save", p)
+            .disabled(!can_submit)
+            .label(if *saving { "Saving…" } else { "Save" })
+            .on_click(cx.listener(|view, _, _, cx| view.save_description(cx)))
+            .into_any_element()])
       }
       Dialog::Timestamp {
         commit,
@@ -2349,7 +2644,6 @@ impl CommitsView {
         saving,
         error,
       } => {
-        let (backdrop, panel) = dialog_panel("edit-timestamp-dialog", 520., viewport, p);
         let toggle = |id: &'static str, label: &'static str, on: bool| {
           Button::new(id, p)
             .size(Size::Sm)
@@ -2404,22 +2698,16 @@ impl CommitsView {
             .into_any_element()
         };
         let can_submit = !saving && form.shift().is_some();
-        let panel = panel
-          .child(
-            div()
-              .flex()
-              .flex_col()
-              .gap_1p5()
-              .child(dialog_title("Edit commit timestamp"))
-              .child(dialog_description(
-                format!(
-                  "Current time: {}. Later commits on this lineage that would become older are \
-                   shifted by the same gaps.",
-                  time::full(&commit.timestamp)
-                ),
-                p,
-              )),
-          )
+        ui::Dialog::new("edit-timestamp-dialog", p)
+          .width(520.)
+          .title("Edit commit timestamp")
+          .description(format!(
+            "Current time: {}. Later commits on this lineage that would become older are \
+             shifted by the same gaps.",
+            time::full(&commit.timestamp)
+          ))
+          .on_primary(ui::handler(cx, |view, _, cx| view.apply_timestamp(cx)))
+          .primary_disabled(!can_submit)
           .child(
             div()
               .flex()
@@ -2450,44 +2738,26 @@ impl CommitsView {
                 )
               }),
           )
-          .child(
-            div()
-              .flex()
-              .items_center()
-              .justify_between()
-              .gap_2()
-              .child(
-                Button::new("shift-stack-to-now", p)
-                  .variant(Variant::Outline)
-                  .disabled(*saving)
-                  .label("Shift stack to now")
-                  .on_click(cx.listener(|view, _, _, cx| view.shift_to_now(true, cx))),
-              )
-              .child(
-                div()
-                  .flex()
-                  .gap_2()
-                  .child(
-                    Button::new("timestamp-cancel", p)
-                      .variant(Variant::Outline)
-                      .disabled(*saving)
-                      .label("Cancel")
-                      .on_click(cx.listener(|view, _, _, cx| view.close_dialog(cx))),
-                  )
-                  .child(
-                    Button::new("timestamp-apply", p)
-                      .disabled(!can_submit)
-                      .when(*saving, |this| {
-                        this
-                          .child(ui::spinner("timestamp-spin", 16., p.primary_foreground))
-                          .label("Saving...")
-                      })
-                      .when(!*saving, |this| this.label("Apply"))
-                      .on_click(cx.listener(|view, _, _, cx| view.apply_timestamp(cx))),
-                  ),
-              ),
-          );
-        (backdrop, panel)
+          // The stack-wide shift sits apart, left of the action pair.
+          .footer([
+            Button::new("shift-stack-to-now", p)
+              .variant(Variant::Outline)
+              .disabled(*saving)
+              .label("Shift stack to now")
+              .on_click(cx.listener(|view, _, _, cx| view.shift_to_now(true, cx)))
+              .into_any_element(),
+            div().flex_1().into_any_element(),
+            Button::new("timestamp-apply", p)
+              .disabled(!can_submit)
+              .when(*saving, |this| {
+                this
+                  .child(ui::spinner("timestamp-spin", 16., p.primary_foreground))
+                  .label("Saving…")
+              })
+              .when(!*saving, |this| this.label("Apply"))
+              .on_click(cx.listener(|view, _, _, cx| view.apply_timestamp(cx)))
+              .into_any_element(),
+          ])
       }
       Dialog::Resolve {
         session,
@@ -2495,12 +2765,6 @@ impl CommitsView {
         submitting,
         ..
       } => {
-        let (backdrop, panel) = dialog_panel(
-          "resolve-conflicts-dialog",
-          f32::from(viewport.width) * 0.42,
-          viewport,
-          p,
-        );
         let preparing = session.is_none();
         let ready = matches!(session, Some(Ok(_)));
         let failed = match session {
@@ -2513,6 +2777,8 @@ impl CommitsView {
           Some(TooltipContent::Text(RESOLVE_HELP.into())),
           div()
             .id("resolve-conflicts-help")
+            .role(gpui::Role::Button)
+            .aria_label("Learn about resolving conflicts")
             .debug_selector(|| "resolve-conflicts-help".into())
             .cursor_pointer()
             .child(ui::icon(
@@ -2526,19 +2792,23 @@ impl CommitsView {
             })),
           cx,
         );
-        let panel = panel
-          .w(viewport.width * 0.42)
-          .flex()
-          .flex_col()
-          .gap_4()
-          .child(
+        ui::Dialog::new("resolve-conflicts-dialog", p)
+          .relative_size(0.42, None)
+          .title("Resolve commit conflicts in place")
+          .header(
             div()
               .flex()
               .items_center()
               .gap_1p5()
-              .child(dialog_title("Resolve commit conflicts in place"))
+              .child(
+                ui::text(div(), TextSize::Lg)
+                  .font_weight(FontWeight::SEMIBOLD)
+                  .child("Resolve commit conflicts in place"),
+              )
               .child(help),
           )
+          .on_primary(ui::handler(cx, |view, _, cx| view.submit_resolve(cx)))
+          .primary_disabled(!ready || *submitting)
           .child(
             div()
               .debug_selector(|| "resolve-conflicts-prompt".into())
@@ -2547,62 +2817,37 @@ impl CommitsView {
           .when_some(failed, |this, err| {
             this.child(
               ui::text(div(), TextSize::Sm)
+                .id("resolve-conflicts-error")
                 .debug_selector(|| "resolve-conflicts-error".into())
+                .role(tauri_plugin_gpui::gpui::Role::Alert)
+                .aria_label(err.clone())
+                .test_support()
                 .text_color(p.destructive)
                 .child(err),
             )
           })
-          .child(
-            div()
-              .flex()
-              .items_center()
-              .justify_end()
-              .gap_2()
-              .child(
-                Button::new("resolve-cancel", p)
-                  .variant(Variant::Ghost)
-                  .disabled(*submitting)
-                  .label("Cancel")
-                  .on_click(cx.listener(|view, _, _, cx| view.close_dialog(cx))),
-              )
-              .child(
-                Button::new("resolve-conflicts-submit", p)
-                  .disabled(!ready || *submitting)
-                  .when(preparing, |this| {
-                    this
-                      .child(ui::spinner("resolve-spin", 16., p.primary_foreground))
-                      .label("Preparing…")
-                  })
-                  .when(!preparing, |this| {
-                    this.label(if *submitting {
-                      "Starting…"
-                    } else {
-                      "Resolve"
-                    })
-                  })
-                  .on_click(cx.listener(|view, _, _, cx| view.submit_resolve(cx))),
-              ),
-          );
-        (backdrop, panel)
+          .footer([Button::new("resolve-conflicts-submit", p)
+            .disabled(!ready || *submitting)
+            .when(preparing, |this| {
+              this
+                .child(ui::spinner("resolve-spin", 16., p.primary_foreground))
+                .label("Preparing…")
+            })
+            .when(!preparing, |this| {
+              this.label(if *submitting {
+                "Starting…"
+              } else {
+                "Resolve"
+              })
+            })
+            .on_click(cx.listener(|view, _, _, cx| view.submit_resolve(cx)))
+            .into_any_element()])
       }
     };
     Some(
-      deferred(
-        anchored().position(point(px(0.), px(0.))).child(
-          backdrop
-            .on_mouse_down(
-              MouseButton::Left,
-              cx.listener(|view, _, _, cx| view.close_dialog(cx)),
-            )
-            .child(
-              panel
-                .id("commits-dialog")
-                .capture_key_down(keys)
-                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()),
-            ),
-        ),
-      )
-      .with_priority(2),
+      dialog
+        .overlay(viewport)
+        .on_close(ui::handler(cx, |view, _, cx| view.close_dialog(cx))),
     )
   }
 }

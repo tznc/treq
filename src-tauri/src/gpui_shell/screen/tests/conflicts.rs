@@ -52,21 +52,51 @@ fn bounds(h: &mut Harness, selector: String) -> Option<gpui::Bounds<gpui::Pixels
   h.cx.debug_bounds(Box::leak(selector.into_boxed_str()))
 }
 
-const CARD: &str = "conflict-card-README.md-conflict-1";
+/// The conflict card the user sees for README.md's only conflict.
+const CARD: &str = "Conflict 1 of 1";
+
+/// Whether the Conflicts section lists `path`, marked as a conflict.
+fn lists_conflict(h: &mut Harness, path: &str) -> bool {
+  let screen = h.rendered();
+  screen
+    .query_all_by_role(gpui_testing_library::by::role(gpui::Role::Button).name(path))
+    .iter()
+    .any(|row| {
+      gpui_testing_library::within(row)
+        .query_by_role(gpui_testing_library::by::role(gpui::Role::Image).name("Conflict"))
+        .is_some()
+    })
+}
+
+/// Whether the user sees the notice that `side` deleted the file.
+fn shows_deleted(h: &mut Harness, side: &str) -> bool {
+  h.shows(gpui::Role::Label, &format!("{side} deleted this file"))
+}
+
+/// Whether line `name` of a diff offers a comment button.
+fn offers_comment(h: &mut Harness, name: &str) -> bool {
+  h.rendered()
+    .query_by_role(
+      gpui_testing_library::by::role(gpui::Role::Button)
+        .name(name)
+        .hidden(true),
+    )
+    .is_some()
+}
 
 #[gpui::test]
 fn changes_tab_lists_no_conflicts_for_a_clean_workspace(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
-  assert!(h.drawn("file-row-a.rs"));
-  assert!(!h.drawn("conflicts-section-toggle"));
+  assert!(h.shows(gpui::Role::Button, "a.rs"));
+  assert!(!h.shows(gpui::Role::Button, "Collapse Conflicts"));
 }
 
 #[gpui::test]
 fn changes_tab_draws_a_conflict_card_with_base_and_both_sides(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, conflict_host(SIDES, true, true), changes_route());
-  assert!(h.drawn("conflicts-section-toggle"));
-  assert!(h.drawn("conflict-row-README.md"));
-  assert!(h.drawn(CARD));
+  assert!(h.shows(gpui::Role::Button, "Collapse Conflicts"));
+  assert!(lists_conflict(&mut h, "README.md"));
+  assert!(h.shows(gpui::Role::Group, CARD));
   let role = |i: usize, role: &str| format!("conflict-line-README.md-conflict-1-{i}-{role}");
   for (i, side) in [(1, "Left"), (3, "Base"), (5, "Right")] {
     assert!(
@@ -83,33 +113,40 @@ fn changes_tab_draws_a_conflict_card_with_base_and_both_sides(cx: &mut TestAppCo
     })
     .collect();
   assert!(tops[0] < tops[1] && tops[1] < tops[2], "{tops:?}");
-  assert!(!h.drawn("conflict-deleted-side"));
+  assert!(!shows_deleted(&mut h, "Side #1"));
+  assert!(!shows_deleted(&mut h, "Side #2"));
 }
 
 #[gpui::test]
 fn changes_tab_offers_no_line_comments_on_a_conflicted_file(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, conflict_host(SIDES, true, true), changes_route());
   // The line after the region is drawn, without a comment button.
-  assert!(h.drawn("gutter-README.md-0-7"));
-  assert!(!h.drawn("add-comment-README.md-0-7"));
-  assert!(h.drawn("add-comment-a.rs-0-1"), "other files keep theirs");
+  assert!(h.shows(gpui::Role::Row, " after"));
+  assert!(!offers_comment(&mut h, "Add comment on README.md line 8"));
+  assert!(
+    offers_comment(&mut h, "Add comment on a.rs line 2"),
+    "other files keep theirs"
+  );
 }
 
 #[gpui::test]
 fn changes_tab_invents_no_card_without_conflict_regions(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, conflict_host(SIDES, false, true), changes_route());
-  assert!(h.drawn("conflict-row-README.md"));
-  assert!(h.drawn("file-card-README.md"));
-  assert!(!h.drawn(CARD));
-  assert!(h.drawn("gutter-README.md-0-0"), "the lines show as a diff");
+  assert!(lists_conflict(&mut h, "README.md"));
+  assert!(h.shows(gpui::Role::Heading, "README.md"));
+  assert!(!h.shows(gpui::Role::Group, CARD));
+  assert!(
+    h.shows(gpui::Role::Row, "+<<<<<<< Side #1 (Conflict 1 of 1)"),
+    "the lines show as a diff"
+  );
 }
 
 #[gpui::test]
 fn changes_tab_says_a_conflicted_file_without_hunks_has_no_diff(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, conflict_host(SIDES, true, false), changes_route());
-  assert!(h.drawn("conflict-row-README.md"));
-  assert!(h.drawn("empty-diff-placeholder"));
-  assert!(!h.drawn(CARD));
+  assert!(lists_conflict(&mut h, "README.md"));
+  assert!(h.shows(gpui::Role::Status, "No diff for this conflicted file"));
+  assert!(!h.shows(gpui::Role::Group, CARD));
 }
 
 /// A conflict only in a commit stays on screen with committed changes
@@ -121,14 +158,31 @@ fn changes_tab_keeps_a_committed_conflict_with_committed_changes_hidden(cx: &mut
     working.uncommitted_files.clear();
   }
   let (mut h, _) = workspace_harness(cx, host, changes_route());
-  assert!(h.drawn("conflict-row-README.md"));
-  assert!(h.drawn(CARD));
-  assert!(!h.drawn("file-card-a.rs"), "committed changes stay hidden");
+  assert!(lists_conflict(&mut h, "README.md"));
+  assert!(h.shows(gpui::Role::Group, CARD));
+  assert!(
+    !h.shows(gpui::Role::Heading, "a.rs"),
+    "committed changes stay hidden"
+  );
 }
 
 #[gpui::test]
 fn changes_tab_draws_the_deleted_side_of_a_delete_modify_conflict(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, conflict_host(DELETED, true, true), changes_route());
-  assert!(h.drawn(CARD));
-  assert!(h.drawn("conflict-deleted-side"));
+  assert!(h.shows(gpui::Role::Group, CARD));
+  assert!(shows_deleted(&mut h, "Side #1"));
+}
+
+/// The Conflicts section's dot and each conflicted file's dot say what
+/// they mean.
+#[gpui::test]
+fn conflict_dots_are_named(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  let (mut h, _) = workspace_harness(cx, conflict_host(SIDES, true, true), changes_route());
+  assert!(lists_conflict(&mut h, "README.md"));
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  let dots = screen.get_all_by_role(by::role(gpui::Role::Image).name("Conflict"));
+  assert!(dots.len() >= 2, "{}", dots.len());
 }

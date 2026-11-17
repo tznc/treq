@@ -1,0 +1,72 @@
+id: mobile-icon-button-needs-name
+language: rust
+severity: error
+message: >
+  A mobile button that shows only an icon needs an accessible name, or
+  TalkBack and VoiceOver read it as "button". Give it `.accessibility_label(..)`
+  (or `.label(..)` when it shows text).
+files:
+  - "src-tauri/src/mobile/**/*.rs"
+utils:
+  # A step of the builder chain the button is built in.
+  in-chain:
+    any:
+      - kind: field_expression
+      - kind: call_expression
+      - kind: arguments
+        inside:
+          kind: call_expression
+          has:
+            field: function
+            any:
+              - kind: identifier
+              - kind: scoped_identifier
+  # A call to `.<name>(..)` in the chain, also inside a `.when(..)`-style closure.
+  calls-icon:
+    kind: call_expression
+    has:
+      field: function
+      kind: field_expression
+      has:
+        field: field
+        regex: ^icon$
+  names-it:
+    kind: call_expression
+    has:
+      field: function
+      kind: field_expression
+      has:
+        field: field
+        any:
+          - regex: ^(label|aria_label|accessibility_label)$
+          - regex: ^(when|when_some|when_none|map)$
+            inside:
+              kind: field_expression
+              inside:
+                kind: call_expression
+                has:
+                  field: arguments
+                  has:
+                    stopBy: end
+                    kind: field_identifier
+                    regex: ^(label|aria_label|accessibility_label)$
+rule:
+  pattern: Button::new($$$)
+  inside:
+    matches: calls-icon
+    stopBy:
+      not:
+        matches: in-chain
+  not:
+    any:
+      - inside:
+          matches: names-it
+          stopBy:
+            not:
+              matches: in-chain
+      - inside:
+          kind: mod_item
+          has:
+            field: name
+            regex: ^tests$
+          stopBy: end

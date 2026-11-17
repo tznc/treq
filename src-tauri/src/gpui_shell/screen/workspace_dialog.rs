@@ -1,4 +1,4 @@
-//! `UnifiedWorkspaceDialog`: "Stack a new Workspace". Creates a workspace,
+//! `UnifiedWorkspaceDialog`: "Stack a new workspace". Creates a workspace,
 //! stacks one on another, or moves commits or files into a new or an
 //! existing workspace, all through the backend
 //! ([`workspace_dialog_data`]). React only says which dialog opened, with
@@ -8,6 +8,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use gpui_kit::base::TestSupportExt as _;
@@ -17,9 +18,8 @@ use gpui_kit::component::{
   IndexPath,
 };
 use tauri_plugin_gpui::gpui::{
-  self, anchored, deferred, div, point, prelude::*, px, App, ClickEvent, Context, Div, Entity,
-  FocusHandle, FontWeight, Hsla, KeyDownEvent, MouseButton, SharedString, Stateful, Subscription,
-  Task, Window,
+  self, anchored, deferred, div, prelude::*, App, ClickEvent, Context, Div, Entity, FocusHandle,
+  FontWeight, Hsla, MouseButton, SharedString, Stateful, Subscription, Task, Window,
 };
 
 use super::{
@@ -28,7 +28,7 @@ use super::{
     self as data, branch_from_title, branch_name_error, new_workspace_chain, ChainEntry, Position,
     Route, Source, StashCommit, Submit, Submitted, Tab, WorkspaceDialogHost,
   },
-  workspace_modal::{dialog_description, dialog_header, dialog_panel, label_xs, press, Check},
+  workspace_modal::{field_hint, field_label, press, Check},
   ActionSink, ScreenAction,
 };
 use crate::{
@@ -280,20 +280,22 @@ impl WorkspaceDialog {
           }
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        let (commits, files, workspaces, branches) = loaded;
-        view.commits_ahead = commits;
-        view.changed_files = files;
-        if let Some(source_id) = view.source_id() {
-          view.target_workspace_id = workspaces.iter().find(|w| w.id != source_id).map(|w| w.id);
-        }
-        view.workspaces = workspaces;
-        if let Some(branches) = branches {
-          view.branches = branches;
-        }
-        view.data_loading = false;
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          let (commits, files, workspaces, branches) = loaded;
+          view.commits_ahead = commits;
+          view.changed_files = files;
+          if let Some(source_id) = view.source_id() {
+            view.target_workspace_id = workspaces.iter().find(|w| w.id != source_id).map(|w| w.id);
+          }
+          view.workspaces = workspaces;
+          if let Some(branches) = branches {
+            view.branches = branches;
+          }
+          view.data_loading = false;
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
 
@@ -317,15 +319,17 @@ impl WorkspaceDialog {
           )
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        view.default_branch = default_branch;
-        view.gitignore_suggestions = suggestions;
-        view.branch_pattern = pattern
-          .filter(|p| !p.is_empty())
-          .unwrap_or_else(|| DEFAULT_PATTERN.into());
-        view.derive_branch(cx);
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.default_branch = default_branch;
+          view.gitignore_suggestions = suggestions;
+          view.branch_pattern = pattern
+            .filter(|p| !p.is_empty())
+            .unwrap_or_else(|| DEFAULT_PATTERN.into());
+          view.derive_branch(cx);
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -354,22 +358,26 @@ impl WorkspaceDialog {
     let (host, repo) = (self.host.clone(), self.route.repo_path.clone());
     self._check = Some(cx.spawn(async move |this, cx| {
       cx.background_executor().timer(DEBOUNCE).await;
-      let _ = this.update(cx, |view, cx| {
-        view.checking_branch = true;
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.checking_branch = true;
+          cx.notify();
+        })
+        .ignore_closed();
       let status = cx
         .background_spawn({
           let name = name.clone();
           async move { host.branch_status(&repo, &name).ok() }
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        view.checking_branch = false;
-        // A new name has no result until its check resolves.
-        view.branch_check = status.map(|s| (name, s));
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.checking_branch = false;
+          // A new name has no result until its check resolves.
+          view.branch_check = status.map(|s| (name, s));
+          cx.notify();
+        })
+        .ignore_closed();
     }));
   }
 
@@ -427,7 +435,7 @@ impl WorkspaceDialog {
 
   pub(super) fn submit_label(&self) -> String {
     if self.loading {
-      return "Creating...".into();
+      return "Creating…".into();
     }
     if self.route.defaults.apply_stash_id.is_some() {
       return "Create & apply stash".into();
@@ -440,7 +448,7 @@ impl WorkspaceDialog {
       return if count > 0 {
         format!("Move {count} to Existing Workspace")
       } else {
-        "Move to Existing Workspace".into()
+        "Move to existing workspace".into()
       };
     }
     let has_selection = !self.selected_commits.is_empty() || !self.selected_hunks.is_empty();
@@ -451,7 +459,7 @@ impl WorkspaceDialog {
     if self.is_home() && !self.selected_hunks.is_empty() {
       return format!("Create with {} file(s)", self.selected_files().len());
     }
-    "Create Workspace".into()
+    "Create workspace".into()
   }
 
   fn other_workspaces(&self) -> Vec<&Workspace> {
@@ -512,7 +520,7 @@ impl WorkspaceDialog {
             let path = path.clone();
             async move {
               host
-                .file_hunks(&repo, id, vec![path])
+                .file_hunks(&repo, id, vec![path], None)
                 .ok()
                 .and_then(|batch| batch.files.into_iter().next())
                 .filter(|file| file.error.is_none())
@@ -521,16 +529,18 @@ impl WorkspaceDialog {
             }
           })
           .await;
-        let _ = this.update(cx, |view, cx| {
-          view.hunks.insert(
-            path,
-            Hunks {
-              hunks,
-              loading: false,
-            },
-          );
-          cx.notify();
-        });
+        this
+          .update(cx, |view, cx| {
+            view.hunks.insert(
+              path,
+              Hunks {
+                hunks,
+                loading: false,
+              },
+            );
+            cx.notify();
+          })
+          .ignore_closed();
       })
       .detach();
     }
@@ -647,29 +657,31 @@ impl WorkspaceDialog {
       let submitted = cx
         .background_spawn(async move { data::submit(&*host, &form) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        view.loading = false;
-        match submitted {
-          Submitted::Done(id) => {
-            view.dismissed = true;
-            (view.sink)(
-              ScreenAction::Field {
-                field: "workspaceDialog.created".into(),
-                value: id.into(),
-              },
-              cx,
-            );
+      this
+        .update(cx, |view, cx| {
+          view.loading = false;
+          match submitted {
+            Submitted::Done(id) => {
+              view.dismissed = true;
+              (view.sink)(
+                ScreenAction::Field {
+                  field: "workspaceDialog.created".into(),
+                  value: id.into(),
+                },
+                cx,
+              );
+            }
+            Submitted::Failed(message) => view.error = message,
           }
-          Submitted::Failed(message) => view.error = message,
-        }
-        cx.notify();
-      });
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
 
   fn open_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-    let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search branches..."));
+    let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search branches…"));
     input.update(cx, |input, cx| input.focus(window, cx));
     let subscription = cx.subscribe(&input, |view, input, event: &InputEvent, cx| match event {
       InputEvent::Change => {
@@ -763,6 +775,7 @@ impl WorkspaceDialog {
     cx.notify();
   }
 
+  #[expect(clippy::expect_used, reason = "the fields are created just above")]
   fn fields(&mut self, window: &mut Window, cx: &mut Context<Self>) -> &Fields {
     if self.fields.is_none() {
       let input = |value: &str, placeholder: &str, window: &mut Window, cx: &mut Context<Self>| {
@@ -939,6 +952,8 @@ impl WorkspaceDialog {
 /// small text buttons.
 fn text_button(id: &'static str, label: &'static str, p: &Palette) -> Stateful<Div> {
   let fg = p.foreground;
+  // Short label (['button label']): 11px is fine.
+  // ast-grep-ignore: gpui-text-xs-short-label-only
   ui::text(div(), TextSize::Xs)
     .id(id)
     .debug_selector(move || id.into())
@@ -955,17 +970,20 @@ fn text_button(id: &'static str, label: &'static str, p: &Palette) -> Stateful<D
 /// by the label.
 pub(super) fn disclosure(
   id: &'static str,
-  label: &'static str,
+  label: impl Into<SharedString>,
   open: bool,
   p: &Palette,
   on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
   let fg = p.foreground;
+  let label: SharedString = label.into();
+  // Short label (['disclosure label']): 11px is fine.
+  // ast-grep-ignore: gpui-text-xs-short-label-only
   ui::text(div(), TextSize::Xs)
     .id(id)
     .debug_selector(move || id.into())
     .role(gpui::Role::Button)
-    .aria_label(label)
+    .aria_label(label.clone())
     .on_click(on_click)
     .flex()
     .items_center()
@@ -1003,11 +1021,11 @@ fn stack_dot(highlighted: bool, p: &Palette) -> Div {
 }
 
 /// `statusIcon` and `statusColor`.
-fn file_status(status: &str, p: &Palette) -> (&'static str, Hsla) {
+pub(crate) fn file_status(status: &str, p: &Palette) -> (&'static str, Hsla) {
   match status {
     "modified" => ("M", p.warning),
-    "added" => ("A", p.success),
-    "deleted" => ("D", p.destructive),
+    "added" => ("A", p.diff_added()),
+    "deleted" => ("D", p.diff_removed()),
     "renamed" => ("R", p.primary),
     _ => ("?", p.muted_foreground),
   }
@@ -1036,8 +1054,12 @@ impl WorkspaceDialog {
           _ => branch_name.clone(),
         };
         // A disabled `<Input className="text-xs text-muted-foreground h-8">`.
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
+          .id("workspace-dialog-stacking-on")
           .debug_selector(|| "workspace-dialog-stacking-on".into())
+          .role(gpui::Role::Label)
+          .aria_label(format!("Stacking on {shown}"))
+          .test_support()
           .h(zpx(32.))
           .px_3()
           .flex()
@@ -1058,7 +1080,7 @@ impl WorkspaceDialog {
         .flex()
         .flex_col()
         .gap_1p5()
-        .child(label_xs("Stacking on"))
+        .child(field_label("Stacking on"))
         .child(stacking_on),
     );
 
@@ -1067,6 +1089,8 @@ impl WorkspaceDialog {
       let segment = |id: &'static str, label: &'static str, pos: Position, current: Position| {
         let active = pos == current;
         let fg = p.foreground;
+        // Short label (['segment label']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .id(id)
           .debug_selector(move || id.into())
@@ -1090,7 +1114,7 @@ impl WorkspaceDialog {
           .flex()
           .items_center()
           .gap_2()
-          .child(label_xs("Position:"))
+          .child(field_label("Position:"))
           .child(
             div()
               .flex()
@@ -1132,19 +1156,10 @@ impl WorkspaceDialog {
           .border_color(p.border.opacity(0.5))
           .pt_3()
           .child(
-            div()
-              .id("move-to-existing")
-              .debug_selector(|| "move-to-existing".into())
-              .flex()
-              .items_center()
-              .gap_2()
-              .cursor_pointer()
-              .child(ui::Checkbox::new("move-to-existing-box", &p).checked(on))
-              .child(
-                ui::text(div(), TextSize::Xs)
-                  .text_color(p.muted_foreground)
-                  .child("Move to existing workspace instead"),
-              )
+            ui::text(ui::Checkbox::new("move-to-existing", &p), TextSize::Sm)
+              .checked(on)
+              .label("Move to existing workspace instead")
+              .text_color(p.muted_foreground)
               .on_click(cx.listener(move |view, _, _, cx| view.set_move_to_existing(!on, cx))),
           ),
       );
@@ -1157,12 +1172,10 @@ impl WorkspaceDialog {
           .flex()
           .flex_col()
           .gap_1p5()
-          .child(label_xs("Target workspace"))
+          .child(field_label("Target workspace"))
           .child(match select {
-            None => ui::text(div(), TextSize::Xs)
-              .debug_selector(|| "no-other-workspaces".into())
-              .text_color(p.muted_foreground)
-              .child("No other workspaces available.")
+            None => ui::EmptyState::new("no-other-workspaces", "No other workspaces", &p)
+              .message("Create another workspace to move changes into.")
               .into_any_element(),
             Some(state) => div()
               .id("target-workspace")
@@ -1171,7 +1184,7 @@ impl WorkspaceDialog {
               .child(
                 ui::text(
                   Select::new(&state).id("target-workspace-select"),
-                  TextSize::Xs,
+                  TextSize::Sm,
                 )
                 .h(zpx(32.)),
               )
@@ -1185,7 +1198,7 @@ impl WorkspaceDialog {
             .flex()
             .flex_col()
             .gap_1p5()
-            .child(label_xs("Title (optional)"))
+            .child(field_label("Title (optional)"))
             .child(
               div()
                 .id("workspace-dialog-title")
@@ -1202,7 +1215,7 @@ impl WorkspaceDialog {
             .flex()
             .flex_col()
             .gap_1p5()
-            .child(label_xs("Description (optional)"))
+            .child(field_label("Description (optional)"))
             .child(
               div()
                 .debug_selector(|| "workspace-dialog-description".into())
@@ -1237,7 +1250,7 @@ impl WorkspaceDialog {
                 .flex()
                 .flex_col()
                 .gap_1p5()
-                .child(label_xs("Sparse paths (optional, one per line)"))
+                .child(field_label("Sparse paths (optional, one per line)"))
                 .child(
                   div()
                     .debug_selector(|| "workspace-dialog-sparse".into())
@@ -1250,21 +1263,20 @@ impl WorkspaceDialog {
                 .flex()
                 .flex_col()
                 .gap_1p5()
-                .child(label_xs("Symlink from home repo (optional, one per line)"))
+                .child(field_label(
+                  "Symlink from home repo (optional, one per line)",
+                ))
                 .child(
                   div()
                     .debug_selector(|| "workspace-dialog-symlinks".into())
                     .min_h(zpx(58.))
                     .child(ui::text(Textarea::new(&symlinks), TextSize::Sm)),
                 )
-                .child(
-                  ui::text(div(), TextSize::Xs)
-                    .text_color(p.muted_foreground)
-                    .child(
-                      "Heavy dirs are linked instead of copied so each workspace shares the home \
+                .child(field_hint(
+                  "Heavy dirs are linked instead of copied so each workspace shares the home \
                        tree.",
-                    ),
-                )
+                  &p,
+                ))
                 .when(!chips.is_empty(), |this| {
                   this.child(div().flex().flex_wrap().gap_1p5().children(
                     chips.into_iter().enumerate().map(|(i, chip)| {
@@ -1275,7 +1287,7 @@ impl WorkspaceDialog {
                           .size(Size::Sm)
                           .h(zpx(24.))
                           .label(label),
-                        TextSize::Xs,
+                        TextSize::Sm,
                       )
                       .on_click(cx.listener(move |view, _, _, cx| {
                         view.symlinked_dirs =
@@ -1310,7 +1322,7 @@ impl WorkspaceDialog {
           .font_family(theme::MONO_FONT)
           .min_w_0()
           .truncate()
-          .child(target.clone().unwrap_or_else(|| "Select...".into())),
+          .child(target.clone().unwrap_or_else(|| "Select…".into())),
       )
       .child(ui::icon(
         theme::ICON_CHEVRON_DOWN,
@@ -1332,36 +1344,26 @@ impl WorkspaceDialog {
         .map(|b| b.name.clone())
         .collect();
       let list = if branches.is_empty() {
-        ui::text(div(), TextSize::Sm)
-          .px_2()
-          .py_4()
-          .text_center()
-          .text_color(p.muted_foreground)
-          .child("No branches found")
+        ui::EmptyState::new("workspace-dialog-no-branches", "No branches match", &p)
+          .message("Try another branch name.")
           .into_any_element()
       } else {
         div()
           .children(branches.into_iter().enumerate().map(|(i, name)| {
             let id = SharedString::from(format!("branch-option-{i}"));
-            let selector = id.to_string();
             let active = selected.as_deref() == Some(name.as_str());
             let checked = target.as_deref() == Some(name.as_str());
             let pick = name.clone();
-            ui::text(div(), TextSize::Sm)
-              .id(id)
-              .debug_selector(move || selector)
+            ui::Row::new(id, &p)
+              .role(gpui::Role::ListBoxOption)
+              .label(name.clone())
+              .selected(active)
               .px_3()
-              .py_1p5()
-              .flex()
-              .items_center()
-              .gap_2()
-              .cursor_pointer()
+              .rounded_none()
               .font_family(theme::MONO_FONT)
-              .when(active, |this| this.bg(p.menu_accent))
-              .when(!active, |this| this.hover(move |s| s.bg(p.menu_accent)))
               .child(div().flex_1().min_w_0().truncate().child(name))
               .when(checked, |this| {
-                this.child(ui::icon(theme::ICON_CHECK, 16., p.popover_foreground))
+                this.trailing(ui::icon(theme::ICON_CHECK, 16., p.popover_foreground))
               })
               .on_click(cx.listener(move |view, _, _, cx| view.pick_branch(pick.clone(), cx)))
           }))
@@ -1423,7 +1425,7 @@ impl WorkspaceDialog {
   }
 
   /// `NewWorkspaceStackCard`.
-  fn stack_card(&self, branch: &Entity<InputState>, base: &str, p: &Palette) -> Div {
+  fn stack_card(&self, branch: &Entity<InputState>, base: &str, p: &Palette) -> impl IntoElement {
     let p = *p;
     let chain = self
       .parent_branch()
@@ -1496,7 +1498,7 @@ impl WorkspaceDialog {
                 .w_full()
                 .child(
                   ui::text(
-                    Styled::h(Input::new(branch).aria_label("Branch Name"), zpx(32.)),
+                    Styled::h(Input::new(branch).aria_label("Branch name"), zpx(32.)),
                     TextSize::Sm,
                   )
                   .font_family(theme::MONO_FONT)
@@ -1505,8 +1507,12 @@ impl WorkspaceDialog {
             )
             .when_some(hint, |this, (text, color, id)| {
               this.child(
-                ui::text(div(), TextSize::Xs)
+                ui::text(div(), TextSize::Sm)
+                  .id(id)
                   .debug_selector(move || id.into())
+                  .role(gpui::Role::Status)
+                  .aria_label(text.clone())
+                  .test_support()
                   .text_color(color)
                   .child(text),
               )
@@ -1542,7 +1548,11 @@ impl WorkspaceDialog {
     });
     let rows: Vec<_> = rows.collect();
     div()
+      .id("new-workspace-stack-card")
       .debug_selector(|| "new-workspace-stack-card".into())
+      .role(gpui::Role::Group)
+      .aria_label("New workspace stack")
+      .test_support()
       .border_1()
       .border_color(p.border)
       .rounded(radius::MD)
@@ -1602,20 +1612,9 @@ impl WorkspaceDialog {
     if self.data_loading && locked.is_none() {
       return div()
         .flex()
-        .items_center()
         .justify_center()
         .py_6()
-        .child(ui::spinner(
-          "workspace-dialog-loading",
-          20.,
-          p.muted_foreground,
-        ))
-        .child(
-          ui::text(div(), TextSize::Sm)
-            .ml_2()
-            .text_color(p.muted_foreground)
-            .child("Loading..."),
-        )
+        .child(ui::Loading::new("workspace-dialog-loading", &p).label("Loading workspace…"))
         .into_any_element();
     }
     let mut commits: Vec<WorkspaceCommit> = Vec::new();
@@ -1633,70 +1632,30 @@ impl WorkspaceDialog {
         .filter(|c| locked.as_ref().is_none_or(|s| s.hash != c.hash))
         .cloned(),
     );
-    let tab_trigger =
-      |id: &'static str, label: &'static str, count: usize, active: bool, disabled: bool| {
-        let fg = p.foreground;
-        let bg = p.background.opacity(0.5);
-        ui::text(div(), TextSize::Xs)
-          .id(id)
-          .debug_selector(move || id.into())
-          .flex()
-          .items_center()
-          .gap_1p5()
-          .px_3()
-          .py_1()
-          .rounded(radius::MD)
-          .font_weight(FontWeight::MEDIUM)
-          .when(active, |this| {
-            this.bg(p.selected()).text_color(p.foreground)
-          })
-          .when(!active, |this| this.text_color(p.muted_foreground))
-          .when(!active && !disabled, |this| {
-            this
-              .cursor_pointer()
-              .hover(move |s| s.bg(bg).text_color(fg))
-          })
-          .when(disabled, |this| this.opacity(0.5))
-          .aria_label(format!("{label} ({count})"))
-          .child(label)
-          .child(ui::Count::new(count, &p))
-      };
-    let tabs = div()
-      .flex()
-      .gap_1()
-      .bg(p.muted)
-      .p_1()
-      .rounded(radius::MD)
-      .mb_2()
-      .child(
-        tab_trigger(
-          "workspace-dialog-tab-commits",
-          "Commits",
-          commits.len(),
-          self.tab == Tab::Commits,
-          false,
+    // Moving a stash takes its commit only, so Changes is off.
+    let disabled = locked.is_some();
+    let tabs = div().mb_2().child(
+      ui::Tabs::segmented("workspace-dialog-tabs", &p)
+        .tab(ui::Tab::new("workspace-dialog-tab-commits", "Commits").count(commits.len()))
+        .tab(
+          ui::Tab::new("workspace-dialog-tab-changes", "Changes")
+            .count(self.changed_files.len())
+            .disabled(disabled),
         )
-        .on_click(cx.listener(|view, _, _, cx| {
-          view.tab = Tab::Commits;
-          cx.notify();
-        })),
-      )
-      .child({
-        let disabled = locked.is_some();
-        tab_trigger(
-          "workspace-dialog-tab-changes",
-          "Changes",
-          self.changed_files.len(),
-          self.tab == Tab::Changes,
-          disabled,
-        )
-        .when(!disabled, |this| {
-          this.on_click(cx.listener(|view, _, _, cx| {
-            view.tab = Tab::Changes;
-            cx.notify();
-          }))
-        })
-      });
+        .selected(usize::from(self.tab == Tab::Changes))
+        .on_select({
+          let view = cx.weak_entity();
+          move |ix, _, cx| {
+            let tab = [Tab::Commits, Tab::Changes][ix];
+            view
+              .update(cx, |view, cx| {
+                view.tab = tab;
+                cx.notify();
+              })
+              .ok();
+          }
+        }),
+    );
     let body = match self.tab {
       Tab::Commits => self.commits_tab(commits, locked.as_ref(), &p, cx),
       Tab::Changes => self.changes_tab(&p, cx),
@@ -1720,11 +1679,8 @@ impl WorkspaceDialog {
     let p = *p;
     let count = commits.len();
     let rows = if commits.is_empty() {
-      ui::text(div(), TextSize::Sm)
-        .p_4()
-        .text_center()
-        .text_color(p.muted_foreground)
-        .child("No mutable commits in this workspace")
+      ui::EmptyState::new("workspace-dialog-no-commits", "No mutable commits", &p)
+        .message("This workspace has no commits that can be moved yet.")
         .into_any_element()
     } else {
       div()
@@ -1733,17 +1689,19 @@ impl WorkspaceDialog {
           let checked = is_locked || self.selected_commits.contains(&commit.hash);
           let id = SharedString::from(format!("dialog-commit-{i}"));
           let selector = id.to_string();
-          let hover = p.muted.opacity(0.5);
           let hash = commit.hash.clone();
           let short: String = commit.hash.chars().take(8).collect();
           let message = if commit.message.is_empty() {
             "(no description)".to_string()
           } else {
-            commit.message.clone()
+            commit.message
           };
           div()
             .id(id)
+            .role(gpui::Role::CheckBox)
+            .aria_label(message.clone())
             .debug_selector(move || selector)
+            .test_support()
             .flex()
             .items_center()
             .gap_2()
@@ -1756,7 +1714,7 @@ impl WorkspaceDialog {
             .when(!is_locked, |this| {
               this
                 .cursor_pointer()
-                .hover(move |s| s.bg(hover))
+                .hover(move |s| s.bg(p.hover()))
                 .on_click(cx.listener(move |view, _, _, cx| view.toggle_commit(&hash, cx)))
             })
             .child(
@@ -1765,6 +1723,8 @@ impl WorkspaceDialog {
                 .disabled(is_locked),
             )
             .child(
+              // Short label (['short commit hash']): 11px is fine.
+              // ast-grep-ignore: gpui-text-xs-short-label-only
               ui::text(div(), TextSize::Xs)
                 .flex_none()
                 .font_family(theme::MONO_FONT)
@@ -1772,7 +1732,7 @@ impl WorkspaceDialog {
                 .child(short),
             )
             .child(
-              ui::text(div(), TextSize::Xs)
+              ui::text(div(), TextSize::Sm)
                 .flex_1()
                 .min_w_0()
                 .truncate()
@@ -1825,7 +1785,7 @@ impl WorkspaceDialog {
         )
       })
       .child(
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
           .mt_1p5()
           .text_color(p.muted_foreground)
           .child(if locked.is_some() {
@@ -1840,11 +1800,8 @@ impl WorkspaceDialog {
     let p = *p;
     let count = self.changed_files.len();
     let rows = if self.changed_files.is_empty() {
-      ui::text(div(), TextSize::Sm)
-        .p_4()
-        .text_center()
-        .text_color(p.muted_foreground)
-        .child("No uncommitted changes")
+      ui::EmptyState::new("workspace-dialog-no-changes", "No uncommitted changes", &p)
+        .message("The working copy matches the last commit.")
         .into_any_element()
     } else {
       div()
@@ -1853,7 +1810,6 @@ impl WorkspaceDialog {
           let expanded = self.expanded.contains(&path);
           let state = self.file_state(&path);
           let (letter, color) = file_status(&file.status, &p);
-          let hover = p.muted.opacity(0.5);
           let fg = p.foreground;
           let row = div()
             .id(SharedString::from(format!("dialog-file-{i}")))
@@ -1862,10 +1818,16 @@ impl WorkspaceDialog {
             .gap_1()
             .px_2()
             .py_1p5()
-            .hover(move |s| s.bg(hover))
+            .hover(move |s| s.bg(p.hover()))
             .child(
               div()
                 .id(SharedString::from(format!("dialog-file-expand-{i}")))
+                .role(gpui::Role::Button)
+                .aria_label(if expanded {
+                  "Collapse file"
+                } else {
+                  "Expand file"
+                })
                 .flex_none()
                 .size(zpx(16.))
                 .flex()
@@ -1897,6 +1859,8 @@ impl WorkspaceDialog {
                 })),
             )
             .child(
+              // Short label (['status letter']): 11px is fine.
+              // ast-grep-ignore: gpui-text-xs-short-label-only
               ui::text(div(), TextSize::Xs)
                 .w_4()
                 .flex_none()
@@ -1906,8 +1870,10 @@ impl WorkspaceDialog {
                 .child(letter),
             )
             .child(
-              ui::text(div(), TextSize::Xs)
+              ui::text(div(), TextSize::Sm)
                 .id(SharedString::from(format!("dialog-file-path-{i}")))
+                .role(gpui::Role::Button)
+                .aria_label(path.clone())
                 .debug_selector({
                   let selector = format!("dialog-file-path-{i}");
                   move || selector
@@ -1967,7 +1933,7 @@ impl WorkspaceDialog {
         )
       })
       .child(
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
           .mt_1p5()
           .text_color(p.muted_foreground)
           .child("Select file changes to move to the new workspace"),
@@ -1979,29 +1945,21 @@ impl WorkspaceDialog {
     let muted_bg = p.muted.opacity(0.1);
     let data = self.hunks.get(path);
     match data {
-      Some(data) if data.loading => ui::text(div(), TextSize::Xs)
-        .flex()
-        .items_center()
-        .gap_2()
-        .px_8()
-        .py_2()
-        .bg(muted_bg)
-        .text_color(p.muted_foreground)
-        .child(ui::spinner(
-          SharedString::from(format!("hunks-loading-{file}")),
-          12.,
-          p.muted_foreground,
-        ))
-        .child("Loading hunks..."),
+      Some(data) if data.loading => div().flex().px_8().py_2().bg(muted_bg).child(
+        ui::Loading::new(SharedString::from(format!("hunks-loading-{file}")), &p)
+          .label("Loading hunks…"),
+      ),
       Some(data) if !data.hunks.is_empty() => {
         div().children(data.hunks.iter().enumerate().map(|(i, hunk)| {
           let key = hunk_key(path, &hunk.id);
           let checked = self.selected_hunks.contains(&key);
-          let hover = p.muted.opacity(0.3);
           let selector = format!("dialog-hunk-{file}-{i}");
           div()
             .id(SharedString::from(selector.clone()))
+            .role(gpui::Role::CheckBox)
+            .aria_label(hunk.header.clone())
             .debug_selector(move || selector)
+            .test_support()
             .flex()
             .items_start()
             .gap_2()
@@ -2011,7 +1969,7 @@ impl WorkspaceDialog {
             .bg(muted_bg)
             .border_t_1()
             .border_color(p.border.opacity(0.3))
-            .hover(move |s| s.bg(hover))
+            .hover(move |s| s.bg(p.hover()))
             .child(
               div().mt_0p5().child(
                 ui::Checkbox::new(
@@ -2029,26 +1987,28 @@ impl WorkspaceDialog {
                 .overflow_hidden()
                 .font_family(theme::MONO_FONT)
                 .child(
-                  ui::text(div(), TextSize::Xs)
+                  ui::text(div(), TextSize::Sm)
                     .truncate()
                     .text_color(ui::Tone::Primary.text(&p))
                     .child(hunk.header.clone()),
                 )
                 .children(hunk.lines.iter().take(3).map(|line| {
                   let color = if line.starts_with('+') {
-                    p.success
+                    p.diff_added()
                   } else if line.starts_with('-') {
-                    p.destructive
+                    p.diff_removed()
                   } else {
                     p.muted_foreground
                   };
-                  ui::text(div(), TextSize::Xs)
+                  ui::text(div(), TextSize::Sm)
                     .truncate()
                     .text_color(color)
                     .child(line.clone())
                 }))
                 .when(hunk.lines.len() > 3, |this| {
                   this.child(
+                    // Short label (['line count']): 11px is fine.
+                    // ast-grep-ignore: gpui-text-xs-short-label-only
                     ui::text(div(), TextSize::Xs)
                       .font_family(theme::SANS_FONT)
                       .text_color(p.muted_foreground)
@@ -2059,12 +2019,14 @@ impl WorkspaceDialog {
             .on_click(cx.listener(move |view, _, _, cx| view.toggle_hunk(&key, cx)))
         }))
       }
-      _ => ui::text(div(), TextSize::Xs)
-        .px_8()
-        .py_1p5()
-        .bg(muted_bg)
-        .text_color(p.muted_foreground)
-        .child("No hunks"),
+      _ => div().bg(muted_bg).child(
+        ui::EmptyState::new(
+          SharedString::from(format!("hunks-none-{file}")),
+          "No hunks",
+          &p,
+        )
+        .message("This change has no text lines to pick, such as a binary file."),
+      ),
     }
   }
 }
@@ -2109,28 +2071,23 @@ impl Render for WorkspaceDialog {
         .children(right)
     });
     let loading = self.loading;
-    let (backdrop, panel) = dialog_panel("workspace-dialog", 640., viewport, &p);
-    let keys = cx.listener(|view, e: &KeyDownEvent, _, cx| {
-      let k = &e.keystroke;
-      if k.key == "enter"
-        && (crate::gpui_shell::keys::held(k.modifiers).platform
-          || crate::gpui_shell::keys::held(k.modifiers).control)
-      {
-        cx.stop_propagation();
-        view.submit(cx);
-      } else if ui::is_escape(k) && view.picker.is_none() {
-        cx.stop_propagation();
-        view.close_unless_creating(cx);
-      }
-    });
+    let can_submit = self.can_submit();
     // A fixed width, so opening Advanced or Move to workspace only makes the
     // dialog taller; the body scrolls once it reaches the window's height.
-    let panel = panel
-      .overflow_hidden()
-      .child(dialog_header(
-        "Stack a new Workspace",
-        dialog_description(description, &p),
-      ))
+    ui::Dialog::new("workspace-dialog", &p)
+      .overlay(viewport)
+      .width(640.)
+      .title("Stack a new workspace")
+      .description(description)
+      .focus(&self.focus)
+      // Escape in the branch picker closes the picker only.
+      .on_close(ui::handler(cx, |view, _, cx| {
+        if view.picker.is_none() {
+          view.close_unless_creating(cx)
+        }
+      }))
+      .on_primary(ui::handler(cx, |view, _, cx| view.submit(cx)))
+      .primary_disabled(!can_submit)
       .child(
         div()
           .id("workspace-dialog-body")
@@ -2154,53 +2111,18 @@ impl Render for WorkspaceDialog {
             .child(self.error.clone()),
         )
       })
-      .child(
-        div()
-          .flex()
-          .justify_end()
-          .gap_2()
-          .mt_4()
-          .pt_3()
-          .border_t_1()
-          .border_color(p.border)
-          .child(
-            Button::new("workspace-dialog-cancel", &p)
-              .variant(Variant::Outline)
-              .disabled(loading)
-              .label("Cancel")
-              .on_click(cx.listener(|view, _, _, cx| view.close_unless_creating(cx))),
-          )
-          .child(
-            Button::new("workspace-dialog-submit", &p)
-              .disabled(!self.can_submit())
-              .when(loading, |this| {
-                this.child(ui::spinner(
-                  "workspace-dialog-spin",
-                  14.,
-                  p.primary_foreground,
-                ))
-              })
-              .label(self.submit_label())
-              .on_click(cx.listener(|view, _, _, cx| view.submit(cx))),
-          ),
-      );
-    deferred(
-      anchored().position(point(px(0.), px(0.))).child(
-        backdrop
-          .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|view, _, _, cx| view.close_unless_creating(cx)),
-          )
-          .child(
-            panel
-              .id("workspace-dialog-panel")
-              .track_focus(&self.focus)
-              .capture_key_down(keys)
-              .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()),
-          ),
-      ),
-    )
-    .with_priority(2)
-    .into_any_element()
+      .footer([Button::new("workspace-dialog-submit", &p)
+        .disabled(!can_submit)
+        .when(loading, |this| {
+          this.child(ui::spinner(
+            "workspace-dialog-spin",
+            14.,
+            p.primary_foreground,
+          ))
+        })
+        .label(self.submit_label())
+        .on_click(cx.listener(|view, _, _, cx| view.submit(cx)))
+        .into_any_element()])
+      .into_any_element()
   }
 }

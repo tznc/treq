@@ -37,10 +37,9 @@ export async function refuseGatedAction(
 /** What each gated feature says when it refuses a Free user. */
 export const PRO_REQUIRED_MESSAGES = {
   githubApp:
-    "The Treq GitHub App needs Pro. Start a trial or upgrade on your treq.dev dashboard.",
-  mergeQueue: "The merge queue needs Pro.",
+    "The Treq GitHub App needs Pro. Upgrade on your treq.dev dashboard.",
   linearOAuth:
-    "Linear OAuth needs Pro. Add a personal Linear API key in the repository's Linear settings to keep using Linear on the Free plan.",
+    "Linear needs Pro. Upgrade on your treq.dev dashboard.",
   cloudWorkspace:
     "Cloud workspaces need Pro. You can still check the status of your cloud workspace or delete it.",
 } as const;
@@ -59,6 +58,20 @@ export async function userHasPro(
 ): Promise<boolean> {
   const { data, error } = await client.rpc("has_pro", { p_user_id: userId });
   if (error) throw new Error(`has_pro failed: ${error.message}`);
+  return data === true;
+}
+
+/**
+ * has_cloud for a user: entitled to cloud where their workspace bills, i.e.
+ * personal Pro, or a Team organization whose owner allows cloud
+ * (068_team_cloud.sql). The client must use the service role.
+ */
+export async function userHasCloud(
+  client: RpcClient,
+  userId: string,
+): Promise<boolean> {
+  const { data, error } = await client.rpc("has_cloud", { p_user_id: userId });
+  if (error) throw new Error(`has_cloud failed: ${error.message}`);
   return data === true;
 }
 

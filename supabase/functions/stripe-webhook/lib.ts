@@ -14,6 +14,7 @@ import {
   type SubscriptionStatus,
 } from "../_shared/billing/plans.ts";
 import { verifyStripeSignature } from "../_shared/billing/stripe-signature.ts";
+import type { StripeClient } from "../_shared/billing/stripe-api.ts";
 
 type SubscriptionEventType =
   | "customer.subscription.created"
@@ -40,6 +41,8 @@ export type SubscriptionEventArgs = {
   p_current_period_end: string | null;
   p_cancel_at_period_end: boolean;
   p_trial_end: string | null;
+  // The spend cap's window (046_placements_and_usage.sql).
+  p_current_period_start: string | null;
 };
 
 export type BillingOwnerType = "user" | "organization";
@@ -111,10 +114,7 @@ function planOf(items: Record<string, unknown>[]): BillingPlan | null {
   for (const item of items) {
     const price = isRecord(item.price) ? item.price : null;
     const key = price?.lookup_key;
-    if (
-      typeof key === "string" &&
-      Object.prototype.hasOwnProperty.call(PLAN_BY_LOOKUP_KEY, key)
-    ) {
+    if (typeof key === "string" && Object.hasOwn(PLAN_BY_LOOKUP_KEY, key)) {
       return PLAN_BY_LOOKUP_KEY[key];
     }
   }
@@ -132,6 +132,18 @@ function periodEndOf(
     .map((item) => item.current_period_end)
     .filter((end): end is number => typeof end === "number");
   return ends.length > 0 ? Math.max(...ends) : null;
+}
+
+// Same as periodEndOf: the earliest item start when the period is on items.
+function periodStartOf(
+  sub: Record<string, unknown>,
+  items: Record<string, unknown>[],
+): number | null {
+  if (typeof sub.current_period_start === "number") return sub.current_period_start;
+  const starts = items
+    .map((item) => item.current_period_start)
+    .filter((start): start is number => typeof start === "number");
+  return starts.length > 0 ? Math.min(...starts) : null;
 }
 
 function subscriptionAction(event: StripeEvent): EventAction {
@@ -180,6 +192,7 @@ function subscriptionAction(event: StripeEvent): EventAction {
       p_current_period_end: unixToIso(periodEnd),
       p_cancel_at_period_end: canceling,
       p_trial_end: unixToIso(sub.trial_end),
+      p_current_period_start: unixToIso(periodStartOf(sub, items)),
     },
   };
 }
@@ -255,6 +268,8 @@ export interface WebhookDeps {
   secret: string | undefined;
   rpc: (fn: string, args: Record<string, unknown>) => Promise<RpcResult>;
   nowSeconds?: () => number;
+  /** Re-reads a subscription when two events from one second disagree. */
+  stripe?: StripeClient;
   log?: (entry: Record<string, unknown>) => void;
 }
 
@@ -279,9 +294,107 @@ function defaultLog(entry: Record<string, unknown>): void {
 // SQL results that need a person to look at them. Retrying cannot fix them,
 // so the webhook still answers 200.
 const ALERT_RESULTS: ReadonlySet<unknown> = new Set([
+  "duplicate_subscription",
   "owner_conflict",
+  "owner_plan_mismatch",
   "unknown_owner",
 ]);
+
+export type SubscriptionSnapshotArgs = {
+  p_subscription_id: string;
+  p_customer_id: string;
+  p_plan: BillingPlan;
+  p_status: SubscriptionStatus;
+  p_current_period_end: string | null;
+  p_cancel_at_period_end: boolean;
+  p_trial_end: string | null;
+  p_fetched_at: string;
+  p_current_period_start: string | null;
+};
+
+/**
+ * The billing_record_subscription_snapshot arguments for a subscription
+ * read from Stripe at `fetchedAtSeconds`, or null if it is not a Treq
+ * subscription.
+ */
+export function subscriptionSnapshotArgs(
+  subscription: Record<string, unknown>,
+  fetchedAtSeconds: number,
+): SubscriptionSnapshotArgs | null {
+  const action = subscriptionAction({
+    id: "snapshot",
+    type: "customer.subscription.updated",
+    created: fetchedAtSeconds,
+    data: { object: subscription },
+  });
+  if (
+    action.action === "ignore" ||
+    action.fn !== "billing_record_subscription_event"
+  ) {
+    return null;
+  }
+  const a = action.args;
+  return {
+    p_subscription_id: a.p_subscription_id,
+    p_customer_id: a.p_customer_id,
+    p_plan: a.p_plan,
+    p_status: a.p_status,
+    p_current_period_end: a.p_current_period_end,
+    p_cancel_at_period_end: a.p_cancel_at_period_end,
+    p_trial_end: a.p_trial_end,
+    p_fetched_at: new Date(fetchedAtSeconds * 1000).toISOString(),
+    p_current_period_start: a.p_current_period_start,
+  };
+}
+
+// Two events from one second disagree, so the stored row cannot tell which
+// came last. Stripe's current copy of the subscription settles it. Any
+// failure answers 500: the tie was not recorded, so Stripe's retry asks again.
+async function resolveTie(
+  event: StripeEvent,
+  subscriptionId: string,
+  deps: WebhookDeps,
+  log: (entry: Record<string, unknown>) => void,
+): Promise<WebhookResult> {
+  const fail = (reason: string) => {
+    log({
+      level: "error",
+      message: "could not resolve a same-second event",
+      stripe_event_id: event.id,
+      reason,
+    });
+    return json({ error: "Write failed" }, 500);
+  };
+  if (!deps.stripe) return fail("STRIPE_SECRET_KEY is not configured");
+
+  const nowSeconds = deps.nowSeconds?.() ?? Math.floor(Date.now() / 1000);
+  let current: Record<string, unknown>;
+  try {
+    current = await deps.stripe.request<Record<string, unknown>>(
+      "GET",
+      `/v1/subscriptions/${encodeURIComponent(subscriptionId)}`,
+    );
+  } catch (err) {
+    return fail(err instanceof Error ? err.message : String(err));
+  }
+
+  const args = subscriptionSnapshotArgs(current, nowSeconds);
+  if (!args) {
+    return json({ received: true, ignored: "not a Treq subscription" }, 200);
+  }
+  const { data, error } = await deps.rpc(
+    "billing_record_subscription_snapshot",
+    args,
+  );
+  if (error) return fail(error.message);
+  log({
+    level: "info",
+    message: "resolved a same-second event from Stripe",
+    stripe_event_id: event.id,
+    result: data,
+  });
+  return json({ received: true, result: data }, 200);
+}
 
 export async function handleStripeWebhook(
   request: WebhookRequest,
@@ -347,6 +460,10 @@ export async function handleStripeWebhook(
     // 500 makes Stripe retry. The event id was not recorded, because the
     // write and the id commit together.
     return json({ error: "Write failed" }, 500);
+  }
+
+  if (data === "tie" && action.fn === "billing_record_subscription_event") {
+    return await resolveTie(event, action.args.p_subscription_id, deps, log);
   }
 
   log({

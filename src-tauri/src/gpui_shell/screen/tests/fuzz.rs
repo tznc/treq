@@ -25,10 +25,13 @@ enum Step {
   Key(&'static str),
   /// Time passes: debounced checks and saves run.
   Advance(u64),
+  /// Tab (or Shift+Tab, `true`) while a dialog is open.
+  Tab(bool),
 }
 
-/// No Tab: unhandled, gpui-testing-library moves the focus as a browser
-/// does, but the shell's windows have no Tab navigation to emulate.
+/// No Tab here: outside a dialog it is unhandled, and gpui-testing-library
+/// would move the focus as a browser does, but the shell's windows have no
+/// Tab navigation to emulate. [`Step::Tab`] presses it inside a dialog.
 const KEYS: &[&str] = &[
   "{Escape}",
   "{Enter}",
@@ -68,6 +71,7 @@ fn step() -> impl Strategy<Value = Step> {
     3 => (any::<Index>(), text()).prop_map(|(i, t)| Step::Type(i, t)),
     3 => gpui::proptest::sample::select(KEYS).prop_map(Step::Key),
     1 => (0u64..1500).prop_map(Step::Advance),
+    2 => any::<bool>().prop_map(Step::Tab),
   ]
 }
 
@@ -146,6 +150,30 @@ impl Frame {
   /// Something on screen: a dialog or a layer.
   fn covered(&self) -> bool {
     !self.dialogs().is_empty() || !self.layers.is_empty()
+  }
+
+  /// Visible controls that share a role and a name with another, which a
+  /// screen reader user can't tell apart: the role and name of each pair.
+  /// Inside an open dialog only its controls count.
+  fn shared_names(&self) -> Vec<(Role, String)> {
+    let dialog = self.dialogs().first().copied();
+    let mut seen = std::collections::HashSet::new();
+    let mut shared = Vec::new();
+    for s in &self.elements {
+      let (Some(role), Some(name)) = (s.role(), s.name().map(str::to_string)) else {
+        continue;
+      };
+      if !CLICK_ROLES.contains(&role) || name.is_empty() || !s.is_visible() {
+        continue;
+      }
+      if dialog.is_some_and(|d| !d.contains(s)) {
+        continue;
+      }
+      if !seen.insert((role, name.clone())) && !shared.contains(&(role, name.clone())) {
+        shared.push((role, name));
+      }
+    }
+    shared
   }
 
   /// Whether an element `before` showed is gone, as a closed popup is.
@@ -267,6 +295,18 @@ impl Run {
         self.screen.user().keyboard(keys);
         format!("key {keys}")
       }
+      Step::Tab(back) => {
+        if self.frame().dialogs().is_empty() {
+          return "tab: no dialog open".into();
+        }
+        let keys = if *back {
+          "{Shift>}{Tab}{/Shift}"
+        } else {
+          "{Tab}"
+        };
+        self.screen.user().keyboard(keys);
+        format!("key {keys}")
+      }
       Step::Advance(ms) => {
         self
           .h
@@ -324,13 +364,15 @@ fn confirms_nothing(step: &Step, done: &str) -> bool {
   match step {
     Step::Type(_, text) => done.contains(" into ") || !text.contains(' '),
     Step::Key(keys) => !matches!(*keys, "{Enter}" | "{Space}"),
+    Step::Tab(_) => true,
     Step::Click(_) | Step::Advance(_) => false,
   }
 }
 
 /// Runs `steps` on `scenario`, checking after each that:
 /// - at most one dialog is open;
-/// - the focus is inside the dialog while one is open;
+/// - the focus is inside the dialog while one is open, whatever Tab and
+///   Shift+Tab were pressed;
 /// - Escape closes the dialog, or a popup inside it;
 /// - typing and moving around write nothing to the backend.
 fn fuzz(cx: &mut TestAppContext, scenario: Scenario, steps: &[Step]) -> Run {
@@ -353,6 +395,12 @@ fn fuzz_from(mut run: Run, steps: &[Step]) -> Run {
       "{:?} and {:?} are open together {}",
       dialogs.iter().map(|d| d.name()).collect::<Vec<_>>(),
       after.layers,
+      run.context()
+    );
+    let shared = after.shared_names();
+    assert!(
+      shared.is_empty(),
+      "controls share a name: {shared:?} {}",
       run.context()
     );
     if let Some(focused) = after.focused() {
@@ -497,16 +545,14 @@ fn settings_survive_random_edits() {
       let mut run = fuzz(cx, settings_scenario(tab), &steps);
       // Whatever was edited, saving it reads back the same in a reopened screen.
       run.settle();
-      if !run.h.drawn("settings-save") {
-        return;
-      }
-      run.h.click("settings-save");
+      // Typed fields save once typing pauses.
+      run
+        .h
+        .cx
+        .executor()
+        .advance_clock(std::time::Duration::from_millis(600));
       run.settle();
       let saved = drawn_settings(&mut run.h);
-      if saved.save.as_ref().is_some_and(|s| !s.disabled) {
-        // Nothing to compare: the save did not go through.
-        return;
-      }
       let mut reopened = Harness::with_host(cx, settings_route(tab), run.host.clone());
       let again = drawn_settings(&mut reopened);
       assert_eq!(
@@ -522,7 +568,7 @@ fn settings_survive_random_edits() {
 // The workspace dialogs: create, stack and rename, and their validation.
 
 const DIALOG_CLICKS: &[&str] = &[
-  "workspace-dialog-cancel",
+  "workspace-dialog-close",
   "workspace-dialog-submit",
   "workspace-dialog-target",
   "position-before",
@@ -616,7 +662,7 @@ const CHANGES_CLICKS: &[&str] = &[
   "unstage-a.rs",
   "viewed-a.rs",
   "discard-all-changes",
-  "discard-all-confirm",
+  "discard-all-dialog-confirm",
   "changes-filter",
 ];
 
@@ -642,8 +688,15 @@ fn the_changes_tab_survives_random_review() {
       for call in effects(&run.host) {
         // Discarding everything needs its confirmation.
         if call.starts_with("discard /") {
+          // Enter runs the open confirmation's verb.
+          let opened = log
+            .find("#discard-all-changes")
+            .or_else(|| log.find("\"Discard all changes…\""));
+          let entered = opened.is_some_and(|at| log[at..].contains("key {Enter}"));
           assert!(
-            log.contains("#discard-all-confirm") || log.contains("\"Discard all changes\""),
+            log.contains("#discard-all-dialog-confirm")
+              || log.contains("\"Discard all changes\"")
+              || entered,
             "{call} {}",
             run.context()
           );
@@ -698,36 +751,259 @@ fn the_logs_tab_survives_random_queries() {
   );
 }
 
-// The file picker: its search, list and Escape.
+// The Overview's machine popover: switching a host's terminals and
+// resetting them only after the confirmation, whatever else is clicked.
 
-const PICKER_CLICKS: &[&str] = &[
-  "task-add",
-  "task-add-file",
-  "file-picker-item-0",
-  "file-picker-item-1",
-  "file-picker-item-2",
+const MACHINE_CLICKS: &[&str] = &[
+  "machine-tools-ssh:ep-1",
+  "machine-tools-local",
+  "machine-terminal-backend",
+  "machine-reset-terminals",
+  "machine-remove",
 ];
 
 #[test]
-fn the_file_picker_survives_random_searches() {
+fn machine_terminal_controls_change_nothing_unconfirmed() {
   fuzz::check(
-    "the_file_picker_survives_random_searches",
-    3,
+    "machine_terminal_controls_change_nothing_unconfirmed",
+    4,
     vec(step(), 1..20),
     |cx, steps| {
       let scenario = Scenario {
-        snapshot: code_route(),
-        host: code_host(),
+        snapshot: onboarding(),
+        host: FakeHost {
+          listing: listing(),
+          host_tools: Some(Ok(vec![])),
+          terminal_status: Some(Ok(running_daemon(1))),
+          ..FakeHost::default()
+        },
         wide: true,
-        clicks: PICKER_CLICKS,
+        clicks: MACHINE_CLICKS,
         fields: &[],
-        layers: &["file-picker"],
+        layers: &[],
       };
-      let mut run = Run::open(cx, scenario);
-      run.h.click("task-add");
-      run.h.click("task-add-file");
+      let mut run = fuzz(cx, scenario, &steps);
       run.settle();
-      fuzz_from(run, &steps);
+      // A change to a host's terminals follows its confirmation, so there
+      // are never more of them than confirmations answered with the action.
+      let changes = run
+        .host
+        .calls()
+        .iter()
+        .filter(|c| c.starts_with("terminals ") || c.starts_with("reset terminals "))
+        .count();
+      // Confirmations: a click on the dialog's action, or Enter/Space on
+      // its focused button.
+      let confirmed = run
+        .log
+        .iter()
+        .filter(|l| {
+          l.ends_with("\"Use tmux\"")
+            || l.ends_with("\"Use Treq daemon\"")
+            || l.ends_with("\"Reset terminals\"")
+            || *l == "key {Enter}"
+            || *l == "key {Space}"
+        })
+        .count();
+      assert!(
+        changes <= confirmed,
+        "{changes} terminal changes for {confirmed} confirmations {}",
+        run.context()
+      );
+      // An open popover never stays on "Asking the host…" once the host
+      // has answered.
+      if run.h.drawn("machine-terminals-status") {
+        let asking = run
+          .screen
+          .get_all_by_role(by::role(Role::Status))
+          .iter()
+          .any(|n| n.name().is_some_and(|name| name.starts_with("Asking")));
+        assert!(!asking, "the status stayed on Asking {}", run.context());
+      }
     },
+  );
+}
+
+// Projects: Project home's tabs, with the Save project or Project
+// instructions dialog over it. Nothing is saved without its Save.
+
+const PROJECT_CLICKS: &[&str] = &[
+  "project-home-tab-code",
+  "project-home-tab-changes",
+  "project-home-tab-commits",
+  "save-project-discard",
+  "save-project-dialog-close",
+  "save-project-submit",
+  "project-context-add-files",
+  "project-context-dialog-close",
+  "project-context-save",
+];
+
+const PROJECT_FIELDS: &[&str] = &[
+  "save-project-name",
+  "project-context-prompt",
+  "project-context-paths",
+];
+
+/// Project home on `name` (`None`: unsaved), with `modal` over it.
+fn project_home(name: Option<&str>, modal: serde_json::Value) -> ScreenSnapshot {
+  serde_json::from_value(serde_json::json!({
+    "kind": "projectHome",
+    "dark": false,
+    "name": name,
+    "repos": [
+      {"path": "/r/web", "label": "acme/web", "homeRef": "main", "missing": false,
+       "github": "acme/web", "workspaces": [["treq/login", 0], ["treq/login-2", 1]]},
+      {"path": "/r/api", "label": "api", "homeRef": null, "missing": true, "workspaces": []},
+    ],
+    "revision": 1,
+    "modal": modal,
+  }))
+  .expect("snapshot")
+}
+
+fn project_modal(which: u8) -> serde_json::Value {
+  match which % 4 {
+    0 => serde_json::Value::Null,
+    1 => serde_json::json!({
+      "kind": "saveProject", "repoPath": "/r/web", "name": "web + api",
+      "saved": false, "closing": false, "repos": ["/r/web", "/r/api"],
+    }),
+    2 => serde_json::json!({
+      "kind": "saveProject", "repoPath": "/r/web", "name": "web + api",
+      "saved": false, "closing": true, "repos": ["/r/web", "/r/api"],
+    }),
+    _ => serde_json::json!({
+      "kind": "projectContext", "repoPath": "/r/web", "name": "Checkout",
+      "prompt": "Use npm.", "contextPaths": ["/docs/a.md"],
+    }),
+  }
+}
+
+fn project_writes(host: &FakeHost) -> Vec<String> {
+  effects(host)
+    .into_iter()
+    .filter(|c| c.starts_with("save project ") || c.starts_with("project context "))
+    .collect()
+}
+
+#[test]
+fn projects_save_nothing_unconfirmed() {
+  fuzz::check(
+    "projects_save_nothing_unconfirmed",
+    6,
+    (vec(step(), 1..20), 0u8..4, any::<bool>()),
+    |cx, (steps, which, failing)| {
+      let scenario = Scenario {
+        snapshot: project_home((which == 3).then_some("Checkout"), project_modal(which)),
+        host: FakeHost {
+          failing: if failing {
+            vec!["save_project", "set_project_context"]
+          } else {
+            Vec::new()
+          },
+          ..FakeHost::default()
+        },
+        wide: true,
+        clicks: PROJECT_CLICKS,
+        fields: PROJECT_FIELDS,
+        layers: &[],
+      };
+      let mut run = fuzz(cx, scenario, &steps);
+      run.settle();
+      let writes = project_writes(&run.host);
+      // Each write follows a Save: a click on it, or Enter/Space.
+      let confirmed = run
+        .log
+        .iter()
+        .filter(|l| {
+          l.contains("save-project-submit")
+            || l.contains("project-context-save")
+            || l.ends_with("\"Save project\"")
+            || l.ends_with("\"Save\"")
+            || *l == "key {Enter}"
+            || *l == "key {Space}"
+        })
+        .count();
+      assert!(
+        writes.len() <= confirmed,
+        "{writes:?} for {confirmed} confirmations {}",
+        run.context()
+      );
+      // A successful save closes the dialog, so it saves once at most.
+      if !failing {
+        assert!(writes.len() <= 1, "{writes:?} {}", run.context());
+      }
+      for call in &writes {
+        if let Some(name) = call.strip_prefix("save project ") {
+          let name: String = serde_json::from_str(name).unwrap_or_default();
+          assert!(
+            !name.is_empty() && name == name.trim(),
+            "{call} {}",
+            run.context()
+          );
+        }
+      }
+    },
+  );
+}
+
+/// Two clicks on Save before the first save returns write once.
+#[gpui::test]
+fn double_clicking_save_project_saves_once(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = Harness::with_host(cx, project_home(None, project_modal(1)), host.clone());
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("Save project")),
+  )
+  .to_be_visible();
+  let at = h.cx.debug_bounds("save-project-submit").unwrap().center();
+  h.cx.simulate_click(at, gpui::Modifiers::none());
+  h.cx.simulate_click(at, gpui::Modifiers::none());
+  h.cx.simulate_keystrokes("enter");
+  h.cx.run_until_parked();
+  assert_eq!(project_writes(&host), ["save project \"web + api\""]);
+}
+
+#[gpui::test]
+fn double_clicking_save_instructions_saves_once(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = Harness::with_host(
+    cx,
+    project_home(Some("Checkout"), project_modal(3)),
+    host.clone(),
+  );
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("Save")),
+  )
+  .to_be_visible();
+  let at = h.cx.debug_bounds("project-context-save").unwrap().center();
+  h.cx.simulate_click(at, gpui::Modifiers::none());
+  h.cx.simulate_click(at, gpui::Modifiers::none());
+  h.cx.run_until_parked();
+  assert_eq!(
+    project_writes(&host),
+    ["project context \"Use npm.\" [\"/docs/a.md\"]"]
+  );
+}
+
+/// Picked files with stray spaces join the box once, trimmed.
+#[gpui::test]
+fn picking_context_files_twice_adds_them_once(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = Harness::with_host(
+    cx,
+    project_home(Some("Checkout"), project_modal(3)),
+    host.clone(),
+  );
+  h.click("project-context-add-files");
+  h.click("project-context-add-files");
+  h.click("project-context-save");
+  h.cx.run_until_parked();
+  assert_eq!(
+    project_writes(&host),
+    ["project context \"Use npm.\" [\"/docs/a.md\", \"/picked/a.md\", \"/picked/spaced.md\"]"]
   );
 }

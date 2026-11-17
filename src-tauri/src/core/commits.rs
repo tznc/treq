@@ -19,10 +19,12 @@ fn append_target_branch_commits(
   }
 }
 
-fn collect_stacked_workspace_labels(
+/// The workspaces `workspace` is stacked on, nearest first, from one read
+/// of the workspace list.
+fn collect_stacked_workspaces(
   repo_path: &str,
   workspace: &local_db::Workspace,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<local_db::Workspace>, String> {
   let workspaces =
     local_db::get_workspaces(repo_path).map_err(|e| format!("Failed to get workspaces: {}", e))?;
   let by_branch: std::collections::HashMap<String, local_db::Workspace> = workspaces
@@ -30,26 +32,28 @@ fn collect_stacked_workspace_labels(
     .map(|workspace| (workspace.branch_name.clone(), workspace))
     .collect();
 
-  let mut labels = Vec::new();
+  let mut stacked = Vec::new();
   let mut current_branch = workspace.branch_name.clone();
   let mut visited = HashSet::new();
 
   while visited.insert(current_branch.clone()) {
-    labels.push(current_branch.clone());
     let Some(next_branch) = by_branch
       .get(&current_branch)
       .and_then(|workspace| workspace.target_branch.clone())
     else {
       break;
     };
-
-    if !by_branch.contains_key(&next_branch) {
+    if visited.contains(&next_branch) {
       break;
     }
+    let Some(next) = by_branch.get(&next_branch) else {
+      break;
+    };
+    stacked.push(next.clone());
     current_branch = next_branch;
   }
 
-  Ok(labels)
+  Ok(stacked)
 }
 
 /// Lists commits for a workspace by its database ID, or for the home repo
@@ -106,13 +110,8 @@ pub fn list_commits(
       )
       .map_err(|e| format!("Failed to list commits: {}", e))?;
 
-      if let Ok(labels) = collect_stacked_workspace_labels(repo_path, &workspace) {
-        for branch_label in labels.into_iter().skip(1) {
-          let Some(stacked_workspace) = local_db::get_workspace_by_branch(repo_path, &branch_label)
-            .map_err(|e| format!("Failed to get workspace: {}", e))?
-          else {
-            continue;
-          };
+      if let Ok(stacked) = collect_stacked_workspaces(repo_path, &workspace) {
+        for stacked_workspace in stacked {
           let stacked_workspace_dir = Path::new(repo_path)
             .join(".treq")
             .join("workspaces")
@@ -265,9 +264,7 @@ pub fn abandon_commit(
   let (workspace_dir, workspace) = workspace_target(repo_path, workspace_id.into())?;
   let workspace_dir_str = workspace_dir.as_str();
 
-  if let Some(workspace) = &workspace {
-    ensure_rewritable(repo_path, workspace, commit_change_id)?;
-  }
+  ensure_target_rewritable(repo_path, workspace.as_ref(), commit_change_id)?;
 
   let op_id = jj::jj_abandon(workspace_dir_str, commit_change_id)
     .map_err(|e| format!("Failed to abandon commit: {}", e))?;
@@ -276,6 +273,23 @@ pub fn abandon_commit(
     .map_err(|e| format!("Failed to update workspace working copy: {}", e))?;
 
   Ok(op_id)
+}
+
+/// [`ensure_rewritable`] for a workspace; for the home repository (`None`),
+/// refuses commits already pushed to the home branch's `origin` bookmark.
+fn ensure_target_rewritable(
+  repo_path: &str,
+  workspace: Option<&local_db::Workspace>,
+  revision: &str,
+) -> Result<(), String> {
+  match workspace {
+    Some(workspace) => ensure_rewritable(repo_path, workspace, revision),
+    None => {
+      let branch = jj::resolve_home_repo_branch(repo_path)
+        .map_err(|e| format!("Failed to get active branch: {}", e))?;
+      jj::ensure_home_commit_rewritable(repo_path, revision, &branch).map_err(|e| e.to_string())
+    }
+  }
 }
 
 /// Refuses `revision` unless `workspace` may rewrite it: it must be in the
@@ -441,9 +455,7 @@ pub fn describe_commit(
   let (workspace_dir, workspace) = workspace_target(repo_path, workspace_id.into())?;
   let workspace_dir_str = workspace_dir.as_str();
 
-  if let Some(workspace) = &workspace {
-    ensure_rewritable(repo_path, workspace, commit_change_id)?;
-  }
+  ensure_target_rewritable(repo_path, workspace.as_ref(), commit_change_id)?;
 
   jj::jj_describe(workspace_dir_str, commit_change_id, description)
     .map_err(|e| format!("Failed to describe commit: {}", e))?;
@@ -490,8 +502,7 @@ pub fn shift_commit_timestamp(
       if days != 0 || hours != 0 || minutes != 0 {
         return Err("Provide either a day or a duration offset, not both".to_string());
       }
-      let (year, month, day) =
-        crate::commit_timestamps::parse_day(day).map_err(|e| e.to_string())?;
+      let (year, month, day) = crate::commit_timestamps::parse_day(day)?;
       crate::commit_timestamps::TimestampShift::ToDay { year, month, day }
     }
     None => {

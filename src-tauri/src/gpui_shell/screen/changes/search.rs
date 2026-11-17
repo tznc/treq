@@ -1,18 +1,16 @@
-//! The Changes tab's find bar (`useDiffSearch`, `SearchOverlay`): Cmd+F
-//! opens it, matches are marked in the diff and Enter steps through them.
+//! The Changes tab's find matches (`useDiffSearch`): the shared find bar
+//! ([`crate::gpui_shell::screen::find`]) marks them in the diff.
 
-use crate::gpui_shell::ui::radius;
 use std::ops::Range;
-use std::sync::Arc;
-use std::time::Duration;
 
-use gpui::{AnyElement, StyledText, Task};
-use gpui_kit::component::input::{Escape, InputState};
+use gpui::{AnyElement, StyledText};
 
 use super::*;
+use crate::gpui_shell::screen::find::{self, match_count, Find, Findable};
 
-/// `useDebounce(searchQuery, 150)`.
-const DEBOUNCE: Duration = Duration::from_millis(150);
+/// Diffs under this many lines are searched on every key: indexing one costs
+/// well under a frame, so waiting for a pause only delays the highlights.
+const INSTANT_LINES: usize = 10_000;
 
 /// Where a match is: a diff line, or a line of a conflict region.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -21,113 +19,21 @@ pub(in crate::gpui_shell::screen) enum MatchKey {
   Conflict(String, usize),
 }
 
-/// One file's inputs to the match index: what decides the lines searched.
-struct Indexed {
-  path: String,
-  conflicted: bool,
-  body: Body,
-  hunks: Option<Arc<Vec<JjDiffHunk>>>,
-}
-
-impl PartialEq for Indexed {
-  fn eq(&self, other: &Self) -> bool {
-    self.path == other.path
-      && self.conflicted == other.conflicted
-      && self.body == other.body
-      && match (&self.hunks, &other.hunks) {
-        (Some(a), Some(b)) => Arc::ptr_eq(a, b),
-        (None, None) => true,
-        _ => false,
-      }
-  }
-}
-
 /// A match's line and where it was drawn.
 type Drawn = (MatchKey, Bounds<Pixels>);
 
+/// The matches of the find bar's query in the diff.
 #[derive(Default)]
-pub(in crate::gpui_shell::screen) struct Search {
-  pub(super) open: bool,
-  query: String,
-  /// The query after the debounce: what is matched.
-  pub(super) applied: String,
-  pub(in crate::gpui_shell::screen) current: usize,
+pub(in crate::gpui_shell::screen) struct Matches {
   /// Matches by line: the first's index overall and how many.
   index: HashMap<MatchKey, (usize, usize)>,
-  pub(in crate::gpui_shell::screen) total: usize,
-  /// What `index` was built from, to skip rebuilding it.
-  indexed: Option<(String, Vec<Indexed>)>,
-  input: Option<Entity<InputState>>,
-  focus: bool,
+  /// The query and the rows' revision `index` was built from: the rows are
+  /// laid out from everything that decides the lines searched.
+  indexed: Option<(String, u64)>,
   /// Scroll the current match into view once it is drawn.
   reveal: bool,
   /// Where the current match was last drawn.
   target: Rc<RefCell<Option<Drawn>>>,
-  debounce: Option<Task<()>>,
-  _subscription: Option<Subscription>,
-  /// Cmd+F anywhere in the window (`useKeyboardShortcut`).
-  _find_key: Option<Subscription>,
-}
-
-/// Byte ranges of `query` in `text`, ignoring case, left to right and
-/// not overlapping (a `gi` regex of the escaped query).
-pub(in crate::gpui_shell::screen) fn match_ranges(text: &str, query: &str) -> Vec<Range<usize>> {
-  let q: Vec<char> = query.chars().flat_map(char::to_lowercase).collect();
-  if q.is_empty() {
-    return Vec::new();
-  }
-  let chars: Vec<(usize, char)> = text.char_indices().collect();
-  let mut out = Vec::new();
-  let mut i = 0;
-  while i < chars.len() {
-    let (mut qi, mut j) = (0, i);
-    let mut ok = true;
-    while ok && qi < q.len() {
-      let Some(&(_, c)) = chars.get(j) else {
-        ok = false;
-        break;
-      };
-      for lower in c.to_lowercase() {
-        if q.get(qi) == Some(&lower) {
-          qi += 1;
-        } else {
-          ok = false;
-          break;
-        }
-      }
-      j += 1;
-    }
-    if ok {
-      let end = chars.get(j).map_or(text.len(), |c| c.0);
-      out.push(chars[i].0..end);
-      i = j;
-    } else {
-      i += 1;
-    }
-  }
-  out
-}
-
-/// How many `match_ranges` `text` has. ASCII text and queries, the usual
-/// case, are counted in place: the index counts every line every frame.
-fn match_count(text: &str, query: &str) -> usize {
-  if !(text.is_ascii() && query.is_ascii()) {
-    return match_ranges(text, query).len();
-  }
-  let (text, query) = (text.as_bytes(), query.as_bytes());
-  if query.is_empty() {
-    return 0;
-  }
-  let (mut i, mut n) = (0, 0);
-  while i + query.len() <= text.len() {
-    if text[i..i + query.len()].eq_ignore_ascii_case(query) {
-      n += 1;
-      i += query.len();
-    } else {
-      i += 1;
-    }
-  }
-  n
 }
 
 /// A conflict region's lines as React searches them.
@@ -149,113 +55,45 @@ pub(in crate::gpui_shell::screen) fn conflict_texts(conflict: &Conflict) -> Vec<
   }
 }
 
+impl Findable for ChangesView {
+  fn find(&mut self) -> &mut Find {
+    &mut self.search
+  }
+
+  fn find_instantly(&self) -> bool {
+    let lines: usize = self
+      .hunks
+      .values()
+      .map(|data| data.hunks.iter().map(|h| h.lines.len()).sum::<usize>())
+      .sum();
+    lines < INSTANT_LINES
+  }
+
+  fn reveal_current(&mut self, _cx: &mut Context<Self>) {
+    self.matches.reveal = true;
+  }
+}
+
 impl ChangesView {
-  /// Listens for Cmd+F in this view's window, focused or not.
-  pub(super) fn watch_find_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-    if self.search._find_key.is_some() {
-      return;
-    }
-    let id = window.window_handle().window_id();
-    self.search._find_key = Some(cx.observe_keystrokes(move |view, event, window, cx| {
-      let k = &event.keystroke;
-      if window.window_handle().window_id() == id
-        && k.key == "f"
-        && (crate::gpui_shell::keys::held(k.modifiers).platform
-          || crate::gpui_shell::keys::held(k.modifiers).control)
-        && !crate::gpui_shell::keys::held(k.modifiers).shift
-        && !crate::gpui_shell::keys::held(k.modifiers).alt
-      {
-        view.open_search(cx);
-      }
-    }));
-  }
-
-  /// Cmd+F: opens the bar, or selects its text again.
-  pub(super) fn open_search(&mut self, cx: &mut Context<Self>) {
-    self.search.open = true;
-    self.search.focus = true;
-    cx.notify();
-  }
-
-  pub(super) fn close_search(&mut self, cx: &mut Context<Self>) {
-    let input = self.search.input.take();
-    self.search = Search {
-      target: self.search.target.clone(),
-      _find_key: self.search._find_key.take(),
-      ..Search::default()
-    };
-    drop(input);
-    cx.notify();
-  }
-
-  fn set_query(&mut self, query: String, cx: &mut Context<Self>) {
-    self.search.query = query.clone();
-    self.search.current = 0;
-    self.search.debounce = Some(cx.spawn(async move |this, cx| {
-      cx.background_executor().timer(DEBOUNCE).await;
-      let _ = this.update(cx, |view, cx| {
-        view.search.applied = query;
-        view.search.current = 0;
-        cx.notify();
-      });
-    }));
-    cx.notify();
-  }
-
-  pub(super) fn step_match(&mut self, delta: isize, cx: &mut Context<Self>) {
-    let total = self.search.total as isize;
-    if total == 0 {
-      return;
-    }
-    self.search.current = (self.search.current as isize + delta).rem_euclid(total) as usize;
-    self.search.reveal = true;
-    cx.notify();
-  }
-
-  /// Builds the input once the bar opens, and focuses it when asked.
-  pub(super) fn ensure_search_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-    if !self.search.open {
-      return;
-    }
-    let input = match &self.search.input {
-      Some(input) => input.clone(),
-      None => {
-        let input = cx.new(|cx| InputState::new(window, cx).placeholder("Find"));
-        self.search._subscription = Some(cx.subscribe(
-          &input,
-          |view, input, event: &InputEvent, cx| match event {
-            InputEvent::Change => {
-              let query = input.read(cx).value().to_string();
-              view.set_query(query, cx);
-            }
-            InputEvent::PressEnter { shift, .. } => {
-              view.step_match(if *shift { -1 } else { 1 }, cx)
-            }
-            _ => {}
-          },
-        ));
-        self.search.input = Some(input.clone());
-        input
-      }
-    };
-    if std::mem::take(&mut self.search.focus) {
-      input.update(cx, |input, cx| {
-        input.focus(window, cx);
-        input.select_all(window, cx);
-      });
-    }
-  }
-
   /// `searchData`: every match, in React's order (conflicts, then the
   /// working copy's files, then the committed ones shown).
   pub(super) fn index_matches(&mut self) {
-    let query = self.search.applied.clone();
-    if query.is_empty() {
-      self.search.index.clear();
-      self.search.total = 0;
-      self.search.indexed = None;
+    if self.search.applied.is_empty() {
+      self.matches.index.clear();
+      self.matches.indexed = None;
+      self.search.set_total(0);
       return;
     }
+    let revision = self.diff.revision;
+    if self
+      .matches
+      .indexed
+      .as_ref()
+      .is_some_and(|(q, r)| *q == self.search.applied && *r == revision)
+    {
+      return;
+    }
+    let query = self.search.applied.clone();
     let conflicted: HashSet<String> = self.conflicted().into_iter().collect();
     let mut files: Vec<(String, String, bool)> = self
       .listed()
@@ -285,27 +123,7 @@ impl ChangesView {
         })
       })
       .collect();
-    let inputs: Vec<Indexed> = files
-      .iter()
-      .zip(&bodies)
-      .map(|((path, _, _), body)| Indexed {
-        path: path.clone(),
-        conflicted: conflicted.contains(path),
-        body: *body,
-        hunks: self.shown_hunks(path).map(|d| d.hunks.clone()),
-      })
-      .collect();
-    if self
-      .search
-      .indexed
-      .as_ref()
-      .is_some_and(|(q, last)| *q == query && *last == inputs)
-    {
-      return;
-    }
-    self.search.indexed = Some((query.clone(), inputs));
-    self.search.index.clear();
-    self.search.total = 0;
+    self.matches.indexed = Some((query.clone(), revision));
     let mut total = 0;
     let mut index = HashMap::new();
     let mut add = |key: MatchKey, text: &str, total: &mut usize| {
@@ -348,18 +166,14 @@ impl ChangesView {
         }
       }
     }
-    self.search.index = index;
-    self.search.total = total;
-    if self.search.current >= total {
-      self.search.current = 0;
-    }
+    self.matches.index = index;
+    self.search.set_total(total);
   }
 
   /// The current match's offset within `key`'s line, if it is there.
   fn current_in(&self, key: &MatchKey) -> Option<usize> {
-    let (first, n) = *self.search.index.get(key)?;
-    let current = self.search.current;
-    (current >= first && current < first + n).then(|| current - first)
+    let (first, n) = *self.matches.index.get(key)?;
+    self.search.current_in(first, n)
   }
 
   /// A line's text with its matches marked (`mark.search-match`).
@@ -369,32 +183,27 @@ impl ChangesView {
     text: &str,
     language: Option<&'static str>,
     changed: &[(Range<usize>, Hsla)],
+    record: Option<RecordLayout>,
   ) -> AnyElement {
-    if !self.search.index.contains_key(&key) {
-      return highlight::styled_marked(text, language, self.dark, changed).into_any_element();
-    }
+    let Some(&(first, _)) = self.matches.index.get(&key) else {
+      let styled = highlight::styled_marked(text, language, self.dark, changed);
+      return with_layout(styled, record).into_any_element();
+    };
     let current = self.current_in(&key);
     let primary = theme::palette(self.dark).primary;
     // Matches first: where one overlaps a changed run, it shows.
-    let marks: Vec<(Range<usize>, Hsla)> = match_ranges(text, &self.search.applied)
+    let marks: Vec<(Range<usize>, Hsla)> = self
+      .search
+      .marks(text, first, primary)
       .into_iter()
-      .enumerate()
-      .map(|(i, r)| {
-        (
-          r,
-          primary.opacity(if Some(i) == current { 0.6 } else { 0.3 }),
-        )
-      })
       .chain(changed.iter().cloned())
       .collect();
     let styled: StyledText = highlight::styled_marked(text, language, self.dark, &marks);
     if current.is_none() {
-      return styled.into_any_element();
+      return with_layout(styled, record).into_any_element();
     }
-    let target = self.search.target.clone();
-    div()
-      .relative()
-      .child(styled)
+    let target = self.matches.target.clone();
+    with_layout(styled, record)
       .child(
         gpui::canvas(
           move |bounds, _, _| {
@@ -412,25 +221,25 @@ impl ChangesView {
 
   /// Scrolls the current match to the middle once it was drawn.
   pub(super) fn reveal_match(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-    if !self.search.reveal {
+    if !self.matches.reveal {
       return;
     }
     let Some(key) = self
-      .search
+      .matches
       .index
       .iter()
       .find(|(k, _)| self.current_in(k).is_some())
       .map(|(k, _)| k.clone())
     else {
-      self.search.reveal = false;
+      self.matches.reveal = false;
       return;
     };
-    let drawn = self.search.target.borrow().clone();
+    let drawn = self.matches.target.borrow().clone();
     match drawn {
       Some((k, line)) if k == key => {
         let view = self.diff.list.viewport_bounds();
         self.diff.list.scroll_by(line.center().y - view.center().y);
-        self.search.reveal = false;
+        self.matches.reveal = false;
         cx.notify();
       }
       _ => {
@@ -448,148 +257,72 @@ impl ChangesView {
   }
 
   /// `SearchOverlay`, top right of the diff.
-  pub(super) fn search_bar(&self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
-    if !self.search.open {
-      return None;
-    }
-    let input = self.search.input.clone()?;
-    let empty = self.search.query.trim().is_empty();
-    let shown = if self.search.total > 0 {
-      self.search.current + 1
-    } else {
-      0
-    };
-    let muted = p.muted_foreground;
-    Some(
-      div()
-        .id("diff-search")
-        .debug_selector(|| "diff-search".into())
-        .absolute()
-        .top_2()
-        .right_2()
-        .bg(p.background)
-        .border_1()
-        .border_color(p.border)
-        .rounded(radius::MD)
-        .shadow_lg()
-        .p_0p5()
-        .flex()
-        .items_center()
-        .gap_0p5()
-        .capture_action(cx.listener(|view, _: &Escape, _, cx| {
-          view.close_search(cx);
-          cx.stop_propagation();
-        }))
-        .child(
-          ui::text(div(), TextSize::Sm)
-            .debug_selector(|| "diff-search-input".into())
-            .h_6()
-            .w_48()
-            .px_2()
-            .flex()
-            .items_center()
-            .rounded(radius::MD)
-            .border_1()
-            .border_color(p.input)
-            .child(ui::input(&input).appearance(false).bordered(false)),
-        )
-        .child(
-          ui::text(div(), TextSize::Xs)
-            .debug_selector(|| "diff-search-count".into())
-            .px_2()
-            .whitespace_nowrap()
-            .text_color(muted)
-            .child(format!("{shown} of {}", self.search.total)),
-        )
-        .child(
-          self.tip(
-            "diff-search-prev-tip".into(),
-            "Previous (Shift+Enter)",
-            ui::IconButton::new(
-              "diff-search-prev",
-              theme::ICON_CHEVRON_UP,
-              "Previous match",
-              p,
-            )
-            .size(ui::IconButtonSize::Small)
-            .disabled(empty)
-            .when(!empty, |this| {
-              this.on_click(cx.listener(|view, _, _, cx| view.step_match(-1, cx)))
-            }),
-            cx,
-          ),
-        )
-        .child(
-          self.tip(
-            "diff-search-next-tip".into(),
-            "Next (Enter)",
-            ui::IconButton::new(
-              "diff-search-next",
-              theme::ICON_CHEVRON_DOWN,
-              "Next match",
-              p,
-            )
-            .size(ui::IconButtonSize::Small)
-            .disabled(empty)
-            .when(!empty, |this| {
-              this.on_click(cx.listener(|view, _, _, cx| view.step_match(1, cx)))
-            }),
-            cx,
-          ),
-        )
-        .child(
-          self.tip(
-            "diff-search-close-tip".into(),
-            "Close (Esc)",
-            ui::IconButton::new("diff-search-close", theme::ICON_X, "Close search", p)
-              .size(ui::IconButtonSize::Small)
-              .on_click(cx.listener(|view, _, _, cx| view.close_search(cx))),
-            cx,
-          ),
-        ),
-    )
+  pub(super) fn search_bar(
+    &mut self,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> Option<impl IntoElement> {
+    find::bar(self, "diff-search", p, cx)
   }
+}
+
+/// Takes a drawn line's text layout, once it is laid out and placed.
+pub(super) type RecordLayout = Rc<dyn Fn(gpui::TextLayout)>;
+
+/// `styled` in a box that hands its layout to `record` at prepaint, when
+/// asking it where a point falls is safe.
+fn with_layout(styled: StyledText, record: Option<RecordLayout>) -> Div {
+  let layout = styled.layout().clone();
+  div()
+    .relative()
+    .child(styled)
+    .when_some(record, |this, record| {
+      this.child(
+        gpui::canvas(move |_, _, _| record(layout.clone()), |_, _, _, _| {})
+          .absolute()
+          .size_0(),
+      )
+    })
 }
 
 #[cfg(test)]
 mod tests {
-  use super::{match_count, match_ranges};
+  use super::match_count;
 
+  /// Round 7 measurement of the find bar's index pass: `match_count` over
+  /// every diff line plus an entry per matching line, as `index_matches`
+  /// does it. `cargo test --lib find_index_cost -- --ignored --nocapture`.
   #[test]
-  fn matches_ignore_case_and_do_not_overlap() {
-    assert_eq!(match_ranges("Logout logout", "LOG"), vec![0..3, 7..10]);
-    assert_eq!(match_ranges("aaaa", "aa"), vec![0..2, 2..4]);
-    assert_eq!(
-      match_ranges("abc", ""),
-      Vec::<std::ops::Range<usize>>::new()
-    );
-    assert_eq!(
-      match_ranges("ab", "abc"),
-      Vec::<std::ops::Range<usize>>::new()
-    );
-  }
-
-  #[test]
-  fn match_count_agrees_with_match_ranges() {
-    for (text, query) in [
-      ("Logout logout", "LOG"),
-      ("aaaa", "aa"),
-      ("aaa", "aa"),
-      ("abc", ""),
-      ("ab", "abc"),
-      ("é x É", "é"),
-      ("let value_1 = VALUE_10", "value_1"),
-    ] {
-      assert_eq!(
-        match_count(text, query),
-        match_ranges(text, query).len(),
-        "{text:?} / {query:?}"
-      );
+  #[ignore = "perf measurement"]
+  fn find_index_cost() {
+    for lines in [3_000usize, 20_000, 100_000] {
+      let text: Vec<String> = (0..lines)
+        .map(|i| {
+          format!(
+            "    let value_{i} = compute_{}(\"item {i}\", {}).map(|v| v + {}); // note {i}",
+            i % 6,
+            i * 3,
+            i * 3
+          )
+        })
+        .collect();
+      for query in ["v", "value_1", "compute_3"] {
+        let started = std::time::Instant::now();
+        let mut index = std::collections::HashMap::new();
+        let mut total = 0;
+        for (l, line) in text.iter().enumerate() {
+          let n = match_count(line, query);
+          if n > 0 {
+            index.insert(("src/module.rs".to_string(), 0usize, l), (total, n));
+            total += n;
+          }
+        }
+        println!(
+          "{lines} lines, query {query:?}: {:?} ({} lines match)",
+          started.elapsed(),
+          index.len()
+        );
+      }
     }
-  }
-
-  #[test]
-  fn matches_keep_byte_offsets_past_wide_characters() {
-    assert_eq!(match_ranges("é x É", "é"), vec![0..2, 5..7]);
   }
 }

@@ -1,6 +1,6 @@
 // Starts the app for the landing capture: the demo event-bus repository
 // (seed.ts), a fake `gh` with fixture PRs, issues and checks, and a fake
-// agent on PATH. Playwright's `webServer` runs it (landing.config.ts).
+// agent on PATH. `capture.ts` runs it.
 import { copyFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";

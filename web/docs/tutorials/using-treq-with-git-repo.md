@@ -1,5 +1,6 @@
 ---
 sidebar_position: 1
+description: Set up Treq with a Git repository and see how Treq workspaces relate to the repo. Keep using your Git remotes to fetch and push.
 ---
 
 # Using Treq with a Git Repository

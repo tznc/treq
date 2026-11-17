@@ -1,0 +1,17 @@
+id: ui-copy-brand-spelling
+language: rust
+severity: error
+message: >
+  Spell brands the way their owners do: GitHub, GitLab, Jujutsu, JavaScript,
+  TypeScript, macOS, iPhone.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+  - "src-tauri/src/mobile/**/*.rs"
+ignores:
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+  - "src-tauri/src/mobile/**/tests.rs"
+  - "src-tauri/src/mobile/**/tests/**"
+rule:
+  kind: string_literal
+  regex: \b(Github|Gitlab|Jujitsu|Javascript|Typescript|MacOS|Macos|Iphone)\b

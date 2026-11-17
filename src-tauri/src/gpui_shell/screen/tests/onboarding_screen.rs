@@ -1,0 +1,1040 @@
+use gpui::TestAppContext;
+
+use super::*;
+
+#[test]
+fn builds_the_checklist_from_the_check() {
+  let list = checklist::from_statuses("Before you start", None, true);
+  assert!(list.validating);
+  assert_eq!(list.groups.len(), 3);
+  // Nothing is reported missing before the first check returns.
+  assert!(!list.groups[1].error);
+  assert!(list
+    .groups
+    .iter()
+    .flat_map(|g| &g.tools)
+    .all(|t| t.installed.is_none()));
+
+  let statuses = [("git", false), ("claude", false), ("gh", true)].map(|(binary, installed)| {
+    crate::core::PrerequisiteStatus {
+      binary: binary.into(),
+      installed,
+    }
+  });
+  let list = checklist::from_statuses("Before you start", Some(&statuses), false);
+  let [required, agents, optional] = &list.groups[..] else {
+    panic!("three groups");
+  };
+  assert_eq!(required.label, "Required");
+  assert!(required.tools[0].required);
+  assert_eq!(required.tools[0].installed, Some(false));
+  assert!(agents.error, "no agent CLI is installed");
+  assert_eq!(agents.tools.len(), 6);
+  assert_eq!(optional.tools[0].installed, Some(true));
+  assert_eq!(
+    optional.tools[0].note.as_deref(),
+    Some("Needed for pull requests and issues")
+  );
+  // The binaries are the ones the backend checks, in its order.
+  let binaries: Vec<_> = list
+    .groups
+    .iter()
+    .flat_map(|g| &g.tools)
+    .map(|t| t.binary.as_str())
+    .collect();
+  assert_eq!(binaries, crate::core::PREREQUISITE_BINARIES);
+}
+
+#[test]
+fn serializes_actions_as_react_reads_them() {
+  let json = serde_json::to_value(ScreenAction::OpenUrl {
+    url: "https://cli.github.com/".into(),
+  })
+  .expect("serialize");
+  assert_eq!(
+    json,
+    serde_json::json!({"kind": "openUrl", "url": "https://cli.github.com/"})
+  );
+  assert_eq!(
+    serde_json::to_value(ScreenAction::RecheckPrerequisites).expect("serialize"),
+    serde_json::json!({"kind": "recheckPrerequisites"})
+  );
+}
+
+#[gpui::test]
+fn the_file_picker_opens_on_its_query(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, workspace_route());
+  let scope = file_picker::Scope {
+    repo_path: "/repo".into(),
+    workspace_id: None,
+    workspace_path: "/repo".into(),
+    query: "zzzz".into(),
+  };
+  h.screen
+    .update(&mut h.cx, |s, cx| s.set_file_picker(Some(scope), cx));
+  assert!(h.shows(gpui::Role::TextInput, "Go to file…"));
+  let query = h.screen.read_with(&h.cx, |s, cx| {
+    s.file_picker
+      .as_ref()
+      .map(|(_, picker)| picker.read(cx).query.clone())
+  });
+  assert_eq!(query.as_deref(), Some("zzzz"));
+}
+
+/// An overlay host that reads nothing.
+struct NoOverlayHost;
+
+impl crate::gpui_shell::overlay::OverlayHost for NoOverlayHost {
+  fn checks(&self, _: &str, _: i64) -> crate::gpui_shell::overlay::PaletteChecks {
+    Default::default()
+  }
+  fn pr(&self, _: &str, _: &str) -> Option<crate::gpui_shell::overlay::PrLink> {
+    None
+  }
+  fn workspaces(&self, _: &str) -> Result<Vec<crate::gpui_shell::overlay::WorkspaceRow>, String> {
+    Ok(Vec::new())
+  }
+  fn branches(&self, _: &str) -> Result<Vec<crate::jj::JjBranch>, String> {
+    Ok(Vec::new())
+  }
+  fn current_branch(&self, _: &str) -> Option<String> {
+    None
+  }
+  fn switch_branch(&self, _: &str, _: &str) -> Result<(), String> {
+    Ok(())
+  }
+  fn open_url(&self, _: &str) {}
+  fn checks_target(&self, _: &str, _: i64) -> Option<crate::core::running_checks::ChecksTarget> {
+    None
+  }
+  fn run_checks(
+    &self,
+    _: &crate::core::running_checks::ChecksTarget,
+    _: &crate::core::running_checks::CheckRun,
+  ) -> Result<Vec<crate::core::checks::JobResult>, String> {
+    Ok(Vec::new())
+  }
+  fn trust_repo(&self, _: &str) -> Result<(), String> {
+    Ok(())
+  }
+  fn notify(&self, _: crate::gpui_shell::native::NativeEvent) {}
+  fn terminal(&self, _: crate::core::palette_commands::TerminalCommand) {}
+}
+
+/// The palette draws over the dimmed app in the repo window, as the file
+/// picker does, rather than in a separate transparent window.
+#[gpui::test]
+fn the_screen_draws_the_palette_over_the_app(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, workspace_route());
+  let snapshot: crate::gpui_shell::OverlaySnapshot = serde_json::from_value(serde_json::json!({
+    "kind": "commandPalette", "dark": false, "repoPath": "/repo", "stash": true,
+    "hasSelectedWorkspace": false, "workspace": null,
+  }))
+  .expect("snapshot");
+  let sink: ActionSink = std::rc::Rc::new(|_, _| {});
+  let host: std::sync::Arc<dyn crate::gpui_shell::overlay::OverlayHost> =
+    std::sync::Arc::new(NoOverlayHost);
+  h.screen.update(&mut h.cx, |s, cx| {
+    s.set_overlay(Some(snapshot), host, sink, cx)
+  });
+  assert!(h.shows(gpui::Role::TextInput, "Type a command or search…"));
+  // the_palette_covers_and_centres_on_the_whole_window checks the backdrop.
+  h.screen.update(&mut h.cx, |s, cx| {
+    s.set_overlay(
+      None,
+      std::sync::Arc::new(NoOverlayHost),
+      std::rc::Rc::new(|_, _| {}),
+      cx,
+    )
+  });
+  assert!(!h.shows(gpui::Role::TextInput, "Type a command or search…"));
+}
+
+#[gpui::test]
+fn the_window_models_file_picker_reports_a_dismissal(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, workspace_route());
+  let scope = file_picker::Scope {
+    repo_path: "/repo".into(),
+    workspace_id: None,
+    workspace_path: "/repo".into(),
+    query: String::new(),
+  };
+  h.screen
+    .update(&mut h.cx, |s, cx| s.set_file_picker(Some(scope), cx));
+  assert!(h.shows(gpui::Role::TextInput, "Go to file…"));
+  h.click_backdrop();
+  assert_eq!(
+    h.sent().last(),
+    Some(&ScreenAction::Press {
+      id: "filePicker.close".into()
+    })
+  );
+  h.screen
+    .update(&mut h.cx, |s, cx| s.set_file_picker(None, cx));
+  assert!(!h.shows(gpui::Role::TextInput, "Go to file…"));
+}
+
+#[gpui::test]
+fn the_ui_zoom_scales_pixel_lengths_as_css_zoom_does(cx: &mut TestAppContext) {
+  use crate::gpui_shell::ui::{apply_zoom, UiZoom};
+  let mut card = |zoom: u32| {
+    let mut h = Harness::new(cx, onboarding());
+    h.cx.update(|window, cx| {
+      cx.set_global(UiZoom(zoom));
+      apply_zoom(window, cx);
+      window.refresh();
+    });
+    h.cx.run_until_parked();
+    h.cx
+      .debug_bounds("onboarding-open-repo")
+      .expect("card")
+      .size
+  };
+  let (normal, zoomed) = (card(100), card(150));
+  assert!(
+    (f32::from(zoomed.height) - f32::from(normal.height) * 1.5).abs() < 1.,
+    "{normal:?} {zoomed:?}"
+  );
+}
+
+#[gpui::test]
+fn onboarding_runs_its_own_actions(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    installed: vec![("git", false), ("gh", true)],
+    listing: listing(),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host.clone());
+  // This computer's tools are checked as the screen opens, shown in its
+  // popover.
+  assert!(!h.shows(gpui::Role::Button, "Install Git"));
+  h.click("machine-tools-local");
+  assert!(h.shows(gpui::Role::Button, "Install Git"));
+  assert!(!h.shows(gpui::Role::Button, "Install GitHub CLI"));
+  h.click("prerequisites-recheck");
+  h.click("install-git");
+  h.click("onboarding-open-repo");
+  h.click("recent-local-0");
+  assert_eq!(
+    host.calls(),
+    [
+      "check",
+      "check",
+      "open https://git-scm.com/downloads",
+      "open_local /home/me/app",
+    ]
+  );
+  // The window model asks for the folder.
+  assert_eq!(h.sent(), vec![ScreenAction::OpenRepo]);
+}
+
+#[gpui::test]
+fn onboarding_groups_recent_repositories_by_machine(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host.clone());
+  assert!(h.shows(gpui::Role::Heading, "SSH Hosts"));
+  for name in ["This computer", "Dev box", "Cloud workspace", "web"] {
+    assert!(h.shows(gpui::Role::ListItem, name), "{name}");
+  }
+  // One recent "app" under this computer, one under the SSH host.
+  assert_eq!(recents(&mut h, "app"), 2);
+  assert!(!h.shows(gpui::Role::Status, "No recent repositories"));
+  // A remote repository opens through the window, by its saved record; a
+  // machine's row connects to it.
+  h.click("recent-ssh:ep-1-0");
+  h.click("machine-ssh:ep-1");
+  // A dev container opens its repository here.
+  h.click("machine-devcontainer:c1");
+  h.click("machine-local");
+  // Before its workspace runs, the cloud row sets it up.
+  h.click("machine-cloud");
+  assert_eq!(
+    h.sent(),
+    vec![
+      press("machines.openSaved:r1"),
+      press("machines.connect:ep-1"),
+      ScreenAction::OpenRepo,
+      press("machines.cloud"),
+    ]
+  );
+  assert_eq!(host.calls(), ["check", "open_local /home/me/web"]);
+}
+
+#[gpui::test]
+fn onboarding_adds_the_dev_containers_docker_lists_to_its_rows(cx: &mut TestAppContext) {
+  use machines::{Machine, Place, Recent};
+  let mut base = listing();
+  base
+    .machines
+    .retain(|m| !matches!(m.place, Place::DevContainer { .. }));
+  base.containers = true;
+  let host = Arc::new(FakeHost {
+    listing: base,
+    containers: (
+      vec![Machine {
+        id: "devcontainer:c2".into(),
+        place: Place::DevContainer {
+          container_id: "c2".into(),
+          repo_path: "/home/me/api".into(),
+          running: true,
+        },
+        name: "api".into(),
+        detail: "Running".into(),
+        terminals: None,
+      }],
+      vec![Recent {
+        machine_id: "devcontainer:c2".into(),
+        name: "api".into(),
+        path: "/home/me/api".into(),
+        saved_id: None,
+      }],
+    ),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host);
+  assert!(h.shows(gpui::Role::ListItem, "This computer"));
+  assert!(h.shows(gpui::Role::ListItem, "api"));
+  assert!(!h.shows(gpui::Role::ListItem, "web"));
+}
+
+#[gpui::test]
+fn onboarding_offers_sign_in_instead_of_a_cloud_row_when_signed_out(cx: &mut TestAppContext) {
+  let mut signed_out = listing();
+  signed_out.machines.retain(|m| m.id != "cloud");
+  signed_out.signed_out = true;
+  let host = Arc::new(FakeHost {
+    listing: signed_out,
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host.clone());
+  assert!(!h.shows(gpui::Role::ListItem, "Cloud workspace"));
+  h.click("onboarding-sign-in");
+  assert!(host
+    .calls()
+    .contains(&"open http://localhost:3001/sign-in?source=desktop".to_string()));
+  let mut h = Harness::with_host(
+    cx,
+    onboarding(),
+    Arc::new(FakeHost {
+      listing: listing(),
+      ..FakeHost::default()
+    }),
+  );
+  assert!(
+    !h.shows(gpui::Role::Button, "Sign in to Treq Cloud"),
+    "signed in: the cloud row instead"
+  );
+  assert!(h.shows(gpui::Role::ListItem, "Cloud workspace"));
+}
+
+#[gpui::test]
+fn onboarding_checks_a_host_only_when_its_popover_opens(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    host_tools: Some(Ok(vec![
+      crate::core::PrerequisiteStatus {
+        binary: "git".into(),
+        installed: true,
+      },
+      crate::core::PrerequisiteStatus {
+        binary: "tmux".into(),
+        installed: false,
+      },
+    ])),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host.clone());
+  assert_eq!(host.calls(), ["check"]);
+  h.click("machine-tools-ssh:ep-1");
+  assert!(h.shows(gpui::Role::Button, "Check again"));
+  // jj is required on a host and tmux is offered; Git is there.
+  assert!(h.shows(gpui::Role::Button, "Install tmux"));
+  assert!(h.shows(gpui::Role::Button, "Install Jujutsu"));
+  assert!(!h.shows(gpui::Role::Button, "Install Git"));
+  assert!(host.calls().iter().any(|c| c.starts_with("tools Ssh")));
+  // Removing the host closes the popover and lists the machines again.
+  h.click("machine-remove");
+  assert!(!h.shows(gpui::Role::Button, "Check again"));
+  // In-app confirmation first: Cancel keeps the host.
+  h.answer("Cancel");
+  assert!(!host.calls().iter().any(|c| c.starts_with("remove Ssh")));
+  h.click("machine-tools-ssh:ep-1");
+  h.click("machine-remove");
+  h.answer("Remove host");
+  assert!(host.calls().iter().any(|c| c.starts_with("remove Ssh")));
+}
+
+#[gpui::test]
+fn onboarding_switches_a_hosts_terminals_to_tmux_after_confirming(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    host_tools: Some(Ok(vec![])),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host.clone());
+  h.click("machine-tools-ssh:ep-1");
+  assert!(h.shows(gpui::Role::Button, "Reset terminals…"));
+  h.click("machine-terminal-backend");
+  // Switching closes the host's open terminals, so it asks first.
+  h.answer("Cancel");
+  assert!(!host.calls().iter().any(|c| c.starts_with("terminals")));
+  h.click("machine-tools-ssh:ep-1");
+  h.click("machine-terminal-backend");
+  h.answer("Use tmux");
+  assert!(
+    host
+      .calls()
+      .iter()
+      .any(|c| c.starts_with("terminals Ssh") && c.ends_with("Tmux")),
+    "{:?}",
+    host.calls()
+  );
+}
+
+/// Opens the SSH host's popover and reads what it says about terminals.
+fn host_terminals_text(cx: &mut TestAppContext, host: Arc<FakeHost>) -> (Harness, Vec<String>) {
+  use gpui_testing_library::prelude::*;
+  let mut h = Harness::with_host(cx, onboarding(), host);
+  h.click("machine-tools-ssh:ep-1");
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  let status: Vec<String> = screen
+    .get_all_by_role(by::role(gpui::Role::Status))
+    .iter()
+    .filter_map(|n| n.name())
+    .collect();
+  let texts = [
+    "Treq daemon running",
+    "Treq daemon not running",
+    "Couldn't ask the host",
+    "tmux",
+  ]
+  .iter()
+  .filter(|t| status.iter().any(|s| s.contains(**t)))
+  .map(|t| t.to_string())
+  .collect();
+  (h, texts)
+}
+
+#[gpui::test]
+fn onboarding_shows_the_daemon_the_host_reports(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    host_tools: Some(Ok(vec![])),
+    terminal_status: Some(Ok(running_daemon(2))),
+    ..FakeHost::default()
+  });
+  let (mut h, texts) = host_terminals_text(cx, host.clone());
+  assert!(
+    texts.contains(&"Treq daemon running".to_string()),
+    "{texts:?}"
+  );
+  assert!(h.shows(
+    gpui::Role::Status,
+    "Treq daemon running (pid 4242, treq 0.3.0): 2 terminals."
+  ));
+  assert!(host
+    .calls()
+    .iter()
+    .any(|c| c.starts_with("read terminal status Ssh")));
+}
+
+#[gpui::test]
+fn onboarding_says_when_the_daemon_is_not_running(cx: &mut TestAppContext) {
+  let mut status = running_daemon(0);
+  status.daemon = None;
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    host_tools: Some(Ok(vec![])),
+    terminal_status: Some(Ok(status)),
+    ..FakeHost::default()
+  });
+  let (_, texts) = host_terminals_text(cx, host);
+  assert!(
+    texts.contains(&"Treq daemon not running".to_string()),
+    "{texts:?}"
+  );
+}
+
+#[gpui::test]
+fn onboarding_says_when_the_host_cannot_report_its_terminals(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    host_tools: Some(Ok(vec![])),
+    terminal_status: Some(Err("ssh: connection refused".into())),
+    ..FakeHost::default()
+  });
+  let (_, texts) = host_terminals_text(cx, host);
+  assert!(
+    texts.contains(&"Couldn't ask the host".to_string()),
+    "{texts:?}"
+  );
+}
+
+#[gpui::test]
+fn onboarding_resets_a_hosts_terminals_after_confirming(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    host_tools: Some(Ok(vec![])),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host.clone());
+  h.click("machine-tools-ssh:ep-1");
+  h.click("machine-reset-terminals");
+  h.answer("Cancel");
+  assert!(!host
+    .calls()
+    .iter()
+    .any(|c| c.starts_with("reset terminals")));
+  h.click("machine-tools-ssh:ep-1");
+  h.click("machine-reset-terminals");
+  h.answer("Reset terminals");
+  assert!(
+    host
+      .calls()
+      .iter()
+      .any(|c| c.starts_with("reset terminals Ssh")),
+    "{:?}",
+    host.calls()
+  );
+}
+
+#[gpui::test]
+fn onboarding_shows_no_terminal_settings_for_this_computer(cx: &mut TestAppContext) {
+  let mut h = Harness::with_host(
+    cx,
+    onboarding(),
+    Arc::new(FakeHost {
+      listing: listing(),
+      ..FakeHost::default()
+    }),
+  );
+  h.click("machine-tools-local");
+  assert!(h.shows(gpui::Role::Button, "Check again"));
+  assert!(!h.shows(gpui::Role::Button, "Reset terminals…"));
+}
+
+#[gpui::test]
+fn onboarding_says_why_a_host_could_not_be_checked(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host);
+  h.click("machine-tools-ssh:ep-1");
+  assert!(h.shows(gpui::Role::Alert, "Couldn't check the tools"));
+}
+
+#[gpui::test]
+fn onboarding_without_recents_says_where_they_appear(cx: &mut TestAppContext) {
+  let mut h = Harness::with_host(cx, onboarding(), Arc::new(FakeHost::default()));
+  assert!(h.shows(gpui::Role::Status, "No recent repositories"));
+}
+
+fn onboarding_with_form(form: serde_json::Value) -> ScreenSnapshot {
+  serde_json::from_value(serde_json::json!({
+    "kind": "onboarding",
+    "dark": false,
+    "remoteRepo": form,
+  }))
+  .expect("onboarding")
+}
+
+#[gpui::test]
+fn onboarding_draws_the_remote_repository_form(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(
+    cx,
+    onboarding_with_form(serde_json::json!({
+      "endpointId": "ep-1",
+      "selector": true,
+      "saved": [{ "id": "r1", "display_name": "app", "canonical_remote_path": "/srv/app" }],
+      "path": "/srv/new",
+      "probe": { "is_repo": false, "needs_clone": true },
+      "cloneUrl": "",
+      "confirmInit": false,
+      "error": "probe failed",
+    })),
+    host,
+  );
+  for (role, name) in [
+    (gpui::Role::Button, "Go to /srv/new"),
+    (gpui::Role::CheckBox, "Show hidden folders"),
+    (gpui::Role::Button, "Home"),
+    (gpui::Role::Group, "Not a repository"),
+    (gpui::Role::Button, "Clone repository"),
+    (gpui::Role::Button, "Initialize repository"),
+    (gpui::Role::Alert, "probe failed"),
+  ] {
+    assert!(h.shows(role, name), "{name}");
+  }
+  // The group lists the saved repositories; the form only opens new ones.
+  assert_eq!(recents(&mut h, "app"), 2, "no saved repository in the form");
+  assert!(!h.shows(gpui::Role::Button, "Open"));
+  assert!(!h.shows(gpui::Role::Button, "Reauthenticate"));
+  // Clone and init already show for the folder.
+  assert!(!h.shows(gpui::Role::Button, "Use this folder"));
+  h.click("remote-repo-confirm-init");
+  // Initialize waits for the confirmation; Clone for a URL.
+  h.click("remote-repo-init");
+  h.click("remote-repo-clone");
+  assert_eq!(
+    h.sent(),
+    vec![ScreenAction::Field {
+      field: "remoteRepo.confirmInit".into(),
+      value: true.into()
+    }]
+  );
+}
+
+fn browsed_form(path: &str, is_repo: bool, show_hidden: bool) -> serde_json::Value {
+  serde_json::json!({
+    "endpointId": "ep-1",
+    "selector": true,
+    "path": path,
+    "showHidden": show_hidden,
+    "listing": {
+      "path": path,
+      "parent": "/home",
+      "is_repo": is_repo,
+      "entries": [
+        { "name": ".config", "path": format!("{path}/.config"), "hidden": true, "is_repo": false },
+        { "name": "app", "path": format!("{path}/app"), "hidden": false, "is_repo": true },
+      ],
+    },
+  })
+}
+
+#[gpui::test]
+fn the_remote_browser_lists_folders_and_hides_dot_folders(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(
+    cx,
+    onboarding_with_form(browsed_form("/home/dev", false, false)),
+    host,
+  );
+  assert!(h.shows(gpui::Role::ListItem, "app"));
+  assert!(
+    !h.shows(gpui::Role::ListItem, ".config"),
+    "hidden by default"
+  );
+  assert!(h.shows(gpui::Role::Button, "Use this folder"));
+  assert!(!h.shows(gpui::Role::Button, "Open"));
+  h.click("remote-browse-folder-app");
+  h.click("remote-browse-crumb-1");
+  h.click("remote-browse-home");
+  h.click("remote-browse-hidden");
+  h.click("remote-repo-use-folder");
+  assert_eq!(
+    h.sent(),
+    vec![
+      field("remoteRepo.browse", "/home/dev/app".into()),
+      field("remoteRepo.browse", "/home".into()),
+      field("remoteRepo.browse", "~".into()),
+      field("remoteRepo.showHidden", true.into()),
+      press("remoteRepo.useFolder"),
+    ]
+  );
+}
+
+#[gpui::test]
+fn the_remote_browser_shows_hidden_folders_and_opens_a_repository(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(
+    cx,
+    onboarding_with_form(browsed_form("/home/dev/app", true, true)),
+    host,
+  );
+  assert!(h.shows(gpui::Role::ListItem, ".config"));
+  assert!(!h.shows(gpui::Role::Button, "Use this folder"));
+  h.click("remote-repo-open");
+  assert_eq!(h.sent(), vec![press("remoteRepo.open")]);
+}
+
+#[gpui::test]
+fn onboarding_offers_reauthentication_when_cut_off(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(
+    cx,
+    onboarding_with_form(serde_json::json!({
+      "endpointId": "ep-1",
+      "cutoff": "session_ended",
+      "selector": true,
+    })),
+    host,
+  );
+  assert!(h.shows(gpui::Role::Button, "Reauthenticate"));
+  assert!(!h.shows(gpui::Role::CheckBox, "Show hidden folders"));
+  h.click("remote-repo-reauthenticate");
+  assert_eq!(h.sent(), vec![press("remoteRepo.reauthenticate")]);
+}
+
+#[gpui::test]
+fn onboarding_adds_machines_from_their_sections(cx: &mut TestAppContext) {
+  let mut empty = listing();
+  empty
+    .machines
+    .retain(|m| matches!(m.place, machines::Place::Local));
+  empty.ssh = true;
+  empty.containers = true;
+  let host = Arc::new(FakeHost {
+    listing: empty,
+    picked: Some("/home/me/web".into()),
+    container_error: Some("The Dev Containers CLI is not installed.".into()),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host.clone());
+  // Both kinds are offered under Other machines' +.
+  h.click("machines-add-other");
+  assert!(h.shows(gpui::Role::Button, "Add SSH host"));
+  assert!(h.shows(gpui::Role::Button, "Add dev container"));
+  h.click("machines-add-ssh");
+  assert_eq!(h.sent(), vec![press("machines.addSsh")]);
+  h.click("machines-add-other");
+  h.click("machines-add-container");
+  h.cx.run_until_parked();
+  assert!(host
+    .calls()
+    .contains(&"container up /home/me/web".to_string()));
+  assert!(
+    h.shows(gpui::Role::Alert, "Couldn't start the dev container"),
+    "why it did not start"
+  );
+
+  let mut off = listing();
+  off
+    .machines
+    .retain(|m| matches!(m.place, machines::Place::Local));
+  let host = Arc::new(FakeHost {
+    listing: off,
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host);
+  assert!(
+    !h.shows(gpui::Role::Button, "Add another machine"),
+    "the previews are off"
+  );
+  assert!(!h.shows(gpui::Role::Button, "Add SSH host"));
+  assert!(!h.shows(gpui::Role::Button, "Add dev container"));
+}
+
+#[gpui::test]
+fn onboarding_titles_the_page_open_a_repository(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host);
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  expect(screen.get_by_role(by::role(gpui::Role::Heading).name("Open a repository")))
+    .to_be_visible();
+}
+
+#[gpui::test]
+fn onboarding_collapses_empty_host_groups_under_other_machines(cx: &mut TestAppContext) {
+  let mut empty = listing();
+  empty
+    .machines
+    .retain(|m| matches!(m.place, machines::Place::Local));
+  empty.ssh = true;
+  empty.containers = true;
+  let host = Arc::new(FakeHost {
+    listing: empty,
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host);
+  // One group with one +, not two empty ones.
+  assert!(h.shows(gpui::Role::Heading, "Other machines"));
+  assert!(!h.shows(gpui::Role::Heading, "SSH Hosts"));
+  assert!(!h.shows(gpui::Role::Heading, "Dev Containers"));
+  assert!(!h.shows(gpui::Role::Button, "Add SSH host"));
+  h.click("machines-add-other");
+  // Its + offers both kinds.
+  assert!(h.shows(gpui::Role::Button, "Add SSH host"));
+  assert!(h.shows(gpui::Role::Button, "Add dev container"));
+  h.click("machines-add-ssh");
+  assert_eq!(h.sent(), vec![press("machines.addSsh")]);
+}
+
+#[gpui::test]
+fn onboarding_splits_other_machines_once_one_exists(cx: &mut TestAppContext) {
+  let mut with_host = listing();
+  with_host
+    .machines
+    .retain(|m| !matches!(m.place, machines::Place::DevContainer { .. }));
+  with_host.ssh = true;
+  with_host.containers = true;
+  let host = Arc::new(FakeHost {
+    listing: with_host,
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host);
+  assert!(!h.shows(gpui::Role::Heading, "Other machines"));
+  assert!(h.shows(gpui::Role::Heading, "SSH Hosts"));
+  assert!(h.shows(gpui::Role::Heading, "Dev Containers"));
+  assert!(h.shows(gpui::Role::Button, "Add SSH host"));
+  assert!(h.shows(gpui::Role::Button, "Add dev container"));
+}
+
+/// The screen beside a sidebar, as the shell lays them out.
+struct BesideSidebar {
+  screen: Entity<Screen>,
+}
+
+impl Render for BesideSidebar {
+  fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    div()
+      .size_full()
+      .flex()
+      .child(
+        div()
+          .w(gpui::px(260.))
+          .h_full()
+          .flex_none()
+          .debug_selector(|| "sidebar".into()),
+      )
+      .child(
+        div()
+          .flex_1()
+          .min_w_0()
+          .h_full()
+          .child(Screen::element(&self.screen)),
+      )
+  }
+}
+
+/// The palette's backdrop dims the whole window, sidebar included, and its
+/// dialog is centred on the window, not on the screen beside the sidebar.
+#[gpui::test]
+fn the_palette_covers_and_centres_on_the_whole_window(cx: &mut TestAppContext) {
+  cx.update(crate::gpui_shell::theme::init);
+  let (root, vcx) = cx.add_window_view(|_, cx| BesideSidebar {
+    screen: cx.new(|cx| {
+      Screen::new(
+        workspace_route(),
+        std::rc::Rc::new(|_, _| {}),
+        std::rc::Rc::new(|_, _| {}),
+        std::sync::Arc::new(FakeHost::default()),
+        cx,
+      )
+    }),
+  });
+  vcx.simulate_resize(gpui::size(gpui::px(1400.), gpui::px(900.)));
+  let screen = root.read_with(vcx, |root, _| root.screen.clone());
+  let snapshot: crate::gpui_shell::OverlaySnapshot = serde_json::from_value(serde_json::json!({
+    "kind": "commandPalette", "dark": false, "repoPath": "/repo", "stash": true,
+    "hasSelectedWorkspace": false, "workspace": null,
+  }))
+  .expect("snapshot");
+  screen.update(vcx, |s, cx| {
+    s.set_overlay(
+      Some(snapshot),
+      std::sync::Arc::new(NoOverlayHost),
+      std::rc::Rc::new(|_, _| {}),
+      cx,
+    )
+  });
+  vcx.run_until_parked();
+  let window = vcx.update(|window, _| window.viewport_size());
+  let backdrop = vcx
+    .debug_bounds("overlay-backdrop")
+    .expect("backdrop drawn");
+  assert_eq!(
+    backdrop.origin,
+    gpui::Point::default(),
+    "the backdrop starts at the window's origin"
+  );
+  assert_eq!(
+    backdrop.size, window,
+    "the backdrop covers the whole window"
+  );
+  let dialog = vcx.debug_bounds("overlay-dialog").expect("dialog drawn");
+  assert!(
+    (dialog.center().x - window.width / 2.).abs() < gpui::px(1.),
+    "dialog centred at {:?}, window centre {:?}",
+    dialog.center().x,
+    window.width / 2.
+  );
+}
+
+#[gpui::test]
+fn onboarding_lists_projects_and_opens_one(cx: &mut TestAppContext) {
+  let mut with_projects = listing();
+  with_projects.projects = vec![machines::ProjectSummary {
+    id: "p1".into(),
+    name: "Checkout revamp".into(),
+    repos: vec!["/home/me/web".into(), "/home/me/api".into()],
+    org_id: None,
+  }];
+  let host = Arc::new(FakeHost {
+    listing: with_projects,
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host.clone());
+  assert!(h.shows(gpui::Role::Heading, "Projects"));
+  h.click("project-p1");
+  assert!(host.calls().contains(&"open_project p1".to_string()));
+}
+
+#[gpui::test]
+fn onboarding_hides_projects_without_any(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    listing: listing(),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host);
+  assert!(!h.shows(gpui::Role::Heading, "Projects"));
+}
+
+#[gpui::test]
+fn onboarding_opens_the_project_of_the_row_clicked(cx: &mut TestAppContext) {
+  let mut with_projects = listing();
+  with_projects.projects = ["p1", "p2"]
+    .into_iter()
+    .map(|id| machines::ProjectSummary {
+      id: id.into(),
+      name: format!("Project {id}"),
+      repos: vec![format!("/home/me/{id}")],
+      org_id: None,
+    })
+    .collect();
+  let host = Arc::new(FakeHost {
+    listing: with_projects,
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host.clone());
+  assert!(
+    h.shows(gpui::Role::ListItem, "Project p1") && h.shows(gpui::Role::ListItem, "Project p2")
+  );
+  h.click("project-p2");
+  let opened: Vec<String> = host
+    .calls()
+    .into_iter()
+    .filter(|c| c.starts_with("open_project"))
+    .collect();
+  assert_eq!(opened, ["open_project p2"]);
+  // The screen opens it itself; nothing goes to the window model.
+  assert!(h.sent().is_empty(), "{:?}", h.sent());
+}
+
+#[gpui::test]
+fn onboarding_lists_projects_above_recent_repositories(cx: &mut TestAppContext) {
+  let mut with_projects = listing();
+  with_projects.projects = vec![machines::ProjectSummary {
+    id: "p1".into(),
+    name: "Checkout".into(),
+    repos: vec!["/home/me/web".into()],
+    org_id: None,
+  }];
+  let host = Arc::new(FakeHost {
+    listing: with_projects,
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host);
+  assert!(h.shows(gpui::Role::Heading, "Projects"));
+  let projects = h.cx.debug_bounds("onboarding-projects").expect("projects");
+  let recent = h.cx.debug_bounds("recent-local-0").expect("recent");
+  assert!(projects.origin.y < recent.origin.y);
+}
+
+#[gpui::test]
+fn onboarding_with_nothing_shows_the_empty_state_and_no_projects(cx: &mut TestAppContext) {
+  let mut empty = listing();
+  empty.projects.clear();
+  empty.recents.clear();
+  let host = Arc::new(FakeHost {
+    listing: empty,
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host);
+  assert!(!h.shows(gpui::Role::Heading, "Projects"));
+  assert!(h.shows(gpui::Role::Status, "No recent repositories"));
+}
+
+/// How many recent repositories named `name` the machine groups list.
+fn recents(h: &mut Harness, name: &str) -> usize {
+  h.rendered()
+    .query_all_by_role(gpui_testing_library::by::role(gpui::Role::ListItem).name(name))
+    .len()
+}
+
+fn owned(id: &str, org: Option<&str>) -> machines::ProjectSummary {
+  machines::ProjectSummary {
+    id: id.into(),
+    name: format!("Project {id}"),
+    repos: vec![format!("/home/me/{id}")],
+    org_id: org.map(Into::into),
+  }
+}
+
+#[gpui::test]
+fn onboarding_hides_the_owner_switcher_without_teams(cx: &mut TestAppContext) {
+  let mut l = listing();
+  l.projects = vec![owned("p1", None)];
+  let host = Arc::new(FakeHost {
+    listing: l,
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host);
+  assert!(h.shows(gpui::Role::ListItem, "Project p1"));
+  assert!(!h.shows(gpui::Role::Tab, "Personal"));
+}
+
+#[gpui::test]
+fn onboarding_switches_projects_between_personal_and_a_team(cx: &mut TestAppContext) {
+  let mut l = listing();
+  l.projects = vec![owned("mine", None), owned("team", Some("o1"))];
+  l.teams = vec![("o1".into(), "Acme".into())];
+  let host = Arc::new(FakeHost {
+    listing: l,
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host);
+  assert!(h.shows(gpui::Role::Tab, "Acme"));
+  assert!(
+    h.shows(gpui::Role::ListItem, "Project mine") && !h.shows(gpui::Role::ListItem, "Project team"),
+    "personal first"
+  );
+  h.click("projects-owner-o1");
+  assert!(
+    h.shows(gpui::Role::ListItem, "Project team") && !h.shows(gpui::Role::ListItem, "Project mine")
+  );
+}
+
+#[gpui::test]
+fn onboarding_rereads_projects_when_switching_owner(cx: &mut TestAppContext) {
+  let mut l = listing();
+  l.projects = vec![owned("mine", None)];
+  l.teams = vec![("o1".into(), "Acme".into())];
+  let host = Arc::new(FakeHost {
+    listing: l,
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, onboarding(), host.clone());
+  h.cx.run_until_parked();
+  let before = host.listings.load(std::sync::atomic::Ordering::SeqCst);
+  h.click("projects-owner-o1");
+  h.cx.run_until_parked();
+  assert!(host.listings.load(std::sync::atomic::Ordering::SeqCst) > before);
+}

@@ -12,6 +12,7 @@ defaults:
     working-directory: web
 
 permissions:
+  actions: read
   contents: write
 
 jobs:
@@ -20,10 +21,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Setup Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: "24.3"
           cache: npm
@@ -32,18 +33,23 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Fetch skills catalog
-        # GITHUB_TOKEN raises the api.github.com rate limit for the per-repo
-        # star-count lookups.
+      # Pins every source to its branch head and refreshes stars in the lock,
+      # then uploads the catalog for builds. GITHUB_TOKEN raises the
+      # api.github.com rate limit for the star lookups.
+      - name: Update skills catalog
+        uses: ./.github/actions/skills-catalog
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run build:skills-catalog
+        with:
+          github-token: ${{ github.token }}
+          args: --update
+          upload: "true"
 
-      - name: Commit and push catalog
+      - name: Commit and push lock
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add src/data/skills.json
+          git add skills.lock.json
           git diff --cached --quiet && echo "No changes, skipping push." && exit 0
           git commit -m "chore: refresh skills catalog"
           git push origin HEAD:main

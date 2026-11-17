@@ -166,7 +166,6 @@ fn test_list_commits_on_feature_branch_returns_diverged_view() {
     .iter()
     .filter(|c| !c.on_target_only)
     .collect();
-  let target_commits: Vec<_> = result.commits.iter().filter(|c| c.on_target_only).collect();
 
   assert!(
     branch_commits
@@ -175,7 +174,7 @@ fn test_list_commits_on_feature_branch_returns_diverged_view() {
     "feature work should appear in branch-unique commits"
   );
   assert!(
-    target_commits.is_empty(),
+    !result.commits.iter().any(|c| c.on_target_only),
     "target-ahead commits should be omitted when include_target_branch_history is false"
   );
   assert!(

@@ -75,7 +75,7 @@ fn browser(h: &mut Harness) -> Entity<FileBrowserView> {
   h.cx.run_until_parked();
   h.screen.read_with(&h.cx, |screen, cx| {
     let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
-    workspace.file_browser.clone().expect("file browser")
+    workspace.file_browser().cloned().expect("file browser")
   })
 }
 
@@ -87,19 +87,25 @@ fn selected(h: &mut Harness) -> Option<String> {
 #[gpui::test]
 fn file_browser_replaces_the_code_tab_and_opens_the_readme(cx: &mut TestAppContext) {
   let (mut h, host) = harness(cx, serde_json::json!({}));
-  assert!(h.drawn("file-browser"));
-  assert!(!h.drawn("code-readme"));
+  assert!(h.shows(gpui::Role::Group, "File browser"));
+  assert!(!h.shows(gpui::Role::Group, "README"));
   assert_eq!(selected(&mut h), Some(format!("{BASE}/README.md")));
-  assert!(h.drawn("file-content"));
-  assert!(h.drawn("file-content-path"));
-  assert!(h.drawn("code-line-1"));
-  assert!(h.drawn("code-line-2"));
-  assert!(!h.drawn("code-line-3"));
-  assert!(h.drawn("file-modified"));
+  assert!(h.shows(gpui::Role::Button, "Copy file contents"));
+  assert!(h.shows(gpui::Role::Heading, "README.md"));
+  assert!(h.shows(gpui::Role::Button, "Line 1"));
+  assert!(h.shows(gpui::Role::Button, "Line 2"));
+  assert!(!h.shows(gpui::Role::Button, "Line 3"));
+  assert!(h
+    .rendered()
+    .query_by_role(
+      gpui_testing_library::by::role(gpui::Role::Label)
+        .name(gpui_testing_library::TextMatch::regex("^Modified "))
+    )
+    .is_some());
   // Markdown offers its preview; hidden directories are left out.
-  assert!(h.drawn("markdown-preview-tab"));
-  assert!(h.drawn("file-tree-src"));
-  assert!(!h.drawn("file-tree-.git"));
+  assert!(h.shows(gpui::Role::Tab, "Preview"));
+  assert!(h.shows(gpui::Role::Button, "src"));
+  assert!(!h.shows(gpui::Role::Button, ".git"));
   assert!(host
     .calls()
     .contains(&format!("read file {BASE}/README.md")));
@@ -108,17 +114,17 @@ fn file_browser_replaces_the_code_tab_and_opens_the_readme(cx: &mut TestAppConte
 #[gpui::test]
 fn file_browser_expands_folders_and_opens_files(cx: &mut TestAppContext) {
   let (mut h, host) = harness(cx, serde_json::json!({}));
-  assert!(!h.drawn("file-tree-src/login.rs"));
+  assert!(!h.shows(gpui::Role::Button, "login.rs"));
   h.click("file-tree-src");
-  assert!(h.drawn("file-tree-src/login.rs"));
+  assert!(h.shows(gpui::Role::Button, "login.rs"));
   assert!(host.calls().contains(&format!("read dir {BASE}/src")));
   h.click("file-tree-src/login.rs");
   assert_eq!(selected(&mut h), Some(format!("{BASE}/src/login.rs")));
-  assert!(h.drawn("code-line-3"));
-  assert!(!h.drawn("markdown-preview-tab"));
+  assert!(h.shows(gpui::Role::Button, "Line 3"));
+  assert!(!h.shows(gpui::Role::Tab, "Preview"));
   // Clicking the folder again folds it.
   h.click("file-tree-src");
-  assert!(!h.drawn("file-tree-src/login.rs"));
+  assert!(!h.shows(gpui::Role::Button, "login.rs"));
 }
 
 #[gpui::test]
@@ -131,7 +137,7 @@ fn file_browser_opens_what_react_asks_for(cx: &mut TestAppContext) {
     }),
   );
   assert_eq!(selected(&mut h), Some(format!("{BASE}/src/login.rs")));
-  assert!(h.drawn("file-tree-src/login.rs"));
+  assert!(h.shows(gpui::Role::Button, "login.rs"));
   h.update(|s| {
     if let View::Workspace(route) = &mut s.view {
       route.file_browser.as_mut().unwrap().selected_file = Some(format!("{BASE}/a.rs"));
@@ -153,14 +159,27 @@ fn file_browser_marks_the_working_copy_changes(cx: &mut TestAppContext) {
   assert_eq!(added, [2, 3]);
 }
 
+/// A changed file keeps its name in the neutral text color and gets a
+/// named dot after it.
+#[gpui::test]
+fn file_browser_marks_a_changed_file_with_a_named_dot(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  let (mut h, _) = harness(cx, serde_json::json!({}));
+  assert!(h.shows(gpui::Role::Button, "a.rs"));
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  expect(screen.get_by_role(by::role(gpui::Role::Image).name("Modified"))).to_be_visible();
+}
+
 #[gpui::test]
 fn file_browser_shows_binary_and_unreadable_files(cx: &mut TestAppContext) {
   let (mut h, host) = harness(cx, serde_json::json!({}));
   h.click("file-tree-logo.png");
-  assert!(h.drawn("file-browser-binary"));
+  assert!(h.shows(gpui::Role::Status, "Binary file - cannot display"));
   assert!(!host.calls().contains(&format!("read file {BASE}/logo.png")));
   h.click("file-tree-gone.txt");
-  assert!(h.drawn("file-browser-failed"));
+  assert!(h.shows(gpui::Role::Status, "Couldn't read gone.txt"));
   assert!(host
     .calls()
     .contains(&"notify toast Failed to read file".to_string()));
@@ -178,12 +197,12 @@ fn file_browser_back_hands_the_tab_to_react(cx: &mut TestAppContext) {
       route.file_browser = None;
     }
   });
-  assert!(!h.drawn("file-browser"));
+  assert!(!h.shows(gpui::Role::Group, "File browser"));
 }
 
 fn comment_line_one(h: &mut Harness, text: &str) {
   h.click("add-comment-1");
-  assert!(h.drawn("comment-input"));
+  assert!(h.shows(gpui::Role::MultilineTextInput, "Add a comment…"));
   h.cx.simulate_input(text);
   h.click("comment-submit");
   h.cx.executor().advance_clock(Duration::from_millis(500));
@@ -193,10 +212,10 @@ fn comment_line_one(h: &mut Harness, text: &str) {
 #[gpui::test]
 fn file_browser_keeps_comments_and_finishes_the_review(cx: &mut TestAppContext) {
   let (mut h, host) = harness(cx, serde_json::json!({}));
-  assert!(!h.drawn("file-browser-pending"));
+  assert!(!h.shows(gpui::Role::Status, "1 comment pending"));
   comment_line_one(&mut h, "Say who");
-  assert!(h.drawn("file-browser-pending"));
-  assert!(h.drawn("file-comment-card"));
+  assert!(h.shows(gpui::Role::Status, "1 comment pending"));
+  assert!(h.shows(gpui::Role::Button, "Edit comment"));
   let saved: serde_json::Value = serde_json::from_str(
     &host
       .browser_review
@@ -211,18 +230,26 @@ fn file_browser_keeps_comments_and_finishes_the_review(cx: &mut TestAppContext) 
   assert_eq!(saved[0]["text"], "Say who", "{saved}");
 
   h.click("finish-review");
-  assert!(h.drawn("finish-review-popover"));
+  assert!(h.shows(gpui::Role::Button, "Plan"));
   h.click("review-plan");
   h.cx.run_until_parked();
   assert!(fields(&h, "fileBrowser.review").is_empty());
   let launches = host.launches.lock().unwrap().clone();
   assert_eq!(launches.len(), 1);
-  assert_eq!(launches[0].0.session_name.as_deref(), Some("Code Review"));
+  assert_eq!(launches[0].0.session_name.as_deref(), Some("Code review"));
   assert_eq!(launches[0].0.mode.as_deref(), Some("plan"));
   let markdown = launches[0].0.prompt.clone().unwrap_or_default();
   assert!(markdown.contains("README.md"), "{markdown}");
+  assert_eq!(
+    host
+      .calls()
+      .iter()
+      .filter(|c| c.starts_with("record review"))
+      .count(),
+    1
+  );
   assert!(markdown.contains("Say who"), "{markdown}");
-  assert!(!h.drawn("file-browser-pending"));
+  assert!(!h.shows(gpui::Role::Status, "1 comment pending"));
   assert!(host.calls().contains(&"clear browser review 7".to_string()));
 }
 
@@ -243,8 +270,8 @@ fn file_browser_loads_the_kept_review(cx: &mut TestAppContext) {
     .to_string(),
   );
   let (mut h, _) = workspace_harness(cx, host, browser_route(serde_json::json!({})));
-  assert!(h.drawn("file-browser-pending"));
-  assert!(h.drawn("file-comment-card"));
+  assert!(h.shows(gpui::Role::Status, "1 comment pending"));
+  assert!(h.shows(gpui::Role::Button, "Edit comment"));
 }
 
 #[gpui::test]
@@ -252,13 +279,13 @@ fn file_browser_discards_the_review_after_confirming(cx: &mut TestAppContext) {
   let (mut h, host) = harness(cx, serde_json::json!({}));
   comment_line_one(&mut h, "Drop me");
   h.click("discard-review");
-  assert!(h.drawn("discard-review-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Discard review?"));
   h.click("keep-reviewing");
-  assert!(!h.drawn("discard-review-dialog"));
-  assert!(h.drawn("file-browser-pending"));
+  assert!(!h.shows(gpui::Role::Dialog, "Discard review?"));
+  assert!(h.shows(gpui::Role::Status, "1 comment pending"));
   h.click("discard-review");
   h.click("confirm-discard-review");
-  assert!(!h.drawn("file-browser-pending"));
+  assert!(!h.shows(gpui::Role::Status, "1 comment pending"));
   assert!(host
     .calls()
     .contains(&"notify toast Review canceled".to_string()));
@@ -271,12 +298,12 @@ fn file_browser_finds_text_in_the_open_file(cx: &mut TestAppContext) {
   h.click("file-tree-src/login.rs");
   h.click("code-line-1");
   h.cx.simulate_keystrokes("cmd-f");
-  assert!(h.drawn("file-search"));
+  assert!(h.shows(gpui::Role::TextInput, "Find"));
   h.cx.simulate_input("login");
   h.cx.executor().advance_clock(Duration::from_millis(150));
   let count = |h: &mut Harness| {
     let browser = browser(h);
-    browser.read_with(&h.cx, |b, _| (b.search.current, b.search.matches.len()))
+    browser.read_with(&h.cx, |b, _| (b.search.current, b.matches.len()))
   };
   assert_eq!(count(&mut h), (0, 2));
   h.cx.simulate_keystrokes("enter");
@@ -284,7 +311,7 @@ fn file_browser_finds_text_in_the_open_file(cx: &mut TestAppContext) {
   h.click("file-search-next");
   assert_eq!(count(&mut h), (0, 2));
   h.click("file-search-close");
-  assert!(!h.drawn("file-search"));
+  assert!(!h.shows(gpui::Role::TextInput, "Find"));
 }
 
 #[gpui::test]
@@ -319,4 +346,65 @@ fn file_lines_show_their_numbers_in_a_gutter(cx: &mut TestAppContext) {
   // Four `ch` of line number, as React's `min-w-[4ch]` gutter.
   assert!(gutter.size.width >= gpui::px(30.), "{gutter:?}");
   assert_eq!(gutter.left(), line.left());
+}
+
+#[gpui::test]
+fn file_browser_discard_review_keeps_on_escape_and_discards_on_enter(cx: &mut TestAppContext) {
+  let (mut h, host) = harness(cx, serde_json::json!({}));
+  comment_line_one(&mut h, "Drop me");
+  h.click("discard-review");
+  h.cx.simulate_keystrokes("escape");
+  assert!(!h.shows(gpui::Role::Dialog, "Discard review?"));
+  assert!(h.shows(gpui::Role::Status, "1 comment pending"));
+  h.click("discard-review");
+  h.cx.simulate_keystrokes("enter");
+  h.cx.run_until_parked();
+  assert!(!h.shows(gpui::Role::Status, "1 comment pending"));
+  assert!(host
+    .calls()
+    .contains(&"notify toast Review canceled".to_string()));
+}
+
+#[gpui::test]
+fn an_unreadable_file_is_an_error_state_with_retry(cx: &mut TestAppContext) {
+  use gpui::Role;
+  use gpui_testing_library::prelude::*;
+  let (mut h, host) = harness(cx, serde_json::json!({}));
+  h.click("file-tree-gone.txt");
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  expect(screen.get_by_role(by::role(Role::Status).name("Couldn't read gone.txt"))).to_be_visible();
+  let reads = || {
+    host
+      .calls()
+      .iter()
+      .filter(|c| c.starts_with("read file") && c.ends_with("gone.txt"))
+      .count()
+  };
+  let before = reads();
+  screen
+    .user()
+    .click(&screen.get_by_role(by::role(Role::Button).name("Retry")));
+  h.cx.run_until_parked();
+  assert_eq!(reads(), before + 1);
+}
+
+/// An added file's dot is the diff tone, not state green.
+#[test]
+fn added_file_dot_uses_the_diff_tone() {
+  use crate::gpui_shell::screen::file_browser::status_dot;
+  assert_eq!(
+    status_dot("A"),
+    Some(crate::gpui_shell::ui::Tone::DiffAdded)
+  );
+  assert_eq!(
+    status_dot("??"),
+    Some(crate::gpui_shell::ui::Tone::DiffAdded)
+  );
+  assert_eq!(
+    status_dot("D"),
+    Some(crate::gpui_shell::ui::Tone::DiffRemoved)
+  );
 }

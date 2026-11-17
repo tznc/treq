@@ -1,0 +1,79 @@
+id: gpui-no-adhoc-feedback
+language: rust
+severity: error
+message: >
+  Build empty, loading and error bodies from `ui::EmptyState` (title, why,
+  at most one action), `ui::Loading` or `ui::Skeleton`, and errors from
+  `ui::Alert` or `EmptyState::error` with Retry, not hand-written text or a
+  local helper, so an error is never shown as "empty".
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+ignores:
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+rule:
+  any:
+    - kind: function_item
+      has:
+        field: name
+        kind: identifier
+        regex: ^(message|empty|loading_text|empty_state|error_state|error_view)$
+      # A method such as a draft's `message(&self)` is data, not a helper.
+      not:
+        inside:
+          kind: impl_item
+          stopBy: end
+    - kind: let_declaration
+      all:
+        - has:
+            field: pattern
+            kind: identifier
+            regex: ^(message|empty|loading_text|empty_state|error_state|error_view)$
+        - has:
+            field: value
+            kind: closure_expression
+    # A retry button says "Retry", as `ui::error_actions` does.
+    - kind: string_literal
+      regex: ^"Try again
+      inside:
+        kind: arguments
+        inside:
+          kind: call_expression
+          has:
+            field: function
+            kind: field_expression
+            has:
+              field: field
+              regex: ^label$
+    - kind: string_literal
+      regex: ^"(No |Loading|Fetching|Couldn't|Failed to|Try again)
+      inside:
+        kind: arguments
+        # Through an `if`/`match` that picks the text, as in
+        # `.child(if empty { "No files" } else { .. })`.
+        stopBy:
+          not:
+            any:
+              - kind: if_expression
+              - kind: else_clause
+              - kind: block
+              - kind: match_expression
+              - kind: match_block
+              - kind: match_arm
+        inside:
+          kind: call_expression
+          has:
+            field: function
+            any:
+              - kind: field_expression
+                has:
+                  field: field
+                  regex: ^child$
+              - regex: ^(ui::)?text$
+  not:
+    inside:
+      kind: mod_item
+      has:
+        field: name
+        regex: ^tests$
+      stopBy: end

@@ -39,6 +39,17 @@ pub fn screen(model: &Model, data: &Data) -> Option<ScreenSnapshot> {
     value["modal"] = modal;
   }
   value["remote"] = remote_dialogs(model, data);
+  if model.has_repo() {
+    // The terminal pane shows at the bottom of every screen.
+    value["globalTerminal"] = json!({
+      "repoPath": model.repo(),
+      "activeSessionId": model.active_session,
+      "sessionsRevision": data.sessions_revision,
+      "commands": model.commands,
+      "remoteShell": model.is_remote(),
+      "mainRepoPath": model.main_repo,
+    });
+  }
   if let Some(repository) = &model.remote.repository {
     value["repository"] = serde_json::to_value(repository).unwrap_or_default();
   }
@@ -51,7 +62,9 @@ fn remote_dialogs(model: &Model, data: &Data) -> Value {
   let setup = remote.setup.then(|| {
     json!({
       "allowUserManaged": data.flags.remote_ssh,
+      "screen": remote.setup_screen,
       "registering": remote.registering,
+      "registerError": remote.register_error,
     })
   });
   // The terminal dialog needs a connected endpoint and an open repository.
@@ -87,8 +100,14 @@ fn remote_chrome(model: &Model) -> Value {
     return Value::Null;
   };
   let cut_off = remote.cutoff().is_some();
+  let unreachable = repository
+    .endpoint_id
+    .as_ref()
+    .is_some_and(|id| remote.unreachable.contains(id));
   let state = if cut_off {
     "cutoff"
+  } else if unreachable {
+    "offline"
   } else {
     remote::connection_state(remote.instance_state.as_deref(), remote.endpoint.is_some())
   };
@@ -103,7 +122,20 @@ fn remote_chrome(model: &Model) -> Value {
 
 /// Which page shows, as `GpuiScreenView`.
 fn view(model: &Model, data: &Data) -> Value {
+  if !model.has_repo() && model.empty_project.is_some() {
+    return project_home(model, data);
+  }
   if !model.has_repo() {
+    // A skill link still asks to install app-wide, which needs no repository.
+    if let (Page::Settings { tab }, Some(skill)) = (&model.page, &model.skill_install) {
+      return json!({
+        "kind": "settings",
+        "tab": tab,
+        "repoPath": null,
+        "currentBranch": null,
+        "installRequest": skill,
+      });
+    }
     return json!({"kind": "onboarding", "remoteRepo": model.remote.form_json()});
   }
   let repo = model.repo();
@@ -113,6 +145,7 @@ fn view(model: &Model, data: &Data) -> Value {
       "tab": tab,
       "repoPath": repo,
       "currentBranch": model.default_branch(data),
+      "installRequest": model.skill_install,
     }),
     Page::Github(github) => match github.review {
       Some(number) => json!({"kind": "prReview", "repoPath": repo, "prNumber": number}),
@@ -123,12 +156,12 @@ fn view(model: &Model, data: &Data) -> Value {
         "filter": github.filter,
         "selected": github.selected,
         "creating": github.creating,
-        // The `mergeQueue` feature flag is off.
-        "mergeQueue": null,
         "runningChecks": [],
+        "reload": github.reload,
       }),
     },
     Page::Linear if data.flags.linear => json!({"kind": "linear", "repoPath": repo}),
+    Page::ProjectHome => project_home(model, data),
     Page::MergePreview { workspace_id } => {
       match data.workspaces(repo).iter().find(|w| w.id == *workspace_id) {
         Some(workspace) => json!({
@@ -141,6 +174,58 @@ fn view(model: &Model, data: &Data) -> Value {
     }
     _ => workspace_view(model, data),
   }
+}
+
+/// The window's repositories as project home cards.
+fn project_home(model: &Model, data: &Data) -> Value {
+  let order = match model.has_repo() {
+    true => super::sidebar::order(model, data),
+    false => Vec::new(),
+  };
+  let labels = super::sidebar::display_labels(&order);
+  // A remote window's repository names the machine it is on.
+  let host = |path: &str| {
+    let remote = model.remote.repository.as_ref()?;
+    let endpoint = remote.endpoint.as_ref()?;
+    remote.matches(path).then(|| endpoint.hostname.clone())
+  };
+  let repos: Vec<Value> = order
+    .iter()
+    .map(|path| {
+      let repo = data.repo(path);
+      let missing = data
+        .supporting()
+        .iter()
+        .any(|r| &r.path == path && !r.exists);
+      let label = repo
+        .and_then(|r| r.remote.as_ref())
+        .map(|r| r.full_name.clone())
+        .or_else(|| labels.get(path).cloned())
+        .unwrap_or_else(|| path.clone());
+      let workspaces: Vec<Value> = super::sidebar::nodes(data, path)
+        .into_iter()
+        .map(|n| json!([n.workspace.branch_name, n.depth]))
+        .collect();
+      json!({
+        "path": path,
+        "label": label,
+        "homeRef": data.home_ref(path),
+        "missing": missing,
+        "github": repo.and_then(|r| r.remote.as_ref()).map(|r| r.full_name.clone()),
+        "workspaces": workspaces,
+        "host": host(path),
+      })
+    })
+    .collect();
+  json!({
+    "kind": "projectHome",
+    "name": data
+      .project()
+      .map(|p| p.name.clone())
+      .or_else(|| model.empty_project.clone()),
+    "repos": repos,
+    "revision": data.revision,
+  })
 }
 
 /// `ShowWorkspace`'s route, with GPUI drawing every tab and the terminal.
@@ -180,7 +265,6 @@ fn workspace_view(model: &Model, data: &Data) -> Value {
     "runningChecks": [],
     "runningWorkflows": [],
     "setupRerunning": false,
-    "mergeQueue": null,
     "revision": data.revision,
     "scrollToCommit": view.scroll_to_commit.as_ref().filter(|_| view.tab == Tab::Commits),
     "showCommitted": committed_toggle.then_some(view.show_committed),
@@ -198,6 +282,7 @@ fn workspace_view(model: &Model, data: &Data) -> Value {
     },
     "fileBrowser": file_browser,
     "remoteChrome": remote_chrome(model),
+    "workspace": workspace,
   })
 }
 
@@ -250,6 +335,38 @@ fn workspace_modal(model: &Model, data: &Data) -> Option<Value> {
       "repoPath": repo_path,
       "workspaceId": id,
       "branchName": branch,
+    }));
+  }
+  if let (Some(closing), false) = (dialogs.save_project, repo.is_empty()) {
+    let repos: Vec<String> = std::iter::once(model.main_repo.clone())
+      .chain(
+        data
+          .supporting()
+          .iter()
+          .filter(|r| r.exists)
+          .map(|r| r.path.clone()),
+      )
+      .collect();
+    let name = data
+      .project()
+      .map(|p| p.name.clone())
+      .unwrap_or_else(|| crate::core::projects::suggested_name(&repos));
+    return Some(json!({
+      "kind": "saveProject",
+      "repoPath": repo,
+      "name": name,
+      "saved": data.project().is_some(),
+      "closing": closing,
+      "repos": repos,
+    }));
+  }
+  if let (true, Some(project)) = (dialogs.project_context, data.project()) {
+    return Some(json!({
+      "kind": "projectContext",
+      "repoPath": repo,
+      "name": project.name,
+      "prompt": project.prompt,
+      "contextPaths": project.context_paths,
     }));
   }
   if dialogs.deletion && !repo.is_empty() {
@@ -388,7 +505,7 @@ mod tests {
   };
   use crate::{
     core::repo::RepoBranch,
-    gpui_shell::{overlay::OverlayView, screen::View},
+    gpui_shell::{native::NativeEvent, overlay::OverlayView, screen::View, window::model::Effect},
   };
 
   fn data() -> Data {
@@ -455,6 +572,27 @@ mod tests {
   }
 
   #[test]
+  fn settings_route_carries_a_skill_install_request() {
+    let mut model = Model::new(Some("/repo".into()));
+    model.open_skill_install("anthropic/pdf".into());
+    let View::Settings(route) = screen(&model, &data()).unwrap().view else {
+      panic!("not settings");
+    };
+    assert_eq!(route.install_request.as_deref(), Some("anthropic/pdf"));
+  }
+
+  #[test]
+  fn skill_link_shows_settings_even_without_a_repository() {
+    let mut model = Model::new(None);
+    model.open_skill_install("anthropic/pdf".into());
+    let View::Settings(route) = screen(&model, &data()).unwrap().view else {
+      panic!("not settings");
+    };
+    assert_eq!(route.repo_path, None);
+    assert_eq!(route.install_request.as_deref(), Some("anthropic/pdf"));
+  }
+
+  #[test]
   fn routes_each_page() {
     let mut model = Model::new(Some("/repo".into()));
     model.open_settings();
@@ -466,7 +604,14 @@ mod tests {
     let View::Github(route) = screen(&model, &data()).unwrap().view else {
       panic!("not GitHub");
     };
-    assert_eq!(route.selected, Some(7));
+    assert_eq!((route.selected, route.reload), (Some(7), 0));
+    if let Page::Github(github) = &mut model.page {
+      github.reload = 2;
+    }
+    let View::Github(route) = screen(&model, &data()).unwrap().view else {
+      panic!("not GitHub");
+    };
+    assert_eq!(route.reload, 2);
     if let Page::Github(github) = &mut model.page {
       github.review = Some(7);
     }
@@ -485,6 +630,38 @@ mod tests {
       matches!(screen(&model, &data()).unwrap().view, View::Workspace(_)),
       "Linear needs its preview feature"
     );
+  }
+
+  #[test]
+  fn builds_project_home_cards_for_every_repository() {
+    let mut model = Model::new(Some("/repo".into()));
+    let mut data = data();
+    data.set_supporting(vec![crate::core::supporting_repos::SupportingRepo {
+      path: "/src/lib".into(),
+      exists: false,
+    }]);
+    model.page = crate::gpui_shell::window::model::Page::ProjectHome;
+    let view = format!("{:?}", screen(&model, &data).unwrap().view);
+    assert!(view.starts_with("ProjectHome"), "{view}");
+    assert!(view.contains("label: \"repo\""), "{view}");
+    assert!(view.contains("path: \"/src/lib\""), "{view}");
+    assert!(view.contains("missing: true"), "{view}");
+  }
+
+  #[test]
+  fn builds_the_save_project_dialog_with_a_suggested_name() {
+    let mut model = Model::new(Some("/r/web".into()));
+    let mut data = data();
+    data.set_supporting(vec![crate::core::supporting_repos::SupportingRepo {
+      path: "/r/api".into(),
+      exists: true,
+    }]);
+    model.dialogs.save_project = Some(true);
+    let modal = format!("{:?}", screen(&model, &data).unwrap().modal.expect("modal"));
+    assert!(modal.starts_with("SaveProject"), "{modal}");
+    assert!(modal.contains("name: \"web + api\""), "{modal}");
+    assert!(modal.contains("closing: true"), "{modal}");
+    assert!(modal.contains("saved: false"), "{modal}");
   }
 
   #[test]
@@ -543,6 +720,18 @@ mod tests {
   }
 
   #[test]
+  fn marks_a_remote_project_home_card_with_its_host() {
+    let mut model = remote_model();
+    model.page = crate::gpui_shell::window::model::Page::ProjectHome;
+    let host = model.remote.endpoint.clone().unwrap().hostname;
+    let View::ProjectHome(route) = screen(&model, &Data::default()).unwrap().view else {
+      panic!("not project home");
+    };
+    assert_eq!(route.repos[0].host.as_deref(), Some(host.as_str()));
+    assert!(!route.repos[0].missing);
+  }
+
+  #[test]
   fn shows_the_remote_repository_with_its_chrome_and_remote_shells() {
     let model = remote_model();
     let snapshot = screen(&model, &Data::default()).unwrap();
@@ -570,6 +759,33 @@ mod tests {
     assert!(chrome.cut_off);
   }
 
+  /// A read that couldn't reach the host shows Offline until one lands.
+  #[test]
+  fn an_unreachable_host_shows_offline_until_it_answers() {
+    let mut model = remote_model();
+    let endpoint_id = model.remote.endpoint.clone().unwrap().id;
+    let state = |model: &Model| {
+      let View::Workspace(route) = screen(model, &Data::default()).unwrap().view else {
+        panic!("not the workspace view");
+      };
+      route.remote_chrome.unwrap().state
+    };
+    let event = |reachable| NativeEvent::RemoteReachability {
+      endpoint_id: endpoint_id.clone(),
+      reachable,
+    };
+    model.native_event(&event(false), &Data::default());
+    assert_eq!(state(&model), "offline");
+    let effects = model.native_event(&event(true), &Data::default());
+    assert_eq!(state(&model), "online");
+    assert!(
+      effects
+        .iter()
+        .any(|e| matches!(e, Effect::Refresh { revision: true })),
+      "what failed meanwhile reads again"
+    );
+  }
+
   #[test]
   fn routes_the_remote_dialogs() {
     let mut model = remote_model();
@@ -593,7 +809,7 @@ mod tests {
     };
     let form = route.remote_repo.unwrap();
     assert!(form.selector);
-    assert_eq!(form.path, remote::DEFAULT_PATH);
+    assert_eq!(form.path, remote::HOME);
     assert!(
       matches!(screen(&Model::new(None), &Data::default()).unwrap().view, View::Onboarding(r) if r.remote_repo.is_none())
     );

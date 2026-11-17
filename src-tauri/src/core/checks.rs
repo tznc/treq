@@ -2,6 +2,7 @@ use crate::core::checks_logs::{
   infer_level, job_log_relative_path, make_log_line, now_timestamp, LogWriter,
 };
 use crate::lock_ext::LockExt;
+use crate::result_ext::ResultExt;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -133,17 +134,15 @@ pub fn list_workflows_sync(repo_path: &str) -> Result<Vec<WorkflowInfo>, String>
     let filename = entry.file_name().to_string_lossy().to_string();
 
     // Verify each file stays within the workflows directory.
-    let canonical_file = match entry.path().canonicalize() {
-      Ok(p) => p,
-      Err(_) => continue,
+    let Ok(canonical_file) = entry.path().canonicalize() else {
+      continue;
     };
     if !canonical_file.starts_with(&canonical_dir) {
       continue;
     }
 
-    let content = match std::fs::read_to_string(entry.path()) {
-      Ok(c) => c,
-      Err(_) => continue,
+    let Ok(content) = std::fs::read_to_string(entry.path()) else {
+      continue;
     };
 
     let wf: WorkflowFile = match serde_yaml::from_str(&content) {
@@ -295,16 +294,18 @@ fn execute_job_steps(
       let step_name = step.name.clone();
       let job_id = job_id.to_string();
       std::sync::Arc::new(move |stream, message| {
-        let _ = writer.write_line(&make_log_line(
-          now_timestamp(),
-          run_id,
-          &job_id,
-          step_index as i64,
-          &step_name,
-          stream,
-          infer_level(message),
-          message,
-        ));
+        writer
+          .write_line(&make_log_line(
+            now_timestamp(),
+            run_id,
+            &job_id,
+            step_index as i64,
+            &step_name,
+            stream,
+            infer_level(message),
+            message,
+          ))
+          .best_effort();
       })
     };
     let outcome = crate::core::shell_step::run(
@@ -319,20 +320,22 @@ fn execute_job_steps(
     .map_err(|e| format!("Failed to run step '{}': {}", step.name, e))?;
 
     if matches!(outcome, crate::core::shell_step::StepOutcome::TimedOut) {
-      let _ = writer.write_line(&make_log_line(
-        now_timestamp(),
-        run_id,
-        job_id,
-        step_index as i64,
-        &step.name,
-        "stderr",
-        "error",
-        &format!(
-          "Step timed out after {} seconds and was terminated.",
-          STEP_TIMEOUT_SECS
-        ),
-      ));
-      let _ = writer.flush();
+      writer
+        .write_line(&make_log_line(
+          now_timestamp(),
+          run_id,
+          job_id,
+          step_index as i64,
+          &step.name,
+          "stderr",
+          "error",
+          &format!(
+            "Step timed out after {} seconds and was terminated.",
+            STEP_TIMEOUT_SECS
+          ),
+        ))
+        .best_effort();
+      writer.flush().best_effort();
       step_results.push(StepResult {
         name: step.name.clone(),
         success: false,
@@ -470,7 +473,7 @@ fn maybe_autosave_on_pass(repo_path: &str, workspace_path: &str) {
   }
   let paths: Vec<String> = changes.into_iter().map(|change| change.path).collect();
   let message = crate::jj::autosave_commit_message(&paths);
-  let _ = crate::jj::jj_commit(workspace_path, &message);
+  crate::jj::jj_commit(workspace_path, &message).warn_on_err("jj commit");
 }
 
 fn store_job_result(
@@ -502,10 +505,10 @@ fn store_job_result(
 /// Synthetic workflow filename used to store the setup script's runs in the
 /// same `workflow_runs`/`workflow_job_results` tables as regular checks, so
 /// it gets run history and browsable logs for free.
-const SETUP_SCRIPT_FILENAME: &str = "__setup__";
+pub const SETUP_SCRIPT_FILENAME: &str = "__setup__";
 const SETUP_SCRIPT_JOB_ID: &str = "setup";
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct SetupScriptStatus {
   /// Whether `.treq/config.yaml` declares a `setup_script`.
   pub configured: bool,
@@ -685,6 +688,22 @@ pub fn list_workflow_runs_sync(
   Ok(summaries)
 }
 
+/// The newest run of a workflow in a workspace, as `(id, status)`: what the
+/// Checks popover draws.
+pub fn latest_workflow_run_sync(
+  repo_path: &str,
+  workspace_id: i64,
+  filename: &str,
+) -> Result<Option<(i64, String)>, String> {
+  // The run row alone: its job rows and their steps go unread.
+  Ok(
+    crate::local_db::list_workflow_runs(repo_path, workspace_id, filename, 1)?
+      .into_iter()
+      .next()
+      .map(|run| (run.id, run.status)),
+  )
+}
+
 /// Confirm a job actually recorded logs before querying the telemetry
 /// database for them — records are looked up by `run_id`/`job_id`, not by a
 /// filesystem path, so there is nothing left to canonicalize.
@@ -741,6 +760,24 @@ mod tests {
     crate::local_db::init_local_db(&repo).unwrap();
     crate::local_db::trust_repo(&repo).unwrap();
     repo
+  }
+
+  #[test]
+  fn latest_workflow_run_is_the_newest_runs_id_and_status() {
+    let dir = TempDir::new().unwrap();
+    let repo = dir.path().to_string_lossy().to_string();
+    crate::local_db::init_local_db(&repo).unwrap();
+    assert_eq!(latest_workflow_run_sync(&repo, 1, "ci.yaml").unwrap(), None);
+    let old = crate::local_db::create_workflow_run(&repo, 1, "ci.yaml").unwrap();
+    crate::local_db::finish_workflow_run(&repo, old, "failure").unwrap();
+    let new = crate::local_db::create_workflow_run(&repo, 1, "ci.yaml").unwrap();
+    crate::local_db::add_workflow_job_result(&repo, new, "a", 0, "success", "t0", "t1", "[]", None)
+      .unwrap();
+    crate::local_db::finish_workflow_run(&repo, new, "success").unwrap();
+    assert_eq!(
+      latest_workflow_run_sync(&repo, 1, "ci.yaml").unwrap(),
+      Some((new, "success".to_string()))
+    );
   }
 
   #[test]

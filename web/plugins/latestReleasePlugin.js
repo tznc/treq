@@ -55,7 +55,10 @@ async function fetchUpdaterManifest(assets) {
 // v0.3.0 via treq.dev/version, so they can still reach a newer release),
 // static/version.json (the updater manifest read by tauri-plugin-updater) and
 // exposes the latest release to the client as global data.
-/** @type {import('@docusaurus/types').PluginModule} */
+/**
+ * @param {import('@docusaurus/types').LoadContext} context
+ * @returns {import('@docusaurus/types').Plugin<Awaited<ReturnType<typeof fetchLatestRelease>> | null>}
+ */
 function latestReleasePlugin(context) {
   return {
     name: 'latest-release-plugin',

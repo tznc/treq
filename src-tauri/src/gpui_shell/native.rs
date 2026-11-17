@@ -7,7 +7,7 @@
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
-use super::remote_repo::{self, Cutoff, Mutation, Remote, Transport};
+use super::remote_repo::{self, Cutoff, Mutation, Reads, Remote, Transport};
 use crate::{
   core::{
     feature_preview,
@@ -53,6 +53,12 @@ pub enum NativeEvent {
   /// A remote command found the endpoint cut off.
   #[serde(rename_all = "camelCase")]
   RemoteCutoff { endpoint_id: String, reason: String },
+  /// A remote read reached the endpoint's host, or couldn't.
+  #[serde(rename_all = "camelCase")]
+  RemoteReachability {
+    endpoint_id: String,
+    reachable: bool,
+  },
   /// The backend started an agent session (`gpui_shell::launch`). The
   /// model makes it the active session, and with `select` shows its
   /// workspace.
@@ -62,6 +68,16 @@ pub enum NativeEvent {
     pane_session_id: i64,
     select: bool,
   },
+  /// GPUI is removing (deleting or archiving) these workspaces of the
+  /// repository: the window hides their rows and leaves them at once, while
+  /// the removal runs. It ends in [`Self::WorkspacesRemoved`] or
+  /// [`Self::WorkspacesRestored`].
+  #[serde(rename_all = "camelCase")]
+  WorkspacesRemoving { repo_path: String, ids: Vec<i64> },
+  /// The removal started by [`Self::WorkspacesRemoving`] failed: the rows
+  /// show again.
+  #[serde(rename_all = "camelCase")]
+  WorkspacesRestored { repo_path: String, ids: Vec<i64> },
   /// GPUI removed (deleted or archived) these workspaces of the repository,
   /// so the window leaves them if they show.
   #[serde(rename_all = "camelCase")]
@@ -97,6 +113,19 @@ pub enum OpenRequest {
     repo_path: String,
     workspace_id: i64,
   },
+  /// A workspace's Changes tab, as a finished review's toast opens it.
+  #[serde(rename_all = "camelCase")]
+  WorkspaceChanges {
+    repo_path: String,
+    workspace_id: i64,
+  },
+  /// The Save project dialog; `closing` when the window is closing and
+  /// asks first.
+  SaveProject {
+    closing: bool,
+  },
+  /// The Project instructions dialog of this window's saved project.
+  ProjectContext,
   /// The pull request in Treq's PR view (`onViewPrInApp`).
   PrReview {
     number: u64,
@@ -141,13 +170,68 @@ pub fn run_toast_action(id: u64) {
   }
 }
 
+/// A toast, the one way a screen shows one: a title that states the result
+/// in the past tense ("Pushed", not "Push successful"), a description, a
+/// tone and at most one action. It becomes a [`NativeEvent::Toast`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct Toast {
+  pub tone: ToastTone,
+  pub title: String,
+  pub description: String,
+  pub action: Option<ToastAction>,
+}
+
+impl Toast {
+  pub fn new(tone: ToastTone, title: impl Into<String>, description: impl Into<String>) -> Self {
+    Self {
+      tone,
+      title: title.into(),
+      description: description.into(),
+      action: None,
+    }
+  }
+
+  pub fn success(title: impl Into<String>) -> Self {
+    Self::new(ToastTone::Success, title, "")
+  }
+
+  pub fn warning(title: impl Into<String>) -> Self {
+    Self::new(ToastTone::Warning, title, "")
+  }
+
+  pub fn error(title: impl Into<String>) -> Self {
+    Self::new(ToastTone::Error, title, "")
+  }
+
+  pub fn description(mut self, description: impl Into<String>) -> Self {
+    self.description = description.into();
+    self
+  }
+
+  /// The toast's one button. A second call replaces the first.
+  pub fn action(mut self, action: ToastAction) -> Self {
+    self.action = Some(action);
+    self
+  }
+}
+
+impl From<Toast> for NativeEvent {
+  fn from(toast: Toast) -> Self {
+    NativeEvent::Toast {
+      title: toast.title,
+      description: toast.description,
+      tone: toast.tone,
+      action: toast.action,
+    }
+  }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ToastTone {
   Success,
   Warning,
   Error,
-  Info,
 }
 
 fn package_json() -> serde_json::Value {
@@ -210,6 +294,7 @@ impl Backend {
       .window_repo_paths
       .lock_or_recover()
       .insert(self.label.clone(), path.to_string());
+    super::projects::assign_draft(&self.app, &self.label, path);
   }
 
   /// Tells this window's model what a screen did, and shows its toasts.
@@ -301,7 +386,9 @@ impl Transport for Backend {
   ) -> Result<serde_json::Value, String> {
     self.with_db(|db| feature_preview::require_remote_for_source(db, &endpoint.source))?;
     let pool = self.exec_pool();
-    tauri::async_runtime::block_on(remote_command::execute_remote_command::<serde_json::Value>(
+    // A relay drop or dead network leaves a pooled connection that fails the
+    // first read; `execute_remote_read` sends it once more on a fresh one.
+    crate::gpui_shell::block_on(remote_command::execute_remote_read::<serde_json::Value>(
       &pool,
       endpoint,
       request,
@@ -319,7 +406,7 @@ impl Transport for Backend {
     self.with_db(|db| feature_preview::require_remote_for_source(db, &endpoint.source))?;
     let pool = self.exec_pool();
     let metrics = pool.metrics.clone();
-    let outcome = tauri::async_runtime::block_on(remote_command::retry_after_reconnect::<
+    let outcome = crate::gpui_shell::block_on(remote_command::retry_after_reconnect::<
       serde_json::Value,
       _,
     >(
@@ -354,5 +441,61 @@ impl Transport for Backend {
       endpoint_id: endpoint_id.to_string(),
       reason: cutoff.id().to_string(),
     });
+  }
+
+  fn reachable(&self, endpoint_id: &str, reachable: bool) {
+    if remote_repo::record_reachable(endpoint_id, reachable) {
+      self.notify(NativeEvent::RemoteReachability {
+        endpoint_id: endpoint_id.to_string(),
+        reachable,
+      });
+    }
+  }
+
+  fn reads(&self) -> &Reads {
+    static READS: std::sync::OnceLock<Reads> = std::sync::OnceLock::new();
+    READS.get_or_init(Reads::default)
+  }
+}
+
+#[cfg(test)]
+mod toast_tests {
+  use super::*;
+
+  #[test]
+  fn test_toast_builds_its_native_event() {
+    let event: NativeEvent = Toast::success("Pushed")
+      .description("feat/x is on origin.")
+      .into();
+    assert_eq!(
+      event,
+      NativeEvent::Toast {
+        title: "Pushed".into(),
+        description: "feat/x is on origin.".into(),
+        tone: ToastTone::Success,
+        action: None,
+      }
+    );
+  }
+
+  #[test]
+  fn test_toast_keeps_at_most_one_action() {
+    let first = ToastAction {
+      label: "Open".into(),
+      id: 1,
+    };
+    let second = ToastAction {
+      label: "View".into(),
+      id: 2,
+    };
+    let toast = Toast::error("Push failed")
+      .description("rejected")
+      .action(first)
+      .action(second.clone());
+    let NativeEvent::Toast { tone, action, .. } = toast.into() else {
+      panic!("not a toast");
+    };
+    assert_eq!(tone, ToastTone::Error);
+    assert_eq!(action, Some(second));
   }
 }

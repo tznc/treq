@@ -2,10 +2,11 @@
 //! runs: PTY sessions, agent start commands, chat logs, and the live
 //! terminal state that outlives any one view of it.
 
+use crate::result_ext::ResultExt;
 use std::{
   collections::HashMap,
   sync::{Arc, Mutex},
-  time::Instant,
+  time::{Duration, Instant},
 };
 
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
@@ -58,6 +59,9 @@ pub struct RemoteTarget {
   pub remote_working_directory: String,
   /// The persistent session's label on the host.
   pub label: String,
+  /// The session's name on the host (`PtyList`'s `title`), if it has one.
+  #[serde(default)]
+  pub title: Option<String>,
   /// What starts when no session has the label yet; the login shell if
   /// unset.
   #[serde(default)]
@@ -107,6 +111,8 @@ pub fn session_running(list: &serde_json::Value, label: &str) -> Option<bool> {
 pub struct Prepared {
   pub command: String,
   pub skill_write_warning: Option<String>,
+  /// The files written for this session (prompt, settings, skills).
+  pub file_paths: Vec<String>,
 }
 
 pub trait TerminalHost:
@@ -119,11 +125,16 @@ pub trait TerminalHost:
   /// [`TerminalHost::listen`].
   fn spawn_pty(&self, spawn: &Spawn) -> Result<(), String>;
   fn pty_exists(&self, id: &str) -> bool;
+  /// Whether PTY `id`'s shell has started the command typed into it. A
+  /// shell left at a continuation prompt (`quote>`) never does.
+  fn agent_started(&self, _id: &str) -> bool {
+    true
+  }
   fn write_pty(&self, id: &str, data: &str) -> Result<(), String>;
   fn resize_pty(&self, id: &str, rows: u16, cols: u16) -> Result<(), String>;
   fn close_pty(&self, id: &str) -> Result<(), String>;
   /// Calls `sink` with each chunk of the PTY's output until dropped.
-  fn listen(&self, id: &str, sink: Box<dyn Fn(String) + Send + Sync>) -> Listening;
+  fn listen(&self, id: &str, sink: OutputSink) -> Listening;
   /// Calls `sink` with the exit status when a remote session's channel
   /// ends, until dropped.
   fn listen_exit(&self, id: &str, sink: Box<dyn Fn(Option<u32>) + Send + Sync>) -> Listening;
@@ -141,6 +152,11 @@ pub trait TerminalHost:
   fn remote_running(&self, target: &RemoteTarget) -> Option<bool>;
   /// `PtyStop`: ends the persistent session on the host.
   fn remote_stop(&self, target: &RemoteTarget) -> Result<(), String>;
+  /// `PtyRename`: names the target's session on the host, or clears its
+  /// name when `title` is empty; the title the host kept.
+  fn remote_rename(&self, target: &RemoteTarget, title: &str) -> Result<Option<String>, String>;
+  /// Renames an agent session in its repository's session table.
+  fn rename_session(&self, repo_path: &str, session_id: i64, name: &str) -> Result<(), String>;
   fn sessions(&self, repo_path: &str) -> Result<Vec<crate::local_db::Session>, String>;
   /// The repository's supporting repositories that still exist.
   fn supporting_repos(&self, repo_path: &str) -> Vec<String>;
@@ -154,6 +170,8 @@ pub trait TerminalHost:
     session_id: i64,
     screen: &str,
   ) -> Result<(), String>;
+  /// The session's terminal closed: its chat is no longer held in memory.
+  fn end_chat(&self, _repo_path: &str, _session_id: i64) {}
   /// `recordUserMessage`: what was sent to the agent, after `screen_before`.
   fn record_chat_message(
     &self,
@@ -171,9 +189,48 @@ pub trait TerminalHost:
     name: &str,
     png: &[u8],
   ) -> Result<String, String>;
+  /// A clipboard image pasted into a terminal: where it was saved.
+  fn write_pasted_image(&self, bytes: &[u8]) -> Result<String, String>;
+  /// Deletes the temporary files of a session that ended: its agent files
+  /// ([`Prepared::file_paths`]) and the images pasted into it. Paths that
+  /// are not Treq's temporary files are left alone.
+  fn remove_session_files(&self, _paths: &[String]) {}
+  /// `treq agent msg`: an agent terminal treq launched, `cols`×`rows`.
+  fn agent_msg_register(
+    &self,
+    _session: &crate::core::agent_msg::hub::SessionInfo,
+    _cols: u16,
+    _rows: u16,
+  ) {
+  }
+  /// A remote agent's persistent session attached as `pty`.
+  fn agent_msg_register_remote(&self, _pty: &str, _target: &RemoteTarget, _cols: u16, _rows: u16) {}
+  /// The user typed into terminal `pty`.
+  fn agent_msg_key(&self, _pty: &str) {}
+  fn agent_msg_resize(&self, _pty: &str, _cols: u16, _rows: u16) {}
+  fn agent_msg_waiting(&self, _pty: &str) -> Option<WaitingMessages> {
+    None
+  }
+  /// The banner's "Deliver".
+  fn agent_msg_deliver_now(&self, _pty: &str) {}
+  /// Moves whenever a terminal's waiting messages may have changed.
+  fn agent_msg_generation(&self) -> u64 {
+    0
+  }
 }
 
 pub type Host = Arc<dyn TerminalHost>;
+
+/// What `treq agent msg` has waiting for a terminal: its badge and banner.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WaitingMessages {
+  pub count: usize,
+  /// Who sent the newest one.
+  pub from: String,
+}
+
+/// Receives a PTY's output, as the bytes read.
+pub type OutputSink = Box<dyn Fn(&[u8]) + Send + Sync>;
 
 /// Stops a [`TerminalHost::listen`] when dropped.
 pub struct Listening(Option<Box<dyn FnOnce() + Send + Sync>>);
@@ -192,9 +249,28 @@ impl Drop for Listening {
   }
 }
 
+impl Backend {
+  /// Gives `treq agent msg` this window's ways to type into terminals and
+  /// to run commands on remote hosts. Once per process.
+  fn connect_agent_msg(&self) {
+    use crate::core::agent_msg::service;
+    static CONNECTED: std::sync::Once = std::sync::Once::new();
+    let backend = self.clone();
+    CONNECTED.call_once(move || {
+      let writer = backend.clone();
+      service::set_writer(Box::new(move |id: &str, text: &str| {
+        writer.write_pty(id, text)
+      }));
+      service::set_remote_runner(std::sync::Arc::new(move |endpoint, request| {
+        Transport::read(&backend, endpoint, request)
+      }));
+    });
+  }
+}
+
 impl TerminalHost for Backend {
   fn spawn_pty(&self, spawn: &Spawn) -> Result<(), String> {
-    use tauri::{Emitter, Manager};
+    use tauri::Manager;
     let state = self.app().state::<crate::AppState>();
     if state.pty_manager.session_exists(&spawn.id) {
       return Ok(());
@@ -209,13 +285,8 @@ impl TerminalHost for Backend {
       None,
       None,
     )?;
-    let app = self.app().clone();
-    let event = format!("pty-data-{}", spawn.id);
-    let emit = Box::new(move |data: String| {
-      if let Err(error) = app.emit(&event, data) {
-        log::warn!("pty emit failed: event={event}, error={error}");
-      }
-    });
+    let id = spawn.id.clone();
+    let emit = Box::new(move |data: &[u8]| crate::pty_stream::publish(&id, data));
     state.pty_manager.create_session(
       spawn.id.clone(),
       Some(self.label().to_string()),
@@ -233,11 +304,23 @@ impl TerminalHost for Backend {
       let (id, command) = (spawn.id.clone(), agent_command::normalize_command(command));
       std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(100));
-        let _ = manager.set_auto_command(&id, &command);
-        let _ = manager.write_to_session(&id, &command);
+        manager.set_auto_command(&id, &command).ignore_closed();
+        manager.write_to_session(&id, &command).ignore_closed();
       });
     }
     Ok(())
+  }
+
+  fn agent_started(&self, id: &str) -> bool {
+    use tauri::Manager;
+    // A remote agent is launched, not typed into a shell.
+    is_remote_pty(id)
+      || self
+        .app()
+        .state::<crate::AppState>()
+        .pty_manager
+        .runs_command(id)
+        .unwrap_or(true)
   }
 
   fn pty_exists(&self, id: &str) -> bool {
@@ -282,8 +365,99 @@ impl TerminalHost for Backend {
       .resize_session(id, rows, cols)
   }
 
+  fn agent_msg_register(
+    &self,
+    session: &crate::core::agent_msg::hub::SessionInfo,
+    cols: u16,
+    rows: u16,
+  ) {
+    self.connect_agent_msg();
+    let mut session = session.clone();
+    session.project = crate::gpui_shell::projects::window_repos(self.app(), self.label());
+    crate::core::agent_msg::service::register(session, cols, rows);
+  }
+
+  fn agent_msg_register_remote(&self, pty: &str, target: &RemoteTarget, cols: u16, rows: u16) {
+    use crate::core::agent_msg::{hub::SessionInfo, service};
+    use crate::core::remote_pty::RemoteAgentId;
+    let Some(PtyLaunchSpec::Agent { agent, .. }) = &target.launch else {
+      return;
+    };
+    let harness = match agent {
+      RemoteAgentId::Claude => "claude",
+      RemoteAgentId::Codex => "codex",
+      RemoteAgentId::CursorAgent => "cursor",
+      RemoteAgentId::Copilot => "copilot",
+      RemoteAgentId::Devin => "devin",
+      RemoteAgentId::Gemini => "gemini",
+    };
+    self.connect_agent_msg();
+    // The repository is on the host; what its agent sends is recorded on
+    // this machine, where the window keeps the repository's state.
+    let ledger = crate::gpui_shell::remote_repo::for_window(self.label())
+      .map(|repo| repo.scope(&repo.canonical_path))
+      .or_else(|| {
+        use tauri::Manager;
+        self
+          .app()
+          .state::<crate::AppState>()
+          .window_repo_paths
+          .lock()
+          .ok()?
+          .get(self.label())
+          .cloned()
+      });
+    service::register_remote(
+      SessionInfo {
+        pty_id: pty.to_string(),
+        handle: format!("{harness}-{}", target.label),
+        harness: harness.to_string(),
+        repo: target.repository_id.clone(),
+        workspace: Some(target.workspace_id.clone()),
+        ledger,
+        project: crate::gpui_shell::projects::window_repos(self.app(), self.label()),
+      },
+      service::RemoteSession {
+        endpoint: target.endpoint.clone(),
+        repo: target.repository_id.clone(),
+        workspace: target.workspace_id.clone(),
+        label: target.label.clone(),
+      },
+      cols,
+      rows,
+    );
+  }
+
+  fn agent_msg_key(&self, pty: &str) {
+    crate::core::agent_msg::service::tracker().note_key(pty);
+  }
+
+  fn agent_msg_resize(&self, pty: &str, cols: u16, rows: u16) {
+    crate::core::agent_msg::service::tracker().resize(pty, cols, rows);
+  }
+
+  fn agent_msg_waiting(&self, pty: &str) -> Option<WaitingMessages> {
+    let hub = crate::core::agent_msg::service::hub();
+    let now = crate::agent_dispatch::now_millis();
+    let count = hub.waiting(pty, now);
+    let latest = hub.latest(pty, now)?;
+    (count > 0).then_some(WaitingMessages {
+      count,
+      from: latest.from,
+    })
+  }
+
+  fn agent_msg_deliver_now(&self, pty: &str) {
+    crate::core::agent_msg::service::deliver_now(pty);
+  }
+
+  fn agent_msg_generation(&self) -> u64 {
+    crate::core::agent_msg::service::generation()
+  }
+
   fn close_pty(&self, id: &str) -> Result<(), String> {
     use tauri::Manager;
+    crate::core::agent_msg::service::unregister(id);
     if is_remote_pty(id) {
       // Detach: the channel closes, the session keeps running on the host.
       remote_channel(self, id, RemoteOp::Close);
@@ -299,20 +473,9 @@ impl TerminalHost for Backend {
     Ok(())
   }
 
-  fn listen(&self, id: &str, sink: Box<dyn Fn(String) + Send + Sync>) -> Listening {
-    use tauri::Listener;
-    let app = self.app().clone();
-    let event = if is_remote_pty(id) {
-      format!("remote-pty-data-{id}")
-    } else {
-      format!("pty-data-{id}")
-    };
-    let handler = app.listen(event, move |event| {
-      if let Ok(data) = serde_json::from_str::<String>(event.payload()) {
-        sink(data);
-      }
-    });
-    Listening::new(move || app.unlisten(handler))
+  fn listen(&self, id: &str, sink: OutputSink) -> Listening {
+    let subscription = crate::pty_stream::subscribe(id, sink.into());
+    Listening::new(move || drop(subscription))
   }
 
   fn listen_exit(&self, id: &str, sink: Box<dyn Fn(Option<u32>) + Send + Sync>) -> Listening {
@@ -346,7 +509,7 @@ impl TerminalHost for Backend {
       .state::<crate::commands::remote_pty_commands::RemotePtyState>()
       .0
       .clone();
-    tauri::async_runtime::block_on(crate::commands::remote_pty_commands::reattach(
+    crate::gpui_shell::block_on(crate::commands::remote_pty_commands::reattach(
       self.app().clone(),
       &manager,
       &self.exec_pool(),
@@ -370,6 +533,7 @@ impl TerminalHost for Backend {
       self,
       &target.endpoint,
       TreqCommandRequest::PtyList {
+        backend: target.endpoint.terminal_backend,
         repo: target.repository_id.clone(),
         workspace: Some(target.workspace_id.clone()),
       },
@@ -383,6 +547,7 @@ impl TerminalHost for Backend {
       self,
       &target.endpoint,
       TreqCommandRequest::PtyStop {
+        backend: target.endpoint.terminal_backend,
         repo: target.repository_id.clone(),
         workspace: target.workspace_id.clone(),
         label: target.label.clone(),
@@ -391,17 +556,37 @@ impl TerminalHost for Backend {
     .map(drop)
   }
 
+  fn remote_rename(&self, target: &RemoteTarget, title: &str) -> Result<Option<String>, String> {
+    let kept = Transport::read(
+      self,
+      &target.endpoint,
+      TreqCommandRequest::PtyRename {
+        backend: target.endpoint.terminal_backend,
+        repo: target.repository_id.clone(),
+        workspace: target.workspace_id.clone(),
+        label: target.label.clone(),
+        title: title.to_string(),
+      },
+    )?;
+    serde_json::from_value(kept).map_err(|e| e.to_string())
+  }
+
+  fn rename_session(&self, repo_path: &str, session_id: i64, name: &str) -> Result<(), String> {
+    crate::core::sessions::rename_session(&self.state_scope(repo_path), session_id, name)
+  }
+
   fn sessions(&self, repo_path: &str) -> Result<Vec<crate::local_db::Session>, String> {
-    crate::local_db::get_sessions(&self.state_scope(repo_path))
+    crate::core::sessions::list_sessions(&self.state_scope(repo_path))
   }
 
   fn supporting_repos(&self, repo_path: &str) -> Vec<String> {
-    crate::core::supporting_repos::list(repo_path)
-      .unwrap_or_default()
-      .into_iter()
-      .filter(|repo| repo.exists)
-      .map(|repo| repo.path)
-      .collect()
+    // A window reads its repositories from its project, saved or draft.
+    if let Some(project) =
+      crate::gpui_shell::projects::window_repos_project(self.app(), self.label())
+    {
+      return crate::gpui_shell::projects::supporting_repos(&project, repo_path);
+    }
+    Vec::new()
   }
 
   fn shell_command(&self) -> Option<String> {
@@ -410,16 +595,29 @@ impl TerminalHost for Backend {
   }
 
   fn prepare_agent(&self, start: &AgentStart) -> Result<Prepared, String> {
-    let model = crate::local_db::get_session_model(&start.repo_path, start.session_id)
+    let model = crate::core::sessions::session_model(&start.repo_path, start.session_id)
       .ok()
       .flatten();
     let bin_dir = crate::commands::binary::get_treq_bin_dir().ok();
     let supporting = self.supporting_repos(&start.repo_path);
+    let project = crate::gpui_shell::projects::window_project(self.app(), self.label())
+      .map(agent_command::ProjectContext::from);
+    let (app_instructions, repo_instructions) = self
+      .with_db(|db| {
+        Ok::<_, rusqlite::Error>((
+          db.get_setting(agent_command::AGENT_INSTRUCTIONS_SETTING)?,
+          db.get_repo_setting(&start.repo_path, agent_command::AGENT_INSTRUCTIONS_SETTING)?,
+        ))
+      })
+      .unwrap_or_default();
     let prepared = agent_command::prepare_auto_command(
       &AgentPaths {
         workspace_path: start.workspace_path.as_deref(),
         repo_path: &start.repo_path,
         supporting_repo_paths: &supporting,
+        project: project.as_ref(),
+        app_instructions: app_instructions.as_deref(),
+        repo_instructions: repo_instructions.as_deref(),
       },
       &AutoCommand {
         agent: &start.agent,
@@ -432,6 +630,7 @@ impl TerminalHost for Backend {
     Ok(Prepared {
       command: prepared.command,
       skill_write_warning: prepared.skill_write_warning,
+      file_paths: prepared.file_paths,
     })
   }
 
@@ -454,7 +653,7 @@ impl TerminalHost for Backend {
     session_id: i64,
     screen: &str,
   ) -> Result<(), String> {
-    crate::core::agent_chat::record_screen(repo_path, session_id, screen).map(drop)
+    crate::core::agent_chat::record_screen(repo_path, session_id, screen)
   }
 
   fn record_chat_message(
@@ -465,7 +664,6 @@ impl TerminalHost for Backend {
     text: &str,
   ) -> Result<(), String> {
     crate::core::agent_chat::record_user_message(repo_path, session_id, screen_before, text)
-      .map(drop)
   }
 
   fn read_send_asset(&self, path: &str) -> Result<String, String> {
@@ -479,6 +677,19 @@ impl TerminalHost for Backend {
     png: &[u8],
   ) -> Result<String, String> {
     crate::send_dispatch::write_send_review_image_bytes(repo_path, name, png)
+      .map(|path| path.to_string_lossy().to_string())
+  }
+
+  fn end_chat(&self, repo_path: &str, session_id: i64) {
+    crate::core::agent_chat::end_session(repo_path, session_id);
+  }
+
+  fn remove_session_files(&self, paths: &[String]) {
+    crate::send_dispatch::remove_session_files(paths);
+  }
+
+  fn write_pasted_image(&self, bytes: &[u8]) -> Result<String, String> {
+    crate::send_dispatch::write_pasted_image(&crate::send_dispatch::pasted_image_dir(), bytes)
       .map(|path| path.to_string_lossy().to_string())
   }
 }
@@ -512,7 +723,7 @@ fn remote_channel(backend: &Backend, id: &str, op: RemoteOp) {
     std::thread::spawn(move || {
       while let Ok(op) = rx.recv() {
         let done = matches!(op, RemoteOp::Close);
-        let result = tauri::async_runtime::block_on(async {
+        let result = crate::gpui_shell::block_on(async {
           match op {
             RemoteOp::Write(data) => manager.write(&id, data.as_bytes()).await,
             RemoteOp::Resize { cols, rows } => manager.resize(&id, cols, rows).await,
@@ -530,7 +741,7 @@ fn remote_channel(backend: &Backend, id: &str, op: RemoteOp) {
     });
     tx
   });
-  let _ = sender.send(op);
+  sender.send(op).ignore_closed();
   if closing {
     channels.remove(id);
   }
@@ -551,6 +762,10 @@ pub fn shell_pty_id(dir: &str, millis: u128) -> String {
 /// `consumePtyEcho`: drops the echo of what the user typed from an output
 /// chunk, so local echo isn't taken for the process working. Returns the
 /// echo still pending and the output the process wrote.
+#[expect(
+  clippy::string_slice,
+  reason = "offsets are char_indices() positions plus char lengths"
+)]
 pub fn consume_echo<'a>(pending: &str, chunk: &'a str) -> (String, &'a str) {
   let echo: Vec<char> = pending.chars().collect();
   let bytes = chunk.as_bytes();
@@ -576,12 +791,34 @@ pub fn consume_echo<'a>(pending: &str, chunk: &'a str) -> (String, &'a str) {
   (echo[e..].iter().collect(), &chunk[c..])
 }
 
+/// How long typing waits for its echo, and how much of it is kept. A TUI
+/// repaints with escape sequences rather than echoing, so its typing is
+/// never matched; this keeps it from piling up.
+const ECHO_EXPIRES: Duration = Duration::from_secs(2);
+const ECHO_MAX: usize = 4096;
+
+#[derive(Default)]
+struct Echo {
+  text: String,
+  typed_at: Option<Instant>,
+}
+
+impl Echo {
+  /// What is still waiting for its echo: nothing once it expired.
+  fn pending(&mut self) -> &mut String {
+    if self.typed_at.is_some_and(|at| at.elapsed() > ECHO_EXPIRES) {
+      self.text.clear();
+    }
+    &mut self.text
+  }
+}
+
 /// A terminal's state, shared by the PTY's output listener and every view
 /// drawing it; it lives as long as the PTY, so reopening the pane keeps the
 /// scrollback.
 pub struct Live {
   pub emulator: Mutex<Emulator>,
-  pending_echo: Mutex<String>,
+  pending_echo: Mutex<Echo>,
   /// When the process (not the echo of typing) last wrote output.
   pub last_output: Mutex<Option<Instant>>,
   watchers: Mutex<Vec<UnboundedSender<bool>>>,
@@ -602,16 +839,29 @@ impl Live {
   }
 
   /// Parses a chunk of output; returns what the terminal wants written back.
+  #[cfg(test)]
   pub fn push(&self, chunk: &str) -> Vec<String> {
+    self.push_bytes(chunk.as_bytes())
+  }
+
+  /// [`Self::push`] for the bytes a PTY read.
+  pub fn push_bytes(&self, chunk: &[u8]) -> Vec<String> {
     let from_process = {
-      let mut pending = self.pending_echo.lock_or_recover();
-      let (left, process) = consume_echo(&pending, chunk);
-      *pending = left;
-      !process.is_empty()
+      let mut echo = self.pending_echo.lock_or_recover();
+      let pending = echo.pending();
+      if pending.is_empty() {
+        !chunk.is_empty()
+      } else {
+        let text = String::from_utf8_lossy(chunk);
+        let (left, process) = consume_echo(pending, &text);
+        let from_process = !process.is_empty();
+        *pending = left;
+        from_process
+      }
     };
     let outputs = {
       let mut emulator = self.emulator.lock_or_recover();
-      emulator.feed(chunk.as_bytes());
+      emulator.feed(chunk);
       emulator.drain()
     };
     let mut replies = Vec::new();
@@ -634,7 +884,15 @@ impl Live {
 
   /// Notes what the user typed, so its echo isn't taken for output.
   pub fn typed(&self, data: &str) {
-    self.pending_echo.lock_or_recover().push_str(data);
+    let mut echo = self.pending_echo.lock_or_recover();
+    let pending = echo.pending();
+    if pending.len() + data.len() > ECHO_MAX {
+      pending.clear();
+    }
+    if data.len() <= ECHO_MAX {
+      pending.push_str(data);
+    }
+    echo.typed_at = Some(Instant::now());
   }
 
   /// A message per output chunk: whether the process wrote it.
@@ -679,8 +937,8 @@ pub fn attach(host: &Host, id: &str, cols: usize, rows: usize) -> (Arc<Live>, bo
     id,
     Box::new(move |chunk| {
       if let Some(terminal) = weak.upgrade() {
-        for reply in terminal.push(&chunk) {
-          let _ = writer.write_pty(&pty, &reply);
+        for reply in terminal.push_bytes(chunk) {
+          writer.write_pty(&pty, &reply).ignore_closed();
         }
       }
     }),
@@ -746,6 +1004,20 @@ mod tests {
   }
 
   #[test]
+  fn typing_a_tui_never_echoes_is_capped_and_expires() {
+    let live = Live::new(20, 2);
+    for _ in 0..10_000 {
+      live.typed("abcdefgh");
+    }
+    assert!(live.pending_echo.lock_or_recover().text.len() <= ECHO_MAX);
+    live.typed("x");
+    live.pending_echo.lock_or_recover().typed_at = Some(Instant::now() - ECHO_EXPIRES * 2);
+    // Output that does not start with the typing is the process writing, and
+    // the expired typing is forgotten rather than matched against later output.
+    assert_eq!(live.pending_echo.lock_or_recover().pending().len(), 0);
+  }
+
+  #[test]
   fn live_terminals_mark_process_output() {
     let live = Live::new(20, 2);
     let mut rx = live.watch();
@@ -758,5 +1030,65 @@ mod tests {
     assert!(live.last_output.lock_or_recover().is_some());
     assert_eq!(live.screen_text(), "adone");
     assert_eq!(live.push("\x1b[6n"), vec!["\x1b[1;6R".to_string()]);
+  }
+
+  #[test]
+  fn live_terminals_take_a_character_split_across_chunks() {
+    let live = Live::new(20, 2);
+    let tick = "✓".as_bytes();
+    live.push_bytes(&tick[..1]);
+    live.push_bytes(&tick[1..]);
+    assert_eq!(live.screen_text(), "✓");
+  }
+
+  /// Feeding ~32 MB of colored output through the old path (decode to a
+  /// string, JSON-encode it as the event payload, parse that, feed) and the
+  /// new one (feed the bytes read). The old path leaves out the event bus
+  /// itself, so it is a lower bound.
+  /// `cargo test --features gpui-shell --lib pty_output_path -- --ignored --nocapture`
+  #[test]
+  #[ignore = "benchmark"]
+  fn pty_output_path_throughput() {
+    let line = "\x1b[38;5;196mERROR\x1b[0m \x1b[1;32m✓ passed\x1b[0m src/日本/main.rs:42:7 \x1b[4mwarning\x1b[24m\r\n";
+    let mut data = Vec::new();
+    while data.len() < 32 << 20 {
+      data.extend_from_slice(line.as_bytes());
+    }
+    let chunks: Vec<&[u8]> = data.chunks(8192).collect();
+
+    // What only the old path does: decode, encode as JSON, parse that.
+    let mut decoder = crate::pty::Utf8StreamDecoder::new();
+    let start = Instant::now();
+    let mut total = 0;
+    for chunk in &chunks {
+      let payload = serde_json::to_string(&decoder.push(chunk)).unwrap();
+      total += serde_json::from_str::<String>(&payload).unwrap().len();
+    }
+    let transport_time = start.elapsed();
+    assert_eq!(total, data.len());
+
+    let old = Live::new(120, 40);
+    let mut decoder = crate::pty::Utf8StreamDecoder::new();
+    let start = Instant::now();
+    for chunk in &chunks {
+      let text = decoder.push(chunk);
+      let payload = serde_json::to_string(&text).unwrap();
+      let text: String = serde_json::from_str(&payload).unwrap();
+      old.push(&text);
+    }
+    let old_time = start.elapsed();
+
+    let new = Live::new(120, 40);
+    let start = Instant::now();
+    for chunk in &chunks {
+      new.push_bytes(chunk);
+    }
+    let new_time = start.elapsed();
+    let mb = data.len() as f64 / (1 << 20) as f64;
+    println!(
+      "transport stages alone {transport_time:?}; old {old_time:?} ({:.0} MB/s), new {new_time:?} ({:.0} MB/s)",
+      mb / old_time.as_secs_f64(),
+      mb / new_time.as_secs_f64()
+    );
   }
 }

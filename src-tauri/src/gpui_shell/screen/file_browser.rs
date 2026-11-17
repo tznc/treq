@@ -10,8 +10,11 @@
 
 mod review;
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
+use gpui_kit::base::TestSupportExt as _;
 use std::{
   cell::RefCell,
   collections::{HashMap, HashSet},
@@ -21,7 +24,7 @@ use std::{
   time::Duration,
 };
 
-use gpui_kit::component::input::{Escape, InputEvent, InputState, Textarea, TextareaState};
+use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use serde::Deserialize;
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
@@ -32,21 +35,20 @@ use tauri_plugin_gpui::gpui::{
 };
 
 use super::{
-  changes::search::match_ranges,
   changes_data::{ChangedFile, EditorApps},
   changes_review::{count_label, review_markdown, LineComment},
   code::Parent,
   file_browser_data::{
     comment_counts, comment_target, dir_status, file_name, filter_hidden, flatten, is_binary,
     is_markdown, line_marks, line_number_width, parse_review, readme, relative, review_to_save,
-    status_title, too_large, FileBrowserHost, LineMarks, COMMENT_HUNK,
+    sorted, status_title, too_large, FileBrowserHost, LineMarks, TreeRow, COMMENT_HUNK,
   },
-  highlight, ActionSink, ScreenAction,
+  find::{self, match_ranges, Find, Findable},
+  highlight, prefetch, ActionSink, ScreenAction,
 };
 use crate::{
   core::WorkspaceEntry,
   gpui_shell::{
-    native::{NativeEvent, ToastTone},
     popup::{self, MenuIcon, NativeMenuItem, PopupRequest, PopupSink, Side, TooltipContent},
     theme::{self, Palette},
     time,
@@ -55,12 +57,8 @@ use crate::{
   },
 };
 
-/// `useDebounce(searchQuery, 150)`.
-const SEARCH_DEBOUNCE: Duration = Duration::from_millis(150);
 /// How long edits wait before the review is written (`useDebounce(…, 500)`).
 const SAVE_DELAY: Duration = Duration::from_millis(500);
-/// How long "Copied" shows.
-const COPIED_FOR: Duration = Duration::from_millis(2000);
 /// `TextSize::Code`'s size and line height.
 const CODE_FONT: f32 = 12.;
 const LINE_HEIGHT: f32 = 18.;
@@ -81,16 +79,35 @@ pub struct Route {
 
 /// What React opens the browser on, and the files' revision
 /// (`changesRevision`), bumped when they change.
+#[derive(Clone)]
 pub struct Opening {
   pub route: Route,
   pub revision: u64,
 }
 
-/// The open file's text, split as React splits it.
+/// The open file's text, split as React splits it. Both halves are shared,
+/// so drawing a row or a frame copies neither.
 #[derive(Debug, Clone, Default)]
 pub(super) struct Opened {
-  pub content: String,
+  pub content: SharedString,
   pub lines: Rc<Vec<String>>,
+}
+
+/// [`Opened`] before it reaches the main thread: split off it, then shared.
+struct Read {
+  content: String,
+  lines: Vec<String>,
+}
+
+impl Read {
+  /// `content` split, or `None` when it is too large to show.
+  fn of(content: String) -> Option<Self> {
+    if too_large(&content) {
+      return None;
+    }
+    let lines = content.split('\n').map(str::to_string).collect();
+    Some(Self { content, lines })
+  }
 }
 
 /// The comment box: what it covers, and whether it shows.
@@ -107,33 +124,11 @@ struct TextInput {
   _changes: Subscription,
 }
 
-/// What a copy button copied.
-#[derive(Debug, Clone, Copy)]
-enum Copied {
-  Contents,
-  Path,
-  Review,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Field {
   Draft,
   Edit,
   Summary,
-}
-
-#[derive(Default)]
-pub(super) struct Search {
-  pub open: bool,
-  query: String,
-  pub applied: String,
-  pub current: usize,
-  /// Every match: its line (0-based) and byte range.
-  pub matches: Vec<(usize, Range<usize>)>,
-  input: Option<Entity<InputState>>,
-  focus: bool,
-  debounce: Option<Task<()>>,
-  _subscription: Option<Subscription>,
 }
 
 pub struct FileBrowserView {
@@ -150,6 +145,8 @@ pub struct FileBrowserView {
   pub(super) root: Option<Vec<WorkspaceEntry>>,
   cache: HashMap<String, Vec<WorkspaceEntry>>,
   pub(super) expanded: HashSet<String>,
+  /// `flatten` of the three fields above, dropped whenever one changes.
+  tree_rows: Option<Rc<Vec<TreeRow>>>,
   pub(super) changed: Vec<ChangedFile>,
   tree_scroll: UniformListScrollHandle,
   pub(super) selected: Option<String>,
@@ -158,10 +155,10 @@ pub struct FileBrowserView {
   pub(super) opened: Option<Opened>,
   language: Option<&'static str>,
   pub(super) marks: LineMarks,
+  /// The file read whose hunks `marks` are, once they land.
+  marks_read: u64,
   /// Bumped per file read, so a slower earlier read is dropped.
   reads: u64,
-  copied: bool,
-  copied_path: bool,
   /// The Markdown file whose preview shows.
   preview: Option<String>,
   list: ListState,
@@ -173,6 +170,8 @@ pub struct FileBrowserView {
   selecting: bool,
   // The review.
   pub(super) comments: Vec<LineComment>,
+  /// The open file's comments, gathered once a frame for its rows.
+  file_comments: Rc<Vec<LineComment>>,
   pub(super) summary: String,
   pub(super) draft: Option<Draft>,
   pub(super) draft_open: bool,
@@ -184,14 +183,20 @@ pub struct FileBrowserView {
   summary_input: Option<TextInput>,
   pub(super) finish_open: bool,
   use_idle: bool,
-  copied_review: bool,
   pub(super) discard_dialog: bool,
   hydrated: Option<(String, i64)>,
-  pub(super) search: Search,
+  pub(super) search: Find,
+  /// Every find match: its line (0-based) and byte range.
+  pub(super) matches: Vec<(usize, Range<usize>)>,
   anchors: Rc<RefCell<HashMap<String, Bounds<Pixels>>>>,
   _save: Option<Task<()>>,
-  _copied_reset: Option<Task<()>>,
-  _find_key: Option<Subscription>,
+  /// The files' revision when the browser was hidden, while another tab
+  /// or workspace shows.
+  hidden_at: Option<u64>,
+  /// The file row the pointer rests on, and the files read ahead that way,
+  /// by path, until the workspace's files change.
+  hovered: prefetch::Intent<String>,
+  prefetched: prefetch::Lru<String, Read>,
 }
 
 impl HasTooltips for FileBrowserView {
@@ -223,6 +228,7 @@ impl FileBrowserView {
       editors,
       root: None,
       cache: HashMap::new(),
+      tree_rows: None,
       expanded: HashSet::new(),
       changed: Vec::new(),
       tree_scroll: UniformListScrollHandle::new(),
@@ -232,9 +238,8 @@ impl FileBrowserView {
       opened: None,
       language: None,
       marks: LineMarks::default(),
+      marks_read: 0,
       reads: 0,
-      copied: false,
-      copied_path: false,
       preview: None,
       list: ListState::new(0, ListAlignment::Top, px(400.)),
       rows_key: Vec::new(),
@@ -242,6 +247,7 @@ impl FileBrowserView {
       anchor: None,
       selecting: false,
       comments: Vec::new(),
+      file_comments: Rc::default(),
       summary: String::new(),
       draft: None,
       draft_open: false,
@@ -253,14 +259,15 @@ impl FileBrowserView {
       summary_input: None,
       finish_open: false,
       use_idle: false,
-      copied_review: false,
       discard_dialog: false,
       hydrated: None,
-      search: Search::default(),
+      search: Find::default(),
+      matches: Vec::new(),
       anchors: Rc::default(),
       _save: None,
-      _copied_reset: None,
-      _find_key: None,
+      hidden_at: None,
+      hovered: prefetch::Intent::default(),
+      prefetched: prefetch::Lru::new(8),
     };
     this.start(route, cx);
     this
@@ -271,6 +278,7 @@ impl FileBrowserView {
   fn start(&mut self, route: Route, cx: &mut Context<Self>) {
     let base = self.base();
     self.expanded = HashSet::from([base]);
+    self.tree_rows = None;
     self.load_root(cx);
     self.load_changed(cx);
     self.hydrate_review(cx);
@@ -305,6 +313,33 @@ impl FileBrowserView {
     self.apply_route(route, cx);
   }
 
+  /// Its tree's first read landed.
+  pub(super) fn ready(&self) -> bool {
+    self.root.is_some()
+  }
+
+  /// Hidden while another tab or workspace shows; shown again, it reads
+  /// the tree and the open file again behind what it draws, unless a
+  /// newer revision already did.
+  pub(super) fn set_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
+    match (shown, self.hidden_at) {
+      (false, None) => {
+        self.hidden_at = Some(self.revision);
+        // Cmd+F is the shown view's; drawing again listens again.
+        find::unwatch_key(self);
+      }
+      (true, Some(at)) => {
+        self.hidden_at = None;
+        // Until its first read lands (a view made ahead), that read is
+        // still on the way.
+        if at == self.revision && self.ready() {
+          self.refresh(cx);
+        }
+      }
+      _ => {}
+    }
+  }
+
   /// `initialSelectedFile` and `initialExpandedDir`, when they change.
   fn apply_route(&mut self, route: Route, cx: &mut Context<Self>) {
     if self.route == route {
@@ -326,6 +361,7 @@ impl FileBrowserView {
   /// The workspace's files changed: read the open file, the expanded
   /// directories and the changed files again.
   fn refresh(&mut self, cx: &mut Context<Self>) {
+    self.prefetched.clear();
     if let Some(path) = self.selected.clone() {
       self.select_file(&path, cx);
     }
@@ -359,26 +395,16 @@ impl FileBrowserView {
       let value = cx
         .background_spawn(async move { work(host.as_ref()) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if view.parent.key() == key {
-          apply(view, value, cx);
-          cx.notify();
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.parent.key() == key {
+            apply(view, value, cx);
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     })
     .detach();
-  }
-
-  fn toast(&self, tone: ToastTone, title: &str, description: impl Into<String>) {
-    super::workspace_data::WorkspaceHost::notify(
-      self.host.as_ref(),
-      NativeEvent::Toast {
-        title: title.into(),
-        description: description.into(),
-        tone,
-        action: None,
-      },
-    );
   }
 
   fn send_react(&self, action: ScreenAction, cx: &mut App) {
@@ -396,12 +422,17 @@ impl FileBrowserView {
   fn load_root(&mut self, cx: &mut Context<Self>) {
     let base = self.base();
     self.run(
-      move |host| host.list_directory(&base).map(filter_hidden),
+      move |host| host.list_directory(&base).map(|e| sorted(filter_hidden(e))),
       |view, result, cx| match result {
         Ok(entries) => {
           let first = view.root.is_none();
-          view.cache.insert(view.base(), entries.clone());
-          view.root = Some(entries);
+          // A refresh that lists the same entries keeps the tree's rows.
+          let base = view.base();
+          if view.root.as_ref() != Some(&entries) || view.cache.get(&base) != Some(&entries) {
+            view.cache.insert(base, entries.clone());
+            view.root = Some(entries);
+            view.tree_rows = None;
+          }
           if first {
             view.open_readme(cx);
           }
@@ -410,6 +441,7 @@ impl FileBrowserView {
           log::warn!("Failed to list directory: {err}");
           if view.root.is_none() {
             view.root = Some(Vec::new());
+            view.tree_rows = None;
           }
         }
       },
@@ -441,24 +473,33 @@ impl FileBrowserView {
     if !force && self.cache.contains_key(&dir) {
       if expand {
         self.expanded.insert(dir);
+        self.tree_rows = None;
         cx.notify();
       }
       return;
     }
     let path = dir.clone();
     self.run(
-      move |host| host.list_directory(&path).map(filter_hidden),
+      move |host| host.list_directory(&path).map(|e| sorted(filter_hidden(e))),
       move |view, result, _| {
         let entries = match result {
           Ok(entries) => entries,
           Err(err) => {
-            view.toast(ToastTone::Error, "Failed to load directory", err);
+            super::workspace_data::WorkspaceHost::notify(
+              view.host.as_ref(),
+              Toast::error("Failed to load directory")
+                .description(err)
+                .into(),
+            );
             Vec::new()
           }
         };
-        view.cache.insert(dir.clone(), entries);
-        if expand {
-          view.expanded.insert(dir);
+        if view.cache.get(&dir) != Some(&entries) {
+          view.cache.insert(dir.clone(), entries);
+          view.tree_rows = None;
+        }
+        if expand && view.expanded.insert(dir) {
+          view.tree_rows = None;
         }
       },
       cx,
@@ -480,6 +521,7 @@ impl FileBrowserView {
 
   fn click_dir(&mut self, path: String, cx: &mut Context<Self>) {
     if self.expanded.remove(&path) {
+      self.tree_rows = None;
       cx.notify();
     } else {
       self.load_dir(path, false, true, cx);
@@ -506,7 +548,7 @@ impl FileBrowserView {
   pub(super) fn select_file(&mut self, path: &str, cx: &mut Context<Self>) {
     let refreshing = self.selected.as_deref() == Some(path);
     if !refreshing {
-      self.close_search(cx);
+      find::close(self, cx);
       self.selection = None;
       self.anchor = None;
       self.draft = None;
@@ -538,54 +580,79 @@ impl FileBrowserView {
     }
     let rel = self.rel(path);
     let hunks = self.changed.iter().any(|f| f.path == rel);
-    let (repo, workspace_id) = (self.parent.repo_path.clone(), self.parent.workspace_id());
+    if hunks {
+      // The hunks are read beside the file, and mark it once they land.
+      let (repo, workspace_id) = (self.parent.repo_path.clone(), self.parent.workspace_id());
+      self.run(
+        move |host| {
+          host
+            .file_hunks(&repo, workspace_id, vec![rel.clone()], None)
+            .map(|batch| {
+              batch
+                .files
+                .into_iter()
+                .find(|f| f.path == rel)
+                .map(|f| f.hunks)
+                .unwrap_or_default()
+            })
+        },
+        move |view, result, _| {
+          if view.reads != read {
+            return;
+          }
+          view.marks_read = read;
+          view.marks = match result {
+            Ok(hunks) => line_marks(&hunks),
+            Err(err) => {
+              log::warn!("Failed to load jj hunks: {err}");
+              LineMarks::default()
+            }
+          };
+        },
+        cx,
+      );
+    }
+    // Read ahead while the pointer rested on its row: drawn at once.
+    let now = cx.background_executor().now();
+    if let Some(content) = (!refreshing)
+      .then(|| self.prefetched.take_fresh(&path.to_string(), now))
+      .flatten()
+    {
+      self.loading_file = false;
+      self.marks = LineMarks::default();
+      self.show_content(content, false, cx);
+      return;
+    }
     let file = path.to_string();
     self.run(
-      move |host| {
-        let content = host.read_file(&file)?;
-        if too_large(&content) || !hunks {
-          return Ok((content, None));
-        }
-        let read = host
-          .file_hunks(&repo, workspace_id, vec![rel.clone()])
-          .map(|batch| {
-            batch
-              .files
-              .into_iter()
-              .find(|f| f.path == rel)
-              .map(|f| f.hunks)
-              .unwrap_or_default()
-          });
-        Ok::<_, String>((content, Some(read)))
-      },
+      move |host| host.read_file(&file).map(Read::of),
       move |view, result, cx| {
         if view.reads != read {
           return;
         }
         view.loading_file = false;
+        // Another file's marks never show on this one; a file read again
+        // keeps its marks until the new ones land.
+        if !hunks || (!refreshing && view.marks_read != read) {
+          view.marks = LineMarks::default();
+        }
         match result {
-          Ok((content, _)) if too_large(&content) => {
-            view.toast(
-              ToastTone::Warning,
-              "File too large",
-              "Files larger than 1MB cannot be displayed.",
+          Ok(None) => {
+            super::workspace_data::WorkspaceHost::notify(
+              view.host.as_ref(),
+              Toast::warning("File too large")
+                .description("Files larger than 1MB cannot be displayed.")
+                .into(),
             );
             view.selected = None;
             view.opened = None;
           }
-          Ok((content, hunks)) => {
-            view.marks = match hunks {
-              Some(Ok(hunks)) => line_marks(&hunks),
-              Some(Err(err)) => {
-                log::warn!("Failed to load jj hunks: {err}");
-                LineMarks::default()
-              }
-              None => LineMarks::default(),
-            };
-            view.show_content(content, refreshing, cx);
-          }
+          Ok(Some(read)) => view.show_content(read, refreshing, cx),
           Err(err) => {
-            view.toast(ToastTone::Error, "Failed to read file", err);
+            super::workspace_data::WorkspaceHost::notify(
+              view.host.as_ref(),
+              Toast::error("Failed to read file").description(err).into(),
+            );
             view.opened = Some(Opened::default());
             view.marks = LineMarks::default();
           }
@@ -596,14 +663,61 @@ impl FileBrowserView {
     cx.notify();
   }
 
-  fn show_content(&mut self, content: String, refreshing: bool, cx: &mut Context<Self>) {
-    let lines: Vec<String> = content.split('\n').map(str::to_string).collect();
-    let count = lines.len();
+  /// The pointer entered or left file `path`'s row.
+  fn hover_file(&mut self, path: String, hovered: bool, cx: &mut Context<Self>) {
+    let file = path.clone();
+    self.hovered.hover(path, hovered, cx, move |view, cx| {
+      view.prefetch_file(file, cx)
+    });
+  }
+
+  /// Reads file `path` ahead, unless it is open or was read ahead lately.
+  /// Nothing redraws.
+  fn prefetch_file(&mut self, path: String, cx: &mut Context<Self>) {
+    let now = cx.background_executor().now();
+    if is_binary(&path)
+      || self.selected.as_ref() == Some(&path)
+      || self.prefetched.has_fresh(&path, now)
+    {
+      return;
+    }
+    let (host, key) = (self.host.clone(), self.parent.key());
+    cx.spawn(async move |this, cx| {
+      let file = path.clone();
+      let read = cx
+        .background_spawn(async move { host.read_file(&file).map(Read::of) })
+        .await;
+      let Ok(Some(content)) = read else {
+        return;
+      };
+      this
+        .update(cx, |view, cx| {
+          if view.parent.key() == key {
+            let now = cx.background_executor().now();
+            view.prefetched.insert(path, now, content);
+          }
+        })
+        .ignore_closed();
+    })
+    .detach();
+  }
+
+  fn show_content(&mut self, read: Read, refreshing: bool, cx: &mut Context<Self>) {
+    // A file read again as it was keeps its rows and their measurements.
+    if refreshing
+      && self
+        .opened
+        .as_ref()
+        .is_some_and(|o| o.content.as_ref() == read.content)
+    {
+      return;
+    }
+    let count = read.lines.len();
     let old = self.opened.as_ref().map_or(0, |o| o.lines.len());
     self.language = self.selected.as_deref().and_then(highlight::language);
     self.opened = Some(Opened {
-      content,
-      lines: Rc::new(lines),
+      content: read.content.into(),
+      lines: Rc::new(read.lines),
     });
     if refreshing {
       self.list.splice(0..old, count);
@@ -615,31 +729,11 @@ impl FileBrowserView {
     cx.notify();
   }
 
-  /// Shows "Copied" on `what` for a while.
-  fn copy_flag(&mut self, what: Copied, cx: &mut Context<Self>) {
-    match what {
-      Copied::Contents => self.copied = true,
-      Copied::Path => self.copied_path = true,
-      Copied::Review => self.copied_review = true,
-    }
-    self._copied_reset = Some(cx.spawn(async move |this, cx| {
-      cx.background_executor().timer(COPIED_FOR).await;
-      let _ = this.update(cx, |view, cx| {
-        view.copied = false;
-        view.copied_path = false;
-        view.copied_review = false;
-        cx.notify();
-      });
-    }));
-    cx.notify();
-  }
-
   fn copy_contents(&mut self, cx: &mut Context<Self>) {
     let Some(opened) = self.opened.as_ref() else {
       return;
     };
-    cx.write_to_clipboard(ClipboardItem::new_string(opened.content.clone()));
-    self.copy_flag(Copied::Contents, cx);
+    cx.write_to_clipboard(ClipboardItem::new_string(opened.content.to_string()));
   }
 
   fn copy_path(&mut self, cx: &mut Context<Self>) {
@@ -647,7 +741,6 @@ impl FileBrowserView {
       return;
     };
     cx.write_to_clipboard(ClipboardItem::new_string(self.rel(&path)));
-    self.copy_flag(Copied::Path, cx);
   }
 
   // Line selection and comments.
@@ -830,17 +923,19 @@ impl FileBrowserView {
     let (comments, summary) = review_to_save(&self.comments, &self.summary);
     self._save = Some(cx.spawn(async move |this, cx| {
       cx.background_executor().timer(SAVE_DELAY).await;
-      let _ = this.update(cx, |view, cx| {
-        view.run(
-          move |host| host.save_browser_review(&repo, id, &comments, summary.as_deref()),
-          |_, result, _| {
-            if let Err(err) = result {
-              log::warn!("Failed to save file browser review: {err}");
-            }
-          },
-          cx,
-        );
-      });
+      this
+        .update(cx, |view, cx| {
+          view.run(
+            move |host| host.save_browser_review(&repo, id, &comments, summary.as_deref()),
+            |_, result, _| {
+              if let Err(err) = result {
+                log::warn!("Failed to save file browser review: {err}");
+              }
+            },
+            cx,
+          );
+        })
+        .ignore_closed();
     }));
   }
 
@@ -850,7 +945,6 @@ impl FileBrowserView {
 
   fn copy_review(&mut self, cx: &mut Context<Self>) {
     cx.write_to_clipboard(ClipboardItem::new_string(self.markdown()));
-    self.copy_flag(Copied::Review, cx);
   }
 
   /// Plan or Edit: React starts the agent with the review.
@@ -883,7 +977,10 @@ impl FileBrowserView {
 
   fn discard_review(&mut self, cx: &mut Context<Self>) {
     self.reset_review(cx);
-    self.toast(ToastTone::Success, "Review canceled", "");
+    super::workspace_data::WorkspaceHost::notify(
+      self.host.as_ref(),
+      Toast::success("Review canceled").into(),
+    );
   }
 
   fn input_for(
@@ -893,16 +990,14 @@ impl FileBrowserView {
     cx: &mut Context<Self>,
   ) -> Option<Entity<TextareaState>> {
     let (slot, text, placeholder) = match field {
-      Field::Draft if self.draft_open && self.draft.is_some() => (
-        &self.draft_input,
-        self.draft_text.clone(),
-        "Add a comment...",
-      ),
+      Field::Draft if self.draft_open && self.draft.is_some() => {
+        (&self.draft_input, self.draft_text.clone(), "Add a comment…")
+      }
       Field::Edit if self.editing.is_some() => (&self.edit_input, self.edit_text.clone(), ""),
       Field::Summary if self.finish_open => (
         &self.summary_input,
         self.summary.clone(),
-        "Add a summary comment (optional)...",
+        "Add a summary comment (optional)…",
       ),
       _ => return None,
     };
@@ -968,8 +1063,9 @@ impl FileBrowserView {
 
   /// Measures rows again when what follows a line changed.
   fn sync_rows(&mut self) {
+    self.file_comments = Rc::new(self.file_comments().into_iter().cloned().collect());
     let mut key: Vec<(u32, String, usize)> = self
-      .file_comments()
+      .file_comments
       .iter()
       .map(|c| (c.end_line, c.id.clone(), c.text.len()))
       .collect();
@@ -988,57 +1084,10 @@ impl FileBrowserView {
 
   // Search.
 
-  fn watch_find_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-    if self._find_key.is_some() {
-      return;
-    }
-    let id = window.window_handle().window_id();
-    self._find_key = Some(cx.observe_keystrokes(move |view, event, window, cx| {
-      let k = &event.keystroke;
-      if window.window_handle().window_id() == id
-        && k.key == "f"
-        && (crate::gpui_shell::keys::held(k.modifiers).platform
-          || crate::gpui_shell::keys::held(k.modifiers).control)
-        && !crate::gpui_shell::keys::held(k.modifiers).shift
-        && !crate::gpui_shell::keys::held(k.modifiers).alt
-      {
-        view.open_search(cx);
-      }
-    }));
-  }
-
-  /// Cmd+F, while a text file is open.
-  pub(super) fn open_search(&mut self, cx: &mut Context<Self>) {
-    if self.selected.as_deref().is_none_or(is_binary) {
-      return;
-    }
-    self.search.open = true;
-    self.search.focus = true;
-    cx.notify();
-  }
-
-  fn close_search(&mut self, cx: &mut Context<Self>) {
-    self.search = Search::default();
-    cx.notify();
-  }
-
-  fn set_query(&mut self, query: String, cx: &mut Context<Self>) {
-    self.search.query = query.clone();
-    self.search.debounce = Some(cx.spawn(async move |this, cx| {
-      cx.background_executor().timer(SEARCH_DEBOUNCE).await;
-      let _ = this.update(cx, |view, cx| {
-        view.search.applied = query;
-        view.search.current = 0;
-        view.index_matches();
-        cx.notify();
-      });
-    }));
-    cx.notify();
-  }
-
+  /// Every match of the find query in the open file, in line order.
   fn index_matches(&mut self) {
     let query = self.search.applied.clone();
-    self.search.matches = match self.opened.as_ref() {
+    self.matches = match self.opened.as_ref() {
       Some(opened) if !query.is_empty() => opened
         .lines
         .iter()
@@ -1047,64 +1096,14 @@ impl FileBrowserView {
         .collect(),
       _ => Vec::new(),
     };
-    if self.search.current >= self.search.matches.len() {
-      self.search.current = 0;
-    }
-  }
-
-  pub(super) fn step_match(&mut self, delta: isize, cx: &mut Context<Self>) {
-    let total = self.search.matches.len() as isize;
-    if total == 0 {
-      return;
-    }
-    self.search.current = (self.search.current as isize + delta).rem_euclid(total) as usize;
-    let line = self.search.matches[self.search.current].0;
-    let half = (f32::from(self.list.viewport_bounds().size.height) / LINE_HEIGHT / 2.) as usize;
-    self.list.scroll_to(ListOffset {
-      item_ix: line.saturating_sub(half),
-      offset_in_item: px(0.),
-    });
-    cx.notify();
-  }
-
-  fn ensure_search_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-    if !self.search.open {
-      return;
-    }
-    let input = match &self.search.input {
-      Some(input) => input.clone(),
-      None => {
-        let input = cx.new(|cx| InputState::new(window, cx).placeholder("Find"));
-        self.search._subscription = Some(cx.subscribe(
-          &input,
-          |view, input, event: &InputEvent, cx| match event {
-            InputEvent::Change => {
-              let query = input.read(cx).value().to_string();
-              view.set_query(query, cx);
-            }
-            InputEvent::PressEnter { shift, .. } => {
-              view.step_match(if *shift { -1 } else { 1 }, cx)
-            }
-            _ => {}
-          },
-        ));
-        self.search.input = Some(input.clone());
-        input
-      }
-    };
-    if std::mem::take(&mut self.search.focus) {
-      input.update(cx, |input, cx| {
-        input.focus(window, cx);
-        input.select_all(window, cx);
-      });
-    }
+    self.search.set_total(self.matches.len());
   }
 
   // Menus.
 
   fn copy_toast(&self, text: String, title: String, cx: &mut App) {
     cx.write_to_clipboard(ClipboardItem::new_string(text));
-    self.toast(ToastTone::Success, &title, "");
+    super::workspace_data::WorkspaceHost::notify(self.host.as_ref(), Toast::success(&title).into());
   }
 
   /// `FileTreeContextMenu`.
@@ -1115,9 +1114,11 @@ impl FileBrowserView {
     let copy = |text: String, title: String| {
       let entity = entity.clone();
       move |cx: &mut App| {
-        let _ = entity.update(cx, |view, cx| {
-          view.copy_toast(text.clone(), title.clone(), cx)
-        });
+        entity
+          .update(cx, |view, cx| {
+            view.copy_toast(text.clone(), title.clone(), cx)
+          })
+          .ignore_closed();
       }
     };
     let mut open = vec![{
@@ -1142,17 +1143,14 @@ impl FileBrowserView {
     let items = vec![
       NativeMenuItem::item(
         "Copy relative path",
-        copy(rel.clone(), "Relative path copied".to_string()),
+        copy(rel, "Relative path copied".to_string()),
       )
       .icon(MenuIcon::Copy),
-      NativeMenuItem::item(
-        "Copy full path",
-        copy(full.clone(), "Full path copied".to_string()),
-      )
-      .icon(MenuIcon::Copy),
+      NativeMenuItem::item("Copy full path", copy(full, "Full path copied".to_string()))
+        .icon(MenuIcon::Copy),
       NativeMenuItem::Separator,
       NativeMenuItem::Submenu {
-        text: "Open in...".into(),
+        text: "Open in…".into(),
         icon: Some(MenuIcon::FolderOpen),
         detail: None,
         items: open,
@@ -1197,11 +1195,38 @@ impl FileBrowserView {
   }
 }
 
+impl Findable for FileBrowserView {
+  fn find(&mut self) -> &mut Find {
+    &mut self.search
+  }
+
+  /// While a text file is open.
+  fn can_find(&self) -> bool {
+    self.selected.as_deref().is_some_and(|p| !is_binary(p))
+  }
+
+  fn query_applied(&mut self, _cx: &mut Context<Self>) {
+    self.index_matches();
+  }
+
+  /// Scrolls the current match's line to the middle.
+  fn reveal_current(&mut self, _cx: &mut Context<Self>) {
+    let Some(&(line, _)) = self.matches.get(self.search.current) else {
+      return;
+    };
+    let half = (f32::from(self.list.viewport_bounds().size.height) / LINE_HEIGHT / 2.) as usize;
+    self.list.scroll_to(ListOffset {
+      item_ix: line.saturating_sub(half),
+      offset_in_item: px(0.),
+    });
+  }
+}
+
 impl Render for FileBrowserView {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     self.tips.sync(cx);
-    self.watch_find_key(window, cx);
-    self.ensure_search_input(window, cx);
+    find::watch_key(self, window, cx);
+    find::ensure_input(self, window, cx);
     self.ensure_inputs(window, cx);
     self.sync_rows();
     let p = theme::palette(self.dark);
@@ -1211,7 +1236,11 @@ impl Render for FileBrowserView {
     let finish = self.finish_popover(&p, cx);
     let dialog = self.discard_dialog(window, &p, cx);
     ui::text(div(), TextSize::Sm)
+      .id("file-browser")
       .debug_selector(|| "file-browser".into())
+      .role(gpui::Role::Group)
+      .aria_label("File browser")
+      .test_support()
       .size_full()
       .flex()
       .flex_col()
@@ -1256,6 +1285,8 @@ impl FileBrowserView {
     let fg = p.foreground;
     let back = ui::text(div(), TextSize::Sm)
       .id("file-browser-back")
+      .role(gpui::Role::Button)
+      .aria_label("Back")
       .debug_selector(|| "file-browser-back".into())
       .flex()
       .items_center()
@@ -1293,7 +1324,11 @@ impl FileBrowserView {
             .gap_2()
             .child(
               ui::text(div(), TextSize::Sm)
+                .id("file-browser-pending")
                 .debug_selector(|| "file-browser-pending".into())
+                .role(gpui::Role::Status)
+                .aria_label(format!("{} pending", count_label(n, "comment")))
+                .test_support()
                 .flex()
                 .items_center()
                 .gap_1p5()
@@ -1341,7 +1376,8 @@ impl FileBrowserView {
       .bg(p.sidebar)
       .overflow_hidden();
     let Some(root) = self.root.as_ref() else {
-      return panel.child(
+      return panel.child(ui::delayed(
+        "file-tree-loading",
         div()
           .debug_selector(|| "file-tree-loading".into())
           .flex()
@@ -1349,9 +1385,12 @@ impl FileBrowserView {
           .justify_center()
           .p_4()
           .child(ui::spinner("file-tree-spin", 24., p.muted_foreground)),
-      );
+      ));
     };
-    let rows = Rc::new(flatten(root, &self.expanded, &self.cache));
+    let rows = self
+      .tree_rows
+      .get_or_insert_with(|| Rc::new(flatten(root, &self.expanded, &self.cache)))
+      .clone();
     let count = rows.len();
     panel.child(
       uniform_list(
@@ -1378,8 +1417,6 @@ impl FileBrowserView {
     cx: &mut Context<Self>,
   ) -> gpui::AnyElement {
     let id = SharedString::from(format!("file-tree-{}", self.rel(&entry.path)));
-    let selector = id.to_string();
-    let hover = p.muted.opacity(0.6);
     let mono = |text: &str, color: Hsla| {
       ui::text(div(), TextSize::Sm)
         .font_family(theme::MONO_FONT)
@@ -1389,19 +1426,11 @@ impl FileBrowserView {
         .child(text.to_string())
     };
     let menu_path = entry.path.clone();
-    let row = div()
-      .id(id)
-      .debug_selector(move || selector)
+    let row = ui::Row::new(id, p)
+      .label(entry.name.clone())
       .w_full()
-      .flex()
-      .items_center()
-      .gap_2()
-      .px_2()
-      .py_1()
       .pl(zpx(depth as f32 * 16. + 8.))
       .rounded(radius::MD)
-      .cursor_pointer()
-      .hover(move |s| s.bg(hover))
       .on_mouse_down(
         MouseButton::Right,
         cx.listener(move |view, e: &MouseDownEvent, _, cx| {
@@ -1413,9 +1442,9 @@ impl FileBrowserView {
       let open = self.expanded.contains(&entry.path);
       let rel = self.rel(&entry.path);
       let status = dir_status(&self.changed, &rel);
-      let color = status.map_or(p.foreground, |s| status_tone(s).text(p));
+      let color = p.foreground;
       return row
-        .child(ui::icon(
+        .leading(ui::icon(
           if open {
             theme::ICON_FOLDER_OPEN
           } else {
@@ -1443,14 +1472,12 @@ impl FileBrowserView {
       .get(&rel)
       .copied()
       .unwrap_or(0);
-    let color = status
-      .as_deref()
-      .map_or(p.foreground, |s| status_tone(s).text(p));
+    let color = p.foreground;
     let selected = self.selected.as_deref() == Some(entry.path.as_str());
     let primary = p.primary;
     row
-      .when(selected, |this| this.bg(primary.opacity(0.1)))
-      .child(ui::icon(theme::ICON_FILE_TEXT, 16., p.muted_foreground))
+      .selected(selected)
+      .leading(ui::icon(theme::ICON_FILE_TEXT, 16., p.muted_foreground))
       .child(mono(&entry.name, color))
       .when(count > 0, |this| {
         this.child(
@@ -1462,6 +1489,8 @@ impl FileBrowserView {
                 if count == 1 { "" } else { "s" }
               ),
               Side::Top,
+              // Short label (['count']): 11px is fine.
+              // ast-grep-ignore: gpui-text-xs-short-label-only
               ui::text(div(), TextSize::Xs)
                 .flex()
                 .items_center()
@@ -1476,13 +1505,28 @@ impl FileBrowserView {
       })
       .when_some(status, |this, status| {
         let bg = status_dot(&status).map_or(p.muted, |tone| tone.color(p));
-        this.child(div().ml_auto().flex_none().child(self.tip(
-          format!("status-{rel}"),
-          status_title(&status),
-          Side::Top,
-          div().size_2().rounded_full().bg(bg),
-          cx,
-        )))
+        this.child(
+          div().ml_auto().flex_none().child(
+            self.tip(
+              format!("status-{rel}"),
+              status_title(&status),
+              Side::Top,
+              div()
+                .id(SharedString::from(format!("status-dot-{rel}")))
+                .role(gpui::Role::Image)
+                .aria_label(status_title(&status))
+                .size_2()
+                .rounded_full()
+                .bg(bg)
+                .test_support(),
+              cx,
+            ),
+          ),
+        )
+      })
+      .on_hover({
+        let path = path.clone();
+        cx.listener(move |view, hovered: &bool, _, cx| view.hover_file(path.clone(), *hovered, cx))
       })
       .on_click(cx.listener(move |view, _, _, cx| view.select_file(&path, cx)))
       .into_any_element()
@@ -1507,7 +1551,11 @@ impl FileBrowserView {
     };
     if is_binary(&path) {
       return Self::centered(p)
+        .id("file-browser-binary")
         .debug_selector(|| "file-browser-binary".into())
+        .role(gpui::Role::Status)
+        .aria_label("Binary file - cannot display")
+        .test_support()
         .flex_col()
         .gap_2()
         .child(ui::icon(theme::ICON_CIRCLE_ALERT, 32., p.muted_foreground))
@@ -1516,29 +1564,49 @@ impl FileBrowserView {
         .into_any_element();
     }
     if self.loading_file {
-      return Self::centered(p)
-        .debug_selector(|| "file-browser-loading".into())
-        .child(ui::spinner("file-spin", 24., p.muted_foreground))
-        .into_any_element();
+      return ui::delayed(
+        "file-browser-loading",
+        Self::centered(p)
+          .debug_selector(|| "file-browser-loading".into())
+          .child(ui::spinner("file-spin", 24., p.muted_foreground)),
+      )
+      .into_any_element();
     }
     let Some(opened) = self.opened.clone().filter(|o| !o.content.is_empty()) else {
+      let retry = path.clone();
       return Self::centered(p)
         .debug_selector(|| "file-browser-failed".into())
-        .child("Failed to load file content")
+        .child(
+          ui::EmptyState::failed(
+            "file-browser-failed-state",
+            format!("Couldn't read {}", file_name(&path)),
+            "The file may have been moved or deleted, or is not text.",
+            p,
+          )
+          .action(ui::error_actions(
+            "file-browser",
+            format!("Couldn't read {path}"),
+            Some(Box::new(
+              cx.listener(move |view, _, _, cx| view.select_file(&retry, cx)),
+            )),
+            p,
+          )),
+        )
         .into_any_element();
     };
     let markdown = is_markdown(&path);
     let previewing = markdown && self.preview.as_deref() == Some(path.as_str());
     let body = if previewing {
+      // The preview scrolls itself, so a long README draws only the blocks
+      // on screen.
       div()
         .id("markdown-preview")
         .debug_selector(|| "file-markdown-preview".into())
         .size_full()
-        .overflow_y_scroll()
         .bg(p.background)
         .px_8()
         .py_6()
-        .child(super::code::markdown(
+        .child(super::code::scrolling_markdown(
           "file-markdown",
           &opened.content,
           14.,
@@ -1556,7 +1624,7 @@ impl FileBrowserView {
             .child(
               list(
                 self.list.clone(),
-                cx.processor(|view, ix: usize, _, cx| view.code_row(ix, cx)),
+                cx.processor(|view, ix: usize, _, cx| view.code_line(ix, cx)),
               )
               .size_full(),
             ),
@@ -1570,12 +1638,12 @@ impl FileBrowserView {
       .flex()
       .flex_col()
       .bg(theme::palette(self.dark).code_background())
-      .child(self.content_header(&path, markdown, previewing, p, cx))
+      .child(self.path_bar(&path, markdown, previewing, p, cx))
       .child(div().flex_1().min_h_0().overflow_hidden().child(body))
       .into_any_element()
   }
 
-  fn content_header(
+  fn path_bar(
     &self,
     path: &str,
     markdown: bool,
@@ -1585,7 +1653,6 @@ impl FileBrowserView {
   ) -> impl IntoElement {
     let rel = self.rel(path);
     let muted = p.muted_foreground;
-    let fg = p.foreground;
     let left = div()
       .flex()
       .items_center()
@@ -1593,27 +1660,28 @@ impl FileBrowserView {
       .min_w_0()
       .child(
         ui::text(div(), TextSize::Sm)
+          .id("file-content-path")
           .debug_selector(|| "file-content-path".into())
+          .role(gpui::Role::Heading)
+          .aria_label(rel.clone())
+          .test_support()
           .font_family(theme::MONO_FONT)
           .text_color(muted)
           .child(rel),
       )
-      .child(
-        self.tip(
+      .child(self.tip(
+        "copy-file-path",
+        "Copy file path",
+        Side::Top,
+        copy_button(
           "copy-file-path",
           "Copy file path",
-          Side::Top,
-          copy_button(
-            "copy-file-path",
-            "Copy file path",
-            self.copied_path,
-            false,
-            p,
-          )
-          .on_click(cx.listener(|view, _, _, cx| view.copy_path(cx))),
-          cx,
+          false,
+          p,
+          cx.listener(|view, _, _, cx| view.copy_path(cx)),
         ),
-      );
+        cx,
+      ));
     let mut right = div().flex().flex_none().items_center().gap_2();
     if let Some(modified) = &self.modified_at {
       right = right.child(
@@ -1622,7 +1690,11 @@ impl FileBrowserView {
           time::full(modified),
           Side::Top,
           ui::text(div(), TextSize::Sm)
+            .id("file-modified-label")
             .debug_selector(|| "file-modified".into())
+            .role(gpui::Role::Label)
+            .aria_label(format!("Modified {}", time::relative(modified)))
+            .test_support()
             .text_color(muted.opacity(0.9))
             .hover(move |s| s.text_color(muted))
             .child(format!("Modified {}", time::relative(modified))),
@@ -1631,70 +1703,37 @@ impl FileBrowserView {
       );
     }
     if markdown {
-      let tab = |id: &'static str, icon: &'static str, label: &'static str, active: bool| {
-        let color = if active { fg } else { muted };
-        ui::text(div(), TextSize::Xs)
-          .id(id)
-          .debug_selector(move || id.into())
-          .flex()
-          .items_center()
-          .gap_1()
-          .px_2()
-          .py_0p5()
-          .rounded(radius::MD)
-          .font_weight(FontWeight::MEDIUM)
-          .cursor_pointer()
-          .text_color(color)
-          .when(active, |this| this.bg(p.background).shadow_sm())
-          .child(ui::icon(icon, 14., color))
-          .child(label)
-      };
       let file = path.to_string();
+      let view = cx.entity().downgrade();
       right = right.child(
-        div()
-          .flex()
-          .gap_0p5()
-          .p_0p5()
-          .rounded(radius::MD)
-          .bg(p.muted)
-          .child(
-            tab("markdown-code", theme::ICON_CODE, "Code", !previewing).on_click(cx.listener(
-              |view, _, _, cx| {
-                view.preview = None;
+        ui::Tabs::new("markdown-view", p)
+          .tab(ui::Tab::new("markdown-code", "Code"))
+          .tab(ui::Tab::new("markdown-preview-tab", "Preview"))
+          .selected(usize::from(previewing))
+          .on_select(move |ix, _, cx| {
+            let preview = (ix == 1).then(|| file.clone());
+            view
+              .update(cx, |view, cx| {
+                view.preview = preview;
                 cx.notify();
-              },
-            )),
-          )
-          .child(
-            tab(
-              "markdown-preview-tab",
-              theme::ICON_EYE,
-              "Preview",
-              previewing,
-            )
-            .on_click(cx.listener(move |view, _, _, cx| {
-              view.preview = Some(file.clone());
-              cx.notify();
-            })),
-          ),
+              })
+              .ok();
+          }),
       );
     }
-    right = right.child(
-      self.tip(
+    right = right.child(self.tip(
+      "copy-file-contents",
+      "Copy file contents",
+      Side::Top,
+      copy_button(
         "copy-file-contents",
         "Copy file contents",
-        Side::Top,
-        copy_button(
-          "copy-file-contents",
-          "Copy file contents",
-          self.copied,
-          true,
-          p,
-        )
-        .on_click(cx.listener(|view, _, _, cx| view.copy_contents(cx))),
-        cx,
+        true,
+        p,
+        cx.listener(|view, _, _, cx| view.copy_contents(cx)),
       ),
-    );
+      cx,
+    ));
     div()
       .flex_none()
       .flex()
@@ -1710,34 +1749,26 @@ impl FileBrowserView {
   }
 
   /// A source line, and the comments under it (`FileBrowserListRow`).
-  fn code_row(&mut self, ix: usize, cx: &mut Context<Self>) -> gpui::AnyElement {
+  fn code_line(&mut self, ix: usize, cx: &mut Context<Self>) -> gpui::AnyElement {
     let p = theme::palette(self.dark);
-    let Some(opened) = self.opened.clone() else {
+    let Some(lines) = self.opened.as_ref().map(|o| o.lines.clone()) else {
       return div().into_any_element();
     };
-    let Some(text) = opened.lines.get(ix) else {
+    let Some(text) = lines.get(ix) else {
       return div().into_any_element();
     };
     let n = ix as u32 + 1;
     let added = self.marks.added.contains(&n);
     let deleted = self.marks.deleted_after.contains(&n);
-    let comments: Vec<LineComment> = self.file_comments().into_iter().cloned().collect();
+    let comments = self.file_comments.clone();
     let has_comment = comments
       .iter()
       .any(|c| n >= c.start_line && n <= c.end_line);
     let selected = self.selection.is_some_and(|(s, e)| n >= s && n <= e);
-    let width = line_number_width(opened.lines.len());
-    let bg = if selected {
-      Some(p.selected())
-    } else if added {
-      Some(ui::Tone::GitOpen.tint(&p))
-    } else {
-      None
-    };
-    let hover = p.muted.opacity(0.3);
+    let width = line_number_width(lines.len());
+    let bg = line_fill(selected, has_comment, added, &p);
     let selecting = self.selecting;
     let accent = p.primary;
-    let accent_hover = p.primary.opacity(0.85);
     let line = ui::text(div(), TextSize::Code)
       .id(SharedString::from(format!("code-line-{n}")))
       .debug_selector(move || format!("code-line-{n}"))
@@ -1748,7 +1779,7 @@ impl FileBrowserView {
       .overflow_hidden()
       .min_h(zpx(18.))
       .when_some(bg, |this, bg| this.bg(bg))
-      .when(bg.is_none(), |this| this.hover(move |s| s.bg(hover)))
+      .when(bg.is_none(), |this| this.hover(move |s| s.bg(p.hover())))
       .on_mouse_move(cx.listener(move |view, _, _, cx| view.drag_line(n, cx)))
       .when(added, |this| {
         this.child(
@@ -1758,7 +1789,7 @@ impl FileBrowserView {
             .top_0()
             .w_1()
             .h_full()
-            .bg(ui::Tone::GitOpen.color(&p)),
+            .bg(ui::Tone::DiffAdded.color(&p)),
         )
       })
       .when(deleted, |this| {
@@ -1770,12 +1801,14 @@ impl FileBrowserView {
             .bottom(zpx(-1.5))
             .w_2()
             .h(zpx(3.))
-            .bg(ui::Tone::GitClosed.color(&p)),
+            .bg(ui::Tone::DiffRemoved.color(&p)),
         )
       })
       .child(
         div()
           .id(SharedString::from(format!("code-gutter-{n}")))
+          .role(gpui::Role::Button)
+          .aria_label(format!("Line {n}"))
           .debug_selector(move || format!("code-gutter-{n}"))
           .relative()
           .flex()
@@ -1783,20 +1816,11 @@ impl FileBrowserView {
           .items_start()
           // Room for the add-comment button's overhang past the number.
           .pr_1()
+          .cursor_pointer()
           .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |view, e: &MouseDownEvent, _, cx| view.press_line(n, e, cx)),
           )
-          .when(has_comment, |this| {
-            this.child(
-              div()
-                .ml_1()
-                .h(zpx(LINE_HEIGHT))
-                .flex()
-                .items_center()
-                .child(ui::icon(theme::ICON_MESSAGE, 12., p.primary)),
-            )
-          })
           .child(
             div()
               .min_w(zpx(width as f32 * CH))
@@ -1825,6 +1849,8 @@ impl FileBrowserView {
                     Side::Top,
                     div()
                       .id(SharedString::from(format!("add-comment-{n}")))
+                      .role(gpui::Role::Button)
+                      .aria_label("Add comment")
                       .debug_selector(move || format!("add-comment-{n}"))
                       .size_5()
                       .flex()
@@ -1835,7 +1861,7 @@ impl FileBrowserView {
                       .cursor_pointer()
                       .opacity(0.)
                       .group_hover("code-line", |s| s.opacity(1.))
-                      .hover(move |s| s.bg(accent_hover))
+                      .hover(move |s| s.bg(p.primary_hover()))
                       .child(ui::icon(theme::ICON_PLUS, 16., p.primary_foreground))
                       .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                       .on_click(cx.listener(move |view, _, _, cx| {
@@ -1846,7 +1872,8 @@ impl FileBrowserView {
                   ),
                 )
               }),
-          ),
+          )
+          .test_support(),
       )
       .child(div().flex_1().min_w_0().child(self.marked_line(ix, text)));
     let under: Vec<&LineComment> = comments.iter().filter(|c| c.end_line == n).collect();
@@ -1862,39 +1889,24 @@ impl FileBrowserView {
 
   /// A line's text, highlighted, with its search matches marked.
   fn marked_line(&self, ix: usize, text: &str) -> gpui::AnyElement {
-    if self.search.applied.is_empty() || !self.search.matches.iter().any(|(l, _)| *l == ix) {
+    // The matches run in line order: this line's are one run of them.
+    let matches = &self.matches;
+    let first = matches.partition_point(|(l, _)| *l < ix);
+    let count = matches[first..].partition_point(|(l, _)| *l == ix);
+    if self.search.applied.is_empty() || count == 0 {
       return highlight::styled(text, self.language, self.dark).into_any_element();
     }
     let primary = theme::palette(self.dark).primary;
-    let marks: Vec<(Range<usize>, Hsla)> = self
-      .search
-      .matches
-      .iter()
-      .enumerate()
-      .filter(|(_, (l, _))| *l == ix)
-      .map(|(i, (_, r))| {
-        let current = i == self.search.current;
-        (r.clone(), primary.opacity(if current { 0.6 } else { 0.3 }))
-      })
-      .collect();
+    let marks = self.search.marks(text, first, primary);
     highlight::styled_marked(text, self.language, self.dark, &marks).into_any_element()
   }
 }
 
-/// The change a file status letter stands for, as the file row's name colour.
-fn status_tone(status: &str) -> ui::Tone {
-  match status {
-    "A" => ui::Tone::Success,
-    "D" => ui::Tone::Danger,
-    _ => ui::Tone::Warning,
-  }
-}
-
 /// The dot after a file's name; `None` for a neutral one.
-fn status_dot(status: &str) -> Option<ui::Tone> {
+pub(crate) fn status_dot(status: &str) -> Option<ui::Tone> {
   match status {
-    "??" | "A" => Some(ui::Tone::Success),
-    "D" => Some(ui::Tone::Danger),
+    "??" | "A" => Some(ui::Tone::DiffAdded),
+    "D" => Some(ui::Tone::DiffRemoved),
     "M" => Some(ui::Tone::Warning),
     "R" => Some(ui::Tone::Primary),
     _ => None,
@@ -1905,19 +1917,59 @@ fn status_dot(status: &str) -> Option<ui::Tone> {
 fn copy_button(
   id: &'static str,
   label: &'static str,
-  copied: bool,
   bordered: bool,
   p: &Palette,
-) -> ui::IconButton {
-  let icon = if copied {
-    theme::ICON_CHECK
+  on_click: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
+) -> ui::copy_feedback::Copyable {
+  let p = *p;
+  ui::copy_feedback::copyable(
+    SharedString::from(format!("{id}-feedback")),
+    move |copied| {
+      let button = ui::IconButton::new(id, theme::ICON_COPY, label, &p)
+        .size(ui::IconButtonSize::Small)
+        .copied(copied)
+        .on_click(on_click);
+      if bordered {
+        button.outline().into_any_element()
+      } else {
+        button.into_any_element()
+      }
+    },
+  )
+}
+
+/// A source line's fill: the selection, then a comment's amber (marking its
+/// lines like GitHub), then the added-line tint.
+fn line_fill(selected: bool, commented: bool, added: bool, p: &Palette) -> Option<Hsla> {
+  if selected {
+    Some(p.selected())
+  } else if commented {
+    Some(p.commented())
+  } else if added {
+    Some(ui::Tone::DiffAdded.tint(p))
   } else {
-    theme::ICON_COPY
-  };
-  let button = ui::IconButton::new(id, icon, label, p).size(ui::IconButtonSize::Small);
-  if bordered {
-    button.outline()
-  } else {
-    button
+    None
+  }
+}
+
+/// Behind a line's comments: the amber of the lines they are on.
+pub(super) fn comment_section_fill(p: &Palette) -> Hsla {
+  p.commented()
+}
+
+#[cfg(test)]
+mod line_fill_tests {
+  use super::*;
+
+  #[test]
+  fn selection_then_comment_then_added() {
+    let p = theme::palette(true);
+    assert_eq!(line_fill(true, true, true, &p), Some(p.selected()));
+    assert_eq!(line_fill(false, true, true, &p), Some(p.commented()));
+    assert_eq!(
+      line_fill(false, false, true, &p),
+      Some(ui::Tone::DiffAdded.tint(&p))
+    );
+    assert_eq!(line_fill(false, false, false, &p), None);
   }
 }

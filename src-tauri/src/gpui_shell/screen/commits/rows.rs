@@ -8,23 +8,25 @@
 //! what the nested layout's collapsing margins made it, and each row in the
 //! timeline draws its own stretch of the rule.
 
+use crate::core::review::selected_range;
 use crate::gpui_shell::ui::radius;
-use std::rc::Rc;
+use gpui_kit::base::TestSupportExt as _;
+use std::{collections::HashSet, rc::Rc};
 
 use tauri_plugin_gpui::gpui::{
   self, div, list, prelude::*, px, rems, AnyElement, Context, ListAlignment, ListOffset, ListState,
   MouseButton, MouseMoveEvent, Pixels, SharedString, Window,
 };
 
-use super::{CommitsView, Kind};
+use super::{search, CommitsView, Kind};
 use crate::{
   gpui_shell::{
     screen::{
-      code_data::group_by_day,
-      commits_data::{line_kind, line_numbers, History, LineKind},
+      commits_data::{headline, line_kind, line_numbers, History, LineKind},
       highlight,
     },
     theme::{self, Palette},
+    time,
     ui::{self, zpx},
   },
   jj::{JjDiffHunk, JjLogCommit},
@@ -62,7 +64,7 @@ pub(super) enum Row {
   OwnEmpty,
   /// "Load more commits", of the target's commits or not.
   LoadMore(bool),
-  /// The rule and "Recent on {target}".
+  /// The rule and "On {target} (read-only)".
   Divider,
   /// The space under the last row.
   End,
@@ -101,6 +103,26 @@ pub(super) struct Feed {
   conflicted: Vec<String>,
   /// The rem size the rows were measured at.
   rem: Pixels,
+  /// What the rows were laid out from, so an unchanged frame keeps them.
+  key: Option<Key>,
+}
+
+/// Every input of `layout_rows`. The history and the diffs are too large to
+/// compare, so `CommitsView::layout_gen` stands for them: it is bumped
+/// wherever either one changes.
+#[derive(PartialEq)]
+struct Key {
+  generation: u64,
+  home: bool,
+  home_limit: usize,
+  target_limit: usize,
+  hide_tentative: bool,
+  removed: HashSet<String>,
+  expanded: HashSet<String>,
+  /// The commit, file and line the comment box is under.
+  comment: Option<(String, String, (usize, usize))>,
+  /// Day labels are relative ("Today"), so a new day relabels them.
+  today: chrono::NaiveDate,
 }
 
 impl Feed {
@@ -123,6 +145,7 @@ impl Default for Feed {
       shift: false,
       conflicted: Vec::new(),
       rem: px(0.),
+      key: None,
     }
   }
 }
@@ -156,27 +179,66 @@ fn ident<'a>(
   }
 }
 
+/// A day's label over `commit` when it starts a new day (`group_by_day`).
+fn day_row(
+  feed: &mut Feed,
+  rows: &mut Rows,
+  day: &mut Option<Option<chrono::NaiveDate>>,
+  commit: &JjLogCommit,
+) {
+  let this = time::day(&commit.timestamp);
+  if *day == Some(this) {
+    return;
+  }
+  *day = Some(this);
+  rows.push(Row::Day(feed.days.len()), 5, 0);
+  feed.days.push(time::day_label(&commit.timestamp));
+}
+
 impl CommitsView {
-  /// The commits the list shows, and the banners over them.
+  fn layout_key(&self) -> Key {
+    Key {
+      generation: self.layout_gen,
+      home: self.home(),
+      home_limit: self.home_limit,
+      target_limit: self.target_limit,
+      hide_tentative: self.hide_tentative,
+      removed: self.removed.clone(),
+      expanded: self.expanded.clone(),
+      comment: self
+        .comment
+        .as_ref()
+        .map(|c| (c.commit_id.clone(), c.target.file_path.clone(), c.target.at)),
+      today: chrono::Local::now().date_naive(),
+    }
+  }
+
+  /// The commits the list shows, and the banners over them. Each listed
+  /// commit is cloned once, into its entry.
   fn layout_rows(&mut self) -> Feed {
     let mut feed = Feed::default();
     let Some(history) = self.history.as_ref() else {
       return feed;
     };
     let home = self.home();
-    let own: Vec<JjLogCommit> = history
-      .own
-      .iter()
-      .filter(|c| !self.removed.contains(&c.commit_id))
-      .cloned()
-      .collect();
-    let tentative = history
-      .tentative
-      .clone()
-      .filter(|_| !home && !self.hide_tentative);
-    let visible = History {
-      own: own.clone(),
-      ..history.clone()
+    // Only a removal, rare and short-lived, needs a filtered copy.
+    let filtered;
+    let visible = if self.removed.is_empty() {
+      history
+    } else {
+      filtered = History {
+        own: history
+          .own
+          .iter()
+          .filter(|c| !self.removed.contains(&c.commit_id))
+          .cloned()
+          .collect(),
+        target: history.target.clone(),
+        tentative: history.tentative.clone(),
+        target_branch: String::new(),
+        default_workspace: history.default_workspace,
+      };
+      &filtered
     };
     if visible.is_empty() {
       return feed;
@@ -187,8 +249,13 @@ impl CommitsView {
       .into_iter()
       .map(|c| c.change_id)
       .collect();
-    let target = history.target.clone();
     let shows_target = visible.shows_target();
+    let own = visible.own.clone();
+    let target = shows_target.then(|| history.target.clone());
+    let tentative = history
+      .tentative
+      .clone()
+      .filter(|_| !home && !self.hide_tentative);
     let mut rows = Rows::default();
     let banner = if !feed.conflicted.is_empty() {
       4
@@ -202,31 +269,29 @@ impl CommitsView {
       self.commit_rows(&mut feed, &mut rows, commit, Kind::Tentative, Some(label));
       rows.pending = rows.pending.max(3);
     }
+    let own_len = own.len();
     let mut first = true;
-    for (label, commits) in group_by_day(&own) {
-      rows.push(Row::Day(feed.days.len()), 5, 0);
-      feed.days.push(label);
-      for commit in commits {
-        self.commit_rows(&mut feed, &mut rows, commit, Kind::Own { first }, None);
-        first = false;
-      }
+    let mut day = None;
+    for commit in own {
+      day_row(&mut feed, &mut rows, &mut day, &commit);
+      self.commit_rows(&mut feed, &mut rows, commit, Kind::Own { first }, None);
+      first = false;
     }
-    if home && own.len() + 1 >= self.home_limit {
+    if home && own_len + 1 >= self.home_limit {
       rows.push(Row::LoadMore(false), 3, 0);
     }
-    if shows_target {
-      if own.is_empty() {
+    if let Some(target) = target {
+      if own_len == 0 {
         rows.push(Row::OwnEmpty, 0, 3);
       }
       rows.push(Row::Divider, 4, 2);
-      for (label, commits) in group_by_day(&target) {
-        rows.push(Row::Day(feed.days.len()), 5, 0);
-        feed.days.push(label);
-        for commit in commits {
-          self.commit_rows(&mut feed, &mut rows, commit, Kind::Target, None);
-        }
+      let target_len = target.len();
+      let mut day = None;
+      for commit in target {
+        day_row(&mut feed, &mut rows, &mut day, &commit);
+        self.commit_rows(&mut feed, &mut rows, commit, Kind::Target, None);
       }
-      if target.len() >= self.target_limit {
+      if target_len >= self.target_limit {
         rows.push(Row::LoadMore(true), 3, 0);
       }
     }
@@ -306,12 +371,17 @@ impl CommitsView {
   /// Brings the list up to date with the rows, keeping the measured
   /// heights of the rows that did not change.
   pub(super) fn sync_rows(&mut self, window: &mut Window) {
-    let mut feed = self.layout_rows();
     let rem = window.rem_size();
     if rem != self.feed.rem {
       self.feed.rem = rem;
       self.feed.list.remeasure();
     }
+    let key = self.layout_key();
+    if self.feed.key.as_ref() == Some(&key) {
+      return;
+    }
+    let mut feed = self.layout_rows();
+    feed.key = Some(key);
     let old = &self.feed;
     let same = |a: (Row, u8), b: (Row, u8)| {
       a == b && ident(&old.entries, &old.days, a.0) == ident(&feed.entries, &feed.days, b.0)
@@ -340,6 +410,55 @@ impl CommitsView {
     feed.list = self.feed.list.clone();
     feed.rem = self.feed.rem;
     self.feed = feed;
+    self.hits.stale = true;
+  }
+
+  /// Each row's searchable text, in the list's order: commit headlines and
+  /// open diff lines.
+  pub(super) fn searchable(&self, mut f: impl FnMut(usize, search::Hit, &str)) {
+    for (ix, (row, _)) in self.feed.rows.iter().enumerate() {
+      match *row {
+        Row::Commit(e) => {
+          let commit = &self.feed.entries[e].commit;
+          f(
+            ix,
+            search::Hit::Message(commit.commit_id.clone()),
+            &headline(commit),
+          );
+        }
+        Row::Line(e, fi, h, l) => {
+          let commit = &self.feed.entries[e].commit;
+          let Some(diff) = self
+            .diffs
+            .get(&commit.commit_id)
+            .and_then(|s| s.diff.as_ref())
+          else {
+            continue;
+          };
+          let Some(file) = diff.committed_files.get(fi) else {
+            continue;
+          };
+          let Some(line) = self
+            .file_diff(&commit.commit_id, &file.path)
+            .and_then(|d| d.hunks.get(h))
+            .and_then(|hunk| hunk.lines.get(l))
+          else {
+            continue;
+          };
+          let hit = search::Hit::Line(commit.commit_id.clone(), file.path.clone(), (h, l));
+          f(ix, hit, line.get(1..).unwrap_or(""));
+        }
+        _ => {}
+      }
+    }
+  }
+
+  /// A commit's headline with its find matches marked.
+  pub(super) fn marked_headline(&self, commit: &JjLogCommit, p: &Palette) -> gpui::StyledText {
+    let text = headline(commit);
+    let hit = search::Hit::Message(commit.commit_id.clone());
+    let marks = self.find_marks(&hit, &text, p);
+    highlight::styled_marked(&text, None, p.dark, &marks)
   }
 
   /// Nothing to list: no commits, or none read yet.
@@ -414,16 +533,23 @@ impl CommitsView {
           .commit(&commit, kind, label.as_ref(), &p, cx)
           .into_any_element()
       }
-      Row::OwnEmpty => div()
-        .debug_selector(|| "own-commits-empty".into())
-        .pl_7()
-        .text_color(p.muted_foreground)
-        .child(if self.home() {
+      Row::OwnEmpty => {
+        let message = if self.home() {
           "There are no commits on this branch yet."
         } else {
           "There are no commits within this workspace branch yet."
-        })
-        .into_any_element(),
+        };
+        div()
+          .id("own-commits-empty")
+          .debug_selector(|| "own-commits-empty".into())
+          .role(gpui::Role::Status)
+          .aria_label(message)
+          .pl_7()
+          .text_color(p.muted_foreground)
+          .child(message)
+          .test_support()
+          .into_any_element()
+      }
       Row::LoadMore(target) => self.load_more_row(target, &p, cx).into_any_element(),
       Row::Divider => {
         let branch = self
@@ -440,7 +566,11 @@ impl CommitsView {
               .font_weight(gpui::FontWeight::SEMIBOLD)
               .text_color(p.muted_foreground)
               .pl_7()
-              .child(format!("Recent on {branch}")),
+              .child(format!("On {branch} (read-only)"))
+              .id("target-divider")
+              .role(gpui::Role::Heading)
+              .aria_label(format!("On {branch} (read-only)"))
+              .test_support(),
           )
           .into_any_element()
       }
@@ -484,7 +614,7 @@ impl CommitsView {
       Row::File(e, f) => self.file_row_at(e, f, p, cx),
       _ => div()
         .bg(p.muted.opacity(0.2))
-        .child(self.body_row(row, p, cx))
+        .child(self.body_line(row, p, cx))
         .into_any_element(),
     };
     div()
@@ -520,14 +650,14 @@ impl CommitsView {
 
   /// A row under a file's row: a hunk's header, a line, the comment box,
   /// "Load diff" or "No diff content available."
-  fn body_row(&mut self, row: Row, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
-    let (e, f) = match row {
-      Row::HunkHeader(e, f, _)
-      | Row::Line(e, f, ..)
-      | Row::CommentBox(e, f)
-      | Row::Deferred(e, f)
-      | Row::Missing(e, f) => (e, f),
-      _ => return div().into_any_element(),
+  fn body_line(&mut self, row: Row, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+    let (Row::HunkHeader(e, f, _)
+    | Row::Line(e, f, ..)
+    | Row::CommentBox(e, f)
+    | Row::Deferred(e, f)
+    | Row::Missing(e, f)) = row
+    else {
+      return div().into_any_element();
     };
     let commit = self.feed.entries[e].commit.clone();
     let Some(state) = self.diffs.get(&commit.commit_id) else {
@@ -579,17 +709,20 @@ impl CommitsView {
       _ => div()
         .border_t_1()
         .border_color(p.border)
-        .px_3()
-        .py_3()
-        .text_color(p.muted_foreground)
-        .child("No diff content available.")
+        .child(
+          ui::EmptyState::new("commit-diff-no-content", "No diff content", p)
+            .message("This change has no lines to show, such as a mode or rename change."),
+        )
         .into_any_element(),
     }
   }
 
   /// `HunkView`'s line: its numbers, the comment button, the sign and the
   /// highlighted text.
-  #[allow(clippy::too_many_arguments)]
+  #[expect(
+    clippy::too_many_arguments,
+    reason = "the row needs its commit, file, hunk and position"
+  )]
   fn line(
     &self,
     commit: &JjLogCommit,
@@ -607,14 +740,13 @@ impl CommitsView {
       .as_ref()
       .is_some_and(|s| s.commit_id == commit.commit_id && s.path == path && s.lines.contains(&at));
     let gutter_fg = p.muted_foreground.opacity(0.6);
-    let gutter_hover = p.muted.opacity(0.5);
     let kind = line_kind(line);
     let bg = if selected {
       Some(ui::Tone::Primary.tint(p))
     } else {
       match kind {
-        LineKind::Added => Some(ui::Tone::GitOpen.tint(p)),
-        LineKind::Removed => Some(ui::Tone::GitClosed.tint(p)),
+        LineKind::Added => Some(ui::Tone::DiffAdded.tint(p)),
+        LineKind::Removed => Some(ui::Tone::DiffRemoved.tint(p)),
         LineKind::Context => None,
       }
     };
@@ -627,6 +759,8 @@ impl CommitsView {
       let (id, file) = (commit.commit_id.clone(), path.to_string());
       div()
         .id(SharedString::from(format!("gutter-{which}-{h}-{l}")))
+        .role(gpui::Role::Button)
+        .aria_label(format!("Line {}", n.unwrap_or_default()))
         .w_10()
         .flex_none()
         .pr_1()
@@ -634,7 +768,6 @@ impl CommitsView {
         .justify_end()
         .text_color(gutter_fg)
         .cursor_pointer()
-        .hover(move |s| s.bg(gutter_hover))
         .child(n.map(|n| n.to_string()).unwrap_or_default())
         .on_mouse_down(
           MouseButton::Left,
@@ -650,10 +783,16 @@ impl CommitsView {
         .flex_none()
         .flex()
         .items_center()
-        .justify_center()
+        .justify_end()
+        .pr_0p5()
         .child(
           div()
             .id(SharedString::from(format!("add-comment-{h}-{l}")))
+            .role(gpui::Role::Button)
+            .aria_label(format!(
+              "Add comment on {path} line {}",
+              new.or(old).unwrap_or_default()
+            ))
             .debug_selector(move || format!("add-comment-{h}-{l}"))
             .p_px()
             .rounded(radius::SM)
@@ -661,24 +800,56 @@ impl CommitsView {
             .opacity(0.)
             .group_hover("diff-line", |s| s.opacity(1.))
             .cursor_pointer()
-            .child(ui::icon(theme::ICON_PLUS, 12., p.primary_foreground))
+            .child(ui::icon(theme::ICON_PLUS, 10., p.primary_foreground))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(move |view, _, _, cx| {
               cx.stop_propagation();
               view.add_comment(&c, &file, at, cx);
-            })),
+            }))
+            .test_support(),
         )
     };
     let (id, file) = (commit.commit_id.clone(), path.to_string());
+    let (press_id, press_file) = (commit.commit_id.clone(), path.to_string());
     let selector = format!("commit-line-{path}-{h}-{l}");
+    let code_selector = format!("commit-code-{path}-{h}-{l}");
+    let picked: Vec<_> = self
+      .text
+      .as_ref()
+      .filter(|t| t.commit_id == commit.commit_id && t.path == path)
+      .zip(self.file_diff(&commit.commit_id, path))
+      .and_then(|(t, f)| selected_range(&f.hunks, t.anchor, t.head, at))
+      .filter(|r| !r.is_empty())
+      .map(|r| (r, p.selected()))
+      .into_iter()
+      .chain(self.find_marks(
+        &search::Hit::Line(commit.commit_id.clone(), path.to_string(), at),
+        line.get(1..).unwrap_or(""),
+        p,
+      ))
+      .collect();
+    let styled = highlight::styled_marked(
+      line.get(1..).unwrap_or(""),
+      highlight::language(path),
+      p.dark,
+      &picked,
+    );
+    let layout = styled.layout().clone();
+    let (layouts, key) = (
+      self.layouts.clone(),
+      (commit.commit_id.clone(), path.to_string(), at),
+    );
     div()
       .id(SharedString::from(format!("diff-line-{h}-{l}")))
       .debug_selector(move || selector)
+      .role(gpui::Role::Row)
+      .aria_label(line.to_string())
       .group("diff-line")
       .flex()
       .when_some(bg, |this, bg| this.bg(bg))
-      .on_mouse_move(cx.listener(move |view, _: &MouseMoveEvent, _, cx| {
+      .on_mouse_move(cx.listener(move |view, e: &MouseMoveEvent, _, cx| {
         view.drag_to(&id, &file, at, cx);
+        view.drag_text(&id, &file, at, e.position, cx);
       }))
       .child(gutter(old, "old", cx))
       .child(gutter(new, "new", cx))
@@ -694,15 +865,33 @@ impl CommitsView {
       )
       .child(
         div()
+          .id(SharedString::from(code_selector.clone()))
+          .debug_selector(move || code_selector)
+          .relative()
           .flex_1()
           .min_w_0()
           .overflow_hidden()
           .whitespace_nowrap()
-          .child(highlight::styled(
-            line.get(1..).unwrap_or(""),
-            highlight::language(path),
-            p.dark,
-          )),
+          .cursor_text()
+          .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |view, e: &gpui::MouseDownEvent, window, cx| {
+              window.focus(&view.focus, cx);
+              view.press_text(&press_id, &press_file, at, e.position, cx);
+            }),
+          )
+          .child(styled)
+          .child(
+            gpui::canvas(
+              move |_, _, _| {
+                layouts.borrow_mut().insert(key.clone(), layout.clone());
+              },
+              |_, _, _, _| {},
+            )
+            .absolute()
+            .size_0(),
+          ),
       )
+      .test_support()
   }
 }

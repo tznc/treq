@@ -67,17 +67,6 @@ code="$(curl -s -o /tmp/treq-profiles.json -w '%{http_code}' \
 assert_http "GET /rest/v1/profiles (service_role)" "200" "${code}"
 assert_true "profiles response is JSON array" grep -q '^\[' /tmp/treq-profiles.json
 
-# RPC that is service-role-only (PGMQ metrics).
-code="$(curl -s -o /tmp/treq-metrics.json -w '%{http_code}' \
-  -X POST \
-  -H "apikey: ${SERVICE}" \
-  -H "Authorization: Bearer ${SERVICE}" \
-  -H "Content-Type: application/json" \
-  -H "Prefer: return=representation" \
-  "${BASE}/rest/v1/rpc/merge_queue_metrics" \
-  -d '{}')"
-assert_http "POST /rest/v1/rpc/merge_queue_metrics" "200" "${code}"
-
 # Anon can still hit OpenAPI (role=anon JWT); table RLS may empty-filter.
 code="$(curl -s -o /tmp/treq-rest-anon.json -w '%{http_code}' \
   -H "apikey: ${ANON}" \
@@ -96,18 +85,6 @@ code="$(curl -s -o /tmp/treq-fn-exchange.json -w '%{http_code}' \
 assert_http "POST exchange-desktop-token without token" "400" "${code}"
 assert_true "exchange-desktop-token reports missing token" \
   grep -qi 'token' /tmp/treq-fn-exchange.json
-
-# Worker accepts empty cron nudge with service role key in Authorization
-# (function itself may still require JWT when verify was true; gateway is off).
-code="$(curl -s -o /tmp/treq-fn-worker.json -w '%{http_code}' \
-  -X POST "${BASE}/functions/v1/merge-queue-worker" \
-  -H "Content-Type: application/json" \
-  -H "apikey: ${SERVICE}" \
-  -H "Authorization: Bearer ${SERVICE}" \
-  -d '{"reason":"ci-verify"}')"
-assert_true "POST merge-queue-worker runs (2xx/4xx from handler, not 502)" \
-  test "${code}" != "502" -a "${code}" != "000"
-echo "      merge-queue-worker HTTP ${code}"
 
 # github-webhook: function boots and rejects bad HMAC (secret is set).
 body='{"action":"ping","zen":"ci"}'

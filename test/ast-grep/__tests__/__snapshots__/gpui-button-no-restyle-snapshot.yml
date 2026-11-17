@@ -1,0 +1,78 @@
+id: gpui-button-no-restyle
+snapshots:
+  ? |
+    fn f(b: Button, c: Hsla) -> Button {
+      b.hover_bg(c)
+    }
+  : labels:
+    - source: b.hover_bg(c)
+      style: primary
+      start: 39
+      end: 52
+  ? |
+    fn f(p: &Palette) {
+      Button::new("delete", p).bg(p.destructive).label("Delete");
+    }
+  : labels:
+    - source: Button::new("delete", p).bg(p.destructive)
+      style: primary
+      start: 22
+      end: 64
+    - source: p.destructive
+      style: secondary
+      start: 50
+      end: 63
+    - source: p.destructive
+      style: secondary
+      start: 50
+      end: 63
+    - source: Button::new
+      style: secondary
+      start: 22
+      end: 33
+    - source: Button::new("delete", p)
+      style: secondary
+      start: 22
+      end: 46
+    - source: Button::new("delete", p)
+      style: secondary
+      start: 22
+      end: 46
+  ? |
+    fn f(p: &Palette) {
+      Button::new("delete", p).hover_bg(p.destructive.opacity(0.9));
+    }
+  : labels:
+    - source: Button::new("delete", p).hover_bg(p.destructive.opacity(0.9))
+      style: primary
+      start: 22
+      end: 83
+  ? |
+    fn f(p: &Palette) {
+      ui::Button::new("delete", p).gap_1().bg(p.destructive.opacity(0.9));
+    }
+  : labels:
+    - source: ui::Button::new("delete", p).gap_1().bg(p.destructive.opacity(0.9))
+      style: primary
+      start: 22
+      end: 89
+    - source: p.destructive.opacity(0.9)
+      style: secondary
+      start: 62
+      end: 88
+    - source: p.destructive.opacity(0.9)
+      style: secondary
+      start: 62
+      end: 88
+    - source: ui::Button::new
+      style: secondary
+      start: 22
+      end: 37
+    - source: ui::Button::new("delete", p)
+      style: secondary
+      start: 22
+      end: 50
+    - source: ui::Button::new("delete", p)
+      style: secondary
+      start: 22
+      end: 50

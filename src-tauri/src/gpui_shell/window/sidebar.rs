@@ -11,11 +11,20 @@ use super::{
 };
 use crate::{
   github::PrInfo,
+  gpui_shell::screen::display_title,
   gpui_shell::sidebar::{
-    PrState, RepoSection, RowStatus, SidebarRow, SidebarSnapshot, StatusColor,
+    open_pr_first, PrState, RepoSection, RowStatus, SidebarRow, SidebarSnapshot, StatusColor,
   },
   local_db::Workspace,
 };
+
+/// The workspace's title for its sidebar row, or `None` to show the branch:
+/// a blank title, or one that repeats the branch, adds nothing.
+pub fn row_name(workspace: &Workspace) -> Option<String> {
+  let title = display_title(workspace);
+  let title = title.trim();
+  (!title.is_empty() && title != workspace.branch_name).then(|| title.to_string())
+}
 
 /// `getWorkspaceStatusIndicator`: red for conflicts, yellow for changes,
 /// spinning while an agent in the workspace streams.
@@ -140,7 +149,10 @@ fn streaming_by_branch(
 /// repository open.
 pub fn snapshot(model: &Model, data: &Data) -> Option<SidebarSnapshot> {
   if !model.has_repo() {
-    return None;
+    return model
+      .empty_project
+      .as_ref()
+      .map(|name| without_repos(model, data, name));
   }
   let on_screen = model.repo().to_string();
   let multi = !data.supporting().is_empty();
@@ -148,7 +160,7 @@ pub fn snapshot(model: &Model, data: &Data) -> Option<SidebarSnapshot> {
   let labels = multi.then(|| display_labels(&order));
   let page_selects = !matches!(
     model.page,
-    Page::Github(_) | Page::Linear | Page::Settings { .. }
+    Page::Github(_) | Page::Linear | Page::Settings { .. } | Page::ProjectHome
   );
   let repos = order
     .iter()
@@ -164,55 +176,69 @@ pub fn snapshot(model: &Model, data: &Data) -> Option<SidebarSnapshot> {
       let workspaces = if missing {
         Vec::new()
       } else {
-        nodes(data, path)
-          .into_iter()
-          .map(|node| {
-            let workspace = &node.workspace;
-            let branch = &workspace.branch_name;
-            let selected = active
-              && (model.multi.contains(&workspace.id)
-                || (page_selects && model.selected == Some(workspace.id)));
-            let pr = repo
-              .and_then(|r| r.prs.get(branch))
-              .and_then(Option::as_ref)
-              .filter(|_| has_remote)
-              .map(pr_state);
-            SidebarRow {
-              id: workspace.id,
-              title: branch.clone(),
-              depth: node.depth,
-              selected,
-              conflicted: node.conflicted,
-              status: status_indicator(
-                node.conflicted,
-                node.has_changes,
-                streaming.get(branch).copied().unwrap_or(false),
-              ),
-              pr,
-              queue: None,
-              archiving: false,
-              exiting: false,
-            }
-          })
-          .collect()
+        open_pr_first(
+          nodes(data, path)
+            .into_iter()
+            .map(|node| {
+              let workspace = &node.workspace;
+              let branch = &workspace.branch_name;
+              let selected = active
+                && (model.multi.contains(&workspace.id)
+                  || (page_selects && model.selected == Some(workspace.id)));
+              let pr = repo
+                .and_then(|r| r.prs.get(branch))
+                .and_then(Option::as_ref)
+                .filter(|_| has_remote)
+                .map(pr_state);
+              SidebarRow {
+                id: workspace.id,
+                title: branch.clone(),
+                name: row_name(workspace),
+                depth: node.depth,
+                selected,
+                conflicted: node.conflicted,
+                status: status_indicator(
+                  node.conflicted,
+                  node.has_changes,
+                  streaming.get(branch).copied().unwrap_or(false),
+                ),
+                pr,
+                target: workspace.target_branch.clone(),
+                archiving: false,
+                exiting: false,
+              }
+            })
+            .collect(),
+        )
       };
       let loaded = data.loaded(path);
       RepoSection {
         path: path.clone(),
         // The React sidebar shows the branch only for the repository on screen.
-        home_ref: if active { data.home_ref(path) } else { None },
+        // A group header shows every repository's branch under its name.
+        home_ref: if active || multi {
+          data.home_ref(path)
+        } else {
+          None
+        },
         home_selected: page_selects && active && model.selected.is_none(),
         active,
         loading: !missing && !loaded && workspaces.is_empty(),
         workspaces,
-        label: labels.as_ref().and_then(|l| l.get(path).cloned()),
+        // A GitHub origin names the repository as GitHub does: owner/name.
+        label: labels.as_ref().and_then(|l| {
+          repo
+            .and_then(|r| r.remote.as_ref())
+            .map(|remote| remote.full_name.clone())
+            .or_else(|| l.get(path).cloned())
+        }),
         missing,
         collapsed: multi && !missing && model.collapsed.contains(path),
       }
     })
     .collect();
   let main = if model.main_repo.is_empty() {
-    on_screen.clone()
+    on_screen
   } else {
     model.main_repo.clone()
   };
@@ -233,9 +259,34 @@ pub fn snapshot(model: &Model, data: &Data) -> Option<SidebarSnapshot> {
     agent_unavailable: None,
     shell_unavailable: None,
     bulk_archive: (!model.multi.is_empty()).then_some(model.multi.len() as u32),
+    project: data.project().map(|p| p.name.clone()),
+    project_home: multi.then_some(matches!(model.page, Page::ProjectHome)),
     repos,
     modal: None,
   })
+}
+
+/// The sidebar of a project with no repository: its name, its Home and the
+/// pages that need none; the list says it is empty.
+fn without_repos(model: &Model, data: &Data, name: &str) -> SidebarSnapshot {
+  SidebarSnapshot {
+    repo_name: name.to_string(),
+    settings_open: matches!(model.page, Page::Settings { .. }),
+    github: matches!(model.page, Page::Github(_)),
+    linear: data
+      .flags
+      .linear
+      .then_some(matches!(model.page, Page::Linear)),
+    dark: model.prefs.dark(),
+    width: model.prefs.sidebar_width,
+    agent_unavailable: None,
+    shell_unavailable: None,
+    bulk_archive: None,
+    project: Some(name.to_string()),
+    project_home: Some(matches!(model.page, Page::ProjectHome)),
+    repos: Vec::new(),
+    modal: None,
+  }
 }
 
 #[cfg(test)]
@@ -288,6 +339,31 @@ mod tests {
   }
 
   #[test]
+  fn labels_github_repositories_owner_slash_name() {
+    let mut data = data_with(vec![workspace(1, "login", Some("main"))]);
+    data.set_supporting(vec![crate::core::supporting_repos::SupportingRepo {
+      path: "/src/lib".into(),
+      exists: true,
+    }]);
+    data.apply(
+      "/repo",
+      RepoRead {
+        remote: Some(Some(crate::github::GitRemoteInfo {
+          owner: "tznc".into(),
+          repo: "my-repo".into(),
+          full_name: "tznc/my-repo".into(),
+        })),
+        ..RepoRead::default()
+      },
+    );
+    let model = Model::new(Some("/repo".into()));
+    let snapshot = snapshot(&model, &data).unwrap();
+    assert_eq!(snapshot.repos[0].label.as_deref(), Some("tznc/my-repo"));
+    // Without a GitHub origin, the folder name.
+    assert_eq!(snapshot.repos[1].label.as_deref(), Some("lib"));
+  }
+
+  #[test]
   fn builds_rows_with_selection_and_status() {
     let data = data_with(vec![
       workspace(1, "login", Some("main")),
@@ -296,6 +372,8 @@ mod tests {
     let mut model = Model::new(Some("/repo".into()));
     model.selected = Some(2);
     model.terminals = vec![TerminalSummary {
+      id: None,
+      name: None,
       agent: true,
       branch: Some("login".into()),
       repo_path: Some("/repo".into()),
@@ -337,6 +415,46 @@ mod tests {
       .collect();
     assert_eq!(selected, [3]);
     assert_eq!(snapshot.bulk_archive, Some(1));
+  }
+
+  #[test]
+  fn names_a_row_by_its_title_and_falls_back_to_the_branch() {
+    let mut ws = workspace(1, "zn/blissful-shannon", None);
+    assert_eq!(row_name(&ws), None, "no title shows the branch");
+    ws.title = "  ".into();
+    assert_eq!(row_name(&ws), None, "a blank title shows the branch");
+    ws.title = "zn/blissful-shannon".into();
+    assert_eq!(
+      row_name(&ws),
+      None,
+      "a title that repeats the branch adds nothing"
+    );
+    ws.title = " feat(spool): fail readiness ".into();
+    assert_eq!(
+      row_name(&ws).as_deref(),
+      Some("feat(spool): fail readiness")
+    );
+    ws.title = String::new();
+    ws.metadata = Some(r#"{"title":"From the PR"}"#.into());
+    assert_eq!(
+      row_name(&ws).as_deref(),
+      Some("From the PR"),
+      "the metadata's title"
+    );
+  }
+
+  #[test]
+  fn rows_carry_the_workspace_title() {
+    let mut titled = workspace(1, "login", None);
+    titled.title = "Add login".into();
+    let data = data_with(vec![titled, workspace(3, "fix", None)]);
+    let snapshot = snapshot(&Model::new(Some("/repo".into())), &data).unwrap();
+    let rows: Vec<_> = snapshot.repos[0]
+      .workspaces
+      .iter()
+      .map(|r| (r.title.as_str(), r.name.as_deref()))
+      .collect();
+    assert_eq!(rows, [("fix", None), ("login", Some("Add login"))]);
   }
 
   #[test]

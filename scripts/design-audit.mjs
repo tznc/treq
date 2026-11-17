@@ -19,12 +19,29 @@ import { parse, stringify } from "yaml";
 
 const root = new URL("..", import.meta.url).pathname;
 const RULES = [
+  "gpui-hover-token",
   "gpui-no-raw-color",
   "gpui-no-raw-text-size",
+  "gpui-text-xs-short-label-only",
   "gpui-no-zpx-spacing",
   "gpui-escape-via-layers",
   "gpui-no-adhoc-controls",
+  "gpui-button-no-restyle",
+  "gpui-row-selected-token",
+  "gpui-no-local-row",
+  "gpui-no-local-header-or-toast",
+  "gpui-no-adhoc-tabs",
+  "gpui-no-local-dialog",
+  "gpui-no-adhoc-feedback",
+  "gpui-name-no-status-color",
+  "gpui-success-means-success",
+  "gpui-one-primary-per-region",
+  "gpui-list-nav-shared",
+  "gpui-clickable-needs-role",
+  "ui-copy-brand-spelling",
   "ui-copy-no-yes-no",
+  "ui-copy-sentence-case",
+  "ui-copy-ellipsis",
 ];
 const NOT_MIGRATED = /^\s*#\s*Not migrated yet/;
 const SCREENS = "src-tauri/src/gpui_shell";

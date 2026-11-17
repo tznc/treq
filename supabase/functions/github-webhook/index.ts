@@ -4,15 +4,13 @@
 //   1. Verify the HMAC signature before parsing anything.
 //   2. Deduplicate deliveries via github_webhook_receipts.
 //   3. Upsert directly observable GitHub facts (installations/repos).
-//   4. Publish domain commands to PGMQ.
-//   5. Return 202.
-//
-// All queue orchestration happens in the merge-queue-worker function.
+//   4. Return 202.
 
 import { createClient } from "npm:@supabase/supabase-js@2.95.3";
-import { fetchWithTimeout } from "../_shared/http/fetch-with-timeout.ts";
-import { publishMergeQueueCommand } from "../_shared/merge-queue/commands-queue.ts";
-import { applyInstallationFacts, commandsForEvent } from "./webhook-handlers.ts";
+import {
+  applyInstallationFacts,
+  type GitHubWebhookPayload,
+} from "./webhook-handlers.ts";
 
 async function verifySignature(
   secret: string,
@@ -55,32 +53,6 @@ async function sha256Hex(input: string): Promise<string> {
     .join("");
 }
 
-// Best-effort nudge so commands are usually picked up immediately.
-// Correctness never depends on this: the cron-driven worker is the
-// recovery mechanism. Skipped under MERGE_QUEUE_GITHUB_STUB so service-qa
-// can drain the worker serially without racing the webhook nudge.
-function invokeWorkerSoon(): void {
-  const stub = Deno.env.get("MERGE_QUEUE_GITHUB_STUB") ?? "";
-  if (stub === "1" || stub.toLowerCase() === "true") return;
-
-  const url = Deno.env.get("SUPABASE_URL");
-  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  if (!url || !key) return;
-  const invoke = fetchWithTimeout(`${url}/functions/v1/merge-queue-worker`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ reason: "webhook" }),
-  }).then(
-    (res) => res.body?.cancel(),
-    () => {},
-  );
-  // deno-lint-ignore no-explicit-any
-  (globalThis as any).EdgeRuntime?.waitUntil(invoke);
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204 });
@@ -109,8 +81,7 @@ Deno.serve(async (req) => {
   }
   const event = req.headers.get("x-github-event") ?? "";
 
-  // deno-lint-ignore no-explicit-any
-  let payload: Record<string, any>;
+  let payload: GitHubWebhookPayload;
   try {
     payload = JSON.parse(body);
   } catch {
@@ -172,24 +143,10 @@ Deno.serve(async (req) => {
 
   try {
     await applyInstallationFacts(supabase, event, payload);
-    const commands = await commandsForEvent(supabase, event, payload, deliveryId);
-
-    const messageIds: number[] = [];
-    for (const command of commands) {
-      messageIds.push(await publishMergeQueueCommand(supabase, command));
-    }
-
     await supabase
       .from("github_webhook_receipts")
-      .update({
-        accepted_at: new Date().toISOString(),
-        command_ids: commands.map((c) => c.commandId),
-      })
+      .update({ accepted_at: new Date().toISOString() })
       .eq("delivery_id", deliveryId);
-
-    if (commands.length > 0) {
-      invokeWorkerSoon();
-    }
 
     console.log(
       JSON.stringify({
@@ -197,11 +154,10 @@ Deno.serve(async (req) => {
         github_delivery_id: deliveryId,
         event,
         action: payload.action ?? null,
-        command_count: commands.length,
       }),
     );
 
-    return new Response(JSON.stringify({ ok: true, commands: commands.length }), {
+    return new Response(JSON.stringify({ ok: true }), {
       status: 202,
       headers: { "Content-Type": "application/json" },
     });

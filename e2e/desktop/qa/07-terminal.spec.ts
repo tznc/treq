@@ -200,7 +200,7 @@ test("terminal: sessions survive a trip to Settings", async ({ page }) => {
     expectations: ["A shell and two agent columns show"],
   });
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  const close = page.getByRole("button", { name: "Close", exact: true });
+  const close = page.getByRole("button", { name: "Back", exact: true });
   await expect(close).toBeVisible();
   await settle(page, 1000);
   await close.click();

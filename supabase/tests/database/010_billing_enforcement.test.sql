@@ -1,9 +1,8 @@
 -- Server-side Pro enforcement from 027_billing_enforcement.sql: the
 -- entitlement check for callers without a user JWT, the installation owner
--- check the merge queue uses, the merge queue opt-in gate, and the database
--- side of the cloud workspace lapse sweep.
+-- check, and the database side of the cloud workspace lapse sweep.
 begin;
-select plan(58);
+select plan(42);
 
 -- Fixtures, created as postgres. d1 has Pro, d2 is Free, d3 had Pro and
 -- canceled it, d4 and d5 subscribe later in the test.
@@ -31,8 +30,7 @@ insert into public.github_repositories (id, installation_id, owner, name, full_n
   (9102, 9002, 'enforce-free', 'repo', 'enforce-free/repo'),
   (9103, 9003, 'enforce-lapsed', 'repo', 'enforce-lapsed/repo');
 
--- d3 turned the queue on while Pro, then canceled.
-insert into public.merge_queue_configs (repo_id, target_branch, enabled) values (9103, 'main', true);
+-- d3 had Pro, then canceled.
 update public.billing_subscriptions set status = 'canceled' where stripe_subscription_id = 'sub_enf_lapsed';
 
 -- ── Shape and grants ──────────────────────────────────────────────────────
@@ -99,80 +97,15 @@ select throws_ok($$select * from public.remote_lapse_candidates()$$, '42501', nu
 select is(public.has_pro('00000000-0000-0000-0000-0000000000d1'), false,
   'has_pro still answers false about another user');
 
--- ── set_merge_queue_enabled and direct config writes ──────────────────────
--- Free user d2.
-select throws_ok($$select public.set_merge_queue_enabled('enforce-free/repo', true)$$,
-  'PT402', 'The merge queue needs Pro',
-  'a Free user cannot turn the merge queue on');
-select is((select count(*)::int from public.merge_queue_configs where repo_id = 9102), 0,
-  'the refused call wrote no config row');
-select is(public.set_merge_queue_enabled('enforce-free/repo', false), false,
-  'a Free user can turn the merge queue off');
-select throws_ok(
-  $$update public.merge_queue_configs set enabled = true where repo_id = 9102$$,
-  'PT402', 'The merge queue needs Pro',
-  'a Free user cannot turn the queue on by updating the config row');
-select throws_ok(
-  $$insert into public.merge_queue_configs (repo_id, target_branch, enabled) values (9102, 'release', true)$$,
-  'PT402', 'The merge queue needs Pro',
-  'a Free user cannot turn the queue on by inserting a config row');
-select throws_ok($$select public.set_merge_queue_enabled('enforce-pro/repo', true)$$,
-  'P0002', null,
-  'a user still cannot touch a repo they did not link, so the Pro check reveals nothing about it');
--- Inserting a config for someone else's repo fails the same way whether
--- that owner pays or not.
-select throws_ok(
-  $$insert into public.merge_queue_configs (repo_id, target_branch, enabled) values (9101, 'leak', true)$$,
-  '42501', null,
-  'a config insert for a Pro owner''s repo is refused by RLS');
-select throws_ok(
-  $$insert into public.merge_queue_configs (repo_id, target_branch, enabled) values (9103, 'leak', true)$$,
-  '42501', null,
-  'a config insert for a Free owner''s repo is refused the same way, so it reveals no entitlement');
-
--- Lapsed user d3, whose queue was on.
-select set_config('request.jwt.claims',
-  '{"sub":"00000000-0000-0000-0000-0000000000d3","role":"authenticated"}', true);
-select throws_ok($$select public.set_merge_queue_enabled('enforce-lapsed/repo', true)$$,
-  'PT402', 'The merge queue needs Pro',
-  'a user whose Pro ended cannot turn the queue on again');
-select lives_ok(
-  $$update public.merge_queue_configs set batch_size = 2 where repo_id = 9103$$,
-  'a lapsed user can still edit settings of a queue that is already on');
-select throws_ok(
-  $$update public.merge_queue_configs set target_branch = 'release' where repo_id = 9103$$,
-  'PT402', 'The merge queue needs Pro',
-  'moving an enabled queue to another branch counts as turning that one on');
-select lives_ok(
-  $$insert into public.merge_queue_configs (repo_id, target_branch, enabled, batch_size)
-    values (9103, 'main', true, 3)
-    on conflict (repo_id, target_branch) do update set batch_size = excluded.batch_size, enabled = excluded.enabled$$,
-  'an upsert that keeps an enabled queue enabled is not a new opt-in');
-select is(public.set_merge_queue_enabled('enforce-lapsed/repo', false), false,
-  'a lapsed user can turn the queue off');
-
--- Pro user d1.
-select set_config('request.jwt.claims',
-  '{"sub":"00000000-0000-0000-0000-0000000000d1","role":"authenticated"}', true);
-select is(public.set_merge_queue_enabled('enforce-pro/repo', true), true,
-  'a Pro user can turn the merge queue on');
-select results_eq(
-  $$select enabled from public.merge_queue_configs where repo_id = 9101 and target_branch = 'main'$$,
-  $$values (true)$$,
-  'the Pro user''s config row is enabled');
-select lives_ok(
-  $$insert into public.merge_queue_configs (repo_id, target_branch, enabled) values (9101, 'release', true)$$,
-  'a Pro user can write an enabled config row directly');
-
 reset role;
 
 -- ── Cloud workspace lapse ─────────────────────────────────────────────────
 insert into public.remote_instances (id, owner_user_id, provider_kind, region, size_preset, status, lapsed_at) values
-  ('00000000-0000-0000-0000-00000000e001', '00000000-0000-0000-0000-0000000000d1', 'fly_sprites', 'us_east', 'small', 'ready', null),
-  ('00000000-0000-0000-0000-00000000e002', '00000000-0000-0000-0000-0000000000d2', 'fly_sprites', 'us_east', 'small', 'ready', null),
-  ('00000000-0000-0000-0000-00000000e003', '00000000-0000-0000-0000-0000000000d3', 'fly_sprites', 'us_east', 'small', 'suspended', now() - interval '8 days'),
-  ('00000000-0000-0000-0000-00000000e004', '00000000-0000-0000-0000-0000000000d4', 'fly_sprites', 'us_east', 'small', 'suspended', now() - interval '40 days'),
-  ('00000000-0000-0000-0000-00000000e005', '00000000-0000-0000-0000-0000000000d5', 'fly_sprites', 'us_east', 'small', 'suspended', now() - interval '6 days');
+  ('00000000-0000-0000-0000-00000000e001', '00000000-0000-0000-0000-0000000000d1', 'boat', 'us_east', 'small', 'ready', null),
+  ('00000000-0000-0000-0000-00000000e002', '00000000-0000-0000-0000-0000000000d2', 'boat', 'us_east', 'small', 'ready', null),
+  ('00000000-0000-0000-0000-00000000e003', '00000000-0000-0000-0000-0000000000d3', 'boat', 'us_east', 'small', 'suspended', now() - interval '31 days'),
+  ('00000000-0000-0000-0000-00000000e004', '00000000-0000-0000-0000-0000000000d4', 'boat', 'us_east', 'small', 'suspended', now() - interval '40 days'),
+  ('00000000-0000-0000-0000-00000000e005', '00000000-0000-0000-0000-0000000000d5', 'boat', 'us_east', 'small', 'suspended', now() - interval '6 days');
 
 -- d4 subscribes again. The webhook's write clears the lapse at once, so a
 -- sweep that has not run since cannot count the old lapse.
@@ -210,7 +143,7 @@ select is(public.remote_claim_lapsed_deletion('00000000-0000-0000-0000-00000000e
 select is(public.remote_claim_lapsed_deletion('00000000-0000-0000-0000-00000000e004'), false,
   'an instance whose owner subscribed again is kept');
 select is(public.remote_claim_lapsed_deletion('00000000-0000-0000-0000-00000000e003'), true,
-  'an instance lapsed for 8 days is claimed for deletion');
+  'an instance lapsed for 31 days is claimed for deletion');
 select is((select status from public.remote_instances where id = '00000000-0000-0000-0000-00000000e003'), 'deleting',
   'the claimed instance moves to deleting');
 

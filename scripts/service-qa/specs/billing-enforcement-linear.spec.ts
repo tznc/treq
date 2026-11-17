@@ -1,13 +1,13 @@
 /**
  * Pro enforcement on Linear OAuth (`create-linear-oauth-intent`,
- * `linear-proxy`) against the local database.
+ * `integration-proxy` /linear/graphql) against the local database.
  *
  * Runs the handlers (lib.ts) in this process with their real service-role
  * stores, so has_pro, linear_oauth_intents and linear_oauth_tokens are the
  * real ones. Only Linear's GraphQL endpoint is a stub `fetch`. Pro comes from
  * the billing write functions (../billing.ts).
  */
-import { expect, it, vi } from "vitest";
+import { expect, it, jest } from "@jest/globals";
 import {
   PRO_REQUIRED_MESSAGES,
   userHasPro,
@@ -20,7 +20,7 @@ import {
 import {
   linearTokenStore,
   proxyLinearRequest,
-} from "../../../supabase/functions/linear-proxy/lib";
+} from "../../../supabase/functions/integration-proxy/linear";
 import { clearBilling, endPro, grantPro } from "../billing";
 import { getServiceClient } from "../clients";
 import { recordOutcome } from "../record";
@@ -29,7 +29,7 @@ import { createTestUser, deleteTestUser } from "../seed";
 const VIEWER = { data: { viewer: { id: "linear-user" } } };
 
 function stubLinear() {
-  return vi.fn(
+  return jest.fn(
     async (_url: string | URL | Request, _init?: RequestInit) =>
       new Response(JSON.stringify(VIEWER), {
         status: 200,
@@ -83,22 +83,24 @@ it("requires Pro for Linear OAuth and the Linear proxy", async () => {
       details: { freeIntent, proStatus: proIntent.status },
     });
 
-    // ── linear-proxy ──────────────────────────────────────────────────────
+    // ── integration-proxy /linear/graphql ──────────────────────────────────────────────────────
     // Both users hold an OAuth token, as if they connected while Pro.
-    await admin.from("linear_oauth_tokens").insert([
-      {
-        user_id: free.user.id,
-        access_token: "lin_oauth_free",
-        linear_workspace_id: "ws",
-        linear_workspace_name: "Workspace",
-      },
-      {
-        user_id: pro.user.id,
-        access_token: "lin_oauth_pro",
-        linear_workspace_id: "ws",
-        linear_workspace_name: "Workspace",
-      },
-    ]);
+    // Tokens live in Vault (032_linear_tokens_vault.sql), so they are
+    // written through linear_tokens_save.
+    for (const [userId, token] of [
+      [free.user.id, "lin_oauth_free"],
+      [pro.user.id, "lin_oauth_pro"],
+    ]) {
+      const { error } = await admin.rpc("linear_tokens_save", {
+        p_user_id: userId,
+        p_access_token: token,
+        p_refresh_token: null,
+        p_expires_at: null,
+        p_workspace_id: "ws",
+        p_workspace_name: "Workspace",
+      });
+      expect(error).toBeNull();
+    }
     const proxy = (userId: string, fetch: ReturnType<typeof stubLinear>) =>
       proxyLinearRequest(
         { query: "query { viewer { id } }" },
@@ -136,7 +138,7 @@ it("requires Pro for Linear OAuth and the Linear proxy", async () => {
 
     await recordOutcome("billing-enforcement-linear-02-proxy", {
       expectations: [
-        "linear-proxy answers a Free user 402 pro_required, with a message pointing at the personal API key, and never calls Linear.",
+        "integration-proxy /linear/graphql answers a Free user 402 pro_required, with a message pointing at the personal API key, and never calls Linear.",
         "For the Pro user it forwards the query with their stored OAuth token and passes Linear's 200 through.",
         "Once the subscription is deleted the same user gets 402 and Linear is not called.",
       ],

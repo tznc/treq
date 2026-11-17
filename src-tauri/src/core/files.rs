@@ -1,6 +1,45 @@
 use crate::core::WorkspaceEntry;
 use crate::jj;
+use crate::local_db;
 use std::collections::HashSet;
+
+/// The indexed files of a workspace (or the home repo) whose path matches
+/// `query`, as paths relative to it; the shortest paths first when it is empty.
+pub fn search_workspace_files(
+  repo_path: &str,
+  workspace_id: Option<i64>,
+  query: &str,
+  limit: usize,
+) -> Result<Vec<String>, String> {
+  Ok(
+    local_db::search_workspace_files(repo_path, workspace_id, query, limit)?
+      .into_iter()
+      .map(|file| file.relative_path)
+      .collect(),
+  )
+}
+
+/// Lists the top-level entries of a workspace (or the home repo when
+/// `workspace_id` is `None`), each annotated with its file status for the
+/// Code tab's file list. Costs three jj computations on top of a plain
+/// `ls_workspace`, so callers that don't need status use that instead.
+pub fn list_workspace_files(
+  repo_path: &str,
+  workspace_id: Option<i64>,
+) -> Result<Vec<WorkspaceEntry>, String> {
+  let workspace_root = crate::core::workspaces::resolve_workspace_root(repo_path, workspace_id)?;
+  let mut entries = crate::core::ls_workspace(repo_path, workspace_id)?;
+
+  let target_branch = workspace_id.and_then(|id| {
+    local_db::get_workspace_by_id(repo_path, id)
+      .ok()
+      .flatten()
+      .and_then(|ws| ws.target_branch)
+  });
+  annotate_entry_statuses(&workspace_root, &mut entries, target_branch.as_deref());
+
+  Ok(entries)
+}
 
 /// Status of a file (or, for a directory, the most severe status among its
 /// descendants) relative to the working copy and target branch.
@@ -12,6 +51,8 @@ pub enum FileStatus {
   WorkingCopy,
   /// Modified by an already-committed ancestor, relative to the target branch.
   Committed,
+  /// No change in the working copy or the workspace's commits.
+  Untouched,
 }
 
 impl FileStatus {
@@ -20,13 +61,13 @@ impl FileStatus {
       FileStatus::Conflicted => "conflict",
       FileStatus::WorkingCopy => "workingCopy",
       FileStatus::Committed => "committed",
+      FileStatus::Untouched => "untouched",
     }
   }
 }
 
 /// Populate `status` on each entry (file or directory) in place, based on
-/// each entry's path relative to `workspace_path`. Entries whose `path` isn't
-/// inside `workspace_path` are left untouched (no status).
+/// each entry's path relative to `workspace_path`.
 pub fn annotate_entry_statuses(
   workspace_path: &str,
   entries: &mut [WorkspaceEntry],
@@ -53,7 +94,7 @@ pub fn annotate_entry_statuses(
     } else {
       file_status(&rel_path, &conflicted, &working_copy, &committed)
     };
-    entry.status = status.map(|s| s.as_str().to_string());
+    entry.status = Some(status.unwrap_or(FileStatus::Untouched).as_str().to_string());
   }
 }
 
@@ -136,12 +177,18 @@ pub fn list_directory(path: &str) -> Result<Vec<WorkspaceEntry>, String> {
       continue;
     }
     if let Some(name) = entry_path.file_name().and_then(|n| n.to_str()) {
-      let full = entry_path.to_string_lossy().to_string();
+      // The type comes with the directory listing; only a symlink needs a
+      // stat to tell whether it leads to a directory. No caller reads the
+      // entries' times, and a stat per entry was most of a large listing.
+      let is_directory = match entry.file_type() {
+        Some(t) if !t.is_symlink() => t.is_dir(),
+        _ => entry_path.is_dir(),
+      };
       files.push(WorkspaceEntry {
         name: name.to_string(),
-        modified_at: file_modified_at(&full),
-        path: full,
-        is_directory: entry_path.is_dir(),
+        modified_at: None,
+        path: entry_path.to_string_lossy().to_string(),
+        is_directory,
         submodule_pin: None,
         submodule_synced: None,
         status: None,
@@ -172,6 +219,26 @@ mod list_directory_tests {
     let names: Vec<_> = entries.iter().map(|e| e.name.as_str()).collect();
     assert_eq!(names, ["z", "a.txt"]);
     assert!(entries[0].is_directory);
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn a_symlink_to_a_directory_lists_as_one() {
+    let temp = TempDir::new().unwrap();
+    std::fs::create_dir(temp.path().join("real")).unwrap();
+    std::fs::write(temp.path().join("file"), "a").unwrap();
+    std::os::unix::fs::symlink(temp.path().join("real"), temp.path().join("link")).unwrap();
+    std::os::unix::fs::symlink(temp.path().join("file"), temp.path().join("file-link")).unwrap();
+    let entries = list_directory(&temp.path().to_string_lossy()).unwrap();
+    let dir = |name: &str| {
+      entries
+        .iter()
+        .find(|e| e.name == name)
+        .unwrap()
+        .is_directory
+    };
+    assert!(dir("real") && dir("link"));
+    assert!(!dir("file") && !dir("file-link"));
   }
 
   #[test]

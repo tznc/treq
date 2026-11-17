@@ -3,6 +3,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use gpui_kit::base::TestSupportExt as _;
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, App, Div, FontWeight, Hsla, SharedString, Stateful, Window,
 };
@@ -39,6 +40,26 @@ pub fn state_chip(state: &str, draft: bool, p: &Palette) -> impl IntoElement {
     ("Closed", Tone::GitClosed)
   };
   ui::Badge::new(label, p).tone(tone)
+}
+
+/// Where `pr`'s review stands, when it stands anywhere.
+pub fn review_chip(pr: &crate::github::GhPullRequest, p: &Palette) -> Option<impl IntoElement> {
+  use crate::github::ReviewState;
+  let state = crate::core::pr_view::review_state(pr)?;
+  let tone = match state {
+    ReviewState::Approved => Tone::Success,
+    ReviewState::ChangesRequested => Tone::Danger,
+    ReviewState::ReviewRequired => Tone::Warning,
+  };
+  Some(
+    div()
+      .id("github-review-state")
+      .debug_selector(|| "github-review-state".into())
+      .role(gpui::Role::Status)
+      .aria_label(format!("Review: {}", state.label()))
+      .child(ui::Badge::new(state.label(), p).tone(tone))
+      .test_support(),
+  )
 }
 
 /// A label's `#rrggbb` (or bare `rrggbb`) color.
@@ -82,6 +103,7 @@ pub fn ci_style(state: CiState, p: &Palette) -> (&'static str, Hsla) {
     CiState::Success => (theme::ICON_CIRCLE_CHECK, Tone::Success.text(p)),
     CiState::Failure => (theme::ICON_CIRCLE_X, Tone::Danger.text(p)),
     CiState::Pending => (theme::ICON_SPINNER, Tone::Warning.text(p)),
+    CiState::Inactive => (theme::ICON_MINUS, p.muted_foreground),
   }
 }
 
@@ -107,117 +129,28 @@ pub fn check_row(
   check: &PrCheckEntry,
   p: &Palette,
   on_open: Option<OnClick>,
-) -> Stateful<Div> {
+) -> ui::Row {
   let id: SharedString = id.into();
   let state = CiState::of_bucket(&check.bucket);
-  let row = ui::text(div(), TextSize::Sm)
-    .flex()
-    .items_center()
-    .gap_2()
+  let row = ui::Row::new(id.clone(), p)
+    .label(check.name.clone())
+    .w_full()
     .py_1p5()
-    .px_2()
-    .child(ci_icon(format!("{id}-spin"), state, 16., p))
-    .child(
-      div()
-        .flex_1()
-        .min_w_0()
-        .truncate()
-        .child(check.name.clone()),
-    )
-    .children(check.duration_secs.map(|secs| {
-      ui::text(div(), TextSize::Sm)
-        .flex_none()
-        .text_color(p.muted_foreground)
-        .child(data::check_duration(secs))
-    }));
-  let muted = p.muted;
+    .rounded(radius::SM)
+    .leading(ci_icon(format!("{id}-spin"), state, 16., p))
+    .title(check.name.clone())
+    .when_some(check.duration_secs, |row, secs| {
+      row.trailing(
+        ui::text(div(), TextSize::Sm)
+          .flex_none()
+          .text_color(p.muted_foreground)
+          .child(data::check_duration(secs)),
+      )
+    });
   match on_open.filter(|_| !check.link.is_empty()) {
-    Some(open) => named(div(), id)
-      .w_full()
-      .rounded(radius::SM)
-      .cursor_pointer()
-      .hover(move |s| s.bg(muted.opacity(0.5)))
-      .on_click(open)
-      .child(row),
-    None => named(div(), id).child(row),
+    Some(open) => row.on_click(open),
+    None => row.interactive(false),
   }
-}
-
-/// `text-base font-semibold uppercase tracking-widest text-muted-foreground`.
-pub fn section_heading(
-  label: impl Into<SharedString>,
-  icon: Option<&'static str>,
-  p: &Palette,
-) -> Div {
-  let label: SharedString = label.into();
-  ui::text(div(), TextSize::Sm)
-    .flex()
-    .items_center()
-    .gap_1()
-    .font_weight(FontWeight::SEMIBOLD)
-    .text_color(p.muted_foreground)
-    .children(icon.map(|icon| ui::icon(icon, 12., p.muted_foreground)))
-    // `tracking-widest` is 0.1em: GPUI has no letter spacing, so the
-    // capitals stand in.
-    .child(label.to_uppercase())
-}
-
-/// `ErrorState`: the gh message, so auth or network trouble shows.
-pub fn error_state(
-  id: &str,
-  title: &str,
-  error: &str,
-  p: &Palette,
-  on_retry: Option<OnClick>,
-) -> Stateful<Div> {
-  named(div(), format!("{id}-error"))
-    .flex()
-    .flex_col()
-    .items_center()
-    .justify_center()
-    .py_12()
-    .px_6()
-    .gap_2()
-    .text_center()
-    .child(ui::icon(theme::ICON_CIRCLE_ALERT, 24., p.destructive))
-    .child(
-      ui::text(div(), TextSize::Sm)
-        .font_weight(FontWeight::MEDIUM)
-        .child(title.to_string()),
-    )
-    .child(
-      ui::text(div(), TextSize::Sm)
-        .max_w_full()
-        .text_color(p.muted_foreground)
-        .child(error.to_string()),
-    )
-    .children(on_retry.map(|retry| {
-      Button::new(SharedString::from(format!("{id}-retry")), p)
-        .variant(Variant::Outline)
-        .size(Size::Sm)
-        .mt_1()
-        .label("Try again")
-        .on_click(retry)
-    }))
-}
-
-/// `LoadMoreButton`.
-pub fn load_more(id: &'static str, loading: bool, p: &Palette, on_click: OnClick) -> Div {
-  div().p_3().child(
-    Button::new(id, p)
-      .variant(Variant::Outline)
-      .w_full()
-      .disabled(loading)
-      .when(loading, |b| {
-        b.child(ui::spinner(
-          SharedString::from(format!("{id}-spin")),
-          16.,
-          p.foreground,
-        ))
-      })
-      .label("Load more")
-      .on_click(on_click),
-  )
 }
 
 /// `OpenInWebButton`.
@@ -227,7 +160,7 @@ pub fn open_in_web(id: &'static str, p: &Palette, on_click: OnClick) -> Button {
     .size(Size::Sm)
     .gap_1p5()
     .icon(theme::ICON_EXTERNAL_LINK, 16.)
-    .label("Open in Web")
+    .label("Open in web")
     .on_click(on_click)
 }
 
@@ -265,6 +198,76 @@ pub fn comment(author: &str, date: &str, body: gpui::AnyElement, p: &Palette) ->
         .child(date.to_string()),
     )
     .child(body)
+}
+
+/// A reviewer's verdict in the timeline: their avatar (the initial until it
+/// loads), their login and what they did.
+pub fn review_event(
+  review: &crate::github::GhReview,
+  date: &str,
+  image: Option<std::sync::Arc<gpui::Image>>,
+  p: &Palette,
+) -> impl IntoElement {
+  let login = review.author.login.clone();
+  let approved = review.state == "APPROVED";
+  let (icon, tone) = if approved {
+    (theme::ICON_CIRCLE_CHECK, Tone::Success)
+  } else {
+    (theme::ICON_CIRCLE_X, Tone::Danger)
+  };
+  let avatar: gpui::AnyElement = match image {
+    Some(image) => gpui::img(image)
+      .size(zpx(20.))
+      .flex_none()
+      .rounded_full()
+      .into_any_element(),
+    // Short label (['avatar initial']): 11px is fine.
+    // ast-grep-ignore: gpui-text-xs-short-label-only
+    None => ui::text(div(), TextSize::Xs)
+      .size(zpx(20.))
+      .flex_none()
+      .rounded_full()
+      .bg(p.muted)
+      .flex()
+      .items_center()
+      .justify_center()
+      .font_weight(FontWeight::MEDIUM)
+      .text_color(p.muted_foreground)
+      .child(
+        review
+          .author
+          .login
+          .chars()
+          .next()
+          .map(|c| c.to_uppercase().to_string())
+          .unwrap_or_default(),
+      )
+      .into_any_element(),
+  };
+  let name = format!("{login} {}", review.verdict().unwrap_or_default());
+  ui::text(div(), TextSize::Sm)
+    .id(SharedString::from(format!("github-review-event-{login}")))
+    .debug_selector(move || format!("github-review-event-{login}"))
+    .role(gpui::Role::Label)
+    .aria_label(name)
+    .flex()
+    .items_center()
+    .gap_2()
+    .px_3()
+    .py_1()
+    .text_color(p.muted_foreground)
+    .child(ui::icon(icon, 14., tone.color(p)).flex_none())
+    .child(avatar)
+    .child(
+      div()
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(p.foreground)
+        .child(review.author.login.clone()),
+    )
+    .child(review.verdict().unwrap_or_default())
+    .child("·")
+    .child(date.to_string())
+    .test_support()
 }
 
 /// A dropdown menu's panel: `rounded-md border bg-popover p-1 shadow-md`.
@@ -358,4 +361,23 @@ pub fn pr_list_item(pr: &GhPullRequest, branches: bool, p: &Palette) -> Div {
             .child(crate::gpui_shell::time::date(&pr.created_at)),
         ),
     )
+}
+
+/// A comment thread's fold: a full-width outline button under the same
+/// gap as the cards, which shows the comments it hides.
+pub fn fold_row(
+  id: &'static str,
+  hidden: usize,
+  p: &Palette,
+  on_click: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
+) -> gpui::AnyElement {
+  Button::new(id, p)
+    .variant(Variant::Outline)
+    .size(Size::Sm)
+    .w_full()
+    .gap_1()
+    .icon(theme::ICON_CHEVRON_DOWN, 14.)
+    .label(format!("Show {hidden} earlier comments"))
+    .on_click(on_click)
+    .into_any_element()
 }

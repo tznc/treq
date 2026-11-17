@@ -3,9 +3,6 @@
 // its checks popover and its review screen, and the new-PR form; then the
 // Linear view with no API key.
 //
-// The Merge Queue tab never shows: the GPUI window's route sets
-// `mergeQueue` to null (window/snapshots.rs, the feature flag is off).
-//
 // List rows and the view's own tabs are not observable; they are clicked
 // at their place in the 1400x900 window.
 import { expect, test, type Page } from "@playwright/test";
@@ -20,8 +17,8 @@ const FIRST_ROW = { x: 700, y: 147 };
 
 async function github(page: Page): Promise<void> {
   await ready(page);
-  await page.getByRole("button", { name: "Github", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Github", selected: true })).toBeVisible();
+  await page.getByRole("button", { name: "GitHub", exact: true }).click();
+  await expect(page.getByRole("button", { name: "GitHub", selected: true })).toBeVisible();
   await settle(page, 2000);
 }
 
@@ -63,7 +60,7 @@ test("github-linear: issues", async ({ page }) => {
     ],
   });
   await closeDetail(page);
-  await page.getByRole("button", { name: "New" }).click();
+  await page.getByRole("button", { name: "New", exact: true }).click();
   await settle(page, 1500);
   await capture(page, {
     name: "10-github-new-issue",
@@ -140,14 +137,14 @@ test("github-linear: pull requests", async ({ page }) => {
     expectations: ["Each check with status, name and link; failing first"],
   });
   await dismissPopover(page);
-  await page.getByRole("textbox", { name: "Leave a comment..." }).fill("Looks good once the test passes");
+  await page.getByRole("textbox", { name: "Leave a comment…" }).fill("Looks good once the test passes");
   await settle(page, 400);
   await capture(page, {
     name: "10-github-pr-comment-typed",
     title: "Pull request: comment typed",
     expectations: ["Comment button enabled; text not clipped"],
   });
-  await page.getByRole("textbox", { name: "Leave a comment..." }).fill("");
+  await page.getByRole("textbox", { name: "Leave a comment…" }).fill("");
 
   await page.getByRole("button", { name: "Review changes" }).click();
   await settle(page, 3000);
@@ -168,7 +165,7 @@ test("github-linear: new pull request", async ({ page }) => {
   await github(page);
   await page.mouse.click(PRS_TAB.x, PRS_TAB.y);
   await settle(page, 1500);
-  await page.getByRole("button", { name: "New" }).click();
+  await page.getByRole("button", { name: "New", exact: true }).click();
   await settle(page, 2000);
   await capture(page, {
     name: "10-github-new-pr",
@@ -199,7 +196,7 @@ test("github-linear: linear without an API key", async ({ page }) => {
       "An Open Settings button under the message; no spinner",
     ],
   });
-  await page.getByRole("button", { name: "Open Settings" }).click();
+  await page.getByRole("button", { name: "Open settings" }).click();
   await expect(page.getByRole("tab", { name: "Integrations", selected: true })).toBeVisible();
   await settle(page, 1500);
   await capture(page, {

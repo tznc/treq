@@ -1,0 +1,277 @@
+id: gpui-no-adhoc-feedback
+snapshots:
+  ? |
+    fn body(p: &Palette) -> Div {
+      div().text_color(p.destructive).child("Failed to load comments")
+    }
+  : labels:
+    - source: '"Failed to load comments"'
+      style: primary
+      start: 70
+      end: 95
+    - source: child
+      style: secondary
+      start: 64
+      end: 69
+    - source: div().text_color(p.destructive).child
+      style: secondary
+      start: 32
+      end: 69
+    - source: div().text_color(p.destructive).child("Failed to load comments")
+      style: secondary
+      start: 32
+      end: 96
+    - source: ("Failed to load comments")
+      style: secondary
+      start: 69
+      end: 96
+  ? |
+    fn body(p: &Palette) -> Div {
+      let error_state = |err: String| div().child(err);
+      error_state("x".into())
+    }
+  : labels:
+    - source: 'let error_state = |err: String| div().child(err);'
+      style: primary
+      start: 32
+      end: 81
+    - source: error_state
+      style: secondary
+      start: 36
+      end: 47
+    - source: '|err: String| div().child(err)'
+      style: secondary
+      start: 50
+      end: 80
+  ? |
+    fn body(p: &Palette) -> Div {
+      let message = |text: &'static str| div().child(text);
+      message("x")
+    }
+  : labels:
+    - source: 'let message = |text: &''static str| div().child(text);'
+      style: primary
+      start: 32
+      end: 85
+    - source: message
+      style: secondary
+      start: 36
+      end: 43
+    - source: '|text: &''static str| div().child(text)'
+      style: secondary
+      start: 46
+      end: 84
+  ? |
+    fn empty(p: &Palette, label: String) -> Div {
+      div().child(label)
+    }
+  : labels:
+    - source: |-
+        fn empty(p: &Palette, label: String) -> Div {
+          div().child(label)
+        }
+      style: primary
+      start: 0
+      end: 68
+    - source: empty
+      style: secondary
+      start: 3
+      end: 8
+  ? |
+    fn error_view(p: &Palette) -> Div {
+      div()
+    }
+  : labels:
+    - source: |-
+        fn error_view(p: &Palette) -> Div {
+          div()
+        }
+      style: primary
+      start: 0
+      end: 45
+    - source: error_view
+      style: secondary
+      start: 3
+      end: 13
+  ? |
+    fn list(p: &Palette) -> Div {
+      div().child("Couldn't load commits")
+    }
+  : labels:
+    - source: '"Couldn''t load commits"'
+      style: primary
+      start: 44
+      end: 67
+    - source: child
+      style: secondary
+      start: 38
+      end: 43
+    - source: div().child
+      style: secondary
+      start: 32
+      end: 43
+    - source: div().child("Couldn't load commits")
+      style: secondary
+      start: 32
+      end: 68
+    - source: ("Couldn't load commits")
+      style: secondary
+      start: 43
+      end: 68
+  ? |
+    fn list(p: &Palette) -> Div {
+      div().child("Fetching branches…")
+    }
+  : labels:
+    - source: '"Fetching branches…"'
+      style: primary
+      start: 44
+      end: 66
+    - source: child
+      style: secondary
+      start: 38
+      end: 43
+    - source: div().child
+      style: secondary
+      start: 32
+      end: 43
+    - source: div().child("Fetching branches…")
+      style: secondary
+      start: 32
+      end: 67
+    - source: ("Fetching branches…")
+      style: secondary
+      start: 43
+      end: 67
+  ? |
+    fn list(p: &Palette) -> Div {
+      div().text_color(p.muted_foreground).child("No files found")
+    }
+  : labels:
+    - source: '"No files found"'
+      style: primary
+      start: 75
+      end: 91
+    - source: child
+      style: secondary
+      start: 69
+      end: 74
+    - source: div().text_color(p.muted_foreground).child
+      style: secondary
+      start: 32
+      end: 74
+    - source: div().text_color(p.muted_foreground).child("No files found")
+      style: secondary
+      start: 32
+      end: 92
+    - source: ("No files found")
+      style: secondary
+      start: 74
+      end: 92
+  ? |
+    fn list(p: &Palette) -> Div {
+      ui::text(div(), TextSize::Sm).child("Loading commits…")
+    }
+  : labels:
+    - source: '"Loading commits…"'
+      style: primary
+      start: 68
+      end: 88
+    - source: child
+      style: secondary
+      start: 62
+      end: 67
+    - source: ui::text(div(), TextSize::Sm).child
+      style: secondary
+      start: 32
+      end: 67
+    - source: ui::text(div(), TextSize::Sm).child("Loading commits…")
+      style: secondary
+      start: 32
+      end: 89
+    - source: ("Loading commits…")
+      style: secondary
+      start: 67
+      end: 89
+  ? |
+    fn list(p: &Palette, empty: bool) -> Div {
+      div().child(if empty { "No files found" } else { "Type to search" })
+    }
+  : labels:
+    - source: '"No files found"'
+      style: primary
+      start: 68
+      end: 84
+    - source: child
+      style: secondary
+      start: 51
+      end: 56
+    - source: div().child
+      style: secondary
+      start: 45
+      end: 56
+    - source: div().child(if empty { "No files found" } else { "Type to search" })
+      style: secondary
+      start: 45
+      end: 113
+    - source: (if empty { "No files found" } else { "Type to search" })
+      style: secondary
+      start: 56
+      end: 113
+  ? |
+    fn message(p: &Palette, text: impl Into<SharedString>) -> Div {
+      div().child(text.into())
+    }
+  : labels:
+    - source: |-
+        fn message(p: &Palette, text: impl Into<SharedString>) -> Div {
+          div().child(text.into())
+        }
+      style: primary
+      start: 0
+      end: 92
+    - source: message
+      style: secondary
+      start: 3
+      end: 10
+  ? |
+    fn retry(p: &Palette) -> Button {
+      Button::new("retry", p).label("Try again")
+    }
+  : labels:
+    - source: '"Try again"'
+      style: primary
+      start: 66
+      end: 77
+    - source: label
+      style: secondary
+      start: 60
+      end: 65
+    - source: Button::new("retry", p).label
+      style: secondary
+      start: 36
+      end: 65
+    - source: Button::new("retry", p).label("Try again")
+      style: secondary
+      start: 36
+      end: 78
+    - source: ("Try again")
+      style: secondary
+      start: 65
+      end: 78
+  ? |
+    pub fn error_state(id: &str, title: &str, error: &str, p: &Palette) -> Stateful<Div> {
+      div().id(id.to_string()).child(title.to_string())
+    }
+  : labels:
+    - source: |-
+        pub fn error_state(id: &str, title: &str, error: &str, p: &Palette) -> Stateful<Div> {
+          div().id(id.to_string()).child(title.to_string())
+        }
+      style: primary
+      start: 0
+      end: 140
+    - source: error_state
+      style: secondary
+      start: 7
+      end: 18

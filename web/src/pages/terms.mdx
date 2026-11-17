@@ -34,7 +34,7 @@ export const toc = [
 
 # Terms of Service
 
-_Last updated: 12 October 2026_
+_Last updated: 25 October 2026_
 
 ## 1. Agreement to Terms
 
@@ -84,7 +84,7 @@ Testing the security of the open-source code on your own machine is welcome. Rep
 
 - **Ours.** Treq owns the hosted services, the Treq name and logo, and the treq.dev site content, except where an open source license says otherwise.
 - **Yours.** Your code, repositories, issues, and files stay yours. We claim no ownership of your projects or anything you or your agents create with Treq.
-- **License to run the service.** You give Treq permission to host, copy, transmit, and process your content only as needed to run the hosted services for you. For example, the merge queue reads pull request state to merge it, and a cloud workspace stores your checkout on its disk.
+- **License to run the service.** You give Treq permission to host, copy, transmit, and process your content only as needed to run the hosted services for you. For example, a cloud workspace stores your checkout on its disk.
 - We do not use your content to train machine learning models.
 - You confirm you have the rights to the content you put into the hosted services.
 
@@ -108,7 +108,6 @@ You are responsible for the actions you or your agents take through those connec
 
 - **Payment.** Stripe processes all payments. You agree to pay the fees shown when you buy. Plans bill monthly in advance in US dollars. Prices exclude taxes, which we add where the law requires.
 - **Renewal.** Subscriptions renew automatically each month until you cancel.
-- **Pro trial.** A new Pro subscription includes a 14-day free trial. Each customer gets one trial. A card is required to start it. The first charge happens when the trial ends unless you cancel before then. Team has no trial.
 - **Cancellation.** Cancel at any time from the Subscription tab of the [dashboard](/dashboard). Cancellation takes effect at the end of the current billing period. Paid features stay on until then.
 - **Refunds.** Fees are not refundable, including for partial months, except where the law requires otherwise.
 - **Failed payments.** If a payment fails, Stripe retries it and your paid features stay on while it does. If the retries fail, the subscription ends and the paid features stop.
@@ -120,12 +119,13 @@ You are responsible for the actions you or your agents take through those connec
 - Team bills one seat per member. Adding or removing a member changes the seat count, and Stripe prorates the difference on the next invoice. Pending invites are not billed.
 - A member's Pro access through Team ends as soon as they leave or are removed. A member's own Pro subscription is separate and is unaffected.
 - An organization owns the GitHub App installations attached to it. Deleting an organization detaches them.
-- Deleting an account or an organization does not cancel its subscription. Cancel it from the dashboard first.
+- Deleting an organization does not cancel its Team subscription. Cancel it from the dashboard first.
+- You cannot delete your account while you are the last owner of any organization, including one with no other members. Make another member an owner, or delete the organization, first. Deleting your account never cancels a Team subscription.
 
 ## 11. Cloud Workspaces
 
 - A managed cloud workspace is a virtual machine that Treq provisions for you on our infrastructure provider. You control what runs on it.
-- When your paid plan ends, the workspace stops and cannot be woken. We keep its disk for 7 days, then delete it. Resubscribing within 7 days restores access.
+- When your paid plan ends, the workspace stops and cannot be woken. We keep its disk for 30 days, then delete it. Resubscribing within 30 days restores access.
 - We apply resource limits to cloud workspaces. We tell you about a limit when you reach it.
 - Back up anything you need. Cloud workspaces are not a backup service.
 
@@ -152,7 +152,7 @@ You will defend and indemnify Treq against third-party claims, and the resulting
 
 ## 16. Termination
 
-- **By you.** Stop using the Services at any time. To delete your account, email us at the address under [Contact](#20-contact). Cancel any subscription first.
+- **By you.** Stop using the Services at any time. To delete your account, select **Delete account** in the desktop app's Account settings, the mobile app's Home screen, or the [dashboard](/dashboard). Deletion cancels your Pro subscription at once and without a refund, and deletes your cloud workspace machine and its disk. We keep billing records. If you cannot use those, email us at the address under [Contact](#20-contact).
 - **By us.** We can suspend or close an account that breaks these terms, puts other users or the Services at risk, or that the law requires us to close. Where we can, we tell you first and give you a chance to fix the problem and export your data.
 - **Discontinued services.** If we discontinue a paid hosted service, we give at least 30 days' notice and refund any prepaid fees for the period after it stops.
 - Sections 6, 13, 14, 15, 17, and 19 survive termination.

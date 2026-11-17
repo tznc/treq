@@ -1,0 +1,61 @@
+id: gpui-list-nav-shared
+language: rust
+severity: error
+message: >
+  Do not match the arrow keys to move a list's selection. Read the key with
+  `ui::ListKey::from_key` (or `from_key_with_emacs` beside a search field)
+  and move with `ui::ListNav`, so every list answers Up/Down, Home/End,
+  PageUp/PageDown and Enter the same way.
+note: >
+  A match that also handles "right" maps every arrow (a terminal's key
+  encoder), not a list's selection, and is not flagged.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+ignores:
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+utils:
+  arrow:
+    kind: string_literal
+    regex: ^"(up|down)"$
+rule:
+  any:
+    - kind: binary_expression
+      all:
+        - has:
+            field: operator
+            regex: ^[!=]=$
+        - has:
+            matches: arrow
+            stopBy: neighbor
+    - matches: arrow
+      inside:
+        kind: token_tree
+        inside:
+          kind: macro_invocation
+          has:
+            field: macro
+            regex: ^matches$
+    - matches: arrow
+      inside:
+        kind: match_pattern
+        stopBy: end
+      not:
+        inside:
+          kind: match_block
+          stopBy: end
+          has:
+            kind: match_arm
+            has:
+              kind: match_pattern
+              has:
+                kind: string_literal
+                regex: ^"right"$
+                stopBy: end
+  not:
+    inside:
+      kind: mod_item
+      has:
+        field: name
+        regex: ^tests$
+      stopBy: end

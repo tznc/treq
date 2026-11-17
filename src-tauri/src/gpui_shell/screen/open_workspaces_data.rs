@@ -2,6 +2,8 @@
 //! names, whether it opens an existing branch or creates a new one, and the
 //! backend calls that do it.
 
+use std::collections::{HashMap, HashSet};
+
 use serde::Deserialize;
 
 use super::{
@@ -33,6 +35,45 @@ pub struct Route {
 }
 
 pub use crate::core::new_workspaces::{parse_lines, stack_parents, Line};
+
+/// The dialog's footer: what submitting will create, from the checked lines
+/// and the picked pull requests and issues.
+pub fn preview(targets: &[Target]) -> String {
+  let new: Vec<&Target> = targets.iter().filter(|t| !t.existing).collect();
+  let open = targets.len() - new.len();
+  match (new.as_slice(), open) {
+    ([], 0) => "Type a line or pick an item to create workspaces.".to_string(),
+    ([], 1) => format!("{} is already open", targets[0].branch),
+    ([], n) => format!("{n} workspaces are already open"),
+    ([one], 0) => match (&one.pr, &one.issue) {
+      (Some(pr), _) => format!("Will create {} from PR #{pr}", one.branch),
+      (None, Some(issue)) => format!("Will create {} from {}", one.branch, issue.identifier),
+      (None, None) => format!("Will create {}", one.branch),
+    },
+    (new, open) => {
+      let mut parts = vec![format!(
+        "Will create {}",
+        if new.len() == 1 {
+          "1 workspace".to_string()
+        } else {
+          format!("{} workspaces", new.len())
+        }
+      )];
+      // A line's base is set only when it stacks on the line above it.
+      let stacked = new
+        .iter()
+        .filter(|t| t.pr.is_none() && t.base.is_some())
+        .count();
+      if stacked > 0 {
+        parts.push(format!("{stacked} stacked"));
+      }
+      if open > 0 {
+        parts.push(format!("{open} already open"));
+      }
+      parts.join(", ")
+    }
+  }
+}
 
 /// `checked` stacked on `parent`'s branch.
 pub fn stack_on_line(checked: &Checked, parent: &Checked) -> Checked {
@@ -75,7 +116,8 @@ impl Target {
       head_branch: self.branch.clone(),
       base_branch: self.base.clone().unwrap_or_else(|| stack_on.to_string()),
       title: self.title.clone(),
-      description: self.pr.map(|n| format!("From GitHub PR #{n}")),
+      description: None,
+      pr_number: self.pr,
     }
   }
 
@@ -108,6 +150,67 @@ impl Target {
   }
 }
 
+/// The picked issue that `issue` is a sub-issue of.
+fn picked_parent<'a>(issue: &LinearIssue, issues: &'a [LinearIssue]) -> Option<&'a LinearIssue> {
+  issues.iter().find(|p| {
+    issue.parent_id.as_deref() == Some(p.id.as_str())
+      || issue.parent_identifier.as_deref() == Some(p.identifier.as_str())
+  })
+}
+
+/// The workspaces for the picked Linear issues, a parent before its
+/// sub-issues. A sub-issue stacks on its parent's workspace: the one the
+/// dialog makes for a picked parent, or the open one in `linked` (branches
+/// by Linear issue key).
+pub fn issue_targets(
+  repo_path: &str,
+  issues: &[LinearIssue],
+  open: &HashSet<String>,
+  linked: &HashMap<String, String>,
+) -> Vec<Target> {
+  fn visit<'a>(
+    issue: &'a LinearIssue,
+    issues: &'a [LinearIssue],
+    seen: &mut HashSet<&'a str>,
+    order: &mut Vec<&'a LinearIssue>,
+  ) {
+    if !seen.insert(&issue.id) {
+      return;
+    }
+    if let Some(parent) = picked_parent(issue, issues) {
+      visit(parent, issues, seen, order);
+    }
+    order.push(issue);
+  }
+  let (mut seen, mut order) = (HashSet::new(), Vec::new());
+  for issue in issues {
+    visit(issue, issues, &mut seen, &mut order);
+  }
+  order
+    .into_iter()
+    .map(|issue| {
+      let existing = open.contains(&issue.branch_name) || linked.contains_key(&issue.identifier);
+      let mut target = Target::from_issue(repo_path, issue, existing);
+      // Stacking only affects a workspace that is about to be made.
+      if !existing {
+        target.base = match picked_parent(issue, issues) {
+          Some(parent) => Some(
+            linked
+              .get(&parent.identifier)
+              .unwrap_or(&parent.branch_name)
+              .clone(),
+          ),
+          None => issue
+            .parent_identifier
+            .as_ref()
+            .and_then(|key| linked.get(key).cloned()),
+        };
+      }
+      target
+    })
+    .collect()
+}
+
 /// What checking a line found.
 pub type Checked = Result<Target, String>;
 
@@ -135,17 +238,13 @@ impl OpenWorkspacesHost for Backend {
     if self.remote(repo_path).is_some() {
       return;
     }
-    if let Err(err) = crate::jj::jj_git_fetch(repo_path) {
+    if let Err(err) = core::repo::fetch_repo(repo_path) {
       log::warn!("open workspaces: fetch {repo_path}: {err}");
     }
   }
 
   fn open_prs(&self, repo: &str, mine: bool, query: &str) -> Result<Vec<GhPullRequest>, String> {
-    let gh = crate::binary_paths::get_binary_path("gh")
-      .or_else(|| crate::binary_paths::detect_binary("gh"))
-      .ok_or_else(|| "gh CLI not found".to_string())?;
-    let path = crate::binary_paths::get_extended_path();
-    crate::github::gh_search_open_prs_impl(&gh, repo, mine, query, PR_LIMIT, &path)
+    core::github_cli::search_open_prs(repo, mine, query, PR_LIMIT)
   }
 
   fn open_workspaces(
@@ -161,10 +260,16 @@ impl OpenWorkspacesHost for Backend {
     }
     core::open_or_create_workspaces(repo_path, requests)
       .into_iter()
-      .map(|result| {
+      .zip(requests)
+      .map(|(result, request)| {
         let (workspace, created) = result?;
         if created {
           crate::commands::workspace::spawn_setup_script_if_configured(&workspace);
+          // The dialog's PRs carry no body; the poll fills it in.
+          if request.pr_number.is_some() {
+            crate::pr_status::global()
+              .queue_branch_refresh(repo_path.to_string(), workspace.branch_name.clone());
+          }
         }
         Ok((workspace.id, created))
       })
@@ -173,13 +278,11 @@ impl OpenWorkspacesHost for Backend {
 
   fn open_issue(&self, repo_path: &str, issue: &LinearIssue) -> Result<(i64, bool), String> {
     self.local_only(repo_path, "Opening a Linear issue's workspace")?;
-    let opened = tauri::async_runtime::block_on(
+    let opened = crate::gpui_shell::block_on(
       crate::commands::linear::open_or_create_workspace_from_linear_issue(repo_path, issue),
     )?;
     if opened.created {
-      if let Ok(Some(workspace)) =
-        crate::local_db::get_workspace_by_id(repo_path, opened.workspace_id)
-      {
+      if let Ok(Some(workspace)) = core::find_workspace(repo_path, opened.workspace_id) {
         crate::commands::workspace::spawn_setup_script_if_configured(&workspace);
       }
     }
@@ -464,6 +567,61 @@ mod tests {
     list.iter().map(|i| i.id.clone()).collect()
   }
 
+  fn sub_issue(id: &str, parent: &str) -> LinearIssue {
+    let mut issue = issue(id, "unstarted", None);
+    issue.parent_id = Some(parent.to_string());
+    issue.parent_identifier = Some(format!("ENG-{parent}"));
+    issue
+  }
+
+  fn bases(targets: &[Target]) -> Vec<(&str, Option<&str>, bool)> {
+    targets
+      .iter()
+      .map(|t| (t.branch.as_str(), t.base.as_deref(), t.existing))
+      .collect()
+  }
+
+  #[test]
+  fn issue_targets_put_a_picked_parent_before_its_sub_issue() {
+    let picked = [sub_issue("2", "1"), issue("1", "unstarted", None)];
+    let targets = issue_targets("/repo", &picked, &HashSet::new(), &HashMap::new());
+    assert_eq!(
+      bases(&targets),
+      vec![("eng-1", None, false), ("eng-2", Some("eng-1"), false)]
+    );
+  }
+
+  #[test]
+  fn issue_targets_stack_on_a_parent_workspace_that_is_open() {
+    let linked = HashMap::from([("ENG-1".to_string(), "octocat/parent".to_string())]);
+    let targets = issue_targets("/repo", &[sub_issue("2", "1")], &HashSet::new(), &linked);
+    assert_eq!(
+      bases(&targets),
+      vec![("eng-2", Some("octocat/parent"), false)]
+    );
+  }
+
+  #[test]
+  fn issue_targets_keep_the_default_branch_without_a_parent_workspace() {
+    let targets = issue_targets(
+      "/repo",
+      &[sub_issue("2", "1")],
+      &HashSet::new(),
+      &HashMap::new(),
+    );
+    assert_eq!(bases(&targets), vec![("eng-2", None, false)]);
+  }
+
+  #[test]
+  fn issue_targets_leave_an_open_sub_issue_where_it_is() {
+    let linked = HashMap::from([
+      ("ENG-1".to_string(), "eng-1".to_string()),
+      ("ENG-2".to_string(), "eng-2".to_string()),
+    ]);
+    let targets = issue_targets("/repo", &[sub_issue("2", "1")], &HashSet::new(), &linked);
+    assert_eq!(bases(&targets), vec![("eng-2", None, true)]);
+  }
+
   #[test]
   fn issue_list_shows_the_users_open_issues_first() {
     let issues = [
@@ -529,6 +687,59 @@ mod tests {
     assert_eq!(
       stack_on_line(&Err("x".into()), &Ok(target("/r", "a"))).unwrap_err(),
       "x"
+    );
+  }
+
+  fn line(branch: &str) -> Target {
+    Target {
+      repo_path: "/r".into(),
+      branch: branch.into(),
+      base: None,
+      title: None,
+      pr: None,
+      issue: None,
+      existing: false,
+      create: true,
+    }
+  }
+
+  #[test]
+  fn preview_says_nothing_is_picked_yet() {
+    assert_eq!(
+      preview(&[]),
+      "Type a line or pick an item to create workspaces."
+    );
+  }
+
+  #[test]
+  fn preview_names_a_single_workspace_and_its_source() {
+    assert_eq!(preview(&[line("feat/a")]), "Will create feat/a");
+    let mut pr = line("feat/login-tests");
+    pr.pr = Some(42);
+    pr.base = Some("main".into());
+    assert_eq!(preview(&[pr]), "Will create feat/login-tests from PR #42");
+    let mut open = line("feat/c");
+    open.existing = true;
+    assert_eq!(preview(&[open]), "feat/c is already open");
+  }
+
+  #[test]
+  fn preview_counts_stacked_and_open_workspaces() {
+    let mut stacked = line("feat/b");
+    stacked.base = Some("feat/a".into());
+    assert_eq!(
+      preview(&[line("feat/a"), stacked.clone()]),
+      "Will create 2 workspaces, 1 stacked"
+    );
+    let mut open = line("feat/c");
+    open.existing = true;
+    assert_eq!(
+      preview(&[line("feat/a"), stacked, open.clone()]),
+      "Will create 2 workspaces, 1 stacked, 1 already open"
+    );
+    assert_eq!(
+      preview(&[open.clone(), open]),
+      "2 workspaces are already open"
     );
   }
 }

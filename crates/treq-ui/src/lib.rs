@@ -6,30 +6,48 @@
 
 pub mod alert;
 pub mod badge;
+pub mod card;
 pub mod checkbox;
+pub mod copy_feedback;
 pub mod dialog;
 pub mod empty_state;
+pub mod form;
 pub mod icon_button;
+pub mod image;
+pub mod input_group;
 pub mod kbd;
+#[cfg(test)]
+mod keyboard_tests;
+pub mod list_nav;
 pub mod menu;
+pub mod path_field;
 pub mod picker;
 pub mod popover;
+pub mod press;
 pub mod row;
+pub mod section_header;
 pub mod split_button;
 pub mod tabs;
 pub mod theme;
+pub mod touch;
 
 pub use alert::{Alert, Severity};
 pub use badge::{Badge, Count, Dot, Tone};
-pub use checkbox::{CheckState, Checkbox};
-pub use dialog::{ConfirmDialog, Dialog};
-pub use empty_state::{EmptyState, Loading, Skeleton};
+pub use card::{Card, CardFooter, CardHeader, CardVariant};
+pub use checkbox::{CheckKind, CheckState, Checkbox};
+pub use dialog::{handler, tab_key, trap_tab, ConfirmDialog, Dialog};
+pub use empty_state::{error_actions, EmptyState, Loading, Skeleton};
+pub use form::{Field, FieldLayout, Form, FormActions, FormLayout, FormRow, FormSection};
 pub use icon_button::{IconButton, IconButtonSize};
+pub use input_group::InputGroup;
 pub use kbd::Kbd;
+pub use list_nav::{ListKey, ListNav};
 pub use menu::{MenuItem, MenuLabel, MenuSeparator};
+pub use path_field::PathField;
 pub use picker::{Picker, PickerPlacement};
-pub use popover::Popover;
-pub use row::{Row, RowDensity};
+pub use popover::{floating, Popover};
+pub use row::{Row, RowDensity, TOUCH_ROW_HEIGHT};
+pub use section_header::SectionHeader;
 pub use split_button::SplitButton;
 pub use tabs::{Tab, Tabs, TabsStyle};
 
@@ -122,6 +140,8 @@ pub enum TextSize {
 impl TextSize {
   pub fn metrics(self) -> (f32, f32) {
     match self {
+      // Short label (["the type scale's own definition"]): 11px is fine.
+      // ast-grep-ignore: gpui-text-xs-short-label-only
       TextSize::Xs => (11., 16.),
       TextSize::Sm => (13., 20.),
       TextSize::Lg => (15., 22.),
@@ -157,12 +177,52 @@ pub fn spinner(id: impl Into<ElementId>, size: f32, color: Hsla) -> impl IntoEle
   spin(id, icon(theme::ICON_SPINNER, size, color))
 }
 
+/// How often a spinner redraws. Each of its frames draws the whole window,
+/// and half the display's rate still turns smoothly.
+pub const SPIN_FPS: f32 = 30.;
+
+/// How often a pulse redraws. Its opacity moves by half in a second, so a
+/// dozen steps a second look the same as sixty, for a fifth of the frames.
+pub const PULSE_FPS: f32 = 12.;
+
 /// Spins `icon` once a second, as Tailwind's `animate-spin` does.
 pub fn spin(id: impl Into<ElementId>, icon: gpui::Svg) -> impl IntoElement {
   icon.with_animation(
     id,
-    Animation::new(Duration::from_secs(1)).repeat(),
+    Animation::new(Duration::from_secs(1))
+      .repeat()
+      .with_max_fps(SPIN_FPS),
     |svg, delta| svg.with_transformation(Transformation::rotate(gpui::percentage(delta))),
+  )
+}
+
+/// How long a load runs before its spinner or skeleton shows: one that
+/// lands sooner draws nothing rather than flashing it.
+pub const SPINNER_DELAY: Duration = Duration::from_millis(150);
+
+/// `placeholder` (a spinner, skeleton or "Loading..." line), hidden for its
+/// first [`SPINNER_DELAY`], so a fast load flashes nothing. It takes its room
+/// from the start, so nothing moves when it shows. Once shown it also
+/// answers to the debug selector `{id}-shown`.
+pub fn delayed<E>(id: impl Into<SharedString>, placeholder: E) -> gpui::AnimationElement<E>
+where
+  E: Styled + InteractiveElement + IntoElement + 'static,
+{
+  let id: SharedString = id.into();
+  let shown = format!("{id}-shown");
+  placeholder.with_animation(
+    ElementId::Name(id),
+    // One frame when the delay is up, rather than one every frame while
+    // nothing shows.
+    Animation::new(SPINNER_DELAY).with_max_fps(1. / SPINNER_DELAY.as_secs_f32()),
+    move |el, delta| {
+      if delta < 1. {
+        el.opacity(0.)
+      } else {
+        let shown = shown.clone();
+        el.debug_selector(move || shown)
+      }
+    },
   )
 }
 
@@ -175,6 +235,22 @@ pub enum Variant {
   Link,
   Outline,
   Secondary,
+  /// Filled amber: an action that brings back something that drifted
+  /// (Resync after a local edit). Not for errors; those are `Destructive`.
+  Warning,
+  /// Filled green: the action that lands finished work (Merge).
+  Success,
+  /// Filled in GitHub's brand color: an action that runs on GitHub.
+  Github,
+  /// A red-bordered outline: a destructive action beside neutral ones.
+  DestructiveOutline,
+  /// A muted icon that tints red on hover: a destructive action that asks
+  /// for confirmation next.
+  DestructiveGhost,
+  /// A muted, search-field-like outline with its keyboard shortcut at the
+  /// end ([`Button::shortcut`]): an action reached by a key, such as Go to
+  /// file.
+  Command,
 }
 
 /// `ui/button.tsx` sizes.
@@ -182,24 +258,23 @@ pub enum Variant {
 pub enum Size {
   Default,
   Icon,
+  /// 32px square: an icon button beside small (`Sm`) controls.
+  IconSm,
   IconXs,
   Lg,
+  /// [`theme::CONTROL_MD`] tall: the toolbar and header size, which
+  /// [`SplitButton`] and status pills share.
+  Md,
   Sm,
   Xs,
 }
-
-/// How much of a filled variant's color a disabled button keeps, as
-/// gpui-kit's own disabled buttons do. React's `disabled:opacity-40` faded
-/// the whole button as one layer; GPUI fades each primitive on its own, so
-/// element opacity let the faded fill show through a translucent label and
-/// wash it out.
-const DISABLED_FILL_OPACITY: f32 = 0.15;
 
 /// A [`Button`] child. Icons take the button's color when it renders, so
 /// they fade with it whichever order `icon` and `disabled` were called in.
 enum ButtonChild {
   Element(gpui::AnyElement),
   Icon(&'static str, f32),
+  CopyIcon(copy_feedback::Copied, f32),
 }
 
 /// `ui/button.tsx`. Its id is also its debug selector, which tests find it
@@ -217,10 +292,14 @@ pub struct Button {
   on_right_click: Option<OnRightClick>,
   on_hover: Option<OnHover>,
   selected: bool,
+  /// On or off, for a toggle.
+  pressed: Option<bool>,
   style: StyleRefinement,
   hover_bg: Option<Hsla>,
   /// The accessible name: the first label, unless set with `aria_label`.
   name: Option<SharedString>,
+  /// The action's shortcut, drawn after every other child.
+  shortcut: Option<Kbd>,
 }
 
 impl Button {
@@ -236,14 +315,16 @@ impl Button {
       on_right_click: None,
       on_hover: None,
       selected: false,
+      pressed: None,
       style: StyleRefinement::default(),
       hover_bg: None,
       name: None,
+      shortcut: None,
     }
   }
 
   /// The background on hover, in place of the variant's (`hover:bg-…`).
-  pub fn hover_bg(mut self, color: Hsla) -> Self {
+  pub(crate) fn hover_bg(mut self, color: Hsla) -> Self {
     self.hover_bg = Some(color);
     self
   }
@@ -270,6 +351,27 @@ impl Button {
     self
   }
 
+  /// A toggle, on or off: drawn in the selected style while on, and read
+  /// out as pressed or not.
+  pub fn pressed(mut self, on: bool) -> Self {
+    self.pressed = Some(on);
+    self.selected = on;
+    self
+  }
+
+  /// A filter toggle where a switch won't fit: a checkbox leads the label,
+  /// checked while on, and it reads out as pressed or not. Unlike
+  /// [`Self::pressed`], the fill stays the variant's; the box shows state.
+  pub fn checked(mut self, on: bool) -> Self {
+    self.pressed = Some(on);
+    self.selected = false;
+    let check = checkbox::Checkbox::new(format!("{}-check", self.id), &self.palette).checked(on);
+    self
+      .children
+      .insert(0, ButtonChild::Element(check.into_any_element()));
+    self
+  }
+
   /// Text in the button's own color.
   pub fn label(mut self, label: impl Into<SharedString>) -> Self {
     let label: SharedString = label.into();
@@ -281,6 +383,21 @@ impl Button {
   /// first text (React's `aria-label`).
   pub fn aria_label(mut self, name: impl Into<SharedString>) -> Self {
     self.name = Some(name.into());
+    self
+  }
+
+  /// The copy icon, or while `copied` the green check, swapping with a
+  /// fade. Pair it with [`copy_feedback::copyable`] for `copied`.
+  pub fn copy_icon(mut self, copied: impl Into<copy_feedback::Copied>, size: f32) -> Self {
+    let copied = copied.into();
+    self.children.push(ButtonChild::CopyIcon(copied, size));
+    self
+  }
+
+  /// The action's shortcut as a key cap at the button's end, whatever
+  /// order the other children were added in.
+  pub fn shortcut(mut self, kbd: Kbd) -> Self {
+    self.shortcut = Some(kbd);
     self
   }
 
@@ -322,8 +439,17 @@ impl Button {
     }
   }
 
-  fn filled(&self) -> bool {
-    matches!(self.variant, Variant::Default | Variant::Destructive)
+  /// Drawn with a solid fill (Primary, Destructive or a state colour),
+  /// which a region holds at most one of.
+  pub fn filled(&self) -> bool {
+    matches!(
+      self.variant,
+      Variant::Default
+        | Variant::Destructive
+        | Variant::Warning
+        | Variant::Success
+        | Variant::Github
+    )
   }
 
   fn variant_foreground(&self) -> Hsla {
@@ -334,6 +460,10 @@ impl Button {
       Variant::Ghost | Variant::Outline => p.foreground,
       Variant::Link => p.primary,
       Variant::Secondary => p.secondary_foreground,
+      Variant::Warning => p.warning_foreground,
+      Variant::Success | Variant::Github => p.primary_foreground,
+      Variant::DestructiveOutline => p.destructive,
+      Variant::DestructiveGhost | Variant::Command => p.muted_foreground,
     }
   }
 }
@@ -355,8 +485,9 @@ impl Styled for Button {
 impl Button {
   /// The colors of each interaction state, as gpui-bootstrap's
   /// `button-variant()` takes them. A disabled button keeps its shape: a
-  /// filled one fades its fill, an unfilled one its border, and the label
-  /// goes muted.
+  /// filled one swaps its fill for the neutral muted one, whatever its
+  /// variant or a caller's fill, so no state colour shows on a control that
+  /// can't act; an unfilled one fades its border, and the label goes muted.
   fn colors(&self) -> gpui_bootstrap::ButtonColors {
     let p = &self.palette;
     let clear = gpui::transparent_black();
@@ -367,6 +498,19 @@ impl Button {
       Variant::Link => (clear, clear, clear),
       Variant::Outline => (p.background, p.input, p.accent),
       Variant::Secondary => (p.secondary, p.secondary, p.secondary.opacity(0.7)),
+      Variant::Warning => (p.warning, p.warning, p.warning.opacity(0.85)),
+      Variant::Success => {
+        let green = Tone::Success.color(p);
+        (green, green, green.opacity(0.85))
+      }
+      Variant::Github => (p.github(), p.github(), p.github().opacity(0.85)),
+      Variant::DestructiveOutline => (
+        p.background,
+        p.destructive.opacity(0.3),
+        p.destructive.opacity(0.1),
+      ),
+      Variant::DestructiveGhost => (clear, clear, p.destructive.opacity(0.1)),
+      Variant::Command => (p.background, p.border, p.hover()),
     };
     let hover_bg = self.hover_bg.unwrap_or(hover_bg);
     let (bg, hover_bg) = if self.selected && !self.filled() {
@@ -376,10 +520,7 @@ impl Button {
     };
     let color = self.variant_foreground();
     let (disabled_bg, disabled_border) = if self.filled() {
-      (
-        bg.opacity(DISABLED_FILL_OPACITY),
-        border.opacity(DISABLED_FILL_OPACITY),
-      )
+      (p.muted, p.muted)
     } else {
       (bg, border.opacity(0.5))
     };
@@ -401,7 +542,7 @@ impl Button {
     }
   }
 
-  /// The label color while disabled. Over a tinted fill the muted color
+  /// The label color while disabled. Over the muted fill the muted color
   /// alone reads as disabled; over the page it needs fading too, or an
   /// outline button looks enabled.
   fn disabled_foreground(&self) -> Hsla {
@@ -425,7 +566,7 @@ impl RenderOnce for Button {
       let mut style = self.style.clone();
       if filled {
         style.background = style.background.take().map(|fill| match fill {
-          gpui::Fill::Color(bg) => gpui::Fill::Color(bg.opacity(DISABLED_FILL_OPACITY)),
+          gpui::Fill::Color(_) => gpui::Fill::Color(self.palette.muted.into()),
         });
       }
       style.border_color = style.border_color.map(|c| c.opacity(0.5));
@@ -438,30 +579,46 @@ impl RenderOnce for Button {
     // Icons follow the label, including a `text_color` override.
     let icon_color = style.text.color.unwrap_or(fg);
     let selector = self.id.to_string();
+    let (id, palette) = (self.id.clone(), self.palette);
     let mut el = gpui_bootstrap::button::Button::new(self.id)
       .colors(colors)
       .disabled(disabled)
-      // As before the facade: a press leaves focus in the editor or list
-      // the button acts on.
-      .focusable(false)
+      // A press leaves focus in the editor or list the button acts on; Tab
+      // still reaches it, as inside a dialog.
+      .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
       .when(self.variant == Variant::Link, |b| {
         b.button_style(gpui_bootstrap::button::ButtonStyle::Link)
       })
       .when_some(self.name, |b, name| b.accessibility_label(name))
+      .when_some(self.pressed, |b, on| {
+        b.aria_toggled(if on {
+          gpui::accesskit::Toggled::True
+        } else {
+          gpui::accesskit::Toggled::False
+        })
+      })
       .debug_selector(move || selector)
       .whitespace_nowrap()
       .font_weight(gpui::FontWeight::MEDIUM)
-      .rounded(zpx(8.))
+      .rounded(zpx(theme::RADIUS_MD))
       .p_0()
       .min_h_0()
-      .when(self.variant != Variant::Outline, |b| b.border_0())
+      .when(
+        !matches!(self.variant, Variant::Outline | Variant::Command),
+        |b| b.border_0(),
+      )
       .map(|b| match self.size {
         Size::Default => text(b.h(zpx(40.)).px_4(), TextSize::Sm),
         Size::Icon => b.size(zpx(40.)),
+        Size::IconSm => b.size(zpx(32.)),
         Size::IconXs => b.size(zpx(24.)),
         Size::Lg => text(b.h(zpx(44.)).px_6(), TextSize::Lg),
+        Size::Md => text(b.h(zpx(theme::CONTROL_MD)).px_2p5(), TextSize::Sm),
         Size::Sm => text(b.h(zpx(32.)).px_3(), TextSize::Sm),
         Size::Xs => text(b.h(zpx(24.)).px_2(), TextSize::Sm),
+      })
+      .when(self.variant == Variant::Command, |b| {
+        b.justify_start().gap_3().px_4().rounded(radius::LG)
       })
       .when(filled && !disabled, |b| b.shadow_sm())
       .when_some(self.on_click.filter(|_| !disabled), |b, f| {
@@ -476,10 +633,46 @@ impl RenderOnce for Button {
       .children(self.children.into_iter().map(|child| match child {
         ButtonChild::Element(el) => el,
         ButtonChild::Icon(path, size) => icon(path, size, icon_color).into_any_element(),
-      }));
+        ButtonChild::CopyIcon(copied, size) => {
+          copy_feedback::copy_icon(id.clone(), copied, size, icon_color, palette.success)
+        }
+      }))
+      .when_some(self.shortcut, |b, kbd| {
+        b.child(gpui::div().ml_auto().child(kbd))
+      });
     el.style().refine(&style);
     el
   }
+}
+
+/// A control's own tab stop, kept across frames under `key`.
+pub(crate) fn tab_stop(
+  key: impl Into<ElementId>,
+  window: &mut Window,
+  cx: &mut App,
+) -> gpui::FocusHandle {
+  window
+    .use_keyed_state(key, cx, |_, cx| cx.focus_handle().tab_stop(true))
+    .read(cx)
+    .clone()
+}
+
+/// The ring a control draws while it has keyboard focus. Controls keep
+/// focus where it was on a click, so it only shows for the keyboard.
+/// `inset` draws it inside, for a row a scrolling list would clip.
+pub fn focus_ring(p: &Palette, inset: bool) -> gpui::BoxShadow {
+  gpui::BoxShadow {
+    color: p.ring.opacity(0.55),
+    offset: gpui::point(gpui::px(0.), gpui::px(0.)),
+    blur_radius: gpui::px(0.),
+    spread_radius: gpui::px(2.),
+    inset,
+  }
+}
+
+/// Whether a click came from `key` ("enter" or "space") on the keyboard.
+pub(crate) fn keyboard_click(event: &ClickEvent, key: gpui::KeyboardButton) -> bool {
+  matches!(event, ClickEvent::Keyboard(k) if k.button == key)
 }
 
 /// Closes a click-to-open menu and says whether it was open.
@@ -691,7 +884,8 @@ impl<E: ParentElement> ParentElement for A11yDisabled<E> {
   }
 }
 
-/// `ui/card.tsx`'s `Card`: a bordered, rounded surface.
+/// `ui/card.tsx`'s `Card`: a bordered, rounded surface. Prefer [`Card`],
+/// which adds the header, padding and footer.
 pub fn card(p: &Palette) -> Div {
   div()
     .rounded(zpx(12.))
@@ -699,6 +893,16 @@ pub fn card(p: &Palette) -> Div {
     .border_color(p.border.opacity(0.5))
     .bg(p.card)
     .text_color(p.card_foreground)
+}
+
+/// A card's action row for a hand-built [`card`]: buttons pulled right at
+/// their own width, like a dialog footer. [`Card`] does this via [`CardFooter`].
+pub fn card_actions() -> Div {
+  div()
+    .flex()
+    .items_center()
+    .justify_end()
+    .gap(zpx(theme::space::SM))
 }
 
 #[cfg(test)]
@@ -714,11 +918,99 @@ mod tests {
   }
 
   #[test]
+  fn a_pressed_button_is_a_toggle_in_the_selected_style() {
+    let p = theme::palette(false);
+    let off = Button::new("off", &p).pressed(false);
+    assert_eq!(off.pressed, Some(false));
+    assert!(!off.selected);
+    let on = Button::new("on", &p)
+      .variant(Variant::Outline)
+      .pressed(true);
+    assert_eq!(on.pressed, Some(true));
+    assert_eq!(on.colors().bg, p.selected());
+    // A plain button is no toggle.
+    assert_eq!(Button::new("plain", &p).pressed, None);
+  }
+
+  #[test]
+  fn a_checked_button_is_a_toggle_led_by_a_checkbox() {
+    let p = theme::palette(false);
+    for on in [false, true] {
+      let b = Button::new("assigned", &p)
+        .variant(Variant::Outline)
+        .checked(on)
+        .label("Assigned to me");
+      assert_eq!(b.pressed, Some(on));
+      // The box carries the state, not the selected fill.
+      assert!(!b.selected);
+      assert_eq!(
+        b.colors().bg,
+        Button::new("x", &p).variant(Variant::Outline).colors().bg
+      );
+      assert!(matches!(b.children.first(), Some(ButtonChild::Element(_))));
+    }
+  }
+
+  #[test]
+  fn state_variants_carry_their_own_fill_and_hover() {
+    let p = theme::palette(false);
+    let green = Tone::Success.color(&p);
+    let success = Button::new("s", &p).variant(Variant::Success);
+    assert!(success.filled());
+    assert_eq!(success.colors().bg, green);
+    assert_eq!(success.colors().hover_bg, green.opacity(0.85));
+    let github = Button::new("g", &p).variant(Variant::Github);
+    assert!(github.filled());
+    assert_eq!(github.colors().bg, p.github());
+    assert_eq!(github.foreground(), p.primary_foreground);
+    let outline = Button::new("o", &p).variant(Variant::DestructiveOutline);
+    assert!(!outline.filled());
+    assert_eq!(outline.colors().border, p.destructive.opacity(0.3));
+    assert_eq!(outline.colors().hover_bg, p.destructive.opacity(0.1));
+    assert_eq!(outline.foreground(), p.destructive);
+    let ghost = Button::new("d", &p).variant(Variant::DestructiveGhost);
+    assert_eq!(ghost.colors().hover_bg, p.destructive.opacity(0.1));
+    assert_eq!(ghost.foreground(), p.muted_foreground);
+  }
+
+  #[test]
+  fn a_command_button_is_a_muted_field_with_its_shortcut_last() {
+    let p = theme::palette(false);
+    let command = Button::new("c", &p)
+      .variant(Variant::Command)
+      .shortcut(Kbd::from_label("Ctrl + P", &p))
+      .icon(theme::ICON_SEARCH, 16.)
+      .label("Go to file");
+    assert!(!command.filled());
+    assert_eq!(command.colors().bg, p.background);
+    assert_eq!(command.colors().border, p.border);
+    assert_eq!(command.colors().hover_bg, p.hover());
+    assert_eq!(command.foreground(), p.muted_foreground);
+    assert!(matches!(
+      command.children[..],
+      [ButtonChild::Icon(..), ButtonChild::Element(_)]
+    ));
+    assert!(command.shortcut.is_some());
+  }
+
+  #[test]
+  fn warning_button_is_filled_with_a_dark_label() {
+    let p = theme::palette(false);
+    let warning = Button::new("warning", &p).variant(Variant::Warning);
+    assert!(warning.filled());
+    assert_eq!(warning.foreground(), p.warning_foreground);
+    assert_eq!(
+      theme::palette(true).warning_foreground,
+      p.warning_foreground
+    );
+  }
+
+  #[test]
   fn disabled_button_mutes_its_label_and_icons() {
     let p = theme::palette(false);
     let primary = Button::new("primary", &p);
     assert_eq!(primary.foreground(), p.primary_foreground);
-    // An opaque label over the tinted fill, so the fill can't wash it out.
+    // An opaque label over the muted fill, so the fill can't wash it out.
     let primary = primary.disabled(true);
     assert_eq!(primary.foreground(), p.muted_foreground);
     let outline = Button::new("outline", &p)
@@ -731,5 +1023,18 @@ mod tests {
       .icon(theme::ICON_COMPARE, 16.)
       .disabled(true);
     assert!(matches!(icon_first.children[..], [ButtonChild::Icon(..)]));
+  }
+
+  #[test]
+  fn a_copy_button_keeps_its_icon_slot_for_the_check() {
+    let p = theme::palette(false);
+    let button = Button::new("copy", &p).copy_icon(true, 12.).label("Copied");
+    assert!(matches!(
+      button.children[..],
+      [
+        ButtonChild::CopyIcon(copy_feedback::Copied { copied: true, .. }, 12.),
+        ButtonChild::Element(_)
+      ]
+    ));
   }
 }

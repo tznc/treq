@@ -10,7 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::core::remote_provider::{ManagedInstanceRecord, RegionCode, SizePreset};
+use crate::core::remote_provider::{RegionCode, SizePreset};
 
 /// A verified SSH host public key, pinned by the control plane. Managed host
 /// trust is tracked independently of the user's global `known_hosts` file.
@@ -105,6 +105,13 @@ pub struct SshEndpoint {
   /// which all dial directly, so it defaults to [`SshTransport::Direct`].
   #[serde(default, skip_serializing_if = "SshTransport::is_direct")]
   pub transport: SshTransport,
+  /// What holds the machine's persistent terminals: the Treq daemon unless
+  /// the user picked tmux. Absent in older serialized endpoints.
+  #[serde(
+    default,
+    skip_serializing_if = "crate::core::pty_remote_supervisor::PtyBackend::is_default"
+  )]
+  pub terminal_backend: crate::core::pty_remote_supervisor::PtyBackend,
 }
 
 /// The byte path to an endpoint's sshd. SSH (host-key pinning and client
@@ -116,9 +123,9 @@ pub enum SshTransport {
   #[default]
   Direct,
   /// A WebSocket to Treq's `remote-ssh-relay` Edge Function, which forwards
-  /// raw bytes to sshd on a managed Sprite. Sprites have no raw TCP ingress,
-  /// so `hostname`/`port` then name sshd as seen from inside the Sprite and
-  /// are not dialed. The URL carries only ids; the Supabase session token is
+  /// raw bytes to sshd on a managed machine. Managed machines have no raw
+  /// TCP ingress, so `hostname`/`port` then name sshd as seen from inside the
+  /// machine and are not dialed. The URL carries only ids; the Supabase session token is
   /// sent in a header on each connection (see
   /// `SshConnectionPool::set_relay_access_token`).
   Relay { url: String },
@@ -183,12 +190,6 @@ pub struct ReprovisionInstanceRequest {
 pub struct DeleteInstanceRequest {
   pub instance_id: String,
   pub idempotency_key: IdempotencyKey,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct InstanceStatusResponse {
-  pub instance: Option<ManagedInstanceRecord>,
-  pub endpoint: Option<SshEndpoint>,
 }
 
 // -- Client keys and certificates -------------------------------------------

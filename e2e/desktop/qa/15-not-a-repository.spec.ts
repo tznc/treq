@@ -11,8 +11,10 @@ import { chromium, expect, test, type Browser, type Locator, type Page } from "@
 import { appBinary, port } from "../env.ts";
 import { appEnv, makeFixture, writeFakeAgent } from "../harness.ts";
 import { capture, theme } from "./capture.ts";
+import { popupBox, xPointer } from "./helpers.ts";
 
-const plainPort = port + 2;
+// port + 2 is the fake Linear `launch.ts` starts.
+const plainPort = port + 3;
 
 type App = { app: ChildProcess; browser: Browser; page: Page; folder: string };
 
@@ -101,7 +103,7 @@ test("not-a-repository: asks, and cancelled leaves the folder alone", async () =
       ],
     });
     await cancel.click();
-    const open = run.page.getByRole("button", { name: "Open Repository" });
+    const open = run.page.getByRole("button", { name: "Open repository…" });
     await expect(open).toBeVisible();
     await run.page.waitForTimeout(500);
     await capture(run.page, {
@@ -110,8 +112,25 @@ test("not-a-repository: asks, and cancelled leaves the folder alone", async () =
       screen: true,
       expectations: [
         "The onboarding card shows",
-        "A 'Not a Git Repository' error toast",
+        "A 'Not a Git repository' error toast",
       ],
+    });
+    // The toast's Copy button sits left of its close button, `p-4` in.
+    const toast = popupBox();
+    expect(toast).not.toBeNull();
+    await xPointer(run.page, toast!.x + toast!.w - 68, toast!.y + 28, 1);
+    await capture(run.page, {
+      name: "15-not-a-repository-02b-copied",
+      title: "Error toast copied",
+      screen: true,
+      expectations: ["The error toast's Copy icon is a green check"],
+    });
+    await run.page.waitForTimeout(2500);
+    await capture(run.page, {
+      name: "15-not-a-repository-02c-copy-reverted",
+      title: "Error toast copy reverted",
+      screen: true,
+      expectations: ["The error toast shows the Copy icon again, not the check"],
     });
     expect(existsSync(join(run.folder, ".treq"))).toBe(false);
     expect(existsSync(join(run.folder, ".git"))).toBe(false);
@@ -124,7 +143,7 @@ test("not-a-repository: initialized, it opens as a repository", async () => {
   const run = await launch();
   try {
     await (await question(run.page)).initialize.click();
-    await expect(run.page.getByRole("button", { name: "Open Repository" })).toBeHidden({
+    await expect(run.page.getByRole("button", { name: "Open repository…" })).toBeHidden({
       timeout: 30_000,
     });
     await run.page.waitForTimeout(2000);

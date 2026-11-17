@@ -139,7 +139,7 @@ impl RenderOnce for MenuItem {
           .gap_0p5()
           .child(div().font_weight(FontWeight::MEDIUM).child(self.label))
           .child(
-            text(div(), TextSize::Xs)
+            text(div(), TextSize::Sm)
               .text_color(p.muted_foreground)
               .child(description),
           ),
@@ -147,6 +147,8 @@ impl RenderOnce for MenuItem {
       })
       .when_some(self.shortcut, |el, keystroke| {
         el.child(
+          // Short label (['kbd hint']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
           text(div(), TextSize::Xs)
             .text_color(p.muted_foreground)
             .child(Kbd::label(&keystroke)),
@@ -175,6 +177,8 @@ impl MenuLabel {
 
 impl RenderOnce for MenuLabel {
   fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    // Short label (['section heading']): 11px is fine.
+    // ast-grep-ignore: gpui-text-xs-short-label-only
     text(div(), TextSize::Xs)
       .px_2()
       .pt_1p5()

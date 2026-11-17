@@ -79,7 +79,6 @@ COPY docker/db /opt/treq/db
 COPY docker/nginx.conf /etc/nginx/nginx.conf
 COPY docker/entrypoint.sh /opt/treq/bin/entrypoint.sh
 COPY docker/apply-treq-migrations.sh /opt/treq/bin/apply-treq-migrations.sh
-COPY docker/merge-queue-cron.sh /opt/treq/bin/merge-queue-cron.sh
 
 # @supabase/supabase-js resolves via its npm: specifier at runtime.
 COPY docker/deno.json /home/deno/functions/deno.json
@@ -88,31 +87,25 @@ COPY docker/deno.json /home/deno/functions/deno.json
 COPY docker/openrc/postgrest /etc/init.d/postgrest
 COPY docker/openrc/edge-runtime /etc/init.d/edge-runtime
 COPY docker/openrc/nginx-gateway /etc/init.d/nginx-gateway
-COPY docker/openrc/merge-queue-cron /etc/init.d/merge-queue-cron
 COPY docker/openrc/run-postgrest.sh /usr/local/bin/run-postgrest.sh
 COPY docker/openrc/run-edge-runtime.sh /usr/local/bin/run-edge-runtime.sh
 COPY docker/openrc/run-nginx.sh /usr/local/bin/run-nginx.sh
-COPY docker/openrc/run-merge-queue-cron.sh /usr/local/bin/run-merge-queue-cron.sh
 
 RUN find /home/deno/functions -name '.env' -delete 2>/dev/null || true \
   && chmod +x \
       /opt/treq/bin/entrypoint.sh \
       /opt/treq/bin/apply-treq-migrations.sh \
-      /opt/treq/bin/merge-queue-cron.sh \
       /usr/local/bin/postgrest \
       /usr/local/bin/edge-runtime \
       /etc/init.d/postgrest \
       /etc/init.d/edge-runtime \
       /etc/init.d/nginx-gateway \
-      /etc/init.d/merge-queue-cron \
       /usr/local/bin/run-postgrest.sh \
       /usr/local/bin/run-edge-runtime.sh \
       /usr/local/bin/run-nginx.sh \
-      /usr/local/bin/run-merge-queue-cron.sh \
   && rc-update add postgrest default \
   && rc-update add edge-runtime default \
   && rc-update add nginx-gateway default \
-  && rc-update add merge-queue-cron default \
   && mkdir -p /var/log/nginx /var/lib/nginx /run/nginx /tmp /root/.cache/deno
 
 ENV POSTGRES_DB=postgres \

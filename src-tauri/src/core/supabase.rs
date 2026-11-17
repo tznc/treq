@@ -42,6 +42,10 @@ struct Package {
 }
 
 /// The `dev` or `prod` environment of `package.json`.
+#[expect(
+  clippy::expect_used,
+  reason = "package.json is embedded at build time and checked by tests"
+)]
 pub fn package_env(dev: bool) -> Env {
   let envs = serde_json::from_str::<Package>(PACKAGE_JSON)
     .expect("package.json has an `env` block")
@@ -85,8 +89,11 @@ impl std::fmt::Display for ApiError {
 
 impl std::error::Error for ApiError {}
 
-/// The PostgREST code `set_merge_queue_enabled` raises without Pro.
+/// The PostgREST code an RPC raises without Pro.
 const POSTGREST_PRO_REQUIRED: &str = "PT402";
+
+/// The code remote-instance refuses `ensure`/`wake`/`resize` with over the spend cap.
+pub const SPEND_CAP_REACHED: &str = "spend_cap_reached";
 
 impl ApiError {
   pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
@@ -104,8 +111,71 @@ impl ApiError {
 
   /// `isProRequiredError`: the server refused for want of Pro.
   pub fn is_pro_required(&self) -> bool {
-    self.status == 402 || self.code == "pro_required" || self.code == POSTGREST_PRO_REQUIRED
+    !self.is_spend_cap_reached()
+      && (self.status == 402 || self.code == "pro_required" || self.code == POSTGREST_PRO_REQUIRED)
   }
+
+  /// The error as a sentence for the user, with the HTTP status and
+  /// correlation id on a second line for support. Refusals the cloud card
+  /// reads by their code (Pro, spend cap, a rejected provider key) keep
+  /// their `[code]` form.
+  pub fn friendly(&self) -> String {
+    if self.is_pro_required()
+      || self.is_spend_cap_reached()
+      || self.code == "provider_credential_invalid"
+    {
+      return self.to_string();
+    }
+    let sentence = match (self.code.as_str(), self.status) {
+      ("network", _) if self.message.contains("timed out") => {
+        "Treq Cloud took too long to answer. Try again.".to_string()
+      }
+      ("network", _) => "Couldn't reach Treq Cloud. Check your connection.".to_string(),
+      ("unauthorized", _) | (_, 401) => "Your session expired. Sign in again.".to_string(),
+      ("invalid_response", _) => {
+        "Treq Cloud sent a reply Treq couldn't read. Try again.".to_string()
+      }
+      ("forbidden", _) | (_, 403) => "Treq Cloud refused this request.".to_string(),
+      ("internal_error", _) | (_, 500..) => "Treq Cloud had a problem. Try again.".to_string(),
+      _ => {
+        readable(&self.message).unwrap_or_else(|| "Treq Cloud refused this request.".to_string())
+      }
+    };
+    let mut details = Vec::new();
+    if self.status > 0 {
+      details.push(format!("HTTP {}", self.status));
+    }
+    if let Some(id) = &self.correlation_id {
+      details.push(format!("Correlation ID: {id}"));
+    }
+    if details.is_empty() {
+      sentence
+    } else {
+      format!("{sentence}\n{}", details.join(" · "))
+    }
+  }
+
+  /// The monthly spend cap stopped a cloud workspace action (also HTTP 402).
+  pub fn is_spend_cap_reached(&self) -> bool {
+    self.code == SPEND_CAP_REACHED
+  }
+}
+
+/// A server message fit to show as is: one plain line, no JSON or URL,
+/// ending as a sentence.
+fn readable(message: &str) -> Option<String> {
+  let message = message.trim();
+  let plain = !message.is_empty()
+    && !message.contains(['{', '[', '\n'])
+    && !message.contains("://")
+    && message.len() <= 200;
+  plain.then(|| {
+    if message.ends_with(['.', '!', '?']) {
+      message.to_string()
+    } else {
+      format!("{message}.")
+    }
+  })
 }
 
 /// The error bodies of Edge Functions, PostgREST and GoTrue.
@@ -150,12 +220,21 @@ fn api_error(status: u16, header_id: Option<String>, body: ErrorBody) -> ApiErro
     code,
     message: body
       .error_description
-      .or(error)
       .or(body.message)
+      .or(error)
       .or(body.msg)
       .unwrap_or_else(|| "Request failed".into()),
     correlation_id: body.correlation_id.or(header_id),
   }
+}
+
+/// The [`ApiError`] of a refusal whose body was already read.
+pub(crate) fn api_error_from(status: u16, body: Value) -> ApiError {
+  api_error(
+    status,
+    None,
+    serde_json::from_value(body).unwrap_or_default(),
+  )
 }
 
 /// Reads a response: its JSON on success, an [`ApiError`] otherwise.
@@ -177,7 +256,10 @@ pub(crate) async fn read<T: DeserializeOwned>(response: reqwest::Response) -> Re
   } else {
     &text
   };
-  serde_json::from_str(text).map_err(ApiError::transport)
+  serde_json::from_str(text).map_err(|error| ApiError {
+    status: status.as_u16(),
+    ..ApiError::new("invalid_response", error.to_string())
+  })
 }
 
 /// The client: PostgREST, Edge Functions, and the session they run as.
@@ -266,6 +348,25 @@ impl Supabase {
     self.send(self.http.post(url).json(args)).await
   }
 
+  /// `functions.invoke(name, { body })`, answering any HTTP status with
+  /// its JSON body, for callers that read a refusal's details. Only a
+  /// transport failure is an error.
+  pub async fn invoke_raw(&self, name: &str, body: &Value) -> Result<(u16, Value), ApiError> {
+    let url = format!("{}/functions/v1/{name}", self.url);
+    let response = self
+      .http
+      .post(url)
+      .json(body)
+      .bearer_auth(self.bearer().await)
+      .header("apikey", &self.anon_key)
+      .send()
+      .await
+      .map_err(ApiError::transport)?;
+    let status = response.status().as_u16();
+    let text = response.text().await.map_err(ApiError::transport)?;
+    Ok((status, serde_json::from_str(&text).unwrap_or(Value::Null)))
+  }
+
   /// `functions.invoke(name, { body })`.
   pub async fn invoke<T: DeserializeOwned>(&self, name: &str, body: &Value) -> Result<T, ApiError> {
     let url = format!("{}/functions/v1/{name}", self.url);
@@ -332,16 +433,115 @@ mod tests {
       Some("cid".into()),
       ErrorBody {
         error: Some(json!("Key has been revoked")),
-        provider_error: Some("sprites".into()),
+        provider_error: Some("boat".into()),
         ..Default::default()
       },
     );
-    assert_eq!(error.code, "sprites");
+    assert_eq!(error.code, "boat");
     assert_eq!(
       error.to_string(),
-      "[sprites] Key has been revoked\nHTTP 409 · Correlation ID: cid"
+      "[boat] Key has been revoked\nHTTP 409 · Correlation ID: cid"
     );
     assert_eq!(api_error(500, None, ErrorBody::default()).code, "http_500");
+  }
+
+  fn refusal(status: u16, body: Value) -> ApiError {
+    api_error(status, None, serde_json::from_value(body).unwrap())
+  }
+
+  #[test]
+  fn errors_read_as_sentences_with_the_details_below() {
+    let cases = [
+      (
+        ApiError::transport("error sending request for url (https://x.supabase.co/functions/v1/a)"),
+        "Couldn't reach Treq Cloud. Check your connection.",
+      ),
+      (
+        ApiError::transport("operation timed out"),
+        "Treq Cloud took too long to answer. Try again.",
+      ),
+      (
+        refusal(
+          401,
+          json!({"code": "unauthorized", "message": "JWT expired"}),
+        ),
+        "Your session expired. Sign in again.",
+      ),
+      (
+        refusal(
+          500,
+          json!({"code": "internal_error", "message": "upstream sprite error"}),
+        ),
+        "Treq Cloud had a problem. Try again.",
+      ),
+      (
+        refusal(502, json!({})),
+        "Treq Cloud had a problem. Try again.",
+      ),
+      (
+        ApiError {
+          status: 200,
+          ..ApiError::new("invalid_response", "expected value at line 1 column 1")
+        },
+        "Treq Cloud sent a reply Treq couldn't read. Try again.",
+      ),
+      (
+        refusal(
+          409,
+          json!({"code": "quota_exceeded", "message": "Instance limit reached"}),
+        ),
+        "Instance limit reached.",
+      ),
+    ];
+    for (error, sentence) in cases {
+      let friendly = error.friendly();
+      assert_eq!(friendly.lines().next(), Some(sentence), "{error}");
+      assert!(!friendly.contains('['), "{friendly}");
+      assert!(!friendly.contains("http"), "{friendly}");
+    }
+    let with_id = ApiError {
+      correlation_id: Some("7f3a".into()),
+      ..refusal(500, json!({}))
+    };
+    assert_eq!(
+      with_id.friendly(),
+      "Treq Cloud had a problem. Try again.\nHTTP 500 · Correlation ID: 7f3a"
+    );
+  }
+
+  #[test]
+  fn refusals_the_card_reads_by_code_keep_their_code() {
+    for code in [
+      "pro_required",
+      "spend_cap_reached",
+      "provider_credential_invalid",
+    ] {
+      let error = refusal(402, json!({"code": code, "error": "x"}));
+      assert_eq!(error.friendly(), error.to_string());
+    }
+  }
+
+  #[test]
+  fn the_message_wins_over_the_error_field() {
+    let error = refusal(
+      400,
+      json!({"error": "bad_request", "message": "Tier is unknown"}),
+    );
+    assert_eq!(error.message, "Tier is unknown");
+  }
+
+  #[tokio::test]
+  async fn an_unreadable_success_is_an_invalid_response_not_a_network_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+      .and(path("/functions/v1/f"))
+      .respond_with(ResponseTemplate::new(200).set_body_string("<html>"))
+      .mount(&server)
+      .await;
+    let (supabase, _) = client(&server.uri());
+    let error = supabase.invoke::<Value>("f", &json!({})).await.unwrap_err();
+    assert_eq!(error.code, "invalid_response");
+    assert_eq!(error.status, 200);
   }
 
   #[test]
@@ -354,6 +554,17 @@ mod tests {
     assert!(rpc.is_pro_required());
     assert_eq!(rpc.message, "Pro");
     assert!(!ApiError::new("network", "down").is_pro_required());
+  }
+
+  #[test]
+  fn a_spend_cap_refusal_is_not_a_pro_refusal() {
+    let capped = api_error(
+      402,
+      None,
+      serde_json::from_value(json!({"code": "spend_cap_reached", "error": "Cap"})).unwrap(),
+    );
+    assert!(!capped.is_pro_required());
+    assert!(capped.is_spend_cap_reached());
   }
 
   #[tokio::test]
@@ -395,7 +606,7 @@ mod tests {
   async fn calls_rpcs_and_functions_and_reads_their_errors() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
-      .and(path("/rest/v1/rpc/get_merge_queue_enabled"))
+      .and(path("/rest/v1/rpc/get_flag"))
       .and(body_json(json!({"p_repo_full_name": "o/r"})))
       .respond_with(ResponseTemplate::new(200).set_body_json(json!(true)))
       .mount(&server)
@@ -416,10 +627,7 @@ mod tests {
       .await;
     let (supabase, _) = client(&server.uri());
     let enabled: bool = supabase
-      .rpc(
-        "get_merge_queue_enabled",
-        &json!({"p_repo_full_name": "o/r"}),
-      )
+      .rpc("get_flag", &json!({"p_repo_full_name": "o/r"}))
       .await
       .unwrap();
     assert!(enabled);

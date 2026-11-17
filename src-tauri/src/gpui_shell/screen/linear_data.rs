@@ -90,6 +90,24 @@ pub trait LinearHost: ChangesHost {
   ) -> Result<Vec<AgentReviewComment>, String>;
   /// Replaces the reviewed passage in Linear with the comment's suggestion.
   fn linear_apply_suggestion(&self, repo_path: &str, comment_id: &str) -> Result<(), String>;
+  /// Creates an issue in the team `team_id`; returns it as Linear saved it.
+  fn linear_create_issue(
+    &self,
+    repo_path: &str,
+    team_id: &str,
+    title: &str,
+    description: &str,
+  ) -> Result<LinearIssue, String>;
+  /// Replaces an issue's title and description.
+  fn linear_update_issue(
+    &self,
+    repo_path: &str,
+    issue_id: &str,
+    title: &str,
+    description: &str,
+  ) -> Result<LinearIssue, String>;
+  /// Moves an issue to Linear's trash, where it can be restored for 30 days.
+  fn linear_delete_issue(&self, repo_path: &str, issue_id: &str) -> Result<(), String>;
 }
 
 impl Backend {
@@ -105,22 +123,22 @@ impl Backend {
 impl LinearHost for Backend {
   fn linear_teams(&self, repo_path: &str) -> Result<Vec<LinearTeam>, String> {
     let client = self.linear_client(repo_path)?;
-    tauri::async_runtime::block_on(crate::linear::linear_list_teams_impl(&client))
+    crate::gpui_shell::block_on(crate::linear::linear_list_teams_impl(&client))
   }
 
   fn linear_issues(&self, repo_path: &str, team: Option<&str>) -> Result<Vec<LinearIssue>, String> {
     let client = self.linear_client(repo_path)?;
-    tauri::async_runtime::block_on(crate::linear::linear_list_issues_impl(&client, team))
+    crate::gpui_shell::block_on(crate::linear::linear_list_issues_impl(&client, team))
   }
 
   fn linear_viewer(&self, repo_path: &str) -> Result<LinearUser, String> {
     let client = self.linear_client(repo_path)?;
-    tauri::async_runtime::block_on(crate::linear::linear_get_viewer_impl(&client))
+    crate::gpui_shell::block_on(crate::linear::linear_get_viewer_impl(&client))
   }
 
   fn linear_projects(&self, repo_path: &str) -> Result<Vec<LinearProject>, String> {
     let client = self.linear_client(repo_path)?;
-    tauri::async_runtime::block_on(crate::linear::linear_list_projects_impl(&client))
+    crate::gpui_shell::block_on(crate::linear::linear_list_projects_impl(&client))
   }
 
   fn linear_documents(
@@ -129,14 +147,14 @@ impl LinearHost for Backend {
     project_id: &str,
   ) -> Result<Vec<LinearDocument>, String> {
     let client = self.linear_client(repo_path)?;
-    tauri::async_runtime::block_on(crate::linear::linear_list_project_documents_impl(
+    crate::gpui_shell::block_on(crate::linear::linear_list_project_documents_impl(
       &client, project_id,
     ))
   }
 
   fn linear_comments(&self, repo_path: &str, of: &Commented) -> Result<Vec<LinearComment>, String> {
     let client = self.linear_client(repo_path)?;
-    tauri::async_runtime::block_on(async {
+    crate::gpui_shell::block_on(async {
       match of {
         Commented::Issue(id) => crate::linear::linear_list_issue_comments_impl(&client, id).await,
         Commented::Project(id) => {
@@ -164,14 +182,51 @@ impl LinearHost for Backend {
     repo_path: &str,
     of: &Commented,
   ) -> Result<Vec<AgentReviewComment>, String> {
-    crate::local_db::list_agent_review_comments(repo_path, of.target_type(), of.id())
+    crate::core::agent_review::list_comments(repo_path, of.target_type(), of.id())
   }
 
   fn linear_apply_suggestion(&self, repo_path: &str, comment_id: &str) -> Result<(), String> {
     let client = self.linear_client(repo_path)?;
-    tauri::async_runtime::block_on(crate::linear::linear_apply_review_suggestion_impl(
+    crate::gpui_shell::block_on(crate::linear::linear_apply_review_suggestion_impl(
       &client, repo_path, comment_id,
     ))
+  }
+
+  fn linear_create_issue(
+    &self,
+    repo_path: &str,
+    team_id: &str,
+    title: &str,
+    description: &str,
+  ) -> Result<LinearIssue, String> {
+    let client = self.linear_client(repo_path)?;
+    crate::gpui_shell::block_on(crate::linear::linear_create_issue_impl(
+      &client,
+      team_id,
+      title,
+      description,
+    ))
+  }
+
+  fn linear_update_issue(
+    &self,
+    repo_path: &str,
+    issue_id: &str,
+    title: &str,
+    description: &str,
+  ) -> Result<LinearIssue, String> {
+    let client = self.linear_client(repo_path)?;
+    crate::gpui_shell::block_on(crate::linear::linear_update_issue_impl(
+      &client,
+      issue_id,
+      title,
+      description,
+    ))
+  }
+
+  fn linear_delete_issue(&self, repo_path: &str, issue_id: &str) -> Result<(), String> {
+    let client = self.linear_client(repo_path)?;
+    crate::gpui_shell::block_on(crate::linear::linear_delete_issue_impl(&client, issue_id))
   }
 }
 
@@ -193,20 +248,11 @@ impl IssueView {
     IssueView::Backlog,
   ];
 
-  pub fn value(self) -> &'static str {
-    match self {
-      IssueView::All => "all",
-      IssueView::Active => "active",
-      IssueView::MyIssues => "my-issues",
-      IssueView::Backlog => "backlog",
-    }
-  }
-
   pub fn label(self) -> &'static str {
     match self {
-      IssueView::All => "All Issues",
+      IssueView::All => "All issues",
       IssueView::Active => "Active",
-      IssueView::MyIssues => "My Issues",
+      IssueView::MyIssues => "My issues",
       IssueView::Backlog => "Backlog",
     }
   }
@@ -427,15 +473,6 @@ impl ProjectView {
     ProjectView::Backlog,
   ];
 
-  pub fn value(self) -> &'static str {
-    match self {
-      ProjectView::All => "all",
-      ProjectView::Mine => "my-projects",
-      ProjectView::Active => "active",
-      ProjectView::Backlog => "backlog",
-    }
-  }
-
   pub fn label(self) -> &'static str {
     match self {
       ProjectView::All => "All",
@@ -457,7 +494,8 @@ pub fn project_view<'a>(
     .filter(|p| match view {
       ProjectView::All => true,
       ProjectView::Active => p.state == "started",
-      ProjectView::Backlog => p.state == "planned",
+      // Not started yet: Linear's `backlog` and `planned` project states.
+      ProjectView::Backlog => matches!(p.state.as_str(), "backlog" | "planned"),
       ProjectView::Mine => viewer.is_some_and(|v| p.lead.as_ref().is_some_and(|l| l.id == v)),
     })
     .collect()
@@ -521,6 +559,10 @@ pub struct Anchor<'a> {
 
 /// `highlightQuotedText`: wraps each anchor's first match in a `<mark>`,
 /// so the passage lines up with its card in the comments column.
+#[expect(
+  clippy::string_slice,
+  reason = "offsets come from find() of the quote and its own length"
+)]
 pub fn highlight_quoted(content: &str, anchors: &[Anchor]) -> String {
   let mut result = content.to_string();
   for anchor in anchors {
@@ -538,6 +580,37 @@ pub fn highlight_quoted(content: &str, anchors: &[Anchor]) -> String {
     }
   }
   result
+}
+
+/// The markdown's blocks: runs of lines between blank lines, a fenced code
+/// block kept whole, so a comment can show under the one it quotes.
+pub fn paragraphs(content: &str) -> Vec<String> {
+  let mut blocks = Vec::new();
+  let mut block: Vec<&str> = Vec::new();
+  let mut fenced = false;
+  for line in content.lines() {
+    if line.trim_start().starts_with("```") {
+      fenced = !fenced;
+    }
+    if line.trim().is_empty() && !fenced {
+      if !block.is_empty() {
+        blocks.push(block.join("\n"));
+        block.clear();
+      }
+    } else {
+      block.push(line);
+    }
+  }
+  if !block.is_empty() {
+    blocks.push(block.join("\n"));
+  }
+  blocks
+}
+
+/// The first of `blocks` that holds `quote`, where its comment shows.
+pub fn quoted_block(blocks: &[String], quote: Option<&str>) -> Option<usize> {
+  let quote = quote.map(str::trim).filter(|q| !q.is_empty())?;
+  blocks.iter().position(|b| b.contains(quote))
 }
 
 /// Linear's own anchors: `bg-yellow-200/70 dark:bg-yellow-500/30`.
@@ -614,6 +687,24 @@ pub fn agent_count_label(n: usize) -> String {
 mod tests {
   use super::*;
 
+  #[test]
+  fn paragraphs_keep_fenced_code_whole() {
+    let text = "# Title\n\nFirst line\nsecond line\n\n```\na\n\nb\n```\n\n\nLast";
+    assert_eq!(
+      paragraphs(text),
+      [
+        "# Title",
+        "First line\nsecond line",
+        "```\na\n\nb\n```",
+        "Last"
+      ]
+    );
+    let blocks = paragraphs(text);
+    assert_eq!(quoted_block(&blocks, Some(" second line ")), Some(1));
+    assert_eq!(quoted_block(&blocks, Some("missing")), None);
+    assert_eq!(quoted_block(&blocks, None), None);
+  }
+
   pub(crate) fn issue(id: &str, state: (&str, &str)) -> LinearIssue {
     serde_json::from_value(serde_json::json!({
       "id": id,
@@ -679,7 +770,7 @@ mod tests {
       ids(&issue_view(&issues, IssueView::MyIssues, Some("me"))),
       ["1"]
     );
-    // Without a viewer, "My Issues" is empty.
+    // Without a viewer, "My issues" is empty.
     assert!(issue_view(&issues, IssueView::MyIssues, None).is_empty());
   }
 
@@ -779,6 +870,7 @@ mod tests {
       project("1", "started", Some(("me", "Me"))),
       project("2", "planned", Some(("u2", "Bo"))),
       project("3", "completed", None),
+      project("4", "backlog", None),
     ];
     let pick = |v, viewer| {
       project_view(&projects, v, viewer)
@@ -787,7 +879,7 @@ mod tests {
         .collect::<Vec<_>>()
     };
     assert_eq!(pick(ProjectView::Active, None), ["1"]);
-    assert_eq!(pick(ProjectView::Backlog, None), ["2"]);
+    assert_eq!(pick(ProjectView::Backlog, None), ["2", "4"]);
     assert_eq!(pick(ProjectView::Mine, Some("me")), ["1"]);
     assert!(pick(ProjectView::Mine, None).is_empty());
 
@@ -795,7 +887,7 @@ mod tests {
     let (states, leads) = project_filter_options(&all);
     assert_eq!(
       states.iter().map(|s| s.value.as_str()).collect::<Vec<_>>(),
-      ["completed", "planned", "started"]
+      ["backlog", "completed", "planned", "started"]
     );
     assert_eq!(
       leads.iter().map(|l| l.label.as_str()).collect::<Vec<_>>(),

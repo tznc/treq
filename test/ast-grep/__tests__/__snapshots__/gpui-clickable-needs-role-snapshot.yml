@@ -1,0 +1,81 @@
+id: gpui-clickable-needs-role
+snapshots:
+  ? |
+    fn icon_only() -> Stateful<Div> {
+      div().id("close").cursor_pointer().child(icon(X)).on_click(f)
+    }
+  : labels:
+    - source: div().id("close").cursor_pointer().child(icon(X)).on_click(f)
+      style: primary
+      start: 36
+      end: 97
+    - source: on_click
+      style: secondary
+      start: 86
+      end: 94
+    - source: div().id("close").cursor_pointer().child(icon(X)).on_click
+      style: secondary
+      start: 36
+      end: 94
+    - source: div()
+      style: secondary
+      start: 36
+      end: 41
+    - source: div()
+      style: secondary
+      start: 36
+      end: 41
+  ? |
+    fn pressed() -> Stateful<Div> {
+      div().id("line").cursor_pointer().on_mouse_down(MouseButton::Left, press)
+    }
+  : labels:
+    - source: div().id("line").cursor_pointer().on_mouse_down(MouseButton::Left, press)
+      style: primary
+      start: 34
+      end: 107
+    - source: on_mouse_down
+      style: secondary
+      start: 68
+      end: 81
+    - source: div().id("line").cursor_pointer().on_mouse_down
+      style: secondary
+      start: 34
+      end: 81
+    - source: (MouseButton::Left, press)
+      style: secondary
+      start: 81
+      end: 107
+    - source: div()
+      style: secondary
+      start: 34
+      end: 39
+    - source: div()
+      style: secondary
+      start: 34
+      end: 39
+  ? |
+    fn wrapped() -> Stateful<Div> {
+      ui::text(div(), TextSize::Xs).id("reply").cursor_pointer().child("Reply").on_click(f)
+    }
+  : labels:
+    - source: ui::text(div(), TextSize::Xs).id("reply").cursor_pointer().child("Reply").on_click(f)
+      style: primary
+      start: 34
+      end: 119
+    - source: on_click
+      style: secondary
+      start: 108
+      end: 116
+    - source: ui::text(div(), TextSize::Xs).id("reply").cursor_pointer().child("Reply").on_click
+      style: secondary
+      start: 34
+      end: 116
+    - source: div()
+      style: secondary
+      start: 43
+      end: 48
+    - source: div()
+      style: secondary
+      start: 43
+      end: 48

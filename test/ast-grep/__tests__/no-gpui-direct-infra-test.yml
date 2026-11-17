@@ -1,0 +1,36 @@
+id: no-gpui-direct-infra
+valid:
+  - |
+    fn sessions(repo: &str) -> Vec<Session> {
+      crate::core::sessions::list_sessions(repo).unwrap_or_default()
+    }
+  - |
+    fn remote(repo: &str) -> Option<GitRemoteInfo> {
+      core::github_cli::remote(repo).ok().flatten()
+    }
+  - |
+    use crate::local_db::Session;
+    fn name(session: &Session) -> &str {
+      &session.name
+    }
+  - |
+    fn branch(b: crate::jj::JjBranch) -> String {
+      b.name
+    }
+invalid:
+  - |
+    fn sessions(repo: &str) -> Vec<Session> {
+      crate::local_db::get_sessions(repo).unwrap_or_default()
+    }
+  - |
+    fn trusted(repo: &str) -> bool {
+      local_db::is_repo_trusted(repo)
+    }
+  - |
+    fn fetch(repo: &str) {
+      let _ = crate::jj::jj_git_fetch(repo);
+    }
+  - |
+    fn remote(repo: &str) {
+      let _ = github::get_git_remote_url_impl(repo);
+    }

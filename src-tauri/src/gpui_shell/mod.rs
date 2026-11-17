@@ -6,6 +6,7 @@
 //! (`sidebar`), a screen (`screen`) and the dialogs over them. Tooltips,
 //! menus and toasts open in popup windows of their own (see `popup`).
 
+use crate::result_ext::ResultExt;
 use std::{
   collections::{HashMap, VecDeque},
   sync::Mutex,
@@ -17,6 +18,7 @@ use tauri_plugin_gpui::{
   GpuiConfig, GpuiWindowExt,
 };
 
+mod actions;
 mod checks_run;
 mod confirm;
 #[cfg(feature = "e2e")]
@@ -27,11 +29,11 @@ mod fuzz;
 mod keys;
 pub mod launch;
 mod menus;
-mod modal;
 pub mod native;
 mod overlay;
 mod popover;
 mod popup;
+pub mod projects;
 pub mod remote_repo;
 mod screen;
 #[doc(hidden)]
@@ -42,6 +44,7 @@ mod sidebar_actions;
 use treq_ui::theme;
 mod time;
 mod title_bar;
+mod toast_layer;
 mod toasts;
 mod tooltips;
 use treq_ui as ui;
@@ -53,9 +56,10 @@ use screen::Screen;
 pub use screen::{Modal, ScreenSnapshot};
 pub use sidebar::SidebarSnapshot;
 use sidebar::{Sidebar, SidebarAction};
+pub(crate) use window::note_just_initialized;
 
-/// Tooltips, menus, toasts and the modal window are windows of their own,
-/// placed at screen positions (`popup`, `modal`), which a Wayland client
+/// Tooltips, menus and toasts are windows of their own, placed at screen
+/// positions (`popup`), which a Wayland client
 /// cannot choose, so a Wayland session runs GTK through XWayland. Call
 /// before GTK starts, while the process is still single-threaded.
 pub fn force_x11_on_wayland() {
@@ -111,6 +115,8 @@ struct Shell {
   /// Focused while the model's confirmation shows, so it hears Enter and
   /// Escape.
   confirm_focus: Option<gpui::FocusHandle>,
+  /// The window's toasts, over everything in it.
+  toasts: Vec<Toast>,
 }
 
 impl Shell {
@@ -130,6 +136,11 @@ impl Shell {
       let keystroke = &event.keystroke;
       let m = keys::held(keystroke.modifiers);
       let within = |name: &str| event.context_stack.iter().any(|c| c.contains(name));
+      // An open dialog (the palette, the shortcuts sheet, a picker) takes
+      // every key, its own Escape included.
+      if within(overlay::KEY_CONTEXT) {
+        return;
+      }
       let found = shortcuts::app_shortcut(
         &keystroke.key,
         keystroke.key_char.as_deref(),
@@ -143,9 +154,7 @@ impl Shell {
       let shortcut = found
         .map(window::from_app)
         .or_else(|| window::window_shortcut(&keystroke.key, m, within(screen::TERMINAL_CONTEXT)));
-      if shortcut == Some(window::Shortcut::Escape)
-        && (modal::escape_popover(&label, cx) || ui::escape_menus(cx))
-      {
+      if shortcut == Some(window::Shortcut::Escape) && ui::escape_menus(cx) {
         cx.stop_propagation();
         return;
       }
@@ -171,6 +180,19 @@ impl Render for Shell {
       e2e::begin_frame(window);
       e2e::shell_window(window.window_handle());
     }
+    static FIRST: std::sync::Once = std::sync::Once::new();
+    FIRST.call_once(|| {
+      crate::startup::mark("first render");
+      // The syntax set takes a while to load; load it before the first
+      // diff, but after the first frame, which it would compete with for a
+      // core.
+      window.on_next_frame(|_, _| {
+        std::thread::Builder::new()
+          .name("warm-highlighting".into())
+          .spawn(screen::warm_highlighting)
+          .warn_on_err("spawn highlighting warm-up thread");
+      });
+    });
     let os_dark = matches!(
       window.appearance(),
       gpui::WindowAppearance::Dark | gpui::WindowAppearance::VibrantDark
@@ -187,7 +209,15 @@ impl Render for Shell {
     ui::apply_zoom(window, cx);
     self.watch_shortcuts(window, cx);
     let confirm = self.confirm(window, dark, cx);
+    let toasts = toast_layer::toast_layer(&self.toasts, theme::palette(dark), {
+      let (app, label) = (self.app.clone(), self.label.to_string());
+      std::rc::Rc::new(move |id, action, _| {
+        let (label, id) = (label.clone(), id.to_string());
+        defer_main(&app, move |app| toasts::click(app, &label, &id, action));
+      })
+    });
     gpui::div()
+      .relative()
       .size_full()
       .flex()
       .font_family(theme::SANS_FONT)
@@ -200,6 +230,7 @@ impl Render for Shell {
       })
       .bg(theme::palette(dark).background)
       .when_some(self.sidebar.clone(), |this, sidebar| {
+        let sidebar = Sidebar::element(&sidebar, cx);
         // The cut-off overlay spans the sidebar too; the workspace view
         // dims its own part below the remote strip.
         let cut_off = self
@@ -236,10 +267,16 @@ impl Render for Shell {
             this.child(title_bar::drag_area("screen-title-bar"))
           })
           .when_some(self.screen.clone(), |this, screen| {
-            this.child(gpui::div().flex_1().min_h_0().child(screen))
+            this.child(
+              gpui::div()
+                .flex_1()
+                .min_h_0()
+                .child(Screen::element(&screen)),
+            )
           }),
       )
       .children(confirm)
+      .children(toasts)
   }
 }
 
@@ -266,7 +303,7 @@ impl Shell {
       .clone();
     let label = self.label.to_string();
     Some(
-      question.dialog(&focus, window, &theme::palette(dark), move |yes, _, cx| {
+      question.confirm_dialog(&focus, window, &theme::palette(dark), move |yes, _, cx| {
         window::answer(&label, yes, cx)
       }),
     )
@@ -304,11 +341,14 @@ pub fn open_window(
     .title_bar_style(tauri::TitleBarStyle::Overlay)
     .hidden_title(true);
   let window = window.build()?;
+  crate::startup::mark("window built");
   #[cfg(target_os = "linux")]
   hide_menu_bar(&window)?;
 
   let shell_label = label.to_string();
   let shell_app = app.clone();
+  // The first frame follows the OS appearance, before GPUI reports it.
+  let os_dark = window.theme().ok().map(|theme| theme == tauri::Theme::Dark);
   window.attach_gpui(move |cx| {
     let shell = cx.new(|_| Shell {
       app: shell_app,
@@ -318,9 +358,10 @@ pub fn open_window(
       modal: None,
       window: None,
       presented: None,
-      os_dark: None,
+      os_dark,
       shortcuts: None,
       confirm_focus: None,
+      toasts: Vec::new(),
     });
     cx.default_global::<Shells>()
       .0
@@ -328,7 +369,9 @@ pub fn open_window(
     shell
   })?;
 
+  crate::startup::mark("gpui attached");
   window::start(app, label, repo)?;
+  crate::startup::mark("window model started");
   Ok(())
 }
 
@@ -402,7 +445,7 @@ impl Shell {
       self.show_modal(next.modal.clone(), cx);
     }
     if before.as_ref().is_none_or(|b| b.overlay != next.overlay) {
-      self.show_overlay(next.overlay.clone());
+      self.show_overlay(next.overlay.clone(), cx);
     }
     self.show_file_picker(next.file_picker.clone(), cx);
     // Every GPUI window draws at the app's zoom.
@@ -476,12 +519,18 @@ impl Shell {
     }
   }
 
-  fn show_overlay(&self, snapshot: Option<OverlaySnapshot>) {
-    let label = self.label.to_string();
-    defer_main(&self.app, move |app| {
-      let host = std::sync::Arc::new(native::Backend::new(app.clone(), label.clone()));
-      let sink = overlay_sink(label.clone());
-      modal::update(app, &label, snapshot, host, sink);
+  /// Hands the screen the window-wide dialog to draw over itself.
+  fn show_overlay(&mut self, snapshot: Option<OverlaySnapshot>, cx: &mut gpui::Context<Self>) {
+    let Some(screen) = &self.screen else {
+      return;
+    };
+    let host = std::sync::Arc::new(native::Backend::new(
+      self.app.clone(),
+      self.label.to_string(),
+    ));
+    let sink = overlay_sink(self.label.to_string());
+    screen.update(cx, |screen, cx| {
+      screen.set_overlay(snapshot, host, sink, cx)
     });
   }
 
@@ -514,6 +563,9 @@ fn action_sink(app: AppHandle, label: String) -> sidebar::ActionSink {
     let (app, label) = (app.clone(), label.clone());
     // The sidebar is mid-update while it sends; read it once it is done.
     cx.defer(move |cx| {
+      if let SidebarAction::PrefetchWorkspace { id } = action {
+        return prefetch_workspace(&label, id, cx);
+      }
       if window::sidebar_action(&label, &action, cx) || !sidebar_actions::handles(&action) {
         return;
       }
@@ -530,6 +582,22 @@ fn action_sink(app: AppHandle, label: String) -> sidebar::ActionSink {
   })
 }
 
+/// Reads ahead in window `label` what selecting workspace `id` of its
+/// repository would show.
+fn prefetch_workspace(label: &str, id: i64, cx: &mut gpui::App) {
+  let Some(route) = window::workspace_route(label, id, cx) else {
+    return;
+  };
+  let screen = cx
+    .try_global::<Shells>()
+    .and_then(|shells| shells.0.get(label))
+    .and_then(WeakEntity::upgrade)
+    .and_then(|shell| shell.read(cx).screen.clone());
+  if let Some(screen) = screen {
+    screen.update(cx, |screen, cx| screen.prefetch_workspace(route, cx));
+  }
+}
+
 /// Closes the terminals of a workspace GPUI removed, in window `label`.
 /// Callable from any thread.
 fn close_workspace_terminals(app: &AppHandle, label: &str, path: String) {
@@ -541,11 +609,12 @@ fn close_workspace_terminals(app: &AppHandle, label: &str, path: String) {
 fn terminal_command(app: &AppHandle, label: &str, kind: &'static str, dir: Option<String>) {
   let label = label.to_string();
   defer_main(app, move |_| {
-    let _ = update_shell(&label, move |shell, cx| {
+    update_shell(&label, move |shell, cx| {
       if let Some(screen) = &shell.screen {
         screen.update(cx, |screen, cx| screen.terminal_command(kind, dir, cx));
       }
-    });
+    })
+    .ignore_closed();
   });
 }
 
@@ -558,6 +627,19 @@ fn popup_sink(app: AppHandle, label: String) -> popup::PopupSink {
 }
 
 type Deferred = Box<dyn FnOnce(&AppHandle) + Send>;
+
+/// Runs `future` to completion on the calling thread, for host methods
+/// that call async backend code. Hosts run on GPUI's background executor;
+/// on the main thread this would freeze the window until the future (often a
+/// network call) finished, so debug builds refuse it. Use this, not
+/// `tauri::async_runtime::block_on`, in `gpui_shell`.
+pub(crate) fn block_on<F: std::future::Future>(future: F) -> F::Output {
+  debug_assert!(
+    std::thread::current().name() != Some("main"),
+    "gpui_shell::block_on called on the main thread; call the host from a background task"
+  );
+  tauri::async_runtime::block_on(future)
+}
 
 /// Calls waiting for the main thread, in the order they were deferred.
 static DEFERRED: Mutex<VecDeque<Deferred>> = Mutex::new(VecDeque::new());
@@ -572,11 +654,13 @@ fn defer_main(app: &AppHandle, f: impl FnOnce(&AppHandle) + Send + 'static) {
   let app = app.clone();
   tauri::async_runtime::spawn(async move {
     let handle = app.clone();
-    let _ = app.run_on_main_thread(move || {
-      while let Some(next) = DEFERRED.lock().ok().and_then(|mut d| d.pop_front()) {
-        next(&handle);
-      }
-    });
+    app
+      .run_on_main_thread(move || {
+        while let Some(next) = DEFERRED.lock().ok().and_then(|mut d| d.pop_front()) {
+          next(&handle);
+        }
+      })
+      .ignore_closed();
   });
 }
 
@@ -633,33 +717,11 @@ pub fn hide_popups(app: &AppHandle) {
   defer_main(app, |_| popup::hide_all());
 }
 
-/// Draws window `label`'s toasts, in its sidebar's theme.
+/// Draws window `label`'s toasts in that window.
 fn draw_toasts(app: &AppHandle, label: &str, toasts: Vec<Toast>) {
   let label = label.to_string();
-  defer_main(app, move |app| {
-    let dark = tauri_plugin_gpui::with_app({
-      let label = label.clone();
-      move |cx| {
-        let sidebar = cx
-          .try_global::<Shells>()
-          .and_then(|shells| shells.0.get(&label))
-          .and_then(WeakEntity::upgrade)
-          .and_then(|shell| shell.read(cx).sidebar.clone())?;
-        Some(sidebar.read(cx).snapshot().dark)
-      }
-    });
-    let dark = dark.ok().flatten().unwrap_or(false);
-    popup::show_toasts(app, &label, toasts, dark);
-  });
-}
-
-/// Keeps window `label`'s toasts in its corner, and its open dialog over
-/// it, as it moves or resizes.
-pub fn place_toasts(app: &AppHandle, label: &str) {
-  let label = label.to_string();
-  defer_main(app, move |app| {
-    popup::place_owner_toasts(app, &label);
-    modal::place(app, &label);
+  defer_main(app, move |_| {
+    update_shell(&label, move |shell, _| shell.toasts = toasts).ignore_closed();
   });
 }
 
@@ -669,13 +731,19 @@ pub fn menu_event(app: &AppHandle, label: &str, event: &str, payload: Option<Str
   window::menu_event(app, label, event, payload)
 }
 
+/// A `treq://skill/install` link for window `label`: it shows the install
+/// confirmation for catalog skill `skill_id`. Any thread.
+pub fn skill_install_link(app: &AppHandle, label: &str, skill_id: String) {
+  window::skill_install_link(app, label, skill_id);
+}
+
 /// Types `keystroke` (GPUI's notation, e.g. "cmd-v") into the focused GPUI
 /// window, as if pressed there. On macOS a menu item's key equivalent takes
 /// the key press before the window sees it, so the Edit menu hands its keys
 /// back this way: text fields and the terminal handle them as typed.
 pub fn type_keystroke(app: &AppHandle, keystroke: &'static str) {
   defer_main(app, move |_| {
-    let _ = tauri_plugin_gpui::with_app(move |cx| {
+    tauri_plugin_gpui::with_app(move |cx| {
       let Ok(keystroke) = gpui::Keystroke::parse(keystroke) else {
         return;
       };
@@ -686,16 +754,19 @@ pub fn type_keystroke(app: &AppHandle, keystroke: &'static str) {
       else {
         return;
       };
-      let _ = window.update(cx, |_, window, cx| {
-        window.dispatch_keystroke(keystroke, cx);
-      });
-    });
+      window
+        .update(cx, |_, window, cx| {
+          window.dispatch_keystroke(keystroke, cx);
+        })
+        .ignore_closed();
+    })
+    .ignore_closed();
   });
 }
 
-/// Window `label` gained focus.
-pub fn window_focused(app: &AppHandle, label: &str) {
-  window::window_focused(app, label);
+/// Window `label` gained (`focused`) or lost focus.
+pub fn window_focused(app: &AppHandle, label: &str, focused: bool) {
+  window::window_focused(app, label, focused);
 }
 
 /// The cloud workspace connected (for window `label`, which asked) or its
@@ -714,18 +785,43 @@ pub fn cutoff_cleared(app: &AppHandle, endpoint_id: &str) {
 }
 
 /// Forgets a destroyed window's shell.
+/// The last repo window closed, and every terminal with it.
+pub fn forget_terminals() {
+  screen::forget_terminals();
+}
+
+pub use projects::close_requested;
+
 pub fn forget_window(label: &str) {
-  popup::forget_owner(label);
   toasts::forget(label);
   remote_repo::set_window(label, None);
-  modal::forget(label);
   window::forget(label);
   let label = label.to_string();
-  let _ = tauri_plugin_gpui::with_app(move |cx| {
+  tauri_plugin_gpui::with_app(move |cx| {
     if let Some(shells) = cx.try_global::<Shells>() {
       if shells.0.contains_key(&label) {
         cx.global_mut::<Shells>().0.remove(&label);
       }
     }
-  });
+  })
+  .ignore_closed();
+}
+
+#[cfg(test)]
+mod block_on_tests {
+  #[test]
+  fn block_on_runs_off_the_main_thread() {
+    assert_eq!(super::block_on(async { 7 }), 7);
+  }
+
+  #[cfg(debug_assertions)]
+  #[test]
+  fn block_on_refuses_the_main_thread() {
+    let on_main = std::thread::Builder::new()
+      .name("main".into())
+      .spawn(|| super::block_on(async { 7 }))
+      .expect("spawn")
+      .join();
+    assert!(on_main.is_err());
+  }
 }

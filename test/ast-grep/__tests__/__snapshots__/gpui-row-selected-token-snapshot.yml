@@ -1,0 +1,121 @@
+id: gpui-row-selected-token
+snapshots:
+  ? |
+    fn f(p: &Palette, active: bool) -> Div {
+      div().when(active, |this| this.bg(p.background).shadow_sm())
+    }
+  : labels:
+    - source: div().when(active, |this| this.bg(p.background).shadow_sm())
+      style: primary
+      start: 43
+      end: 103
+    - source: active
+      style: secondary
+      start: 54
+      end: 60
+    - source: active
+      style: secondary
+      start: 54
+      end: 60
+  ? |
+    fn f(p: &Palette, active: bool) -> Div {
+      div().when(active, |this| this.bg(p.menu_accent))
+    }
+  : labels:
+    - source: div().when(active, |this| this.bg(p.menu_accent))
+      style: primary
+      start: 43
+      end: 92
+    - source: active
+      style: secondary
+      start: 54
+      end: 60
+    - source: active
+      style: secondary
+      start: 54
+      end: 60
+  ? |
+    fn f(p: &Palette, highlighted: bool, hover_bg: Hsla) -> Div {
+      div().when(highlighted, |this| this.bg(hover_bg))
+    }
+  : labels:
+    - source: div().when(highlighted, |this| this.bg(hover_bg))
+      style: primary
+      start: 64
+      end: 113
+    - source: highlighted
+      style: secondary
+      start: 75
+      end: 86
+    - source: highlighted
+      style: secondary
+      start: 75
+      end: 86
+  ? |
+    fn f(p: &Palette, i: usize, selected: usize) -> Div {
+      div().when(i == selected, |this| this.bg(p.accent.opacity(0.5)))
+    }
+  : labels:
+    - source: div().when(i == selected, |this| this.bg(p.accent.opacity(0.5)))
+      style: primary
+      start: 56
+      end: 120
+    - source: i == selected
+      style: secondary
+      start: 67
+      end: 80
+    - source: i == selected
+      style: secondary
+      start: 67
+      end: 80
+  ? |
+    fn f(p: &Palette, selected: bool) -> Div {
+      div().bg(if selected { p.muted } else { p.background })
+    }
+  : labels:
+    - source: div().bg(if selected { p.muted } else { p.background })
+      style: primary
+      start: 45
+      end: 100
+    - source: if selected { p.muted } else { p.background }
+      style: secondary
+      start: 54
+      end: 99
+    - source: if selected { p.muted } else { p.background }
+      style: secondary
+      start: 54
+      end: 99
+  ? |
+    fn f(p: &Palette, selected: bool) -> Div {
+      div().when(selected, |this| this.bg(p.menu_accent.opacity(0.5)))
+    }
+  : labels:
+    - source: div().when(selected, |this| this.bg(p.menu_accent.opacity(0.5)))
+      style: primary
+      start: 45
+      end: 109
+    - source: selected
+      style: secondary
+      start: 56
+      end: 64
+    - source: selected
+      style: secondary
+      start: 56
+      end: 64
+  ? |
+    fn f(p: &Palette, selected: bool, active: bool, tint: Hsla) -> Div {
+      div().when(selected || active, |this| this.bg(tint))
+    }
+  : labels:
+    - source: div().when(selected || active, |this| this.bg(tint))
+      style: primary
+      start: 71
+      end: 123
+    - source: selected || active
+      style: secondary
+      start: 82
+      end: 100
+    - source: selected || active
+      style: secondary
+      start: 82
+      end: 100

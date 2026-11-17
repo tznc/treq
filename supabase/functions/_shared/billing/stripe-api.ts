@@ -14,9 +14,11 @@ export class StripeApiError extends Error {
   }
 }
 
+export type StripeMethod = "GET" | "POST" | "DELETE";
+
 export interface StripeClient {
   request<T = Record<string, unknown>>(
-    method: "GET" | "POST",
+    method: StripeMethod,
     path: string,
     params?: StripeParams,
     options?: { idempotencyKey?: string },
@@ -47,7 +49,7 @@ export function createStripeClient(
 ): StripeClient {
   return {
     async request<T>(
-      method: "GET" | "POST",
+      method: StripeMethod,
       path: string,
       params: StripeParams = {},
       options: { idempotencyKey?: string } = {},
@@ -59,7 +61,7 @@ export function createStripeClient(
       };
       let url = `${STRIPE_API_BASE}${path}`;
       const init: RequestInit = { method, headers };
-      if (method === "GET") {
+      if (method !== "POST") {
         if (encoded) url += `?${encoded}`;
       } else {
         headers["Content-Type"] = "application/x-www-form-urlencoded";

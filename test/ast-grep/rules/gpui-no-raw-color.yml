@@ -6,10 +6,13 @@ message: >
   `p.text` or `p.border`, so the color follows the theme.
 files:
   - "src-tauri/src/gpui_shell/**/*.rs"
+  - "src-tauri/src/mobile/**/*.rs"
 ignores:
   # Syntax and ANSI palettes are content colors, not UI tokens.
   - "src-tauri/src/gpui_shell/screen/highlight.rs"
   - "src-tauri/src/gpui_shell/screen/terminal_emu.rs"
+  - "src-tauri/src/mobile/terminal.rs"
+  - "src-tauri/src/mobile/ui/terminal_view.rs"
   - "src-tauri/src/gpui_shell/**/tests.rs"
   - "src-tauri/src/gpui_shell/**/tests/**"
 rule:

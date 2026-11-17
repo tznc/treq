@@ -16,9 +16,9 @@ test("home-sidebar: home view, rows, menus and multi-select", async ({ page }) =
     name: "02-home-view",
     title: "Home view (event-bus main) with the sidebar",
     expectations: [
-      "Sidebar: event-bus and docs-site home rows, Github, Linear, then WORKSPACES grouped by repo",
+      "Sidebar: event-bus and docs-site home rows, GitHub, Linear, then WORKSPACES grouped by repo",
       "Stacked feat/empty-event-message is indented under feat/event-ingest; status dots aligned right",
-      "Code tab: prompt box, Go to file, file tree, README preview and the Commits rail",
+      "Code tab: Agent and Go to file in one row, file tree, README preview and the Commits rail; no prompt box",
     ],
     issue: "Shortcut hints read '⌘ + K' / '⌘ + P' on Linux; the home file tree lists .git",
   });
@@ -31,13 +31,13 @@ test("home-sidebar: home view, rows, menus and multi-select", async ({ page }) =
     screen: true,
     rest: false,
     expectations: [
-      "Hovered row shows Start agent, Open shell and Stack workspace icons, aligned",
+      "Hovered row shows Start agent, Open shell and Stack on this… icons, aligned",
       "Tooltip names the branch and its PR state (Open PR) and does not cover the row",
     ],
   });
 
   await row(page, "feat/keyvalues-cache")
-    .getByRole("button", { name: "Stack workspace" })
+    .getByRole("button", { name: "Stack on this…" })
     .hover();
   await settle(page, 1500);
   await capture(page, {
@@ -45,10 +45,10 @@ test("home-sidebar: home view, rows, menus and multi-select", async ({ page }) =
     title: "Tooltip on a row action button",
     screen: true,
     rest: false,
-    expectations: ["The Stack workspace icon's tooltip is readable and placed next to it"],
+    expectations: ["The Stack on this… icon's tooltip is readable and placed next to it"],
   });
 
-  await row(page, "main").click({ button: "right" });
+  await row(page, "main").first().click({ button: "right" });
   await settle(page, 1000);
   await capture(page, {
     name: "02-sidebar-home-context-menu",
@@ -112,7 +112,7 @@ test("home-sidebar: home view, rows, menus and multi-select", async ({ page }) =
     await docsHome.click();
   } else {
     // The docs-site home row has no accessible name; it is the row under event-bus.
-    const main = await row(page, "main").boundingBox();
+    const main = await row(page, "main").first().boundingBox();
     if (main) await page.mouse.click(main.x + 60, main.y + main.height + 16);
   }
   await settle(page, 2500);

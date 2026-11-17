@@ -1,3 +1,4 @@
+use crate::result_ext::ResultExt;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -17,12 +18,8 @@ pub struct RemoteReadinessCheck {
   pub available: bool,
   pub detail: String,
   /// Distinct structured error code for this check, when it failed for a
-  /// reason more specific than "unavailable" (PRD "Resource quotas": quota
-  /// failures "must be a distinct, structured readiness or mutation error
-  /// so the UI can explain the quota rather than surfacing a generic
-  /// filesystem or provider failure"). `None` for ordinary binary-presence
-  /// checks; `Some("disk_quota_exceeded")` when the base disk quota check
-  /// fails.
+  /// reason more specific than "unavailable". `None` for ordinary
+  /// binary-presence checks.
   #[serde(skip_serializing_if = "Option::is_none", default)]
   pub code: Option<String>,
 }
@@ -41,6 +38,28 @@ pub struct RemoteRepoProbe {
   pub exists: bool,
   pub is_repo: bool,
   pub needs_clone: bool,
+}
+
+/// The directories in one directory on a machine ([`TreqCommandRequest::ListDirectories`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DirectoryListing {
+  /// The directory, absolute (`~` resolved).
+  pub path: String,
+  /// Its parent; `None` at the root.
+  pub parent: Option<String>,
+  /// It holds a Git or jj repository.
+  pub is_repo: bool,
+  /// Its subdirectories, by name.
+  pub entries: Vec<DirectoryEntry>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DirectoryEntry {
+  pub name: String,
+  pub path: String,
+  /// The name starts with a dot.
+  pub hidden: bool,
+  pub is_repo: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -143,6 +162,17 @@ pub enum TreqCommandRequest {
     workspace: Option<String>,
     path: String,
   },
+  /// `DiffFile` for several files at once, from the trees `token` (a
+  /// `working_copy_token` from `WorkspaceDiff`) names when given, else from
+  /// a snapshot. Answers a `WorkspaceFileHunksBatch`; a host older than it
+  /// fails, so callers fall back to `DiffFile`.
+  DiffFiles {
+    repo: String,
+    workspace: Option<String>,
+    paths: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    token: Option<String>,
+  },
   ReadFile {
     repo: String,
     workspace: Option<String>,
@@ -179,6 +209,15 @@ pub enum TreqCommandRequest {
     revision: String,
     path: String,
   },
+  /// One directory of the workspace's files (Git-ignored entries left out),
+  /// directories first; `path` is relative to the workspace, empty for its
+  /// root. See [`RemoteFileEntry`].
+  ListFiles {
+    repo: String,
+    workspace: Option<String>,
+    #[serde(default)]
+    path: String,
+  },
   /// Fuzzy file-name search over the workspace file index.
   SearchFiles {
     repo: String,
@@ -195,11 +234,28 @@ pub enum TreqCommandRequest {
     repo: String,
     workspace: Option<String>,
   },
+  /// Whether the workspace's branch no longer exists, as after a fetch
+  /// dropped a branch deleted on the remote
+  /// (`core::workspace_branch_deleted`).
+  WorkspaceBranchDeleted {
+    repo: String,
+    workspace: String,
+  },
   /// Totals for every repository under `root` on the machine: repository
-  /// and workspace counts plus the bytes they occupy (the same figure the
-  /// disk quota is enforced against). See [`MachineUsageReport`].
+  /// and workspace counts plus the bytes they occupy. See [`MachineUsageReport`].
   MachineUsage {
     root: String,
+  },
+  /// Which of Git, jj, tmux and the agent CLIs the machine has
+  /// ([`crate::core::prerequisites::HOST_BINARIES`]); `root` is unused but
+  /// the CLI requires `--repo`.
+  MachineTools {
+    root: String,
+  },
+  /// The directories in `path` on the machine (`~` is its home), for
+  /// browsing to a repository. See [`DirectoryListing`].
+  ListDirectories {
+    path: String,
   },
   /// What the host can run: the treq version, a terminal multiplexer for
   /// persistent sessions, and which agent CLIs are installed. `root` is the
@@ -427,6 +483,37 @@ pub enum TreqCommandRequest {
     workspace: Option<String>,
     idempotency_key: String,
   },
+  /// The workspace branch's GitHub pull request and its checks, read with
+  /// the host's `gh`.
+  WorkspacePullRequest {
+    repo: String,
+    workspace: String,
+  },
+  /// Pushes the workspace, then opens a pull request from its branch into
+  /// its target branch with the host's `gh`.
+  CreatePullRequest {
+    repo: String,
+    workspace: String,
+    title: String,
+    #[serde(default)]
+    body: String,
+    #[serde(default)]
+    draft: bool,
+    idempotency_key: String,
+  },
+  /// A GitHub read through the host's `gh`, against the repository's
+  /// GitHub remote. See [`GithubQuery`].
+  GithubRead {
+    repo: String,
+    query: GithubQuery,
+  },
+  /// A GitHub change through the host's `gh`, against the repository's
+  /// GitHub remote. See [`GithubAction`].
+  GithubWrite {
+    repo: String,
+    action: GithubAction,
+    idempotency_key: String,
+  },
   // -- Phase 5: agent lifecycle (VM-local supervisor) -----------------------------
   AgentStart {
     repo: String,
@@ -454,11 +541,16 @@ pub enum TreqCommandRequest {
     workspace: String,
   },
   // -- Phase 7: VM-local persistent PTY supervisor (`pty-remote`) -----------------
-  /// Starts (or reuses, if already running) a persistent tmux/screen-backed
-  /// PTY session. Does not itself attach — the client attaches over a
+  /// Starts (or reuses, if already running) a persistent PTY session. Does not itself attach — the client attaches over a
   /// separate SSH PTY channel using `PtyAttachCommand`'s returned command
   /// line, matching how `core::remote_pty::build_launch_command` is used.
   PtyStart {
+    /// Which program holds the session; omitted for the default daemon.
+    #[serde(
+      default,
+      skip_serializing_if = "crate::core::pty_remote_supervisor::PtyBackend::is_default"
+    )]
+    backend: crate::core::pty_remote_supervisor::PtyBackend,
     repo: String,
     workspace: String,
     label: String,
@@ -470,18 +562,62 @@ pub enum TreqCommandRequest {
   },
   /// Lists persistent PTY sessions, optionally scoped to `workspace`.
   PtyList {
+    /// Which program holds the session; omitted for the default daemon.
+    #[serde(
+      default,
+      skip_serializing_if = "crate::core::pty_remote_supervisor::PtyBackend::is_default"
+    )]
+    backend: crate::core::pty_remote_supervisor::PtyBackend,
     repo: String,
     workspace: Option<String>,
   },
+  /// Ends every Treq session on the host under `backend`, whatever its
+  /// repository, and for the daemon stops the daemon: a machine's "Reset
+  /// terminals".
+  /// What holds Treq's terminals on the host right now: the daemon (its
+  /// pid, version and sessions) and Treq's sessions in tmux.
+  PtyStatus,
+  PtyReset {
+    #[serde(
+      default,
+      skip_serializing_if = "crate::core::pty_remote_supervisor::PtyBackend::is_default"
+    )]
+    backend: crate::core::pty_remote_supervisor::PtyBackend,
+  },
   /// Stops (kills) a persistent PTY session. Idempotent.
   PtyStop {
+    /// Which program holds the session; omitted for the default daemon.
+    #[serde(
+      default,
+      skip_serializing_if = "crate::core::pty_remote_supervisor::PtyBackend::is_default"
+    )]
+    backend: crate::core::pty_remote_supervisor::PtyBackend,
     repo: String,
     workspace: String,
     label: String,
   },
+  /// Names a persistent PTY session; an empty title clears it. Idempotent.
+  PtyRename {
+    /// Which program holds the session; omitted for the default daemon.
+    #[serde(
+      default,
+      skip_serializing_if = "crate::core::pty_remote_supervisor::PtyBackend::is_default"
+    )]
+    backend: crate::core::pty_remote_supervisor::PtyBackend,
+    repo: String,
+    workspace: String,
+    label: String,
+    title: String,
+  },
   /// Returns the literal command line an SSH PTY channel should exec to
   /// attach (creating first if necessary) to a persistent session.
   PtyAttachCommand {
+    /// Which program holds the session; omitted for the default daemon.
+    #[serde(
+      default,
+      skip_serializing_if = "crate::core::pty_remote_supervisor::PtyBackend::is_default"
+    )]
+    backend: crate::core::pty_remote_supervisor::PtyBackend,
     repo: String,
     workspace: String,
     label: String,
@@ -490,6 +626,90 @@ pub enum TreqCommandRequest {
     cols: u16,
     rows: u16,
   },
+  /// Pastes `text` into a running persistent session as one bracketed
+  /// paste, then presses Enter when `submit`: how a review reaches an
+  /// agent's terminal.
+  PtyPaste {
+    /// Which program holds the session; omitted for the default daemon.
+    #[serde(
+      default,
+      skip_serializing_if = "crate::core::pty_remote_supervisor::PtyBackend::is_default"
+    )]
+    backend: crate::core::pty_remote_supervisor::PtyBackend,
+    repo: String,
+    workspace: String,
+    label: String,
+    text: String,
+    submit: bool,
+    idempotency_key: String,
+  },
+  /// `treq agent msg`: holds a message for an agent in a persistent
+  /// session, in the host's mailbox for it (`core::agent_msg::mailbox`).
+  /// Delivering the same message again replaces it.
+  PtyMsgDeliver {
+    repo: String,
+    workspace: String,
+    label: String,
+    /// The message (`agent_msg::hub::Envelope`) as JSON.
+    envelope: String,
+  },
+  /// What the agent in a persistent session did with its messages since
+  /// event `since`; the events up to `since` are dropped.
+  PtyMsgPoll {
+    repo: String,
+    workspace: String,
+    label: String,
+    since: u64,
+  },
+  /// The review a workspace's page left unsent on the host (empty if none).
+  ReviewLoad {
+    repo: String,
+    workspace: String,
+    scope: ReviewScope,
+  },
+  /// Keeps a workspace's unsent review on the host. Overwrites.
+  ReviewSave {
+    repo: String,
+    workspace: String,
+    scope: ReviewScope,
+    review: crate::core::review::Stored,
+  },
+  /// Drops a workspace's unsent review, once it is sent or discarded.
+  ReviewClear {
+    repo: String,
+    workspace: String,
+    scope: ReviewScope,
+  },
+}
+
+/// Which page a pending review belongs to: each keeps its own, as on
+/// desktop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewScope {
+  /// The Changes tab's diff.
+  Changes,
+  /// The file browser.
+  Files,
+}
+
+impl ReviewScope {
+  pub fn as_str(self) -> &'static str {
+    match self {
+      Self::Changes => "changes",
+      Self::Files => "files",
+    }
+  }
+
+  pub fn parse(value: &str) -> Result<Self, String> {
+    match value {
+      "changes" => Ok(Self::Changes),
+      "files" => Ok(Self::Files),
+      other => Err(format!(
+        "invalid_arguments: review scope must be changes or files, not '{other}'"
+      )),
+    }
+  }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -527,6 +747,7 @@ impl TreqCommandRequest {
       | Self::InspectWorkspace { .. }
       | Self::ListChanges { .. }
       | Self::DiffFile { .. }
+      | Self::DiffFiles { .. }
       | Self::ReadFile { .. }
       | Self::ListCommits { .. }
       | Self::ListConflicts { .. }
@@ -534,15 +755,24 @@ impl TreqCommandRequest {
       | Self::CommitDiff { .. }
       | Self::CommitFileDiff { .. }
       | Self::SearchFiles { .. }
+      | Self::ListFiles { .. }
       | Self::ProbeRepo { .. }
       | Self::GitRemoteInfo { .. }
+      | Self::WorkspacePullRequest { .. }
+      | Self::GithubRead { .. }
       | Self::AgentStatus { .. }
       | Self::AgentLogs { .. }
       | Self::PtyList { .. }
+      | Self::PtyStatus
       | Self::PtyAttachCommand { .. }
+      | Self::PtyMsgPoll { .. }
       | Self::WorkspaceChangeMarker { .. }
+      | Self::WorkspaceBranchDeleted { .. }
       | Self::MachineUsage { .. }
-      | Self::HostCheck { .. } => false,
+      | Self::MachineTools { .. }
+      | Self::ListDirectories { .. }
+      | Self::ReviewLoad { .. } => false,
+      Self::HostCheck { .. } => false,
       // -- Mutations -----------------------------------------------------------
       Self::CloneRepo { .. }
       | Self::InitRepo { .. }
@@ -574,11 +804,19 @@ impl TreqCommandRequest {
       | Self::PullWorkspace { .. }
       | Self::GitBookmarkTrack { .. }
       | Self::GitPush { .. }
+      | Self::CreatePullRequest { .. }
+      | Self::GithubWrite { .. }
       | Self::AgentStart { .. }
       | Self::AgentInput { .. }
       | Self::AgentStop { .. }
       | Self::PtyStart { .. }
-      | Self::PtyStop { .. } => true,
+      | Self::PtyStop { .. }
+      | Self::PtyRename { .. }
+      | Self::PtyReset { .. }
+      | Self::PtyPaste { .. }
+      | Self::PtyMsgDeliver { .. }
+      | Self::ReviewSave { .. }
+      | Self::ReviewClear { .. } => true,
     }
   }
 
@@ -604,9 +842,12 @@ impl TreqCommandRequest {
       | Self::RevertCommit { .. }
       | Self::ResolveConflict { .. }
       | Self::GitPush { .. }
+      | Self::CreatePullRequest { .. }
+      | Self::GithubWrite { .. }
       | Self::AgentStart { .. }
       | Self::AgentInput { .. }
-      | Self::PtyStart { .. } => true,
+      | Self::PtyStart { .. }
+      | Self::PtyPaste { .. } => true,
       Self::InspectRepository { .. }
       | Self::RepositoryStatus { .. }
       | Self::ListBranches { .. }
@@ -616,6 +857,7 @@ impl TreqCommandRequest {
       | Self::InspectWorkspace { .. }
       | Self::ListChanges { .. }
       | Self::DiffFile { .. }
+      | Self::DiffFiles { .. }
       | Self::ReadFile { .. }
       | Self::ListCommits { .. }
       | Self::ListConflicts { .. }
@@ -623,8 +865,12 @@ impl TreqCommandRequest {
       | Self::CommitDiff { .. }
       | Self::CommitFileDiff { .. }
       | Self::SearchFiles { .. }
+      | Self::ListFiles { .. }
       | Self::WorkspaceChangeMarker { .. }
+      | Self::WorkspaceBranchDeleted { .. }
       | Self::MachineUsage { .. }
+      | Self::MachineTools { .. }
+      | Self::ListDirectories { .. }
       | Self::HostCheck { .. }
       | Self::ProbeRepo { .. }
       | Self::UpdateWorkspace { .. }
@@ -642,12 +888,22 @@ impl TreqCommandRequest {
       | Self::PullWorkspace { .. }
       | Self::GitBookmarkTrack { .. }
       | Self::GitRemoteInfo { .. }
+      | Self::WorkspacePullRequest { .. }
+      | Self::GithubRead { .. }
       | Self::AgentStatus { .. }
       | Self::AgentStop { .. }
       | Self::AgentLogs { .. }
       | Self::PtyList { .. }
+      | Self::PtyStatus
       | Self::PtyStop { .. }
-      | Self::PtyAttachCommand { .. } => false,
+      | Self::PtyRename { .. }
+      | Self::PtyReset { .. }
+      | Self::PtyAttachCommand { .. }
+      | Self::PtyMsgDeliver { .. }
+      | Self::PtyMsgPoll { .. }
+      | Self::ReviewLoad { .. }
+      | Self::ReviewSave { .. }
+      | Self::ReviewClear { .. } => false,
     }
   }
 
@@ -662,6 +918,7 @@ impl TreqCommandRequest {
       Self::InspectWorkspace { .. } => "InspectWorkspace",
       Self::ListChanges { .. } => "ListChanges",
       Self::DiffFile { .. } => "DiffFile",
+      Self::DiffFiles { .. } => "DiffFiles",
       Self::ReadFile { .. } => "ReadFile",
       Self::ListCommits { .. } => "ListCommits",
       Self::ListConflicts { .. } => "ListConflicts",
@@ -669,8 +926,12 @@ impl TreqCommandRequest {
       Self::CommitDiff { .. } => "CommitDiff",
       Self::CommitFileDiff { .. } => "CommitFileDiff",
       Self::SearchFiles { .. } => "SearchFiles",
+      Self::ListFiles { .. } => "ListFiles",
       Self::WorkspaceChangeMarker { .. } => "WorkspaceChangeMarker",
+      Self::WorkspaceBranchDeleted { .. } => "WorkspaceBranchDeleted",
       Self::MachineUsage { .. } => "MachineUsage",
+      Self::MachineTools { .. } => "MachineTools",
+      Self::ListDirectories { .. } => "ListDirectories",
       Self::HostCheck { .. } => "HostCheck",
       Self::ProbeRepo { .. } => "ProbeRepo",
       Self::CloneRepo { .. } => "CloneRepo",
@@ -704,6 +965,10 @@ impl TreqCommandRequest {
       Self::GitBookmarkTrack { .. } => "GitBookmarkTrack",
       Self::GitRemoteInfo { .. } => "GitRemoteInfo",
       Self::GitPush { .. } => "GitPush",
+      Self::WorkspacePullRequest { .. } => "WorkspacePullRequest",
+      Self::CreatePullRequest { .. } => "CreatePullRequest",
+      Self::GithubRead { .. } => "GithubRead",
+      Self::GithubWrite { .. } => "GithubWrite",
       Self::AgentStart { .. } => "AgentStart",
       Self::AgentInput { .. } => "AgentInput",
       Self::AgentStatus { .. } => "AgentStatus",
@@ -712,7 +977,16 @@ impl TreqCommandRequest {
       Self::PtyStart { .. } => "PtyStart",
       Self::PtyList { .. } => "PtyList",
       Self::PtyStop { .. } => "PtyStop",
+      Self::PtyRename { .. } => "PtyRename",
+      Self::PtyReset { .. } => "PtyReset",
+      Self::PtyStatus => "PtyStatus",
       Self::PtyAttachCommand { .. } => "PtyAttachCommand",
+      Self::PtyPaste { .. } => "PtyPaste",
+      Self::PtyMsgDeliver { .. } => "PtyMsgDeliver",
+      Self::PtyMsgPoll { .. } => "PtyMsgPoll",
+      Self::ReviewLoad { .. } => "ReviewLoad",
+      Self::ReviewSave { .. } => "ReviewSave",
+      Self::ReviewClear { .. } => "ReviewClear",
     }
   }
 
@@ -728,11 +1002,15 @@ impl TreqCommandRequest {
     "InspectWorkspace",
     "ListChanges",
     "DiffFile",
+    "DiffFiles",
     "ReadFile",
     "ListCommits",
     "ListConflicts",
     "WorkspaceChangeMarker",
+    "WorkspaceBranchDeleted",
     "MachineUsage",
+    "MachineTools",
+    "ListDirectories",
     "HostCheck",
     "ProbeRepo",
     "CloneRepo",
@@ -774,570 +1052,26 @@ impl TreqCommandRequest {
     "PtyStart",
     "PtyList",
     "PtyStop",
+    "PtyRename",
+    "PtyReset",
+    "PtyStatus",
     "PtyAttachCommand",
+    "PtyPaste",
+    "PtyMsgDeliver",
+    "PtyMsgPoll",
+    "ReviewLoad",
+    "ReviewSave",
+    "ReviewClear",
     "WorkspaceDiff",
     "CommitDiff",
     "CommitFileDiff",
     "SearchFiles",
+    "ListFiles",
+    "WorkspacePullRequest",
+    "CreatePullRequest",
+    "GithubRead",
+    "GithubWrite",
   ];
-}
-
-/// The result of checking observable VM state against a mutation's expected
-/// effect after a network failure interrupted the original attempt.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MutationVerificationOutcome {
-  /// State shows the mutation already applied: the client treats it as
-  /// complete and does not resend.
-  AlreadyApplied,
-  /// State shows the mutation did not apply: the client may retry, using the
-  /// same idempotency key.
-  NotApplied,
-  /// State is ambiguous: the client surfaces this to the user rather than
-  /// guessing.
-  Ambiguous,
-}
-
-/// A verification recipe for one in-flight mutation: a typed read command
-/// safe to retry, plus a function that inspects its JSON result and decides
-/// whether the mutation already landed. Built once per mutation attempt (it
-/// closes over the mutation's own arguments, e.g. the branch name a
-/// `CreateWorkspace` call was trying to create) so the check can compare
-/// "what we asked for" against "what state now shows".
-pub struct MutationVerification {
-  pub read_request: TreqCommandRequest,
-  pub check: Box<dyn Fn(&serde_json::Value) -> MutationVerificationOutcome + Send + Sync>,
-}
-
-fn json_str<'a>(value: &'a serde_json::Value, field: &str) -> Option<&'a str> {
-  value.get(field).and_then(|v| v.as_str())
-}
-
-/// Workspace ids are numbers in `ListWorkspaces` output but strings in typed
-/// requests; compare them as text.
-fn json_id_matches(item: &serde_json::Value, id: &str) -> bool {
-  match item.get("id") {
-    Some(serde_json::Value::String(value)) => value == id,
-    Some(serde_json::Value::Number(value)) => value.to_string() == id,
-    _ => false,
-  }
-}
-
-/// Builds the verification recipe for `request`, when one exists. Every
-/// mutation under "Remote mutation coverage" that this module currently
-/// implements has one; a mutation with no meaningful state to observe (e.g.
-/// `RestoreFile`, whose "effect" is the absence of a diff a read command
-/// would need workspace-specific context to reconstruct reliably) returns
-/// `None`, and the caller treats that as always-ambiguous rather than
-/// guessing a false-positive check.
-pub fn verification_for(request: &TreqCommandRequest) -> Option<MutationVerification> {
-  match request {
-    TreqCommandRequest::CreateWorkspace {
-      repo, branch_name, ..
-    } => {
-      let branch_name = branch_name.clone();
-      Some(MutationVerification {
-        read_request: TreqCommandRequest::ListWorkspaces { repo: repo.clone() },
-        check: Box::new(move |value| {
-          let Some(items) = value.as_array() else {
-            return MutationVerificationOutcome::Ambiguous;
-          };
-          let found = items
-            .iter()
-            .any(|item| json_str(item, "branch_name") == Some(branch_name.as_str()));
-          if found {
-            MutationVerificationOutcome::AlreadyApplied
-          } else {
-            MutationVerificationOutcome::NotApplied
-          }
-        }),
-      })
-    }
-    // Archived workspaces drop out of `ListWorkspaces` just like deleted ones.
-    TreqCommandRequest::DeleteWorkspace { repo, workspace }
-    | TreqCommandRequest::ArchiveWorkspace { repo, workspace } => {
-      let workspace = workspace.clone();
-      Some(MutationVerification {
-        read_request: TreqCommandRequest::ListWorkspaces { repo: repo.clone() },
-        check: Box::new(move |value| {
-          let Some(items) = value.as_array() else {
-            return MutationVerificationOutcome::Ambiguous;
-          };
-          let still_present = items
-            .iter()
-            .any(|item| json_id_matches(item, workspace.as_str()));
-          if still_present {
-            MutationVerificationOutcome::NotApplied
-          } else {
-            MutationVerificationOutcome::AlreadyApplied
-          }
-        }),
-      })
-    }
-    TreqCommandRequest::RenameWorkspace {
-      repo,
-      workspace,
-      new_name,
-      ..
-    } => {
-      let workspace = workspace.clone();
-      let new_name = new_name.clone();
-      Some(MutationVerification {
-        read_request: TreqCommandRequest::InspectWorkspace {
-          repo: repo.clone(),
-          workspace,
-        },
-        // Renaming changes the workspace's branch; `InspectWorkspace`
-        // returns it under `current`.
-        check: Box::new(move |value| {
-          match value
-            .get("current")
-            .and_then(|c| json_str(c, "branch_name"))
-          {
-            Some(current) if current == new_name => MutationVerificationOutcome::AlreadyApplied,
-            Some(_) => MutationVerificationOutcome::NotApplied,
-            None => MutationVerificationOutcome::Ambiguous,
-          }
-        }),
-      })
-    }
-    TreqCommandRequest::SwitchRepoBranch { repo, bookmark } => {
-      let bookmark = bookmark.clone();
-      Some(MutationVerification {
-        read_request: TreqCommandRequest::InspectRepository { repo: repo.clone() },
-        check: Box::new(move |value| match value.get("current_branch") {
-          Some(serde_json::Value::String(current)) if *current == bookmark => {
-            MutationVerificationOutcome::AlreadyApplied
-          }
-          Some(_) => MutationVerificationOutcome::NotApplied,
-          None => MutationVerificationOutcome::Ambiguous,
-        }),
-      })
-    }
-    // Matching on the message alone is not enough: repeated messages such as
-    // "wip" would make an older commit look like this one. Without the
-    // pre-commit working-copy change id there is no precise check, so the
-    // caller reports ambiguity rather than guessing.
-    TreqCommandRequest::CreateCommit {
-      repo,
-      workspace,
-      message,
-      base_change_id: Some(base_change_id),
-      ..
-    } => {
-      let message = message.clone();
-      let base_change_id = base_change_id.clone();
-      Some(MutationVerification {
-        read_request: TreqCommandRequest::ListCommits {
-          repo: repo.clone(),
-          workspace: workspace.clone(),
-        },
-        check: Box::new(move |value| check_create_commit(value, &base_change_id, &message)),
-      })
-    }
-    // Undoing a commit abandons it too: its change id leaves the log.
-    TreqCommandRequest::AbandonCommit {
-      repo,
-      workspace,
-      commit,
-      ..
-    }
-    | TreqCommandRequest::UndoCommit {
-      repo,
-      workspace,
-      commit,
-    } => {
-      let commit = commit.clone();
-      Some(MutationVerification {
-        read_request: TreqCommandRequest::ListCommits {
-          repo: repo.clone(),
-          workspace: Some(workspace.clone()),
-        },
-        check: Box::new(move |value| {
-          let Some(items) = value.get("commits").and_then(|v| v.as_array()) else {
-            return MutationVerificationOutcome::Ambiguous;
-          };
-          let still_present = items.iter().any(|item| {
-            json_str(item, "commit_id") == Some(commit.as_str())
-              || json_str(item, "change_id") == Some(commit.as_str())
-          });
-          if still_present {
-            MutationVerificationOutcome::NotApplied
-          } else {
-            MutationVerificationOutcome::AlreadyApplied
-          }
-        }),
-      })
-    }
-    TreqCommandRequest::ResolveConflict { repo, revision, .. } => {
-      let revision = revision.clone();
-      Some(MutationVerification {
-        read_request: TreqCommandRequest::ListCommits {
-          repo: repo.clone(),
-          workspace: None,
-        },
-        check: Box::new(move |value| check_resolve_conflict(value, &revision)),
-      })
-    }
-    // Discarding everything leaves no changed files to list. A nonempty
-    // working copy does not prove the discard never ran: an agent or another
-    // client may have written new edits after it landed, and RestoreAll has
-    // no idempotency key, so rerunning it would discard those edits.
-    TreqCommandRequest::RestoreAll { repo, workspace } => Some(MutationVerification {
-      read_request: TreqCommandRequest::ListChanges {
-        repo: repo.clone(),
-        workspace: workspace.clone(),
-      },
-      check: Box::new(|value| match value.as_array() {
-        Some(items) if items.is_empty() => MutationVerificationOutcome::AlreadyApplied,
-        _ => MutationVerificationOutcome::Ambiguous,
-      }),
-    }),
-    TreqCommandRequest::GitBookmarkTrack { repo, bookmark, .. } => {
-      let bookmark = bookmark.clone();
-      Some(MutationVerification {
-        read_request: TreqCommandRequest::ListBranches { repo: repo.clone() },
-        check: Box::new(move |value| {
-          let Some(items) = value.as_array() else {
-            return MutationVerificationOutcome::Ambiguous;
-          };
-          let tracked = items.iter().any(|item| {
-            json_str(item, "name") == Some(bookmark.as_str())
-              && item.get("tracked").and_then(|v| v.as_bool()) == Some(true)
-          });
-          if tracked {
-            MutationVerificationOutcome::AlreadyApplied
-          } else {
-            MutationVerificationOutcome::NotApplied
-          }
-        }),
-      })
-    }
-    TreqCommandRequest::AgentStart {
-      repo, workspace, ..
-    } => Some(MutationVerification {
-      read_request: TreqCommandRequest::AgentStatus {
-        repo: repo.clone(),
-        workspace: workspace.clone(),
-      },
-      check: Box::new(
-        move |value| match value.get("running").and_then(|v| v.as_bool()) {
-          Some(true) => MutationVerificationOutcome::AlreadyApplied,
-          Some(false) => MutationVerificationOutcome::NotApplied,
-          None => MutationVerificationOutcome::Ambiguous,
-        },
-      ),
-    }),
-    TreqCommandRequest::AgentStop {
-      repo, workspace, ..
-    } => Some(MutationVerification {
-      read_request: TreqCommandRequest::AgentStatus {
-        repo: repo.clone(),
-        workspace: workspace.clone(),
-      },
-      check: Box::new(
-        move |value| match value.get("running").and_then(|v| v.as_bool()) {
-          Some(false) => MutationVerificationOutcome::AlreadyApplied,
-          Some(true) => MutationVerificationOutcome::NotApplied,
-          None => MutationVerificationOutcome::Ambiguous,
-        },
-      ),
-    }),
-    // No reliable, cheap state check exists yet for these mutations over the
-    // typed read surface (e.g. a file restore's "effect" is the absence of a
-    // diff, which needs the same file/workspace context the mutation itself
-    // used and is easy to get subtly wrong). Rather than guess and risk a
-    // false "already applied"/"not applied" call, these fall back to
-    // `MutationVerificationOutcome::Ambiguous` in `retry_after_reconnect`.
-    _ => None,
-  }
-}
-
-/// Decides whether a `CreateCommit` landed by finding the working-copy change
-/// that was current before the commit ran. A commit keeps that change id,
-/// sets its description, and moves the working copy to a new child, so:
-///
-/// - the change is still the working copy: the commit did not run;
-/// - the change is no longer the working copy and carries the message: it ran;
-/// - anything else (change missing, different description): ambiguous.
-fn check_create_commit(
-  value: &serde_json::Value,
-  base_change_id: &str,
-  message: &str,
-) -> MutationVerificationOutcome {
-  let Some(items) = value.get("commits").and_then(|v| v.as_array()) else {
-    return MutationVerificationOutcome::Ambiguous;
-  };
-  let tentative = value
-    .get("tentative_working_copy")
-    .and_then(|v| v.get("commit"));
-  let base = items.iter().chain(tentative).find(|item| {
-    json_str(item, "change_id").is_some_and(|id| change_ids_match(id, base_change_id))
-  });
-  let Some(base) = base else {
-    return MutationVerificationOutcome::Ambiguous;
-  };
-  let is_working_copy = base
-    .get("is_working_copy")
-    .and_then(|v| v.as_bool())
-    .unwrap_or(false);
-  if is_working_copy {
-    return MutationVerificationOutcome::NotApplied;
-  }
-  let description = json_str(base, "description").unwrap_or("");
-  if description.trim_end() == message.trim_end() {
-    MutationVerificationOutcome::AlreadyApplied
-  } else {
-    MutationVerificationOutcome::Ambiguous
-  }
-}
-
-/// Change ids may be shown at different prefix lengths; treat a shorter id as
-/// matching when it is a prefix of the longer one.
-/// Decides whether a `ResolveConflict` landed by reading the revision's
-/// `has_conflicts` flag from the home-repo log. `ListConflicts` cannot answer
-/// this: it lists file paths, not change ids. A revision the log does not
-/// show (or a non-change-id like `@`) stays ambiguous.
-fn check_resolve_conflict(
-  value: &serde_json::Value,
-  revision: &str,
-) -> MutationVerificationOutcome {
-  let Some(items) = value.get("commits").and_then(|v| v.as_array()) else {
-    return MutationVerificationOutcome::Ambiguous;
-  };
-  let tentative = value
-    .get("tentative_working_copy")
-    .and_then(|v| v.get("commit"));
-  let Some(commit) = items
-    .iter()
-    .chain(tentative)
-    .find(|item| json_str(item, "change_id").is_some_and(|id| change_ids_match(id, revision)))
-  else {
-    return MutationVerificationOutcome::Ambiguous;
-  };
-  match commit.get("has_conflicts").and_then(|v| v.as_bool()) {
-    Some(false) => MutationVerificationOutcome::AlreadyApplied,
-    Some(true) => MutationVerificationOutcome::NotApplied,
-    None => MutationVerificationOutcome::Ambiguous,
-  }
-}
-
-fn change_ids_match(a: &str, b: &str) -> bool {
-  if a.is_empty() || b.is_empty() {
-    return false;
-  }
-  a.starts_with(b) || b.starts_with(a)
-}
-
-/// Outcome of running a mutation with verify-before-retry semantics after a
-/// network failure. Carries enough for a Phase 6 UI to render each case from
-/// the PRD: treat-as-complete, retry-with-idempotency-key, or
-/// surface-ambiguity-to-user.
-#[derive(Debug, Clone, PartialEq)]
-pub enum MutationRetryOutcome<T> {
-  /// The mutation exec channel completed normally (no network failure, or a
-  /// retry that itself completed). Carries the fresh response.
-  Applied(T),
-  /// A network failure interrupted the exec channel, but the post-reconnect
-  /// verification read showed the mutation's effect was already observable
-  /// in VM state. The client does not resend.
-  AlreadyApplied,
-  /// A network failure interrupted the exec channel, and the post-reconnect
-  /// verification read could not determine whether the mutation applied
-  /// (the read itself failed, returned an unexpected shape, or this
-  /// mutation has no verification recipe). The client must surface this to
-  /// the user rather than guess.
-  Ambiguous { reason: String },
-}
-
-/// Reported once per verify-before-retry decision so a caller can feed it
-/// into telemetry (PRD "Client and transport telemetry": "post-reconnect
-/// state verifications before a mutation retry, and their outcome").
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PostReconnectVerification {
-  AlreadyApplied,
-  Retried,
-  Ambiguous,
-}
-
-/// Runs `request` over `pool`/`endpoint` with the PRD's verify-before-retry
-/// behavior: a network failure while the mutation was in flight (as opposed
-/// to a structured error the CLI itself returned) never triggers a blind
-/// resend. Instead, once the connection is usable again, an appropriate
-/// typed read command checks whether the mutation's effect is already
-/// observable, and only a "not applied" verdict retries — with the same
-/// idempotency key the original request carried, so a command that actually
-/// landed once on the VM is not reapplied by a late retry racing the
-/// original.
-///
-/// `on_verification` is called at most once, exactly when a network failure
-/// forced a verification read, with the decision that resulted — this is the
-/// hook a caller uses to emit the PRD's "post-reconnect state verifications
-/// ... and their outcome" telemetry.
-pub async fn retry_after_reconnect<T, F>(
-  pool: &crate::core::remote_ssh_transport::SshConnectionPool,
-  endpoint: &crate::core::remote_control_plane::SshEndpoint,
-  request: TreqCommandRequest,
-  limits: crate::core::remote_ssh_transport::ExecLimits,
-  cancellation: &crate::core::remote_ssh_transport::CancellationToken,
-  mut on_verification: F,
-) -> Result<MutationRetryOutcome<T>, RemoteCommandError>
-where
-  T: DeserializeOwned,
-  F: FnMut(PostReconnectVerification),
-{
-  debug_assert!(
-    request.is_mutation(),
-    "retry_after_reconnect is only meaningful for mutations; reads are always safe to retry directly"
-  );
-
-  // Record the pre-mutation marker the verification check needs before the
-  // mutation can change it. A failed read leaves it unset, which only makes a
-  // later verification report ambiguity; it never blocks the mutation.
-  let request = match baseline_request(&request) {
-    Some(read) => {
-      match execute_remote_command::<WorkspaceChangeMarker>(
-        pool,
-        endpoint,
-        read,
-        limits,
-        cancellation,
-      )
-      .await
-      {
-        Ok(marker) => with_verification_baseline(request, marker),
-        Err(_) => request,
-      }
-    }
-    None => request,
-  };
-
-  match execute_remote_command::<T>(
-    pool,
-    endpoint,
-    clone_request(&request),
-    limits,
-    cancellation,
-  )
-  .await
-  {
-    Ok(value) => Ok(MutationRetryOutcome::Applied(value)),
-    // The CLI reached the VM and returned a structured application-level
-    // error (e.g. `workspace_not_found`). That is not the "did it land?"
-    // uncertainty this function exists for — the CLI told us plainly it did
-    // not run — so it is surfaced as-is rather than triggering verification.
-    Err(error @ RemoteCommandError::Command { .. }) => Err(error),
-    Err(error @ RemoteCommandError::InvalidJson(_)) => Err(error),
-    // The command was refused locally before ever reaching the network
-    // (PRD "Hard cutoff on revocation or expiry"): there is no "did it
-    // land?" uncertainty to verify, since it certainly did not run.
-    Err(error @ RemoteCommandError::CredentialCutOff { .. }) => Err(error),
-    // A transport-layer failure: the client cannot tell whether the command
-    // reached the VM, ran, or completed. Verify observable state before
-    // deciding anything.
-    Err(RemoteCommandError::Transport(transport_message)) => {
-      let Some(verification) = verification_for(&request) else {
-        on_verification(PostReconnectVerification::Ambiguous);
-        return Ok(MutationRetryOutcome::Ambiguous {
-          reason: format!(
-            "network failure during mutation ({transport_message}), and no state check is available to confirm whether it applied"
-          ),
-        });
-      };
-
-      let read_result = execute_remote_command::<serde_json::Value>(
-        pool,
-        endpoint,
-        verification.read_request,
-        limits,
-        cancellation,
-      )
-      .await;
-
-      let observed = match read_result {
-        Ok(value) => (verification.check)(&value),
-        // The verification read itself could not be completed (e.g. still
-        // reconnecting) — this is exactly the "state is ambiguous" case, not
-        // a reason to guess.
-        Err(_) => MutationVerificationOutcome::Ambiguous,
-      };
-
-      match observed {
-        MutationVerificationOutcome::AlreadyApplied => {
-          on_verification(PostReconnectVerification::AlreadyApplied);
-          Ok(MutationRetryOutcome::AlreadyApplied)
-        }
-        MutationVerificationOutcome::NotApplied => {
-          on_verification(PostReconnectVerification::Retried);
-          // Retried with the exact same request, including its idempotency
-          // key field (if any) — so a command that actually did land exactly
-          // once on the VM side is not reapplied a second time by this retry
-          // racing the original.
-          let retried =
-            execute_remote_command::<T>(pool, endpoint, request, limits, cancellation).await?;
-          Ok(MutationRetryOutcome::Applied(retried))
-        }
-        MutationVerificationOutcome::Ambiguous => {
-          on_verification(PostReconnectVerification::Ambiguous);
-          Ok(MutationRetryOutcome::Ambiguous {
-            reason: format!(
-              "network failure during mutation ({transport_message}), and post-reconnect state was ambiguous"
-            ),
-          })
-        }
-      }
-    }
-  }
-}
-
-/// The read that captures a mutation's pre-mutation marker, when its
-/// verification needs one and the caller did not already supply it.
-pub fn baseline_request(request: &TreqCommandRequest) -> Option<TreqCommandRequest> {
-  match request {
-    TreqCommandRequest::CreateCommit {
-      repo,
-      workspace,
-      base_change_id: None,
-      ..
-    } => Some(TreqCommandRequest::WorkspaceChangeMarker {
-      repo: repo.clone(),
-      workspace: workspace.clone(),
-    }),
-    _ => None,
-  }
-}
-
-/// Copies the marker read by [`baseline_request`] into the request so it
-/// travels with the mutation, into the idempotency record, and into any
-/// stale-claim recovery on the VM.
-pub fn with_verification_baseline(
-  request: TreqCommandRequest,
-  marker: WorkspaceChangeMarker,
-) -> TreqCommandRequest {
-  match request {
-    TreqCommandRequest::CreateCommit {
-      repo,
-      workspace,
-      message,
-      base_change_id: None,
-      idempotency_key,
-    } => TreqCommandRequest::CreateCommit {
-      repo,
-      workspace,
-      message,
-      base_change_id: marker.working_copy_change_id,
-      idempotency_key,
-    },
-    other => other,
-  }
-}
-
-/// `TreqCommandRequest` does not derive `Clone` reuse would require adding it
-/// repo-wide; this narrow helper only needs to survive a single retry path,
-/// so it round-trips through JSON rather than widening the enum's derive
-/// list for one caller.
-fn clone_request(request: &TreqCommandRequest) -> TreqCommandRequest {
-  serde_json::from_value(serde_json::to_value(request).expect("TreqCommandRequest serializes"))
-    .expect("TreqCommandRequest round-trips through its own JSON shape")
 }
 
 /// Packs a `pty-remote` launch spec into `--value`'s single string slot as
@@ -1351,7 +1085,11 @@ pub struct PtyLaunchPayload {
   pub rows: u16,
 }
 
-fn pty_launch_payload(
+#[expect(
+  clippy::expect_used,
+  reason = "the payload is plain data that always serializes"
+)]
+pub fn pty_launch_payload(
   remote_dir: &str,
   launch: &crate::core::remote_pty::PtyLaunchSpec,
   cols: u16,
@@ -1405,6 +1143,16 @@ fn hunk_specs_arg(hunks: &[crate::core::workspaces::HunkSpec]) -> Option<String>
   )
 }
 
+/// Adds `--backend` for a machine on tmux; the daemon is the CLI's default.
+fn push_backend(
+  fields: &mut CliArgFields,
+  backend: crate::core::pty_remote_supervisor::PtyBackend,
+) {
+  if !backend.is_default() {
+    fields.extra.push(("backend", backend.as_str().to_string()));
+  }
+}
+
 impl TreqCommandRequest {
   /// Convert a typed request into remote CLI arguments. Values remain separate
   /// process arguments so no frontend-provided value is interpreted as shell.
@@ -1416,6 +1164,8 @@ impl TreqCommandRequest {
       Self::ListBranches { repo } => ("repo", "branches", repo),
       Self::ProbeRepo { repo } => ("repo", "probe", repo),
       Self::MachineUsage { root } => ("repo", "usage", root),
+      Self::MachineTools { root } => ("repo", "tools", root),
+      Self::ListDirectories { path } => ("repo", "dirs", path),
       Self::HostCheck { root } => ("repo", "host-check", root),
       Self::InitRepo {
         repo,
@@ -1588,6 +1338,18 @@ impl TreqCommandRequest {
         }
         ("file", "search", repo)
       }
+      Self::ListFiles {
+        repo,
+        workspace,
+        path,
+      } => {
+        fields.workspace = workspace.as_deref();
+        // The workspace root is an empty path, which `--path` refuses.
+        if !path.is_empty() {
+          fields.path = Some(path);
+        }
+        ("file", "list", repo)
+      }
       Self::DiffFile {
         repo,
         workspace,
@@ -1596,6 +1358,21 @@ impl TreqCommandRequest {
         fields.workspace = workspace.as_deref();
         fields.path = Some(path);
         ("changes", "diff", repo)
+      }
+      Self::DiffFiles {
+        repo,
+        workspace,
+        paths,
+        token,
+      } => {
+        fields.workspace = workspace.as_deref();
+        // JSON, as paths may hold commas.
+        let paths = serde_json::to_string(paths).map_err(|e| e.to_string())?;
+        fields.extra.push(("paths", paths));
+        if let Some(token) = token {
+          fields.extra.push(("token", token.clone()));
+        }
+        ("changes", "diff-files", repo)
       }
       Self::ReadFile {
         repo,
@@ -1770,6 +1547,10 @@ impl TreqCommandRequest {
         fields.workspace = workspace.as_deref();
         ("workspace", "marker", repo)
       }
+      Self::WorkspaceBranchDeleted { repo, workspace } => {
+        fields.workspace = Some(workspace);
+        ("workspace", "branch-deleted", repo)
+      }
       Self::ResolveConflict {
         repo,
         revision,
@@ -1804,6 +1585,40 @@ impl TreqCommandRequest {
         fields.workspace = workspace.as_deref();
         fields.idempotency_key = Some(idempotency_key);
         ("git", "push", repo)
+      }
+      Self::WorkspacePullRequest { repo, workspace } => {
+        fields.workspace = Some(workspace);
+        ("git", "pr", repo)
+      }
+      Self::CreatePullRequest {
+        repo,
+        workspace,
+        title,
+        body,
+        draft,
+        idempotency_key,
+      } => {
+        fields.workspace = Some(workspace);
+        fields.value = Some(body.clone());
+        fields.extra.push(("title", title.clone()));
+        if *draft {
+          fields.extra.push(("draft", "true".into()));
+        }
+        fields.idempotency_key = Some(idempotency_key);
+        ("git", "pr-create", repo)
+      }
+      Self::GithubRead { repo, query } => {
+        fields.value = Some(serde_json::to_string(query).map_err(|e| e.to_string())?);
+        ("git", "github-read", repo)
+      }
+      Self::GithubWrite {
+        repo,
+        action,
+        idempotency_key,
+      } => {
+        fields.value = Some(serde_json::to_string(action).map_err(|e| e.to_string())?);
+        fields.idempotency_key = Some(idempotency_key);
+        ("git", "github-write", repo)
       }
       Self::AgentStart {
         repo,
@@ -1842,6 +1657,7 @@ impl TreqCommandRequest {
         ("agent-remote", "logs", repo)
       }
       Self::PtyStart {
+        backend,
         repo,
         workspace,
         label,
@@ -1851,26 +1667,55 @@ impl TreqCommandRequest {
         rows,
         idempotency_key,
       } => {
+        push_backend(&mut fields, *backend);
         fields.workspace = Some(workspace);
         fields.target = Some(label);
         fields.value = Some(pty_launch_payload(remote_dir, launch, *cols, *rows));
         fields.idempotency_key = Some(idempotency_key);
         ("pty-remote", "start", repo)
       }
-      Self::PtyList { repo, workspace } => {
+      Self::PtyList {
+        backend,
+        repo,
+        workspace,
+      } => {
+        push_backend(&mut fields, *backend);
         fields.workspace = workspace.as_deref();
         ("pty-remote", "list", repo)
       }
+      Self::PtyStatus => ("pty-remote", "status", "/"),
+      Self::PtyReset { backend } => {
+        push_backend(&mut fields, *backend);
+        // Reset reaches every repository on the host; `--repo` only
+        // satisfies the CLI's shared argument shape.
+        ("pty-remote", "reset", "/")
+      }
       Self::PtyStop {
+        backend,
         repo,
         workspace,
         label,
       } => {
+        push_backend(&mut fields, *backend);
         fields.workspace = Some(workspace);
         fields.target = Some(label);
         ("pty-remote", "stop", repo)
       }
+      Self::PtyRename {
+        backend,
+        repo,
+        workspace,
+        label,
+        title,
+      } => {
+        push_backend(&mut fields, *backend);
+        fields.workspace = Some(workspace);
+        fields.target = Some(label);
+        fields.value = Some(title.clone());
+        ("pty-remote", "rename", repo)
+      }
       Self::PtyAttachCommand {
+        backend,
         repo,
         workspace,
         label,
@@ -1879,10 +1724,82 @@ impl TreqCommandRequest {
         cols,
         rows,
       } => {
+        push_backend(&mut fields, *backend);
         fields.workspace = Some(workspace);
         fields.target = Some(label);
         fields.value = Some(pty_launch_payload(remote_dir, launch, *cols, *rows));
         ("pty-remote", "attach-command", repo)
+      }
+      Self::PtyPaste {
+        backend,
+        repo,
+        workspace,
+        label,
+        text,
+        submit,
+        idempotency_key,
+      } => {
+        push_backend(&mut fields, *backend);
+        fields.workspace = Some(workspace);
+        fields.target = Some(label);
+        fields.value = Some(text.clone());
+        fields.idempotency_key = Some(idempotency_key);
+        if *submit {
+          fields.extra.push(("submit", "true".into()));
+        }
+        ("pty-remote", "paste", repo)
+      }
+      Self::PtyMsgDeliver {
+        repo,
+        workspace,
+        label,
+        envelope,
+      } => {
+        fields.workspace = Some(workspace);
+        fields.target = Some(label);
+        fields.value = Some(envelope.clone());
+        ("pty-remote", "msg-deliver", repo)
+      }
+      Self::PtyMsgPoll {
+        repo,
+        workspace,
+        label,
+        since,
+      } => {
+        fields.workspace = Some(workspace);
+        fields.target = Some(label);
+        fields.value = Some(since.to_string());
+        ("pty-remote", "msg-poll", repo)
+      }
+      Self::ReviewLoad {
+        repo,
+        workspace,
+        scope,
+      } => {
+        fields.workspace = Some(workspace);
+        fields.target = Some(scope.as_str());
+        ("changes", "review", repo)
+      }
+      Self::ReviewSave {
+        repo,
+        workspace,
+        scope,
+        review,
+      } => {
+        fields.workspace = Some(workspace);
+        fields.target = Some(scope.as_str());
+        fields.value =
+          Some(serde_json::to_string(review).map_err(|e| format!("Failed to encode review: {e}"))?);
+        ("changes", "review-save", repo)
+      }
+      Self::ReviewClear {
+        repo,
+        workspace,
+        scope,
+      } => {
+        fields.workspace = Some(workspace);
+        fields.target = Some(scope.as_str());
+        ("changes", "review-clear", repo)
       }
     };
     validate_remote_path(repo)?;
@@ -1957,1328 +1874,6 @@ impl TreqCommandRequest {
     Ok(args)
   }
 }
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TransportError {
-  SshConnectionFailed(String),
-  CommandFailed { code: Option<i32>, message: String },
-  InvalidJson(String),
-}
-
-pub trait TreqCommandTransport {
-  fn execute<T: DeserializeOwned>(&self, request: TreqCommandRequest) -> Result<T, TransportError>;
-}
-
-/// Serializes the same core DTOs the native SSH exec transport
-/// (`crate::core::remote_ssh_transport`) does, which keeps local and remote
-/// callers on one response contract.
-pub struct LocalTransport;
-
-impl TreqCommandTransport for LocalTransport {
-  fn execute<T: DeserializeOwned>(&self, request: TreqCommandRequest) -> Result<T, TransportError> {
-    let value = execute_local_request(request).map_err_command()?;
-    serde_json::from_value(value).map_err(|error| TransportError::InvalidJson(error.to_string()))
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Idempotency
-// ---------------------------------------------------------------------------
-//
-// Mutations that could duplicate work on retry (create, movement, git push,
-// agent start) accept an idempotency key. A repeated call with the same key
-// replays the recorded response instead of re-running the mutation.
-//
-// Persisted durably in `core::idempotency_store::IdempotencyStore`, keyed by
-// the same repo-local `.treq/local.db` convention `local_db.rs` uses — not
-// an in-process cache — because the remote VM starts a fresh `treq` CLI
-// process per SSH exec channel, and a process-local cache cannot deduplicate
-// a retry, or a concurrent invocation, that lands in a different process.
-//
-// Naturally idempotent operations (describe/update, which simply overwrite;
-// fetch/inspect/list, which are read-only) do not accept a key at all —
-// adding dedupe machinery for those would be needless per the PRD's own
-// carve-out.
-use crate::core::idempotency_store::{
-  fingerprint, redact_for_storage, IdempotencyStore, RecoveryDecision,
-};
-
-/// Runs `run` unless `key` was already used for `operation` on an equivalent
-/// `request`, in which case the previously recorded (or verification-derived)
-/// response is replayed and `run` is never invoked again. Durable across CLI
-/// process boundaries: `repo` selects the same `.treq/local.db` any other
-/// invocation against that repository would open.
-///
-/// Reusing `key` for a different operation, or the same operation with a
-/// different request body, returns a structured `idempotency_conflict`
-/// error. A pending claim left behind by a process that died mid-mutation
-/// (lost SSH connection, crashed CLI) is resolved by re-running the
-/// mutation's existing observable-state verification recipe
-/// ([`verification_for`]) once it goes stale, exactly as a post-reconnect
-/// retry would.
-fn with_idempotency_key<F>(
-  repo: &str,
-  operation: &str,
-  key: Option<&str>,
-  request: &TreqCommandRequest,
-  run: F,
-) -> Result<serde_json::Value, String>
-where
-  F: FnOnce() -> Result<serde_json::Value, String>,
-{
-  let Some(key) = key.filter(|k| !k.trim().is_empty()) else {
-    return run();
-  };
-
-  let request_json = serde_json::to_value(request).map_err(|e| e.to_string())?;
-  let request_fingerprint = fingerprint(&request_json);
-  let store = IdempotencyStore::open(repo)?;
-
-  let claim = store.claim_or_replay(
-    operation,
-    key,
-    &request_fingerprint,
-    crate::core::idempotency_store::DEFAULT_STALE_AFTER,
-    || recover_stale_claim(request),
-  )?;
-  if let Some(replay) = claim {
-    return Ok(replay);
-  }
-
-  let outcome = match run() {
-    Ok(result) => {
-      store.complete(operation, key, &redact_for_storage(&result))?;
-      Ok(result)
-    }
-    Err(error) => {
-      // A structured failure, not a "did it land?" ambiguity: free the key
-      // for reuse rather than leaving a pending claim behind forever.
-      store.abandon(operation, key)?;
-      Err(error)
-    }
-  };
-  // Best-effort, bounded retention: opportunistically sweep old completed
-  // records on the same connection rather than running a separate cleanup
-  // process. A failure here must never mask the mutation's own outcome.
-  let _ = store.cleanup(crate::core::idempotency_store::DEFAULT_RETENTION);
-  outcome
-}
-
-/// Resolves a stale pending claim by running the mutation's existing
-/// observable-state verification recipe locally (the same recipe
-/// [`verification_for`] builds for the async post-reconnect retry path,
-/// applied here via a synchronous local dispatch instead of an SSH read).
-fn recover_stale_claim(request: &TreqCommandRequest) -> Result<RecoveryDecision, String> {
-  let Some(verification) = verification_for(request) else {
-    return Ok(RecoveryDecision::Ambiguous);
-  };
-  let observed = match execute_local_request(verification.read_request) {
-    Ok(value) => value,
-    Err(_) => return Ok(RecoveryDecision::Ambiguous),
-  };
-  match (verification.check)(&observed) {
-    MutationVerificationOutcome::AlreadyApplied => {
-      Ok(RecoveryDecision::AlreadyApplied { observed })
-    }
-    MutationVerificationOutcome::NotApplied => Ok(RecoveryDecision::VerifiedNotApplied),
-    MutationVerificationOutcome::Ambiguous => Ok(RecoveryDecision::Ambiguous),
-  }
-}
-
-fn resolve_workspace_path(repo: &str, id: Option<i64>) -> Result<String, String> {
-  match id {
-    None => Ok(repo.to_string()),
-    Some(id) => {
-      let workspace = crate::local_db::get_workspace_by_id(repo, id)
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| format!("workspace_not_found: Workspace {id} was not found"))?;
-      Ok(
-        Path::new(repo)
-          .join(".treq")
-          .join("workspaces")
-          .join(workspace.workspace_path)
-          .to_string_lossy()
-          .into_owned(),
-      )
-    }
-  }
-}
-
-fn workspace_id(value: Option<&String>) -> Result<Option<i64>, String> {
-  value
-    .map(|value| {
-      value
-        .parse::<i64>()
-        .ok()
-        .filter(|id| *id > 0)
-        .ok_or_else(|| "invalid_arguments: workspace must be a positive numeric id".to_string())
-    })
-    .transpose()
-}
-
-/// Dispatches typed CLI requests to the same core functions used by Tauri.
-pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::Value, String> {
-  request.cli_args()?;
-  fn json<T: Serialize>(result: Result<T, String>) -> Result<serde_json::Value, String> {
-    serde_json::to_value(result?).map_err(|error| error.to_string())
-  }
-  // Snapshotted before the match consumes `request` by value: mutation arms
-  // need the whole original request both for the idempotency store's
-  // fingerprint and, on a stale claim, for `verification_for`.
-  let request_snapshot = if request.is_mutation() {
-    Some(clone_request(&request))
-  } else {
-    None
-  };
-  match request {
-    TreqCommandRequest::InspectRepository { repo } => json(inspect_repository_path(&repo)),
-    // These return defaults for a non-repository path, so fail first instead.
-    TreqCommandRequest::RepositoryStatus { repo } => {
-      require_existing_repo(&repo)?;
-      json(crate::core::workspaces::workspace_status(&repo, None))
-    }
-    TreqCommandRequest::ListBranches { repo } => {
-      require_existing_repo(&repo)?;
-      json(crate::core::repo::list_repo_branches(&repo))
-    }
-    TreqCommandRequest::ListWorkspaces { repo } => {
-      require_existing_repo(&repo)?;
-      json(crate::core::workspaces::list_workspaces(&repo))
-    }
-    TreqCommandRequest::WorkspaceSummaries { repo } => {
-      require_existing_repo(&repo)?;
-      json(crate::core::workspaces::workspace_summaries(&repo))
-    }
-    TreqCommandRequest::PlanNewWorkspaces {
-      repo,
-      text,
-      stack_on,
-    } => {
-      require_existing_repo(&repo)?;
-      json(crate::core::new_workspaces::plan(
-        &repo,
-        &text,
-        stack_on.as_deref(),
-      ))
-    }
-    TreqCommandRequest::MachineUsage { root } => json(machine_usage(&root)),
-    TreqCommandRequest::HostCheck { root } => json(Ok::<_, String>(host_check(&root))),
-    TreqCommandRequest::InspectWorkspace { repo, workspace } => json(
-      crate::core::workspaces::workspace_status(&repo, workspace_id(Some(&workspace))?),
-    ),
-    TreqCommandRequest::ListChanges { repo, workspace } => json(
-      crate::core::changes::list_changed_files(&repo, workspace_id(workspace.as_ref())?),
-    ),
-    TreqCommandRequest::DiffFile {
-      repo,
-      workspace,
-      path,
-    } => json(crate::core::changes::list_file_hunks(
-      &repo,
-      workspace_id(workspace.as_ref())?,
-      &path,
-      "git",
-    )),
-    TreqCommandRequest::ReadFile {
-      repo,
-      workspace,
-      path,
-      revision,
-      start_line,
-      end_line,
-    } => {
-      let start_line = start_line.unwrap_or(1);
-      json(crate::core::changes::get_file_lines(
-        &repo,
-        workspace_id(workspace.as_ref())?,
-        &path,
-        revision == FileRevision::Parent,
-        start_line,
-        end_line.unwrap_or(start_line.saturating_add(299)),
-      ))
-    }
-    TreqCommandRequest::ListCommits { repo, workspace } => {
-      json(crate::core::commits::list_commits(
-        &repo,
-        workspace_id(workspace.as_ref())?,
-        false,
-        None,
-        None,
-      ))
-    }
-    TreqCommandRequest::ListConflicts { repo, workspace } => {
-      let id = workspace_id(workspace.as_ref())?;
-      let workspace_path = resolve_workspace_path(&repo, id)?;
-      let files = crate::jj::get_conflicted_files(&workspace_path, None)
-        .map_err(|error| format!("jj_command_failed: {error}"))?;
-      serde_json::to_value(files).map_err(|error| error.to_string())
-    }
-    TreqCommandRequest::WorkspaceChangeMarker { repo, workspace } => {
-      let id = workspace_id(workspace.as_ref())?;
-      let workspace_path = resolve_workspace_path(&repo, id)?;
-      json(Ok::<_, String>(WorkspaceChangeMarker {
-        operation_id: crate::jj::jj_snapshot_head_operation_id(&workspace_path)
-          .map_err(|error| format!("jj_command_failed: {error}"))?,
-        working_copy_change_id: crate::jj::jj_get_change_id(&workspace_path, "@").ok(),
-      }))
-    }
-    TreqCommandRequest::WorkspaceDiff { repo, workspace } => {
-      let id = workspace_id(Some(&workspace))?.ok_or("invalid_arguments: workspace is required")?;
-      // A host has no app settings database, so the diff takes the default
-      // conflict marker style, as `treq changes workspace-diff` does.
-      json(crate::core::workspaces::workspace_cli_diff(&repo, id))
-    }
-    TreqCommandRequest::CommitDiff {
-      repo,
-      workspace,
-      revision,
-    } => json(crate::core::commits::get_commit_diff_with_conflict_style(
-      &repo,
-      workspace_id(workspace.as_ref())?,
-      &revision,
-      "git",
-    )),
-    TreqCommandRequest::CommitFileDiff {
-      repo,
-      workspace,
-      revision,
-      path,
-    } => json(
-      crate::core::commits::get_commit_file_diff_with_conflict_style(
-        &repo,
-        workspace_id(workspace.as_ref())?,
-        &revision,
-        &path,
-        "git",
-      ),
-    ),
-    TreqCommandRequest::SearchFiles {
-      repo,
-      workspace,
-      query,
-      limit,
-    } => json(search_files_local(
-      &repo,
-      workspace_id(workspace.as_ref())?,
-      &query,
-      limit.unwrap_or(50),
-    )),
-    TreqCommandRequest::ProbeRepo { repo } => json(probe_repo_path(&repo)),
-    TreqCommandRequest::InitRepo {
-      repo,
-      idempotency_key,
-    } => with_idempotency_key(
-      &repo,
-      "repo.init",
-      Some(idempotency_key.as_str()),
-      request_snapshot.as_ref().expect("InitRepo is a mutation"),
-      || json(init_repo_path(&repo)),
-    ),
-    TreqCommandRequest::CloneRepo {
-      repo_url,
-      destination,
-      idempotency_key,
-    } => with_idempotency_key(
-      // `destination` does not exist yet — cloning is the whole point —
-      // so the idempotency store (which eagerly creates `<repo>/.treq/`
-      // when opened) must not be scoped there or `git clone` will refuse
-      // to write into an already-non-empty destination. Its parent
-      // directory is guaranteed to exist since the caller chose a path
-      // under it.
-      Path::new(&destination)
-        .parent()
-        .and_then(|parent| parent.to_str())
-        .unwrap_or("."),
-      "repo.clone",
-      Some(idempotency_key.as_str()),
-      request_snapshot.as_ref().expect("CloneRepo is a mutation"),
-      || json(clone_repo_local(&repo_url, &destination)),
-    ),
-    TreqCommandRequest::NewWorkspaces {
-      repo,
-      text,
-      stack_on,
-      idempotency_key,
-    } => with_idempotency_key(
-      &repo,
-      "workspace.new",
-      Some(idempotency_key.as_str()),
-      request_snapshot
-        .as_ref()
-        .expect("NewWorkspaces is a mutation"),
-      || {
-        require_existing_repo(&repo)?;
-        json(crate::core::new_workspaces::run(
-          &repo,
-          &text,
-          stack_on.as_deref(),
-        ))
-      },
-    ),
-    TreqCommandRequest::CreateWorkspace {
-      repo,
-      branch_name,
-      source_branch,
-      metadata,
-      idempotency_key,
-    } => with_idempotency_key(
-      &repo,
-      "workspace.create",
-      Some(idempotency_key.as_str()),
-      request_snapshot
-        .as_ref()
-        .expect("CreateWorkspace is a mutation"),
-      || {
-        json(create_workspace_from_metadata(
-          &repo,
-          &branch_name,
-          source_branch.as_deref(),
-          metadata.as_deref(),
-        ))
-      },
-    ),
-    TreqCommandRequest::RenameWorkspace {
-      repo,
-      workspace,
-      new_name,
-      idempotency_key,
-    } => with_idempotency_key(
-      &repo,
-      "workspace.rename",
-      Some(idempotency_key.as_str()),
-      request_snapshot
-        .as_ref()
-        .expect("RenameWorkspace is a mutation"),
-      || {
-        let result = crate::core::workspaces::rename_workspace(
-          &repo,
-          workspace_id(Some(&workspace))?.ok_or("invalid_arguments: workspace is required")?,
-          &new_name,
-          false,
-        )?;
-        if !result.success {
-          return Err(format!("invalid_arguments: {}", result.message));
-        }
-        json(Ok(result))
-      },
-    ),
-    TreqCommandRequest::UpdateWorkspace {
-      repo,
-      workspace,
-      target_branch,
-      title,
-      description,
-    } => json(crate::core::workspaces::update_workspace_with_title(
-      &repo,
-      workspace_id(Some(&workspace))?.ok_or("invalid_arguments: workspace is required")?,
-      target_branch.map_or(
-        crate::core::workspaces::MaybeEmptyParam::Omitted,
-        crate::core::workspaces::MaybeEmptyParam::Some,
-      ),
-      title.map_or(
-        crate::core::workspaces::MaybeEmptyParam::Omitted,
-        crate::core::workspaces::MaybeEmptyParam::Some,
-      ),
-      description.map_or(
-        crate::core::workspaces::MaybeEmptyParam::Omitted,
-        crate::core::workspaces::MaybeEmptyParam::Some,
-      ),
-    )),
-    TreqCommandRequest::DeleteWorkspace { repo, workspace } => {
-      let id = workspace_id(Some(&workspace))?.ok_or("invalid_arguments: workspace is required")?;
-      json(crate::core::workspaces::delete_workspace(&repo, &id))
-    }
-    TreqCommandRequest::ArchiveWorkspace { repo, workspace } => {
-      let id = workspace_id(Some(&workspace))?.ok_or("invalid_arguments: workspace is required")?;
-      json(crate::core::workspaces::archive_workspace(&repo, &id))
-    }
-    TreqCommandRequest::MoveWorkspaceChanges {
-      repo,
-      workspace,
-      destination,
-      files,
-      hunks,
-      commits,
-      idempotency_key,
-    } => with_idempotency_key(
-      &repo,
-      "workspace.move",
-      Some(idempotency_key.as_str()),
-      request_snapshot
-        .as_ref()
-        .expect("MoveWorkspaceChanges is a mutation"),
-      || {
-        let request = crate::core::workspaces::WorkspaceMoveRequest {
-          files: files.into_iter().filter(|f| !f.is_empty()).collect(),
-          hunks,
-          commits: commits.into_iter().filter(|c| !c.is_empty()).collect(),
-        };
-        json(crate::core::workspaces::move_workspace_changes(
-          &repo,
-          &workspace,
-          &destination,
-          request,
-        ))
-      },
-    ),
-    TreqCommandRequest::RebaseWorkspace {
-      repo,
-      workspace,
-      target_branch,
-      idempotency_key,
-    } => with_idempotency_key(
-      &repo,
-      "workspace.rebase",
-      Some(idempotency_key.as_str()),
-      request_snapshot
-        .as_ref()
-        .expect("RebaseWorkspace is a mutation"),
-      || {
-        let id =
-          workspace_id(Some(&workspace))?.ok_or("invalid_arguments: workspace is required")?;
-        // Stack planning needs the repository's real default branch; a
-        // hardcoded "main" misplans retargets in repos that use another name.
-        let default_branch = crate::jj::get_default_branch(&repo)
-          .map_err(|error| format!("jj_command_failed: {error}"))?;
-        json(crate::core::workspaces::retarget_workspace(
-          &repo,
-          id,
-          &target_branch,
-          &default_branch,
-        ))
-      },
-    ),
-    TreqCommandRequest::SwitchRepoBranch { repo, bookmark } => {
-      json(crate::core::repo::switch_repo_branch(&repo, &bookmark))
-    }
-    TreqCommandRequest::RestoreFile {
-      repo,
-      workspace,
-      path,
-    } => {
-      let workspace_path = resolve_workspace_path(&repo, workspace_id(workspace.as_ref())?)?;
-      json(crate::core::changes::discard_file_changes(
-        &workspace_path,
-        &path,
-      ))
-    }
-    TreqCommandRequest::SnapshotWorkingCopy { repo, workspace } => {
-      json(crate::core::snapshot_working_copy(&resolve_workspace_path(
-        &repo,
-        workspace_id(workspace.as_ref())?,
-      )?))
-    }
-    TreqCommandRequest::RestoreAll { repo, workspace } => json(crate::core::discard_all_changes(
-      &resolve_workspace_path(&repo, workspace_id(workspace.as_ref())?)?,
-    )),
-    TreqCommandRequest::RestoreSnapshot {
-      repo,
-      workspace,
-      snapshot_id,
-    } => json(crate::core::restore_working_copy_snapshot(
-      &resolve_workspace_path(&repo, workspace_id(workspace.as_ref())?)?,
-      &snapshot_id,
-    )),
-    TreqCommandRequest::PatchFile {
-      repo,
-      workspace,
-      path,
-      patch_base64,
-      idempotency_key,
-    } => with_idempotency_key(
-      &repo,
-      "file.patch",
-      Some(idempotency_key.as_str()),
-      request_snapshot.as_ref().expect("PatchFile is a mutation"),
-      || {
-        json(apply_remote_patch(
-          &repo,
-          workspace_id(workspace.as_ref())?,
-          &path,
-          &patch_base64,
-        ))
-      },
-    ),
-    TreqCommandRequest::StashWorkspaceChanges {
-      repo,
-      workspace,
-      idempotency_key,
-    } => with_idempotency_key(
-      &repo,
-      "stash.workspace",
-      Some(idempotency_key.as_str()),
-      request_snapshot.as_ref().expect("stash is a mutation"),
-      || {
-        json(crate::core::stash::stash_workspace_changes(
-          &repo,
-          workspace_id(workspace.as_ref())?,
-        ))
-      },
-    ),
-    TreqCommandRequest::CreateCommit {
-      repo,
-      workspace,
-      message,
-      idempotency_key,
-      ..
-    } => with_idempotency_key(
-      &repo,
-      "commit.create",
-      Some(idempotency_key.as_str()),
-      request_snapshot
-        .as_ref()
-        .expect("CreateCommit is a mutation"),
-      || {
-        if message.trim().is_empty() {
-          return Err("invalid_arguments: commit message must not be blank".to_string());
-        }
-        let id = workspace_id(workspace.as_ref())?;
-        let committed =
-          crate::core::workspaces::commit_workspace_changes_with_auto_push(&repo, id, &message)
-            .map_err(|e| match e.as_str() {
-              crate::core::NOTHING_TO_COMMIT => format!("invalid_arguments: {e}"),
-              _ => e,
-            });
-        json(committed)
-      },
-    ),
-    TreqCommandRequest::DescribeCommit {
-      repo,
-      workspace,
-      commit,
-      message,
-    } => {
-      let id = workspace_id(Some(&workspace))?.ok_or("invalid_arguments: workspace is required")?;
-      // Naturally idempotent: it overwrites the description each call, so no
-      // idempotency key is needed or accepted.
-      json(crate::core::commits::describe_commit(
-        &repo,
-        Some(id),
-        &commit,
-        &message,
-      ))
-    }
-    TreqCommandRequest::SplitCommit {
-      repo,
-      workspace,
-      commit,
-      files,
-      hunks,
-      message,
-      idempotency_key,
-    } => {
-      // The underlying split works on whole files of the working copy.
-      // Hunk selections would silently become whole-file splits, so they are
-      // refused before the idempotency store records a claim.
-      if !hunks.is_empty() {
-        return Err(
-          "unsupported: SplitCommit does not support hunk selections yet; select whole files"
-            .to_string(),
-        );
-      }
-      with_idempotency_key(
-        &repo,
-        "commit.split",
-        Some(idempotency_key.as_str()),
-        request_snapshot
-          .as_ref()
-          .expect("SplitCommit is a mutation"),
-        || {
-          let selected: Vec<String> = files
-            .into_iter()
-            .map(|f| f.trim().to_string())
-            .filter(|f| !f.is_empty())
-            .collect();
-          if selected.is_empty() {
-            return Err(
-              "invalid_arguments: SplitCommit requires selected files or hunks".to_string(),
-            );
-          }
-          let id =
-            workspace_id(Some(&workspace))?.ok_or("invalid_arguments: workspace is required")?;
-          let workspace_path = resolve_workspace_path(&repo, Some(id))?;
-          ensure_working_copy_revision(&workspace_path, &commit)?;
-          json(
-            crate::jj::jj_split(&workspace_path, &message, selected)
-              .map_err(|error| format!("jj_command_failed: {error}")),
-          )
-        },
-      )
-    }
-    TreqCommandRequest::MoveCommit {
-      repo,
-      workspace,
-      commit,
-      target_workspace,
-      idempotency_key,
-    } => with_idempotency_key(
-      &repo,
-      "commit.move",
-      Some(idempotency_key.as_str()),
-      request_snapshot.as_ref().expect("MoveCommit is a mutation"),
-      || {
-        let source_id =
-          workspace_id(Some(&workspace))?.ok_or("invalid_arguments: workspace is required")?;
-        let target_id = workspace_id(Some(&target_workspace))?
-          .ok_or("invalid_arguments: target workspace is required")?;
-        json(crate::core::commits::move_commit_to_existing_workspace(
-          &repo, source_id, &commit, target_id,
-        ))
-      },
-    ),
-    TreqCommandRequest::UndoCommit {
-      repo,
-      workspace,
-      commit,
-    } => {
-      let id = workspace_id(Some(&workspace))?.ok_or("invalid_arguments: workspace is required")?;
-      json(crate::core::commits::undo_commit(&repo, id, &commit))
-    }
-    TreqCommandRequest::AbandonCommit {
-      repo,
-      workspace,
-      commit,
-      idempotency_key,
-    } => with_idempotency_key(
-      &repo,
-      "commit.abandon",
-      Some(idempotency_key.as_str()),
-      request_snapshot
-        .as_ref()
-        .expect("AbandonCommit is a mutation"),
-      || {
-        let id =
-          workspace_id(Some(&workspace))?.ok_or("invalid_arguments: workspace is required")?;
-        json(crate::core::commits::abandon_commit(
-          &repo,
-          Some(id),
-          &commit,
-        ))
-      },
-    ),
-    TreqCommandRequest::UndoOperation {
-      repo,
-      workspace,
-      operation_id,
-    } => json(crate::core::commits::undo_repo_operation(
-      &repo,
-      workspace_id(workspace.as_ref())?,
-      &operation_id,
-    )),
-    TreqCommandRequest::RevertCommit {
-      repo,
-      workspace,
-      commit,
-      idempotency_key,
-    } => with_idempotency_key(
-      &repo,
-      "commit.revert",
-      Some(idempotency_key.as_str()),
-      request_snapshot
-        .as_ref()
-        .expect("RevertCommit is a mutation"),
-      || {
-        let id =
-          workspace_id(Some(&workspace))?.ok_or("invalid_arguments: workspace is required")?;
-        json(crate::core::commits::revert_commit(
-          &repo,
-          Some(id),
-          &commit,
-        ))
-      },
-    ),
-    TreqCommandRequest::ResolveConflict {
-      repo,
-      revision,
-      sides,
-      idempotency_key,
-    } => with_idempotency_key(
-      &repo,
-      "conflict.resolve",
-      Some(idempotency_key.as_str()),
-      request_snapshot
-        .as_ref()
-        .expect("ResolveConflict is a mutation"),
-      || {
-        let sides = crate::core::resolve::parse_resolve_sides(
-          &sides
-            .into_iter()
-            .filter(|s| !s.is_empty())
-            .collect::<Vec<_>>(),
-        )?;
-        json(crate::core::resolve::resolve_commit(
-          &repo, &revision, &sides, None,
-        ))
-      },
-    ),
-    // The desktop conflict-marker setting lives in the client's app
-    // database, which the VM does not have, so pulls use the default style.
-    TreqCommandRequest::PullWorkspace { repo, workspace } => {
-      json(crate::core::workspaces::pull_workspace_from_remote(
-        &repo,
-        workspace_id(workspace.as_ref())?,
-        crate::core::DEFAULT_CONFLICT_MARKER_STYLE,
-      ))
-    }
-    TreqCommandRequest::GitRemoteInfo { repo } => {
-      require_existing_repo(&repo)?;
-      json(crate::github::get_git_remote_url_impl(&repo))
-    }
-    TreqCommandRequest::GitFetch { repo } => {
-      json(crate::jj::jj_git_fetch(&repo).map_err(|error| format!("jj_command_failed: {error}")))
-    }
-    TreqCommandRequest::GitBookmarkTrack {
-      repo,
-      bookmark,
-      remote_name,
-    } => {
-      // Tracking an already-tracked bookmark is a no-op in jj, so this is
-      // naturally idempotent and does not need a key.
-      json(
-        crate::jj::jj_bookmark_track(&repo, &bookmark, &remote_name)
-          .map_err(|error| format!("jj_command_failed: {error}")),
-      )
-    }
-    TreqCommandRequest::GitPush {
-      repo,
-      workspace,
-      idempotency_key,
-    } => with_idempotency_key(
-      &repo,
-      "git.push",
-      Some(idempotency_key.as_str()),
-      request_snapshot.as_ref().expect("GitPush is a mutation"),
-      || {
-        json(crate::core::workspaces::push_workspace_to_remote(
-          &repo,
-          workspace_id(workspace.as_ref())?,
-        ))
-      },
-    ),
-    TreqCommandRequest::AgentStart {
-      repo,
-      workspace,
-      agent,
-      prompt,
-      idempotency_key,
-    } => with_idempotency_key(
-      &repo,
-      "agent.start",
-      Some(idempotency_key.as_str()),
-      request_snapshot.as_ref().expect("AgentStart is a mutation"),
-      || {
-        let id =
-          workspace_id(Some(&workspace))?.ok_or("invalid_arguments: workspace is required")?;
-        let workspace_path = resolve_workspace_path(&repo, Some(id))?;
-        json(crate::core::agent_supervisor::start_agent(
-          &repo,
-          &workspace,
-          &workspace_path,
-          &agent,
-          &prompt,
-        ))
-      },
-    ),
-    TreqCommandRequest::AgentInput {
-      repo,
-      workspace,
-      input,
-      idempotency_key,
-    } => with_idempotency_key(
-      &repo,
-      "agent.input",
-      Some(idempotency_key.as_str()),
-      request_snapshot.as_ref().expect("AgentInput is a mutation"),
-      || {
-        json(crate::core::agent_supervisor::send_agent_input(
-          &repo, &workspace, &input,
-        ))
-      },
-    ),
-    TreqCommandRequest::AgentStatus { repo, workspace } => json(
-      crate::core::agent_supervisor::agent_status(&repo, &workspace),
-    ),
-    TreqCommandRequest::AgentStop { repo, workspace } => {
-      json(crate::core::agent_supervisor::stop_agent(&repo, &workspace))
-    }
-    TreqCommandRequest::AgentLogs { repo, workspace } => {
-      json(crate::core::agent_supervisor::agent_logs(&repo, &workspace))
-    }
-    TreqCommandRequest::PtyStart {
-      repo,
-      workspace,
-      label,
-      remote_dir,
-      launch,
-      cols,
-      rows,
-      idempotency_key,
-    } => with_idempotency_key(
-      &repo,
-      "pty.start",
-      Some(idempotency_key.as_str()),
-      request_snapshot.as_ref().expect("PtyStart is a mutation"),
-      || {
-        json(crate::core::pty_remote_supervisor::start_session(
-          &repo,
-          &remote_dir,
-          &workspace,
-          &label,
-          &launch,
-          cols,
-          rows,
-        ))
-      },
-    ),
-    TreqCommandRequest::PtyList { repo, workspace } => json(
-      crate::core::pty_remote_supervisor::list_sessions(&repo, workspace.as_deref()),
-    ),
-    TreqCommandRequest::PtyStop {
-      repo,
-      workspace,
-      label,
-    } => json(crate::core::pty_remote_supervisor::stop_session(
-      &repo, &workspace, &label,
-    )),
-    TreqCommandRequest::PtyAttachCommand {
-      repo,
-      workspace,
-      label,
-      remote_dir,
-      launch,
-      cols,
-      rows,
-    } => json(crate::core::pty_remote_supervisor::build_attach_command(
-      &repo,
-      &remote_dir,
-      &workspace,
-      &label,
-      &launch,
-      cols,
-      rows,
-    )),
-  }
-}
-
-/// Mirrors the local `create_workspace` Tauri command: parses the same
-/// metadata JSON, applies the title, and marks the workspace for its first
-/// rebase. Repository settings that live in the desktop app database (copied
-/// files, setup scripts) are not available on the VM and are skipped.
-fn create_workspace_from_metadata(
-  repo: &str,
-  branch_name: &str,
-  source_branch: Option<&str>,
-  metadata: Option<&str>,
-) -> Result<crate::local_db::Workspace, String> {
-  let parsed = crate::core::workspaces::parse_workspace_metadata(metadata);
-  let workspace = crate::core::workspaces::create_workspace_with_symlinked_dirs(
-    repo,
-    branch_name,
-    parsed.description,
-    parsed.moved_files,
-    source_branch,
-    None,
-    parsed.sparse_patterns,
-    parsed.symlinked_dirs,
-  )?;
-  if let Some(title) = parsed.title {
-    crate::local_db::update_workspace_title(repo, workspace.id, &title)?;
-  }
-  crate::local_db::update_workspace_last_rebased_commit(repo, workspace.id, "")?;
-  crate::local_db::get_workspace_by_id(repo, workspace.id)?.ok_or_else(|| {
-    format!(
-      "workspace_not_found: Workspace {} was not found",
-      workspace.id
-    )
-  })
-}
-
-/// Split only runs against the working copy. Accept `@` or the working
-/// copy's own change id, and refuse anything else so a request for another
-/// commit is never applied to `@` by mistake.
-fn ensure_working_copy_revision(workspace_path: &str, commit: &str) -> Result<(), String> {
-  let commit = commit.trim();
-  if commit.is_empty() || commit == "@" {
-    return Ok(());
-  }
-  let working_copy = crate::jj::jj_get_change_id(workspace_path, "@")
-    .map_err(|error| format!("jj_command_failed: {error}"))?;
-  if change_ids_match(&working_copy, commit) {
-    Ok(())
-  } else {
-    Err(format!(
-      "unsupported: SplitCommit can only split the working copy, not {commit}"
-    ))
-  }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RemoteFileSearchResult {
-  pub file_path: String,
-  pub relative_path: String,
-}
-
-/// Searches the workspace file index. Each remote CLI call is a fresh
-/// process, so the index may not exist yet on the VM; an empty result
-/// triggers one indexing pass and a second search.
-fn search_files_local(
-  repo: &str,
-  workspace: Option<i64>,
-  query: &str,
-  limit: usize,
-) -> Result<Vec<RemoteFileSearchResult>, String> {
-  let search = || crate::local_db::search_workspace_files(repo, workspace, query, limit);
-  let mut files = search()?;
-  if files.is_empty() {
-    let workspace_path = resolve_workspace_path(repo, workspace)?;
-    crate::file_indexer::index_workspace_files(repo, workspace, &workspace_path)?;
-    files = search()?;
-  }
-  Ok(
-    files
-      .into_iter()
-      .map(|f| RemoteFileSearchResult {
-        file_path: f.file_path,
-        relative_path: f.relative_path,
-      })
-      .collect(),
-  )
-}
-
-fn probe_repo_path(repo_path: &str) -> Result<RemoteRepoProbe, String> {
-  let trimmed = repo_path.trim();
-  if trimmed.is_empty() {
-    return Err("Remote path is required".to_string());
-  }
-  // The returned `path` is the expanded one, so callers open the repository
-  // by a path every later command reads the same way.
-  let expanded = expand_home(trimmed, std::env::var("HOME").ok().as_deref());
-  let path = Path::new(&expanded);
-  let exists = path.exists();
-  let is_repo = exists && (path.join(".jj").is_dir() || path.join(".git").exists());
-  Ok(RemoteRepoProbe {
-    host: String::new(),
-    path: expanded.clone(),
-    exists,
-    is_repo,
-    needs_clone: !is_repo,
-  })
-}
-
-/// Recursively sums file sizes under `root` (best effort: unreadable entries
-/// are skipped rather than failing the whole walk) as the "disk used"
-/// figure for base-disk-quota enforcement. This walks the repository root
-/// rather than statvfs-ing the whole volume, since the quota is scoped to
-/// what the user's repositories occupy, not the base image itself.
-fn directory_usage_bytes(root: &Path) -> u64 {
-  let mut total = 0u64;
-  let mut stack = vec![root.to_path_buf()];
-  while let Some(dir) = stack.pop() {
-    let Ok(entries) = fs::read_dir(&dir) else {
-      continue;
-    };
-    for entry in entries.flatten() {
-      let Ok(metadata) = entry.metadata() else {
-        continue;
-      };
-      if metadata.is_dir() {
-        stack.push(entry.path());
-      } else {
-        total += metadata.len();
-      }
-    }
-  }
-  total
-}
-
-/// Expands a leading `~` or `~/` to `home`. Commands run without a shell, so
-/// nothing else would; `~user` and paths without a home are left as typed.
-pub(crate) fn expand_home(path: &str, home: Option<&str>) -> String {
-  let Some(home) = home.filter(|h| !h.is_empty()) else {
-    return path.to_string();
-  };
-  let home = home.trim_end_matches('/');
-  match path.strip_prefix('~') {
-    Some("") => home.to_string(),
-    Some(rest) if rest.starts_with('/') => format!("{home}{rest}"),
-    _ => path.to_string(),
-  }
-}
-
-/// What a host can run, returned by [`TreqCommandRequest::HostCheck`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RemoteHostCheck {
-  /// This treq CLI's version.
-  pub treq_version: String,
-  /// `root` with `~` expanded, and whether it exists.
-  pub root: String,
-  pub root_exists: bool,
-  /// `tmux` or `screen`, which persistent terminals and agents need.
-  pub terminal: Option<String>,
-  /// The allow-listed agent CLIs installed on the host.
-  pub agents: Vec<crate::core::remote_pty::RemoteAgentId>,
-}
-
-fn host_check(root: &str) -> RemoteHostCheck {
-  use crate::core::{pty_remote_supervisor::PtyBackend, remote_pty::RemoteAgentId};
-  let root = expand_home(root.trim(), std::env::var("HOME").ok().as_deref());
-  RemoteHostCheck {
-    treq_version: env!("CARGO_PKG_VERSION").to_string(),
-    root_exists: Path::new(&root).is_dir(),
-    root,
-    terminal: crate::core::pty_remote_supervisor::detect_backend().map(|b| {
-      match b {
-        PtyBackend::Tmux => "tmux",
-        PtyBackend::Screen => "screen",
-      }
-      .to_string()
-    }),
-    agents: RemoteAgentId::ALL
-      .into_iter()
-      .filter(|agent| crate::binary_paths::detect_binary(agent.binary_name()).is_some())
-      .collect(),
-  }
-}
-
-/// Machine-wide usage returned by [`TreqCommandRequest::MachineUsage`].
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MachineUsageReport {
-  pub repository_count: usize,
-  pub workspace_count: usize,
-  pub disk_used_bytes: u64,
-}
-
-/// Repositories sit at most two levels below the root
-/// (`<root>/<owner>/<name>` for managed clones, `<root>/<name>` otherwise).
-const MACHINE_USAGE_REPO_DEPTH: usize = 2;
-
-fn is_repository_dir(path: &Path) -> bool {
-  path.join(".jj").is_dir() || path.join(".git").exists()
-}
-
-fn find_repositories(root: &Path) -> Vec<PathBuf> {
-  let mut repositories = Vec::new();
-  let mut stack = vec![(root.to_path_buf(), 0usize)];
-  while let Some((dir, depth)) = stack.pop() {
-    if depth > 0 && is_repository_dir(&dir) {
-      repositories.push(dir);
-      continue;
-    }
-    if depth == MACHINE_USAGE_REPO_DEPTH {
-      continue;
-    }
-    let Ok(entries) = fs::read_dir(&dir) else {
-      continue;
-    };
-    for entry in entries.flatten() {
-      if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
-        stack.push((entry.path(), depth + 1));
-      }
-    }
-  }
-  repositories
-}
-
-/// Counts repositories and their Treq workspaces under `root` and measures
-/// the bytes they use. A missing root reports zero usage rather than an
-/// error, since a fresh machine has no repositories directory yet.
-fn machine_usage(root: &str) -> Result<MachineUsageReport, String> {
-  validate_remote_path(root)?;
-  let root = Path::new(root.trim());
-  if !root.is_dir() {
-    return Ok(MachineUsageReport::default());
-  }
-  let repositories = find_repositories(root);
-  let workspace_count = repositories
-    .iter()
-    .filter_map(|repo| repo.to_str())
-    .map(|repo| {
-      crate::core::workspaces::list_workspaces(repo)
-        .map(|workspaces| workspaces.len())
-        .unwrap_or(0)
-    })
-    .sum();
-  Ok(MachineUsageReport {
-    repository_count: repositories.len(),
-    workspace_count,
-    disk_used_bytes: directory_usage_bytes(root),
-  })
-}
-
-/// Enforces the base disk quota (PRD "Resource quotas") before a
-/// write-triggering mutation (repo init, clone, patch apply) proceeds.
-/// Returns the distinct `disk_quota_exceeded: ...` structured error the PRD
-/// requires instead of letting the write fail as a generic filesystem
-/// error. `root` is the directory whose usage counts against the quota —
-/// callers pass the repository root (or its parent, before it exists) so
-/// the check reflects what the write is about to add to.
-fn enforce_disk_quota(root: &Path) -> Result<(), String> {
-  enforce_disk_quota_against(root, crate::core::remote_provider::BASE_DISK_QUOTA_BYTES)
-}
-
-/// Same as [`enforce_disk_quota`] but against an arbitrary `quota_bytes`
-/// ceiling, so tests can exercise the failure path without writing 5 GB of
-/// fixture data to disk.
-fn enforce_disk_quota_against(root: &Path, quota_bytes: u64) -> Result<(), String> {
-  let scan_root = if root.exists() {
-    root.to_path_buf()
-  } else {
-    root
-      .parent()
-      .map(Path::to_path_buf)
-      .unwrap_or_else(|| root.to_path_buf())
-  };
-  let used_bytes = directory_usage_bytes(&scan_root);
-  crate::core::remote_provider::check_disk_quota_against(used_bytes, quota_bytes)
-    .map_err(|err| err.to_string())
-}
-
-fn init_repo_path(repo_path: &str) -> Result<RepositoryInspection, String> {
-  let trimmed = repo_path.trim();
-  if trimmed.is_empty() {
-    return Err("Remote path is required".to_string());
-  }
-  let path = Path::new(trimmed);
-  if !path.join(".jj").is_dir() && !path.join(".git").exists() {
-    enforce_disk_quota(path)?;
-    fs::create_dir_all(path)
-      .map_err(|e| format!("filesystem_error: Failed to create {trimmed}: {e}"))?;
-    jj::jj_git_init_colocated(trimmed)
-      .map_err(|e| format!("jj_command_failed: Failed to initialize repository: {e}"))?;
-  }
-  if !path.join(".jj").is_dir() {
-    // A plain Git repository: colocate jj with it, as opening one locally does.
-    match crate::core::init(trimmed) {
-      Ok(true) => {}
-      Ok(false) => {
-        return Err(format!(
-          "jj_command_failed: Failed to initialize jj in {trimmed}"
-        ))
-      }
-      Err(e) => return Err(format!("jj_command_failed: {e}")),
-    }
-  }
-  inspect_repository_path(trimmed)
-}
-
-fn clone_repo_local(repo_url: &str, destination: &str) -> Result<RepositoryInspection, String> {
-  if repo_url.trim().is_empty() {
-    return Err("Repository URL is required".to_string());
-  }
-  validate_remote_path(destination)?;
-  enforce_disk_quota(Path::new(destination))?;
-  let interrupt = std::sync::atomic::AtomicBool::new(false);
-  let clone_err = |e: &dyn std::fmt::Display| format!("git_command_failed: {e}");
-  // Dropping an unfinished clone removes the partial destination.
-  let mut prepare = gix::prepare_clone(repo_url, destination).map_err(|e| clone_err(&e))?;
-  let (mut checkout, _) = prepare
-    .fetch_then_checkout(gix::progress::Discard, &interrupt)
-    .map_err(|e| clone_err(&e))?;
-  // A remote HEAD naming a missing branch leaves nothing to check out. An
-  // empty remote (no branches at all) still clones, as `git clone` does.
-  let repo = checkout.repo();
-  let head = repo.head().map_err(|e| clone_err(&e))?;
-  let has_branches = repo
-    .references()
-    .map_err(|e| clone_err(&e))?
-    .prefixed("refs/remotes/")
-    .map_err(|e| clone_err(&e))?
-    .filter_map(Result::ok)
-    .any(|r| !r.name().as_bstr().ends_with(b"/HEAD"));
-  if head.is_unborn() && has_branches {
-    let branch = head
-      .referent_name()
-      .map(|name| name.shorten().to_string())
-      .unwrap_or_default();
-    return Err(format!(
-      "git_command_failed: remote HEAD points at branch '{branch}', which does not exist"
-    ));
-  }
-  checkout
-    .main_worktree(gix::progress::Discard, &interrupt)
-    .map_err(|e| clone_err(&e))?;
-  inspect_repository_path(destination)
-}
-
-/// Applies a base64-encoded unified diff to `path` inside the given
-/// workspace (or the repo root) using `git apply`. Base64 keeps the exec
-/// argument vector a plain string even though the payload contains newlines.
-fn require_existing_repo(repo: &str) -> Result<(), String> {
-  inspect_repository_path(repo).map(|_| ())
-}
-
-/// Applies a base64-encoded unified diff to `path` inside the given
-/// workspace (or the repo root). Base64 keeps the exec argument vector a plain
-/// string even though the payload contains newlines.
-fn apply_remote_patch(
-  repo: &str,
-  workspace: Option<i64>,
-  path: &str,
-  patch_base64: &str,
-) -> Result<String, String> {
-  let workspace_path = resolve_workspace_path(repo, workspace)?;
-  enforce_disk_quota(Path::new(&workspace_path))?;
-  let decoded = decode_base64(patch_base64.trim())
-    .map_err(|e| format!("invalid_arguments: patch is not valid base64: {e}"))?;
-  let patch = String::from_utf8(decoded)
-    .map_err(|_| "invalid_arguments: patch is not UTF-8 text".to_string())?;
-  jj::jj_apply_file_patch(&workspace_path, path, &patch).map_err(|e| match e {
-    jj::JjError::IoError(message) if message.starts_with("Invalid patch:") => {
-      format!("invalid_arguments: {message}")
-    }
-    other => format!("filesystem_error: {other}"),
-  })?;
-  Ok(format!("Applied patch to {path}"))
-}
-
-/// Minimal RFC 4648 base64 decoder (standard alphabet, `=` padding) so patch
-/// payloads can travel through the plain-string exec argument vector without
-/// pulling in an extra crate dependency.
-fn decode_base64(input: &str) -> Result<Vec<u8>, String> {
-  fn value(byte: u8) -> Option<u8> {
-    match byte {
-      b'A'..=b'Z' => Some(byte - b'A'),
-      b'a'..=b'z' => Some(byte - b'a' + 26),
-      b'0'..=b'9' => Some(byte - b'0' + 52),
-      b'+' => Some(62),
-      b'/' => Some(63),
-      _ => None,
-    }
-  }
-  let cleaned: Vec<u8> = input.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
-  let mut out = Vec::with_capacity(cleaned.len() / 4 * 3);
-  for chunk in cleaned.chunks(4) {
-    if chunk.len() < 2 {
-      return Err("truncated base64 input".to_string());
-    }
-    let padding = chunk.iter().filter(|&&b| b == b'=').count();
-    let vals: Vec<u8> = chunk
-      .iter()
-      .filter(|&&b| b != b'=')
-      .map(|&b| value(b).ok_or_else(|| "invalid base64 character".to_string()))
-      .collect::<Result<_, _>>()?;
-    let mut buf = [0u8; 4];
-    for (i, v) in vals.iter().enumerate() {
-      buf[i] = *v;
-    }
-    out.push((buf[0] << 2) | (buf[1] >> 4));
-    if padding < 2 && vals.len() > 2 {
-      out.push((buf[1] << 4) | (buf[2] >> 2));
-    }
-    if padding < 1 && vals.len() > 3 {
-      out.push((buf[2] << 6) | buf[3]);
-    }
-  }
-  Ok(out)
-}
-
-// ---------------------------------------------------------------------------
-// Native (Phase 4) SSH exec transport for typed commands
-// ---------------------------------------------------------------------------
-//
-// Every reachable connection path, managed or user-managed, goes through the
-// pooled native `russh` transport below and in
-// `crate::core::remote_ssh_transport`, never a system `ssh` subprocess.
 
 /// Structured error for a typed command executed over the native transport.
 /// Distinguishes a transport-layer failure (connection/host-key/auth/limits —
@@ -3384,6 +1979,39 @@ pub async fn execute_remote_command<T: DeserializeOwned>(
     .map_err(|error| RemoteCommandError::InvalidJson(error.to_string()))
 }
 
+impl RemoteCommandError {
+  /// Whether the command failed because the pooled connection was dead
+  /// without being known to be: a channel error (closed session, relay
+  /// recycled), a channel that never opened, or the deadline. A read is safe
+  /// to send again on a fresh connection.
+  pub fn is_stale_connection(&self) -> bool {
+    use crate::core::remote_ssh_transport::SshTransportError;
+    matches!(self, Self::Transport(message)
+      if message.starts_with(&SshTransportError::ChannelError(String::new()).to_string())
+        || *message == SshTransportError::DeadlineExceeded.to_string())
+  }
+}
+
+/// [`execute_remote_command`] for a read: after a stale-connection failure
+/// (see [`RemoteCommandError::is_stale_connection`]) the dead connection is
+/// dropped and the read is sent once more on a fresh one. Mutations never go
+/// through here; they verify before any retry ([`retry_after_reconnect`]).
+pub async fn execute_remote_read<T: DeserializeOwned>(
+  pool: &crate::core::remote_ssh_transport::SshConnectionPool,
+  endpoint: &crate::core::remote_control_plane::SshEndpoint,
+  request: TreqCommandRequest,
+  limits: crate::core::remote_ssh_transport::ExecLimits,
+  cancellation: &crate::core::remote_ssh_transport::CancellationToken,
+) -> Result<T, RemoteCommandError> {
+  match execute_remote_command::<T>(pool, endpoint, request.clone(), limits, cancellation).await {
+    Err(error) if error.is_stale_connection() => {
+      pool.mark_dead(endpoint).await;
+      execute_remote_command::<T>(pool, endpoint, request, limits, cancellation).await
+    }
+    result => result,
+  }
+}
+
 impl TransportError {
   fn command_failed_from_message(message: String) -> Self {
     Self::CommandFailed {
@@ -3403,181 +2031,227 @@ impl<T> TransportErrorExt<T> for Result<T, String> {
   }
 }
 
-pub fn inspect_repository_path(repo_path: &str) -> Result<RepositoryInspection, String> {
-  let root = validate_repository_path(repo_path)?;
-  let repository_type = detect_repository_type(&root)?;
-  let branch = crate::core::repo::get_repo_current_branch(&root).ok();
-  let default_branch =
-    crate::core::repo::get_repo_default_branch(&root).unwrap_or_else(|_| "main".to_string());
-  let current_commit_id = jj::jj_get_commit_id(&root, "@").unwrap_or_default();
-  let current_change_id = String::new();
-  let display_name = repository_display_name(&root);
+mod verification;
+pub use verification::*;
+mod local;
+pub use local::*;
+mod github;
+pub use github::*;
+mod host;
 
-  Ok(RepositoryInspection {
-    root: root.clone(),
-    repository_type,
-    current_branch: branch.and_then(|branch| branch.current_branch),
-    default_branch,
-    current_change_id,
-    current_commit_id,
-    descriptor: RepositoryDescriptor {
-      id: format!("local:{root}"),
-      location: RepositoryLocation::Local { path: root },
-      display_name,
-    },
-  })
+/// Clones `repo_url` into `destination` (which must not exist), with `gix`.
+/// A failed clone leaves no partial folder.
+pub fn clone_repository(repo_url: &str, destination: &str) -> Result<(), String> {
+  host::clone_repo_local(repo_url, destination).map(drop)
 }
-
-pub fn parse_ssh_config_hosts(contents: &str) -> Vec<SshHost> {
-  let mut aliases = BTreeSet::new();
-  for line in contents.lines() {
-    let trimmed = line.trim();
-    if trimmed.is_empty() || trimmed.starts_with('#') {
-      continue;
-    }
-    let mut parts = trimmed.split_whitespace();
-    let Some(keyword) = parts.next() else {
-      continue;
-    };
-    if !keyword.eq_ignore_ascii_case("host") {
-      continue;
-    }
-    for alias in parts {
-      if alias == "*" || alias.contains('*') || alias.contains('?') || alias.starts_with('!') {
-        continue;
-      }
-      aliases.insert(alias.to_string());
-    }
-  }
-  aliases.into_iter().map(|alias| SshHost { alias }).collect()
-}
-
-pub fn list_configured_hosts() -> Result<Vec<SshHost>, String> {
-  list_configured_hosts_from_paths(ssh_config_paths())
-}
-
-pub fn list_configured_hosts_from_paths(paths: Vec<PathBuf>) -> Result<Vec<SshHost>, String> {
-  let mut all = BTreeSet::new();
-  for path in paths {
-    if let Ok(contents) = fs::read_to_string(path) {
-      for host in parse_ssh_config_hosts(&contents) {
-        all.insert(host.alias);
-      }
-    }
-  }
-  Ok(all.into_iter().map(|alias| SshHost { alias }).collect())
-}
-
-pub fn build_ssh_shell_command(
-  host: &str,
-  working_dir: Option<&str>,
-  initial_command: Option<&str>,
-) -> Result<(String, Vec<String>), String> {
-  validate_host_alias(host)?;
-  let mut remote_command = String::new();
-  if let Some(dir) = working_dir {
-    validate_remote_path(dir)?;
-    remote_command.push_str("cd ");
-    remote_command.push_str(&shell_quote(dir));
-    remote_command.push_str(" && ");
-  }
-  remote_command.push_str("${SHELL:-/bin/sh} -l");
-  if let Some(command) = initial_command {
-    if !command.trim().is_empty() {
-      remote_command.push_str(" -c ");
-      remote_command.push_str(&shell_quote(command));
-    }
-  }
-  Ok((
-    "ssh".to_string(),
-    // `--` stops ssh reading the host as an option.
-    vec![
-      "-t".to_string(),
-      "--".to_string(),
-      host.to_string(),
-      remote_command,
-    ],
-  ))
-}
-
-fn validate_repository_path(repo_path: &str) -> Result<String, String> {
-  let trimmed = repo_path.trim();
-  if trimmed.is_empty() {
-    return Err("Repository path is required".to_string());
-  }
-  let path = Path::new(trimmed);
-  if !path.exists() {
-    return Err("repository_not_found: Repository path does not exist".to_string());
-  }
-  if !path.is_dir() {
-    return Err("invalid_repository: Repository path is not a directory".to_string());
-  }
-  std::fs::canonicalize(path)
-    .map_err(|e| format!("permission_denied: Failed to read repository path: {e}"))?
-    .to_str()
-    .map(|path| path.to_string())
-    .ok_or_else(|| "invalid_repository: Repository path is not valid UTF-8".to_string())
-}
-
-fn detect_repository_type(root: &str) -> Result<String, String> {
-  let path = Path::new(root);
-  let has_jj = path.join(".jj").is_dir();
-  let has_git = path.join(".git").exists();
-  match (has_jj, has_git) {
-    (true, true) => Ok("jj_colocated".to_string()),
-    (true, false) => Ok("jj".to_string()),
-    (false, true) => Ok("git".to_string()),
-    (false, false) => Err("invalid_repository: No .jj or .git directory found".to_string()),
-  }
-}
-
-fn repository_display_name(path: &str) -> String {
-  Path::new(path)
-    .file_name()
-    .and_then(|name| name.to_str())
-    .filter(|name| !name.is_empty())
-    .unwrap_or(path)
-    .to_string()
-}
-
-fn ssh_config_paths() -> Vec<PathBuf> {
-  let mut paths = Vec::new();
-  if let Ok(home) = std::env::var("HOME") {
-    paths.push(PathBuf::from(home).join(".ssh").join("config"));
-  }
-  paths.push(PathBuf::from("/etc/ssh/ssh_config"));
-  paths
-}
-
-pub fn shell_quote(value: &str) -> String {
-  format!("'{}'", value.replace('\'', "'\\''"))
-}
-
-fn validate_host_alias(host: &str) -> Result<(), String> {
-  if host.trim().is_empty() {
-    return Err("SSH host is required".to_string());
-  }
-  if host.starts_with('-')
-    || !host
-      .chars()
-      .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '@' | ':' | '-'))
-  {
-    return Err("SSH host must be a host alias from ssh config".to_string());
-  }
-  Ok(())
-}
-
-fn validate_remote_path(path: &str) -> Result<(), String> {
-  if path.trim().is_empty() {
-    return Err("Remote path is required".to_string());
-  }
-  Ok(())
-}
+pub use host::*;
+mod ssh;
+pub use ssh::*;
 
 #[cfg(test)]
 mod tests {
   use super::*;
   use std::process::Command;
+
+  #[test]
+  fn reviews_round_trip_per_page_and_an_empty_save_clears() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().to_str().unwrap();
+    let id = crate::local_db::add_workspace(
+      repo,
+      "ws".into(),
+      format!("{repo}/.treq/workspaces/ws"),
+      "ws".into(),
+      None,
+      None,
+      None,
+    )
+    .unwrap();
+    let review = |summary: &str| crate::core::review::Stored {
+      comments: vec![crate::core::review::Pending::file("a.rs").comment(
+        "tidy",
+        "c1".into(),
+        "now".into(),
+      )],
+      summary: summary.into(),
+      notes: vec![],
+    };
+
+    save_review(repo, id, ReviewScope::Changes, &review("changes")).unwrap();
+    save_review(repo, id, ReviewScope::Files, &review("files")).unwrap();
+    assert_eq!(
+      load_review(repo, id, ReviewScope::Changes).unwrap(),
+      review("changes")
+    );
+    assert_eq!(
+      load_review(repo, id, ReviewScope::Files).unwrap(),
+      review("files")
+    );
+
+    save_review(repo, id, ReviewScope::Files, &Default::default()).unwrap();
+    assert!(load_review(repo, id, ReviewScope::Files)
+      .unwrap()
+      .is_empty());
+    assert!(!load_review(repo, id, ReviewScope::Changes)
+      .unwrap()
+      .is_empty());
+  }
+
+  #[test]
+  fn create_pull_request_needs_a_title_before_touching_the_repo() {
+    let error = create_pull_request("/nonexistent", 1, "  ", "", false).unwrap_err();
+    assert!(error.contains("needs a title"), "{error}");
+  }
+
+  #[test]
+  fn github_writes_are_keyed_mutations_and_reads_are_not() {
+    let write = TreqCommandRequest::GithubWrite {
+      repo: "/r".into(),
+      action: GithubAction::CloseIssue {
+        number: 1,
+        reason: "completed".into(),
+      },
+      idempotency_key: "k".into(),
+    };
+    assert!(write.is_mutation());
+    assert!(write.requires_idempotency_key());
+    let read = TreqCommandRequest::GithubRead {
+      repo: "/r".into(),
+      query: GithubQuery::Issue { number: 1 },
+    };
+    assert!(!read.is_mutation());
+    assert!(!read.requires_idempotency_key());
+  }
+
+  #[test]
+  fn github_requests_need_a_github_remote_before_running_gh() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().to_str().unwrap();
+    let error = github_read(repo, GithubQuery::Issue { number: 1 }).unwrap_err();
+    assert!(error.contains("no GitHub remote"), "{error}");
+    let error = github_write(repo, GithubAction::ReopenIssue { number: 1 }).unwrap_err();
+    assert!(error.contains("no GitHub remote"), "{error}");
+  }
+
+  #[test]
+  fn github_writes_with_text_reject_a_blank_body_or_title() {
+    for action in [
+      GithubAction::CreateIssue {
+        title: " ".into(),
+        body: String::new(),
+      },
+      GithubAction::CommentOnIssue {
+        number: 1,
+        body: "\n".into(),
+      },
+      GithubAction::ReplyToReviewThread {
+        thread_id: "t".into(),
+        body: "".into(),
+      },
+    ] {
+      let error = github_write("/nonexistent", action).unwrap_err();
+      assert!(error.starts_with("invalid_arguments:"), "{error}");
+    }
+  }
+
+  #[test]
+  fn list_files_lists_one_directory_without_ignored_or_hidden_directories() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::process::Command::new("git")
+      .args(["init", "-q"])
+      .current_dir(root)
+      .status()
+      .unwrap();
+    for sub in ["src/ui", "target", ".github"] {
+      fs::create_dir_all(root.join(sub)).unwrap();
+    }
+    fs::write(root.join(".gitignore"), "target/\n").unwrap();
+    fs::write(root.join("README.md"), "").unwrap();
+    fs::write(root.join("src/main.rs"), "").unwrap();
+    let repo = root.to_str().unwrap().to_string();
+
+    let names = |path: &str| -> Vec<(String, String, bool)> {
+      let value = execute_local_request(TreqCommandRequest::ListFiles {
+        repo: repo.clone(),
+        workspace: None,
+        path: path.into(),
+      })
+      .unwrap();
+      serde_json::from_value::<Vec<RemoteFileEntry>>(value)
+        .unwrap()
+        .into_iter()
+        .map(|e| (e.name, e.path, e.is_directory))
+        .collect()
+    };
+    assert_eq!(
+      names(""),
+      vec![
+        ("src".into(), "src".into(), true),
+        (".gitignore".into(), ".gitignore".into(), false),
+        ("README.md".into(), "README.md".into(), false),
+      ]
+    );
+    assert_eq!(
+      names("src/"),
+      vec![
+        ("ui".into(), "src/ui".into(), true),
+        ("main.rs".into(), "src/main.rs".into(), false),
+      ]
+    );
+    for outside in ["..", "../etc", "/etc", "src/../.."] {
+      assert!(
+        execute_local_request(TreqCommandRequest::ListFiles {
+          repo: repo.clone(),
+          workspace: None,
+          path: outside.into(),
+        })
+        .is_err(),
+        "{outside}"
+      );
+    }
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn list_directories_lists_subdirectories_by_name_and_marks_repositories() {
+    let dir = tempfile::tempdir().unwrap();
+    for sub in ["beta", "Alpha/.git", ".config", "plain/.jj"] {
+      fs::create_dir_all(dir.path().join(sub)).unwrap();
+    }
+    fs::write(dir.path().join("notes.txt"), "").unwrap();
+    std::os::unix::fs::symlink(dir.path().join("beta"), dir.path().join("link")).unwrap();
+
+    let listing = list_directories(dir.path().to_str().unwrap()).unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    assert_eq!(listing.path, root.to_string_lossy());
+    assert_eq!(
+      listing.parent.as_deref(),
+      root.parent().map(|p| p.to_string_lossy()).as_deref()
+    );
+    assert!(!listing.is_repo);
+    let names: Vec<_> = listing
+      .entries
+      .iter()
+      .map(|e| (e.name.as_str(), e.hidden, e.is_repo))
+      .collect();
+    assert_eq!(
+      names,
+      [
+        (".config", true, false),
+        ("Alpha", false, true),
+        ("beta", false, false),
+        ("link", false, false),
+        ("plain", false, true),
+      ]
+    );
+    assert!(
+      list_directories(dir.path().join("Alpha").to_str().unwrap())
+        .unwrap()
+        .is_repo
+    );
+    assert!(list_directories(dir.path().join("gone").to_str().unwrap()).is_err());
+  }
 
   #[test]
   fn workspace_id_rejects_zero_and_negative_ids() {
@@ -3762,36 +2436,6 @@ mod tests {
       clone_repo_local(missing.to_str().unwrap(), destination.to_str().unwrap()).unwrap_err();
     assert!(error.starts_with("git_command_failed: "), "{error}");
     assert!(!destination.exists());
-  }
-
-  #[test]
-  fn enforce_disk_quota_passes_under_the_limit() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("a.txt"), vec![0u8; 10]).unwrap();
-    assert!(enforce_disk_quota_against(dir.path(), 100).is_ok());
-  }
-
-  #[test]
-  fn enforce_disk_quota_returns_distinct_structured_error_over_the_limit() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("a.txt"), vec![0u8; 10]).unwrap();
-    let error = enforce_disk_quota_against(dir.path(), 5).unwrap_err();
-    assert!(
-      error.starts_with("disk_quota_exceeded: "),
-      "expected a distinct disk_quota_exceeded error, got: {error}"
-    );
-  }
-
-  #[test]
-  fn enforce_disk_quota_falls_back_to_parent_for_a_not_yet_created_path() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("existing.bin"), vec![0u8; 10]).unwrap();
-    let not_yet_created = dir.path().join("new-repo");
-    // The target path doesn't exist yet (this is `init_repo_path`'s case),
-    // so usage is measured from its parent instead of failing the walk.
-    let error = enforce_disk_quota_against(&not_yet_created, 5).unwrap_err();
-    assert!(error.starts_with("disk_quota_exceeded: "));
-    assert!(enforce_disk_quota_against(&not_yet_created, 100).is_ok());
   }
 
   #[test]
@@ -4187,6 +2831,25 @@ mod tests {
   }
 
   #[test]
+  fn branch_deleted_dispatches_to_the_workspace_check() {
+    let repo_dir = tempfile::tempdir().unwrap();
+    let repo_path = repo_dir.path().to_str().unwrap().to_string();
+    execute_local_request(TreqCommandRequest::InitRepo {
+      repo: repo_path.clone(),
+      idempotency_key: "init-1".into(),
+    })
+    .unwrap();
+
+    // An unknown workspace has no branch to have lost.
+    let deleted = execute_local_request(TreqCommandRequest::WorkspaceBranchDeleted {
+      repo: repo_path,
+      workspace: "42".into(),
+    })
+    .unwrap();
+    assert_eq!(deleted, serde_json::json!(false));
+  }
+
+  #[test]
   fn change_marker_reflects_new_operations_and_local_dispatch_matches_direct_jj_call() {
     let repo_dir = tempfile::tempdir().unwrap();
     let repo_path = repo_dir.path().to_str().unwrap().to_string();
@@ -4221,7 +2884,7 @@ mod tests {
     .unwrap();
 
     let after = execute_local_request(TreqCommandRequest::WorkspaceChangeMarker {
-      repo: repo_path.clone(),
+      repo: repo_path,
       workspace: None,
     })
     .unwrap();
@@ -4858,7 +3521,7 @@ mod tests {
   #[test]
   fn machine_usage_is_a_read_only_repo_cli_command() {
     let request = TreqCommandRequest::MachineUsage {
-      root: "/home/sprite/repos".into(),
+      root: "/home/treq/repos".into(),
     };
 
     assert!(!request.is_mutation());
@@ -4868,10 +3531,73 @@ mod tests {
         "repo",
         "usage",
         "--repo",
-        "/home/sprite/repos",
+        "/home/treq/repos",
         "--format",
         "json"
       ]
+    );
+  }
+
+  #[test]
+  fn a_host_holds_terminals_by_its_backend_and_older_hosts_by_their_multiplexer() {
+    use crate::core::pty_remote_supervisor::PtyBackend;
+    let check = |terminal: Option<&str>, tmux: bool| RemoteHostCheck {
+      treq_version: "0.3.0".into(),
+      root: "/".into(),
+      root_exists: true,
+      terminal: terminal.map(str::to_string),
+      tmux,
+      agents: vec![],
+    };
+    assert!(check(Some("daemon"), false).holds_terminals(PtyBackend::Daemon));
+    assert!(!check(Some("daemon"), false).holds_terminals(PtyBackend::Tmux));
+    assert!(check(Some("daemon"), true).holds_terminals(PtyBackend::Tmux));
+    assert!(check(Some("tmux"), false).holds_terminals(PtyBackend::Tmux));
+    assert!(!check(None, false).holds_terminals(PtyBackend::Daemon));
+    // A host check from before the field existed.
+    let old: RemoteHostCheck = serde_json::from_value(serde_json::json!({
+      "treq_version": "0.2.0", "root": "/", "root_exists": true,
+      "terminal": "tmux", "agents": []
+    }))
+    .unwrap();
+    assert!(!old.tmux);
+    assert!(old.holds_terminals(PtyBackend::Daemon));
+  }
+
+  #[test]
+  fn this_host_reports_the_daemon() {
+    let report = host_check("/");
+    assert_eq!(report.terminal.as_deref(), Some("daemon"));
+    assert_eq!(
+      report.tmux,
+      crate::core::pty_remote_supervisor::tmux_available()
+    );
+  }
+
+  #[test]
+  fn pty_requests_name_tmux_only_when_the_machine_uses_it() {
+    use crate::core::pty_remote_supervisor::PtyBackend;
+    let list = |backend| TreqCommandRequest::PtyList {
+      backend,
+      repo: "/r".into(),
+      workspace: None,
+    };
+    let daemon = list(PtyBackend::Daemon).cli_args().unwrap();
+    assert!(!daemon.contains(&"--backend".to_string()), "{daemon:?}");
+    let tmux = list(PtyBackend::Tmux).cli_args().unwrap();
+    let at = tmux.iter().position(|a| a == "--backend").unwrap();
+    assert_eq!(tmux[at + 1], "tmux");
+    assert_eq!(
+      TreqCommandRequest::PtyStatus.cli_args().unwrap()[..2],
+      ["pty-remote".to_string(), "status".to_string()]
+    );
+    assert_eq!(
+      TreqCommandRequest::PtyReset {
+        backend: PtyBackend::Daemon
+      }
+      .cli_args()
+      .unwrap()[..2],
+      ["pty-remote".to_string(), "reset".to_string()]
     );
   }
 
@@ -4881,7 +3607,7 @@ mod tests {
     let value = serde_json::to_value(&sample).unwrap();
     assert_eq!(value["kind"], "GitFetch");
     assert!(TreqCommandRequest::KIND_NAMES.contains(&sample.kind_name()));
-    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 60);
+    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 78);
   }
 
   #[test]
@@ -5177,7 +3903,6 @@ mod tests {
       .unwrap();
       let base = marker
         .working_copy_change_id
-        .clone()
         .expect("marker reports the working-copy change id");
 
       let request = TreqCommandRequest::CreateCommit {
@@ -5337,7 +4062,7 @@ mod tests {
       TestRepo::write_workspace_file(&source_path, "kept.txt", "kept\n").unwrap();
 
       let result = execute_local_request(TreqCommandRequest::MoveWorkspaceChanges {
-        repo: repo.repo_path.clone(),
+        repo: repo.repo_path,
         workspace: "feat-src".into(),
         destination: "feat-dst".into(),
         files: vec!["moved.txt".into()],

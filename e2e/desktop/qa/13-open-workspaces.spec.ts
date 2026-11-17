@@ -1,4 +1,4 @@
-// The New Workspaces dialog (sidebar New, Ctrl+N, Stack): titles, new
+// The New workspace dialog (sidebar New, Ctrl+N, Stack): titles, new
 // and existing branch names and GitHub links checked line by line (listed in a popover from the summary), the
 // integrations beside them (GitHub's open pull requests, the user's own
 // first, a search across everyone's; Linear's task list from the fake
@@ -33,7 +33,7 @@ test("open-workspaces: type, pick pull requests and issues, and create", async (
   page,
 }) => {
   await home(page);
-  const open = page.getByRole("button", { name: "New workspaces" });
+  const open = page.getByRole("button", { name: "New workspace…" }).first();
   await expect(open).toBeVisible();
   await capture(page, {
     name: "13-open-workspaces-sidebar-button",
@@ -47,7 +47,7 @@ test("open-workspaces: type, pick pull requests and issues, and create", async (
   linearKey("lin_api_qa");
   await open.click();
   await expect(
-    page.getByRole("heading", { name: "New Workspaces" }),
+    page.getByRole("heading", { name: "New workspace" }),
   ).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Your pull requests" }),
@@ -55,10 +55,22 @@ test("open-workspaces: type, pick pull requests and issues, and create", async (
   await settle(page, 800);
   await capture(page, {
     name: "13-open-workspaces-empty",
-    title: "New Workspaces dialog, nothing typed yet",
+    title: "New workspace dialog, nothing typed yet",
     expectations: [
-      "Left: a 'Workspaces' textarea with placeholder, 'Stack on' select reading main, an 'Advanced' toggle, 'Nothing to create yet.', Cancel and a disabled Create button",
+      "Left: a 'Workspaces' textarea with placeholder, 'Stack on' select reading main, an 'Advanced' toggle, 'Type a line or pick an item to create workspaces.', Cancel and a disabled Create button",
       "Right: GitHub / Linear tabs (GitHub selected), 'Your pull requests' with a search box and octocat's open PRs as checkbox rows (#418, #412, #401)",
+    ],
+  });
+
+  await page.getByRole("checkbox", { name: /^#418/ }).hover();
+  await settle(page, 500);
+  await capture(page, {
+    name: "13-open-workspaces-row-hover",
+    title: "New workspace dialog: a hovered pull request row",
+    rest: false,
+    expectations: [
+      "Hovered #418 row fills with the same grey tint as a hovered sidebar row",
+      "The other pull request rows stay unfilled",
     ],
   });
 
@@ -75,7 +87,7 @@ test("open-workspaces: type, pick pull requests and issues, and create", async (
       ].join("\n"),
     );
   await expect(page.getByRole("status")).toHaveAccessibleName(
-    "3 workspaces will be created, 1 already open",
+    "Will create 3 workspaces, 1 already open",
     { timeout: 20_000 },
   );
   await page.getByLabel("Search pull requests").fill("runbook");
@@ -86,7 +98,7 @@ test("open-workspaces: type, pick pull requests and issues, and create", async (
     .getByRole("checkbox", { name: "#409 docs: add the ingest runbook" })
     .click();
   await expect(page.getByRole("status")).toHaveAccessibleName(
-    "4 workspaces will be created, 1 already open",
+    "Will create 4 workspaces, 1 already open",
   );
   await page.getByRole("button", { name: "Advanced" }).click();
   await expect(page.getByLabel("Sparse paths (one per line)")).toBeVisible();
@@ -95,9 +107,9 @@ test("open-workspaces: type, pick pull requests and issues, and create", async (
     name: "13-open-workspaces-checked",
     title: "Lines checked and a searched pull request picked",
     expectations: [
-      "Status reads '4 workspaces will be created, 1 already open' with a chevron, and '2 lines can't be opened' in red",
+      "Status reads 'Will create 4 workspaces, 1 already open' with a chevron, and '2 lines can't be opened' in red",
       "Advanced is open: 'Sparse paths' and 'Symlink from home repo' textareas side by side under Stack on",
-      "Right: 'Matching pull requests' lists only #409, checked; the GitHub tab shows a '1' badge; button reads 'Create 5 Workspaces'",
+      "Right: 'Matching pull requests' lists only #409, checked; the GitHub tab shows a '1' badge; button reads 'Create 5 workspaces'",
     ],
   });
 
@@ -119,7 +131,7 @@ test("open-workspaces: type, pick pull requests and issues, and create", async (
     page.getByRole("list", { name: "Workspaces to open" }),
   ).toBeHidden();
   await expect(
-    page.getByRole("heading", { name: "New Workspaces" }),
+    page.getByRole("heading", { name: "New workspace" }),
   ).toBeVisible();
 
   await page.getByRole("tab", { name: "Linear" }).click();
@@ -130,7 +142,7 @@ test("open-workspaces: type, pick pull requests and issues, and create", async (
     .getByRole("checkbox", { name: "ENG-142 Retry webhook deliveries" })
     .click();
   await expect(page.getByRole("status")).toHaveAccessibleName(
-    "5 workspaces will be created, 1 already open",
+    "Will create 5 workspaces, 1 already open",
   );
   await settle(page, 500);
   await capture(page, {
@@ -138,23 +150,25 @@ test("open-workspaces: type, pick pull requests and issues, and create", async (
     title: "Linear tab: the user's task list",
     expectations: [
       "Linear tab selected with a '1' badge; GitHub tab keeps its '1' badge",
-      "'Your issues' lists ENG-142, ENG-139 and ENG-131 (not the done ENG-128 or hubot's ENG-125), with state, priority and project badges",
-      "ENG-142 is checked; status reads '5 workspaces will be created, 1 already open'; button reads 'Create 6 Workspaces'",
+      "'Your issues' lists ENG-143, ENG-142, ENG-139 and ENG-131 (not the done ENG-128 or hubot's ENG-125), with state, priority and project badges",
+      "ENG-142 is checked; status reads 'Will create 5 workspaces, 1 already open'; button reads 'Create 6 workspaces'",
     ],
   });
 
-  await page.getByRole("button", { name: "Create 6 Workspaces" }).click();
+  await page.getByRole("button", { name: "Create 6 workspaces" }).click();
   await expect(
-    page.getByRole("heading", { name: "New Workspaces" }),
+    page.getByRole("heading", { name: "New workspace" }),
   ).toBeHidden({
     timeout: 30_000,
   });
-  for (const branch of [
-    "treq/retry-flaky-webhook-tests",
+  // A sidebar row is named by the title it shows: the typed line, the
+  // pull request's title, or the branch when there is neither.
+  for (const name of [
+    "Retry flaky webhook tests",
     "chore/bump-deps",
-    "fix/slack-retry",
+    "fix: retry Slack webhooks on 429",
   ]) {
-    await expect(row(page, branch)).toBeVisible({ timeout: 20_000 });
+    await expect(row(page, name)).toBeVisible({ timeout: 20_000 });
   }
   await settle(page, 1500);
   await capture(page, {
@@ -162,8 +176,8 @@ test("open-workspaces: type, pick pull requests and issues, and create", async (
     title: "After opening: new rows in the sidebar",
     screen: true,
     expectations: [
-      "Sidebar lists treq/retry-flaky-webhook-tests, chore/bump-deps, fix/slack-retry and the ENG-142 branch as new workspaces",
-      "treq/retry-flaky-webhook-tests (the first line) is selected",
+      "Sidebar lists Retry flaky webhook tests, chore/bump-deps, fix: retry Slack webhooks on 429 and the ENG-142 issue as new workspaces",
+      "Retry flaky webhook tests (the first line) is selected",
       "A one-line toast (\"Created N workspaces\") reports what was created",
     ],
   });
@@ -171,20 +185,160 @@ test("open-workspaces: type, pick pull requests and issues, and create", async (
   // Stacking on the selected workspace opens the same dialog, on its branch.
   await page.keyboard.press(`${mod}+Shift+N`);
   await expect(
-    page.getByRole("heading", { name: "New Workspaces" }),
+    page.getByRole("heading", { name: "New workspace" }),
   ).toBeVisible();
   await settle(page, 800);
   await capture(page, {
     name: "13-open-workspaces-stack",
     title: "Stack opens the dialog on the selected workspace",
     expectations: [
-      "The Stack shortcut opened New Workspaces, not the old Stack dialog",
+      "The Stack shortcut opened New workspace, not the old Stack dialog",
       "'Stack on' reads treq/retry-flaky-webhook-tests",
     ],
   });
   await page.keyboard.press("Escape");
   await expect(
-    page.getByRole("heading", { name: "New Workspaces" }),
+    page.getByRole("heading", { name: "New workspace" }),
+  ).toBeHidden();
+});
+
+test("open-workspaces: the pull request search shows loading, no matches and errors", async ({
+  page,
+}) => {
+  await home(page);
+  await page.getByRole("button", { name: "New workspace…" }).first().click();
+  await expect(
+    page.getByRole("heading", { name: "Your pull requests" }),
+  ).toBeVisible();
+  const search = page.getByLabel("Search pull requests");
+  const searching = page.getByRole("progressbar", {
+    name: "Searching pull requests",
+  });
+
+  // The fake gh holds a search with "slow" in it for 4s.
+  await search.fill("slow runbook");
+  await expect(searching).toBeVisible();
+  await settle(page, 300);
+  await capture(page, {
+    name: "13-open-workspaces-search-loading",
+    title: "Pull request search in flight",
+    expectations: [
+      "A small grey spinner sits at the right end of the 'Search pull requests' input, which reads 'slow runbook'",
+      "The previous list (octocat's PRs) still shows below, dimmed",
+    ],
+  });
+
+  await expect(searching).toBeHidden({ timeout: 10_000 });
+  await expect(
+    page.getByRole("checkbox", { name: "#409 docs: add the ingest runbook" }),
+  ).toBeVisible();
+  await settle(page, 300);
+  await capture(page, {
+    name: "13-open-workspaces-search-results",
+    title: "Pull request search answered",
+    expectations: [
+      "'Matching pull requests' lists only #409 at full opacity",
+      "No spinner in the search input",
+    ],
+  });
+
+  await search.fill("zzz");
+  // The empty state's text isn't exposed; the capture shows it.
+  await expect(searching).toBeHidden();
+  await expect(
+    page.getByRole("checkbox", { name: "#409 docs: add the ingest runbook" }),
+  ).toBeHidden();
+  await settle(page, 300);
+  await capture(page, {
+    name: "13-open-workspaces-search-empty",
+    title: "Pull request search with no matches",
+    expectations: [
+      "The list shows a PR icon, 'No pull requests match \"zzz\"' and one line saying what to try, not 'No open pull requests'",
+      "No spinner in the search input",
+    ],
+  });
+
+  await search.fill("unreachable");
+  await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
+  await expect(searching).toBeHidden();
+  await settle(page, 300);
+  await capture(page, {
+    name: "13-open-workspaces-search-error",
+    title: "Pull request search failed",
+    expectations: [
+      "The list shows 'Couldn't load pull requests' with the gh error 'HTTP 502: Bad Gateway' and a retry action",
+      "No spinner in the search input",
+    ],
+  });
+
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(
+    page.getByRole("heading", { name: "New workspace" }),
+  ).toBeHidden();
+});
+
+test("open-workspaces: Assigned to me narrows the pull requests to the user's assigned ones", async ({
+  page,
+}) => {
+  await home(page);
+  await page.getByRole("button", { name: "New workspace…" }).first().click();
+  await expect(
+    page.getByRole("heading", { name: "Your pull requests" }),
+  ).toBeVisible();
+  const assigned = page.getByRole("button", { name: "Assigned to me" });
+  // gpui-playwright reports a toggle's state as `checked`, not `pressed`.
+  await expect(
+    page.getByRole("button", { name: "Assigned to me", checked: false }),
+  ).toBeVisible();
+  await settle(page, 500);
+  await capture(page, {
+    name: "13-open-workspaces-assigned-off",
+    title: "Assigned to me, off",
+    expectations: [
+      "An outline 'Assigned to me' chip with a person icon sits right of the 'Search pull requests' input, the same height",
+      "'Your pull requests' lists octocat's own PRs",
+    ],
+  });
+
+  await assigned.click();
+  await expect(
+    page.getByRole("heading", { name: "Assigned to you" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Assigned to me", checked: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("checkbox", { name: "#409 docs: add the ingest runbook" }),
+  ).toBeVisible();
+  await settle(page, 500);
+  await capture(page, {
+    name: "13-open-workspaces-assigned-on",
+    title: "Assigned to me, on",
+    expectations: [
+      "The 'Assigned to me' chip is drawn in the light selected tint",
+      "'Assigned to you' lists #421 by alice and #409 by bob, none of octocat's own",
+    ],
+  });
+
+  await page.getByLabel("Search pull requests").fill("runbook");
+  await expect(
+    page.getByRole("heading", { name: "Matching pull requests" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("checkbox", { name: /^#421 / }),
+  ).toBeHidden();
+  await settle(page, 500);
+  await capture(page, {
+    name: "13-open-workspaces-assigned-search",
+    title: "Assigned to me with a search",
+    expectations: [
+      "The chip stays on; 'Matching pull requests' lists only #409",
+    ],
+  });
+
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(
+    page.getByRole("heading", { name: "New workspace" }),
   ).toBeHidden();
 });
 
@@ -192,9 +346,9 @@ test("open-workspaces: indented lines stack on the line above", async ({
   page,
 }) => {
   await home(page);
-  await page.getByRole("button", { name: "New workspaces" }).click();
+  await page.getByRole("button", { name: "New workspace…" }).first().click();
   await expect(
-    page.getByRole("heading", { name: "New Workspaces" }),
+    page.getByRole("heading", { name: "New workspace" }),
   ).toBeVisible();
   const lines = page.getByLabel("Workspaces", { exact: true });
   await lines.fill(
@@ -204,7 +358,7 @@ test("open-workspaces: indented lines stack on the line above", async ({
   await page.keyboard.press("Shift+ArrowUp");
   await page.keyboard.press("Tab");
   await expect(page.getByRole("status")).toHaveAccessibleName(
-    "3 workspaces will be created",
+    "Will create 3 workspaces, 2 stacked",
     {
       timeout: 20_000,
     },
@@ -215,7 +369,7 @@ test("open-workspaces: indented lines stack on the line above", async ({
     title: "Tab indents the selected lines",
     expectations: [
       "The textarea shows 'Audit log API' and 'Audit log page' indented two spaces under 'Add the audit log'",
-      "Status reads '3 workspaces will be created'; button reads 'Create 3 Workspaces'",
+      "Status reads 'Will create 3 workspaces, 2 stacked'; button reads 'Create 3 workspaces'",
     ],
   });
   await page.getByRole("status").click();
@@ -231,18 +385,14 @@ test("open-workspaces: indented lines stack on the line above", async ({
     ],
   });
   await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "Create 3 Workspaces" }).click();
+  await page.getByRole("button", { name: "Create 3 workspaces" }).click();
   await expect(
-    page.getByRole("heading", { name: "New Workspaces" }),
+    page.getByRole("heading", { name: "New workspace" }),
   ).toBeHidden({
     timeout: 30_000,
   });
-  for (const branch of [
-    "treq/add-the-audit-log",
-    "treq/audit-log-api",
-    "treq/audit-log-page",
-  ]) {
-    await expect(row(page, branch)).toBeVisible({ timeout: 20_000 });
+  for (const name of ["Add the audit log", "Audit log API", "Audit log page"]) {
+    await expect(row(page, name)).toBeVisible({ timeout: 20_000 });
   }
   await settle(page, 1500);
   await capture(page, {
@@ -250,7 +400,61 @@ test("open-workspaces: indented lines stack on the line above", async ({
     title: "The stack in the sidebar",
     clip: { x: 0, y: 0, width: 300, height: 520 },
     expectations: [
-      "The sidebar shows treq/audit-log-api stacked under treq/add-the-audit-log, and treq/audit-log-page under treq/audit-log-api",
+      "The sidebar shows Audit log API stacked under Add the audit log, and Audit log page under Audit log API",
     ],
   });
 });
+
+test("open-workspaces: Tab reaches a pull request checkbox and Space toggles it", async ({
+  page,
+}) => {
+  await home(page);
+  await page.getByRole("button", { name: "New workspace…" }).first().click();
+  await expect(
+    page.getByRole("heading", { name: "Your pull requests" }),
+  ).toBeVisible();
+  await settle(page, 800);
+  // Focus starts in the search field from a click; Tab goes to Assigned to
+  // me, then the first pull request.
+  await page.getByLabel("Search pull requests").click();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Space");
+  await expect(page.getByRole("checkbox", { checked: true })).toHaveCount(1);
+  await settle(page, 300);
+  await capture(page, {
+    name: "13-open-workspaces-tab-to-checkbox",
+    title: "Tab to a pull request checkbox, then Space",
+    expectations: [
+      "focus ring on the checkbox",
+      "the checkbox toggled from the keyboard",
+      "no ring after mouse use",
+    ],
+  });
+});
+
+for (const [state, key] of [
+  ["single", null],
+  ["multi", "lin_api_qa"],
+] as const) {
+  test(`open-workspaces: ${state} integration header`, async ({ page }) => {
+    linearKey(key);
+    await home(page);
+    await page.getByRole("button", { name: "New workspace…" }).first().click();
+    await expect(
+      page.getByRole("heading", { name: "Your pull requests" }),
+    ).toBeVisible();
+    await settle(page, 800);
+    await capture(page, {
+      name: `13-open-workspaces-integrations-${state}`,
+      title: `New workspace dialog, ${state} integration`,
+      expectations: [
+        key === null
+          ? "Right column opens with a GITHUB header and icon, no tab strip"
+          : "Right column opens with GitHub / Linear tabs",
+        "A divider line separates it from 'Your pull requests' below",
+      ],
+    });
+    await page.keyboard.press("Escape");
+  });
+}

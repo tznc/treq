@@ -6,6 +6,7 @@
 use std::{
   cmp::Ordering,
   collections::{HashMap, HashSet},
+  sync::LazyLock,
 };
 
 use regex::Regex;
@@ -18,7 +19,7 @@ use crate::{
   core::{self, WorkspaceEntry},
   gpui_shell::native::Backend,
   jj::JjDiffHunk,
-  local_db::{self, FileBrowserPendingReview},
+  local_db::FileBrowserPendingReview,
 };
 
 /// Files longer than this (in UTF-16 code units, as `content.length`)
@@ -70,7 +71,7 @@ impl FileBrowserHost for Backend {
     repo_path: &str,
     workspace_id: i64,
   ) -> Result<Option<FileBrowserPendingReview>, String> {
-    local_db::get_file_browser_review(repo_path, workspace_id)
+    core::review_drafts::file_browser_review(repo_path, workspace_id)
   }
 
   fn save_browser_review(
@@ -80,11 +81,11 @@ impl FileBrowserHost for Backend {
     comments: &str,
     summary: Option<&str>,
   ) -> Result<(), String> {
-    local_db::save_file_browser_review(repo_path, workspace_id, comments, summary).map(|_| ())
+    core::review_drafts::save_file_browser_review(repo_path, workspace_id, comments, summary)
   }
 
   fn clear_browser_review(&self, repo_path: &str, workspace_id: i64) -> Result<(), String> {
-    local_db::clear_file_browser_review(repo_path, workspace_id)
+    core::review_drafts::clear_file_browser_review(repo_path, workspace_id)
   }
 }
 
@@ -99,12 +100,23 @@ pub fn filter_hidden(entries: Vec<WorkspaceEntry>) -> Vec<WorkspaceEntry> {
 /// Directories first, then by name as `localeCompare` orders them: case
 /// folded, lowercase first on a tie.
 pub fn compare_entries(a: &WorkspaceEntry, b: &WorkspaceEntry) -> Ordering {
+  // Folded char by char, not into new strings: a sort makes thousands of
+  // comparisons.
+  fn fold(s: &str) -> impl Iterator<Item = char> + '_ {
+    s.chars().flat_map(char::to_lowercase)
+  }
   b.is_directory.cmp(&a.is_directory).then_with(|| {
-    a.name
-      .to_lowercase()
-      .cmp(&b.name.to_lowercase())
+    fold(&a.name)
+      .cmp(fold(&b.name))
       .then_with(|| b.name.cmp(&a.name))
   })
+}
+
+/// A directory's entries as the tree lists them, sorted off the main
+/// thread once, so [`flatten`]'s sort finds each level in order.
+pub fn sorted(mut entries: Vec<WorkspaceEntry>) -> Vec<WorkspaceEntry> {
+  entries.sort_by(compare_entries);
+  entries
 }
 
 /// A row of the tree.
@@ -200,8 +212,11 @@ pub struct LineMarks {
 }
 
 /// `handleFileClick`'s hunk parse.
+#[expect(clippy::expect_used, reason = "constant pattern")]
 pub fn line_marks(hunks: &[JjDiffHunk]) -> LineMarks {
-  let header = Regex::new(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@").expect("regex");
+  static HEADER: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@").expect("regex"));
+  let header = &*HEADER;
   let mut marks = LineMarks::default();
   for hunk in hunks {
     let Some(start) = header
@@ -212,10 +227,10 @@ pub fn line_marks(hunks: &[JjDiffHunk]) -> LineMarks {
     };
     let mut line = start;
     for text in &hunk.lines {
-      if text.starts_with('+') && !text.starts_with("+++") {
+      if text.starts_with('+') {
         marks.added.insert(line);
         line += 1;
-      } else if text.starts_with('-') && !text.starts_with("---") {
+      } else if text.starts_with('-') {
         if line > 1 {
           marks.deleted_after.insert(line - 1);
         }
@@ -243,6 +258,10 @@ pub fn status_title(status: &str) -> &'static str {
     "M" => "Modified",
     "A" => "Added",
     "D" => "Deleted",
+    "R" => "Renamed",
+    "C" => "Copied",
+    "U" => "Conflicted",
+    "??" => "Untracked",
     _ => "Changed",
   }
 }
@@ -380,6 +399,25 @@ mod tests {
   }
 
   #[test]
+  fn entries_sort_directories_first_then_case_folded() {
+    let names = |entries: Vec<WorkspaceEntry>| {
+      sorted(entries)
+        .into_iter()
+        .map(|e| e.name)
+        .collect::<Vec<_>>()
+    };
+    assert_eq!(
+      names(vec![
+        entry("B", false),
+        entry("a", false),
+        entry("b", false),
+        entry("Z", true),
+      ]),
+      ["Z", "a", "b", "B"]
+    );
+  }
+
+  #[test]
   fn binary_files_go_by_extension() {
     assert!(is_binary("/ws/logo.PNG"));
     assert!(is_binary("/ws/font.woff2"));
@@ -428,7 +466,17 @@ mod tests {
   #[test]
   fn status_titles_match_react() {
     assert_eq!(status_title("M"), "Modified");
-    assert_eq!(status_title("R"), "Changed");
+    assert_eq!(status_title("X"), "Changed");
+  }
+
+  #[test]
+  fn status_titles_name_every_change_kind() {
+    assert_eq!(status_title("A"), "Added");
+    assert_eq!(status_title("D"), "Deleted");
+    assert_eq!(status_title("R"), "Renamed");
+    assert_eq!(status_title("C"), "Copied");
+    assert_eq!(status_title("U"), "Conflicted");
+    assert_eq!(status_title("??"), "Untracked");
   }
 
   #[test]

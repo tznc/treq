@@ -5,11 +5,13 @@
 //! (see [`github_data`]). React keeps the place in the URL, so moving
 //! around (a tab, a state filter, an item, the create form, leaving for a
 //! workspace or the PR review) is handed back as a `github.*` press and
-//! comes back as the next [`Route`]. The Merge Queue tab and the PR review
-//! page are still React's: GPUI hands their routes back and React draws them.
+//! comes back as the next [`Route`]. The PR review page is drawn by its
+//! own view: GPUI hands its route back.
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
+use crate::result_ext::ResultExt;
 use std::{
   collections::{HashMap, HashSet},
   rc::Rc,
@@ -26,6 +28,9 @@ use super::{
   github_data::{
     self as data, GithubHost, LogLine, PrFilters, Route, StateFilter, Tab, TreqChecks,
   },
+  integrations_cache::cache,
+  prefetch::Intent,
+  rows::Rows,
   ActionSink, ScreenAction,
 };
 use crate::{
@@ -37,7 +42,7 @@ use crate::{
   gpui_shell::{
     checks_run,
     form::{self, Controls, SelectOption},
-    native::{register_toast_action, NativeEvent, ToastAction, ToastTone},
+    native::{register_toast_action, NativeEvent, ToastAction},
     popup::{self, PopupSink},
     theme::{self, Palette},
     tooltips::{HasTooltips, Tooltips},
@@ -69,6 +74,11 @@ pub(super) struct Pages<T> {
   pub(super) error: Option<String>,
   /// Bumped per load, so a stale one is dropped.
   generation: u64,
+  /// Bumped whenever `pages` is replaced, so what is derived from them
+  /// is recomputed only then.
+  version: u64,
+  /// The items of the pages, the first copy of each number, as of `version`.
+  unique: Option<(u64, Rc<Vec<T>>)>,
 }
 
 impl<T> Default for Pages<T> {
@@ -80,6 +90,8 @@ impl<T> Default for Pages<T> {
       fetching_next: false,
       error: None,
       generation: 0,
+      version: 0,
+      unique: None,
     }
   }
 }
@@ -88,14 +100,65 @@ impl<T> Pages<T> {
   fn has_next(&self) -> bool {
     self.pages.last().is_some_and(|p| p.has_more)
   }
+
+  /// Shows other pages.
+  fn set_pages(&mut self, pages: Vec<GhListPage<T>>) {
+    self.pages = pages;
+    self.version += 1;
+  }
 }
 
-/// Every item of the pages, the first copy of each number.
-fn items<T: Clone>(pages: &Pages<T>, number: impl Fn(&T) -> u64) -> Vec<T> {
-  data::unique_by_number(
-    pages.pages.iter().flat_map(|p| p.items.clone()).collect(),
-    number,
-  )
+impl<T: Clone> Pages<T> {
+  /// Every item of the pages, the first copy of each number. Copied once
+  /// per change of the pages, not per frame.
+  fn items(&mut self, number: impl Fn(&T) -> u64) -> Rc<Vec<T>> {
+    if let Some((version, items)) = &self.unique {
+      if *version == self.version {
+        return items.clone();
+      }
+    }
+    let items = Rc::new(data::unique_by_number(
+      self.pages.iter().flat_map(|p| p.items.clone()).collect(),
+      number,
+    ));
+    self.unique = Some((self.version, items.clone()));
+    items
+  }
+}
+
+/// What a list row stands for. Rows are built only while on screen.
+#[derive(Clone, PartialEq)]
+enum ListRow {
+  /// The loaded item at `ix`; `sig` says whether it still draws the same,
+  /// and `branches` whether its row has room for the branch names.
+  Item {
+    ix: usize,
+    number: u64,
+    sig: u64,
+    branches: bool,
+  },
+  /// "No pull requests match", among those loaded.
+  NoMatch,
+  LoadMore,
+}
+
+/// What the filtered pull request rows were derived from.
+#[derive(PartialEq)]
+struct PrRowsKey {
+  version: u64,
+  filters: PrFilters,
+  /// The minute the "opened within" filter was last evaluated at.
+  minute: Option<i64>,
+  branches: bool,
+  has_next: bool,
+}
+
+fn signature(fields: &[&str], flag: bool) -> u64 {
+  use std::hash::{Hash, Hasher};
+  let mut hasher = std::collections::hash_map::DefaultHasher::new();
+  fields.hash(&mut hasher);
+  flag.hash(&mut hasher);
+  hasher.finish()
 }
 
 /// What the open detail is about.
@@ -136,11 +199,17 @@ pub(super) struct Detail {
   pub(super) treq: Option<TreqChecks>,
   /// Workflow files whose run history is open, and what it read.
   pub(super) history_open: HashSet<String>,
+  /// The comment thread's fold is open: every comment shows.
+  pub(super) comments_expanded: bool,
   pub(super) history: HashMap<String, Vec<RunSummary>>,
   /// Runs whose job logs are open, and the logs read, by run and job.
   pub(super) runs_open: HashSet<i64>,
   pub(super) logs: HashMap<(i64, String), Result<Vec<LogLine>, String>>,
+  /// The PR's checks and workspace are being read on a timer.
+  polling: bool,
   generation: u64,
+  /// The PR's checks list every check, not just the failing and running.
+  pub(super) checks_open: bool,
 }
 
 /// The inline New Issue form (`CreateIssueForm`).
@@ -168,6 +237,8 @@ type FilterSelect = (&'static str, &'static str, String, Vec<(String, String)>);
 /// The GitHub view and what it read.
 pub struct GithubView {
   pub(super) host: Arc<dyn GithubHost>,
+  /// Reviewers' avatars by URL: `None` while loading or when it failed.
+  pub(super) avatars: HashMap<String, Option<Arc<gpui::Image>>>,
   /// React's handlers, for moving around.
   react: ActionSink,
   pub(super) controls: Controls,
@@ -180,6 +251,10 @@ pub struct GithubView {
   remote_for: String,
   pub(super) issues: Pages<GhIssue>,
   pub(super) prs: Pages<GhPullRequest>,
+  issue_rows: Rows<ListRow>,
+  pr_rows: Rows<ListRow>,
+  /// The pull request rows the filters keep, for `pr_rows_key`.
+  pr_rows_cache: Option<(PrRowsKey, Vec<ListRow>)>,
   pub(super) filters: PrFilters,
   pub(super) detail: Detail,
   /// The comment being written, kept across items of the same kind.
@@ -199,6 +274,8 @@ pub struct GithubView {
   /// The dialog's focus, for Escape.
   dialog_focus: FocusHandle,
   dialog_focused: bool,
+  /// The row the pointer rests on, whose detail is read ahead.
+  hovered: Intent<(Tab, u64)>,
   /// Draws checks as running while one runs anywhere in the app.
   _running: gpui::Subscription,
 }
@@ -222,7 +299,9 @@ impl GithubView {
     let sink: ActionSink = Rc::new(move |action, cx| {
       let view = view.clone();
       cx.defer(move |cx| {
-        let _ = view.update(cx, |view, cx| view.handle(action, cx));
+        view
+          .update(cx, |view, cx| view.handle(action, cx))
+          .ignore_closed();
       });
     });
     let mut this = Self {
@@ -237,6 +316,10 @@ impl GithubView {
       remote: None,
       issues: Pages::default(),
       prs: Pages::default(),
+      issue_rows: Rows::default(),
+      pr_rows: Rows::default(),
+      pr_rows_cache: None,
+      avatars: HashMap::new(),
       filters: PrFilters::default(),
       detail: Detail::default(),
       comment: String::new(),
@@ -248,6 +331,7 @@ impl GithubView {
       popover_closed: None,
       workspaces: Vec::new(),
       logs_enabled: false,
+      hovered: Intent::default(),
       dialog_focus: cx.focus_handle(),
       dialog_focused: false,
       _running: cx.observe_global::<checks_run::Running>(|_, cx| cx.notify()),
@@ -262,6 +346,7 @@ impl GithubView {
     self.tips.dark = dark;
     if self.route != route {
       let checks_changed = self.route.running_checks != route.running_checks;
+      let reload = self.route.reload != route.reload;
       self.route = route;
       if self.route.repo_path != self.remote_for {
         self.remote_for = self.route.repo_path.clone();
@@ -270,6 +355,9 @@ impl GithubView {
         self.load_workspaces(cx);
       }
       self.sync(cx);
+      if reload {
+        self.load_detail(cx);
+      }
       if checks_changed {
         // A run that finished wrote its results.
         self.reload_checks(cx);
@@ -299,10 +387,12 @@ impl GithubView {
       let out = cx
         .background_spawn(async move { work(host.as_ref()) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        done(view, out, cx);
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          done(view, out, cx);
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -368,10 +458,19 @@ impl GithubView {
       }
       self.popover = None;
       self.detail = Detail {
-        key: detail,
+        key: detail.clone(),
         generation: self.detail.generation + 1,
         ..Detail::default()
       };
+      // What was read last (or read ahead by the pointer) shows while the
+      // read below replaces it.
+      if let Some(key) = detail {
+        let at = (key.repo, key.number);
+        match key.tab {
+          Tab::Issues => self.detail.issue = cache(cx).issues.get(&at).cloned(),
+          Tab::Prs => self.detail.pr = cache(cx).prs.get(&at).cloned(),
+        }
+      }
       self.load_detail(cx);
     }
     let creating_pr = self.route.creating && self.route.tab == Tab::Prs;
@@ -399,6 +498,14 @@ impl GithubView {
     };
     let filter = self.route.filter;
     let plan = plan_load(&mut self.issues, (repo.clone(), filter), more);
+    let key = (repo.clone(), filter);
+    if self.issues.pages.is_empty() {
+      // The first page read last shows while the list is read again.
+      if let Some(page) = cache(cx).issue_pages.get(&key).cloned() {
+        self.issues.set_pages(vec![page]);
+        self.issues.loading = false;
+      }
+    }
     let generation = self.issues.generation;
     self.run(
       cx,
@@ -407,7 +514,12 @@ impl GithubView {
           host.list_issues(&repo, filter.value(), after)
         })
       },
-      move |view, result, _| {
+      move |view, result, cx| {
+        if let Some(first) = result.as_ref().ok().and_then(|pages| pages.first()) {
+          cache(cx)
+            .issue_pages
+            .insert(key, Instant::now(), first.clone());
+        }
         if view.issues.generation == generation {
           finish_load(&mut view.issues, result);
         }
@@ -421,6 +533,13 @@ impl GithubView {
     };
     let filter = self.route.filter;
     let plan = plan_load(&mut self.prs, (repo.clone(), filter), more);
+    let key = (repo.clone(), filter);
+    if self.prs.pages.is_empty() {
+      if let Some(page) = cache(cx).pr_pages.get(&key).cloned() {
+        self.prs.set_pages(vec![page]);
+        self.prs.loading = false;
+      }
+    }
     let generation = self.prs.generation;
     self.run(
       cx,
@@ -429,7 +548,12 @@ impl GithubView {
           host.list_prs(&repo, filter.value(), page)
         })
       },
-      move |view, result, _| {
+      move |view, result, cx| {
+        if let Some(first) = result.as_ref().ok().and_then(|pages| pages.first()) {
+          cache(cx)
+            .pr_pages
+            .insert(key, Instant::now(), first.clone());
+        }
         if view.prs.generation == generation {
           finish_load(&mut view.prs, result);
         }
@@ -437,24 +561,88 @@ impl GithubView {
     );
   }
 
-  /// The loaded pull requests the filters keep.
-  pub(super) fn visible_prs(&self) -> Vec<GhPullRequest> {
-    let prs = items(&self.prs, |pr| pr.number);
-    data::filter_prs(&prs, &self.filters, chrono::Utc::now())
+  pub(super) fn issue_items(&mut self) -> Rc<Vec<GhIssue>> {
+    self.issues.items(|issue| issue.number)
+  }
+
+  pub(super) fn pr_items(&mut self) -> Rc<Vec<GhPullRequest>> {
+    self.prs.items(|pr| pr.number)
+  }
+
+  /// The rows of the pull requests the filters keep, derived again only
+  /// when the pages, the filters or the layout change.
+  fn pr_list_rows(&mut self, branches: bool) -> Vec<ListRow> {
+    let now = chrono::Utc::now();
+    let key = PrRowsKey {
+      version: self.prs.version,
+      filters: self.filters.clone(),
+      minute: self
+        .filters
+        .opened_within_days
+        .map(|_| now.timestamp().div_euclid(60)),
+      branches,
+      has_next: self.prs.has_next(),
+    };
+    if let Some((cached, rows)) = &self.pr_rows_cache {
+      if *cached == key {
+        return rows.clone();
+      }
+    }
+    let prs = self.pr_items();
+    let mut rows: Vec<ListRow> = data::filter_pr_indices(&prs, &self.filters, now)
       .into_iter()
-      .cloned()
-      .collect()
-  }
-
-  pub(super) fn issue_items(&self) -> Vec<GhIssue> {
-    items(&self.issues, |issue| issue.number)
-  }
-
-  pub(super) fn pr_items(&self) -> Vec<GhPullRequest> {
-    items(&self.prs, |pr| pr.number)
+      .map(|ix| (ix, &prs[ix]))
+      .map(|(ix, pr)| ListRow::Item {
+        ix,
+        number: pr.number,
+        sig: signature(
+          &[
+            &pr.title,
+            &pr.state,
+            &pr.author.login,
+            &pr.head_ref_name,
+            &pr.base_ref_name,
+            &pr.created_at,
+          ],
+          pr.is_draft,
+        ),
+        branches,
+      })
+      .collect();
+    if rows.is_empty() {
+      rows.push(ListRow::NoMatch);
+    }
+    if key.has_next {
+      rows.push(ListRow::LoadMore);
+    }
+    self.pr_rows_cache = Some((key, rows.clone()));
+    rows
   }
 
   /// Reads the open detail again, keeping what shows meanwhile.
+  /// Loads the avatars of `pr`'s reviewers that the timeline shows, once
+  /// per URL.
+  fn load_avatars(&mut self, pr: &crate::github::GhPullRequest, cx: &mut Context<Self>) {
+    for review in pr.reviews.iter().filter(|r| r.verdict().is_some()) {
+      let url = crate::core::pr_view::avatar_url(&review.author);
+      if self.avatars.contains_key(&url) {
+        continue;
+      }
+      self.avatars.insert(url.clone(), None);
+      self.run(
+        cx,
+        {
+          let url = url.clone();
+          move |host| host.avatar(&url)
+        },
+        move |view, bytes, _| {
+          let image = bytes.ok().and_then(treq_ui::image::decode);
+          view.avatars.insert(url, image);
+        },
+      );
+    }
+  }
+
   pub(super) fn load_detail(&mut self, cx: &mut Context<Self>) {
     let Some(key) = self.detail.key.clone() else {
       return;
@@ -467,20 +655,30 @@ impl GithubView {
       cx,
       move |host| match k.tab {
         Tab::Issues => (host.issue(&k.repo, k.number).map(Ok), None),
-        Tab::Prs => (
-          host.pr(&k.repo, k.number).map(Err),
-          Some(host.pr_checks(&k.repo, k.number)),
-        ),
+        // Two independent `gh` calls: run them side by side.
+        Tab::Prs => std::thread::scope(|scope| {
+          let checks = scope.spawn(|| host.pr_checks(&k.repo, k.number));
+          let pr = host.pr(&k.repo, k.number).map(Err);
+          (pr, Some(super::joined(checks)))
+        }),
       },
       move |view, (read, checks), cx| {
+        let at = (key.repo.clone(), key.number);
+        match &read {
+          Ok(Ok(issue)) => cache(cx).issues.insert(at, Instant::now(), issue.clone()),
+          Ok(Err(pr)) => cache(cx).prs.insert(at, Instant::now(), pr.clone()),
+          Err(_) => {}
+        }
         if view.detail.generation != generation {
           return;
         }
-        let first = view.detail.issue.is_none() && view.detail.pr.is_none();
         view.detail.loading = false;
         match read {
           Ok(Ok(issue)) => view.detail.issue = Some(issue),
-          Ok(Err(pr)) => view.detail.pr = Some(pr),
+          Ok(Err(pr)) => {
+            view.load_avatars(&pr, cx);
+            view.detail.pr = Some(pr);
+          }
           Err(err) => view.detail.error = Some(err),
         }
         if let Some(checks) = checks {
@@ -489,12 +687,59 @@ impl GithubView {
             None
           });
         }
-        if first && key.tab == Tab::Prs {
+        if key.tab == Tab::Prs && !view.detail.polling {
+          view.detail.polling = true;
           view.load_treq(cx);
           view.poll_checks(generation, cx);
         }
       },
     );
+  }
+
+  /// The pointer entered or left a row: once it rests on one, its detail is
+  /// read into the cache the click's own read starts from.
+  fn hover_item(&mut self, number: u64, hovered: bool, cx: &mut Context<Self>) {
+    let tab = self.route.tab;
+    self
+      .hovered
+      .hover((tab, number), hovered, cx, move |view, cx| {
+        view.read_ahead(tab, number, cx)
+      });
+  }
+
+  fn read_ahead(&mut self, tab: Tab, number: u64, cx: &mut Context<Self>) {
+    let Some(repo) = self.repo() else {
+      return;
+    };
+    if self.route.selected == Some(number) {
+      return;
+    }
+    let at = (repo.clone(), number);
+    let cached = match tab {
+      Tab::Issues => cache(cx).issues.has_fresh(&at, Instant::now()),
+      Tab::Prs => cache(cx).prs.has_fresh(&at, Instant::now()),
+    };
+    if cached {
+      return;
+    }
+    let host = self.host.clone();
+    cx.spawn(async move |_, cx| {
+      let read = cx
+        .background_spawn(async move {
+          match tab {
+            Tab::Issues => host.issue(&repo, number).map(Ok),
+            Tab::Prs => host.pr(&repo, number).map(Err),
+          }
+        })
+        .await;
+      if let Ok(read) = read {
+        cx.update(|cx| match read {
+          Ok(issue) => cache(cx).issues.insert(at, Instant::now(), issue),
+          Err(pr) => cache(cx).prs.insert(at, Instant::now(), pr),
+        });
+      }
+    })
+    .detach();
   }
 
   /// Reads the open PR's checks every [`CHECKS_POLL`] while it shows.
@@ -513,14 +758,18 @@ impl GithubView {
       let checks = cx
         .background_spawn(async move { host.pr_checks(&key.repo, key.number) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if view.detail.generation == generation {
-          if let Ok(checks) = checks {
-            view.detail.checks = checks;
+      this
+        .update(cx, |view, cx| {
+          // Most polls find the checks as they were: nothing to redraw.
+          match checks {
+            Ok(checks) if view.detail.generation == generation && view.detail.checks != checks => {
+              view.detail.checks = checks;
+              cx.notify();
+            }
+            _ => {}
           }
-          cx.notify();
-        }
-      });
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -554,11 +803,13 @@ impl GithubView {
         if setting_up {
           cx.spawn(async move |this, cx| {
             cx.background_executor().timer(SETUP_POLL).await;
-            let _ = this.update(cx, |view, cx| {
-              if view.detail.generation == generation {
-                view.load_treq(cx);
-              }
-            });
+            this
+              .update(cx, |view, cx| {
+                if view.detail.generation == generation {
+                  view.load_treq(cx);
+                }
+              })
+              .ignore_closed();
           })
           .detach();
         }
@@ -608,15 +859,6 @@ impl GithubView {
         }
       },
     );
-  }
-
-  pub(super) fn toast(&self, tone: ToastTone, title: &str, description: impl Into<String>) {
-    self.host.notify(NativeEvent::Toast {
-      title: title.into(),
-      description: description.into(),
-      tone,
-      action: None,
-    });
   }
 
   /// Every run's key in the repository: React's, and those GPUI runs
@@ -669,12 +911,14 @@ impl GithubView {
       run,
       move |target, run| host.run_checks(target, run),
       move |_, cx| {
-        let _ = view.update(cx, |view, cx| {
-          view
-            .host
-            .notify(NativeEvent::WorkspaceChanged { repo_path });
-          view.reload_checks(cx);
-        });
+        view
+          .update(cx, |view, cx| {
+            view
+              .host
+              .notify(NativeEvent::WorkspaceChanged { repo_path });
+            view.reload_checks(cx);
+          })
+          .ignore_closed();
       },
     );
   }
@@ -830,25 +1074,23 @@ impl GithubView {
     self.host.refresh_pr_status(&self.route.repo_path, branch);
   }
 
-  /// `useCreateWorkspacePr`'s success toast, with its "Open in Web" button.
+  /// `useCreateWorkspacePr`'s success toast, with its "Open in web" button.
   pub(super) fn pr_created_toast(&self, repo: &str, number: u64, draft: bool) {
     let url = format!("https://github.com/{repo}/pull/{number}");
     let host = self.host.clone();
     let id = register_toast_action(move || host.open_url(&url));
-    self.host.notify(NativeEvent::Toast {
-      title: if draft {
+    self.host.notify(NativeEvent::from(
+      Toast::success(if draft {
         "Draft PR created"
       } else {
         "Pull request created"
-      }
-      .into(),
-      description: format!("#{number}"),
-      tone: ToastTone::Success,
-      action: Some(ToastAction {
-        label: "Open in Web".into(),
+      })
+      .description(format!("#{number}"))
+      .action(ToastAction {
+        label: "Open in web".into(),
         id,
       }),
-    });
+    ));
   }
 
   fn create_issue(&mut self, cx: &mut Context<Self>) {
@@ -899,6 +1141,7 @@ fn plan_load<T: Clone>(
     *pages = Pages {
       key: Some(key),
       generation: pages.generation,
+      version: pages.version + 1,
       ..Pages::default()
     };
   }
@@ -940,7 +1183,7 @@ fn finish_load<T>(pages: &mut Pages<T>, result: Result<Vec<GhListPage<T>>, Strin
   pages.fetching_next = false;
   match result {
     Ok(read) => {
-      pages.pages = read;
+      pages.set_pages(read);
       pages.error = None;
     }
     Err(err) => pages.error = Some(err),
@@ -1002,18 +1245,17 @@ impl GithubView {
   ) -> impl IntoElement {
     let remote = self.remote.clone();
     let title = match &remote {
-      None => ui::text(div(), TextSize::Sm)
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(p.muted_foreground)
-        .child("Loading…"),
+      None => div()
+        .flex()
+        .child(ui::Loading::new("github-remote-loading", p).label("Reading the remote…")),
       Some(Some(info)) => ui::text(div(), TextSize::Sm)
         .font_weight(FontWeight::SEMIBOLD)
         .font_family(theme::MONO_FONT)
         .child(info.full_name.clone()),
+      // The body says why; the header only names the screen.
       Some(None) => ui::text(div(), TextSize::Sm)
         .font_weight(FontWeight::SEMIBOLD)
-        .text_color(p.destructive)
-        .child("No GitHub remote"),
+        .child("GitHub"),
     };
     let header = div()
       .flex()
@@ -1031,7 +1273,7 @@ impl GithubView {
           .child(title),
       );
     let has_remote = matches!(remote, Some(Some(_)));
-    let body = self.list_body(show_detail, p, cx);
+    let body = self.list_body(show_detail, p, window, cx);
     named(div(), "github-list")
       .flex()
       .flex_col()
@@ -1054,44 +1296,31 @@ impl GithubView {
         has_remote && self.route.creating && self.route.tab == Tab::Issues,
         |d| d.child(self.new_issue_form(p, window, cx)),
       )
-      .child(
-        div()
-          .id("github-list-scroll")
-          .flex_1()
-          .min_h_0()
-          .overflow_y_scroll()
-          .child(body),
-      )
+      .child(div().flex_1().min_h_0().child(body))
   }
 
   fn view_tabs(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     let view = cx.weak_entity();
-    let merge_queue = self.route.merge_queue.as_ref();
     let selected = match self.route.tab {
       Tab::Issues => 0,
       Tab::Prs => 1,
     };
-    let mut tabs = vec![
-      ui::Tab::new("github-tab-issues", "Issues"),
-      ui::Tab::new("github-tab-prs", "Pull Requests"),
-    ];
-    if merge_queue.is_some() {
-      let mut tab = ui::Tab::new("github-tab-merge-queue", "Merge Queue");
-      if merge_queue.is_some_and(|mq| !mq.pro) {
-        tab = tab.badge("PRO", ui::Tone::Neutral);
+    fn with_total<T>(tab: ui::Tab, pages: &Pages<T>) -> ui::Tab {
+      match pages.pages.first().and_then(|p| p.total_count) {
+        Some(total) => tab.count(total as usize),
+        None => tab,
       }
-      tabs.push(tab);
     }
+    let tabs = vec![
+      with_total(ui::Tab::new("github-tab-issues", "Issues"), &self.issues),
+      with_total(ui::Tab::new("github-tab-prs", "Pull requests"), &self.prs),
+    ];
     div().flex().items_center().gap_2().child(
       ui::Tabs::new("github-tabs", p)
         .tabs(tabs)
         .selected(selected)
         .on_select(move |ix, _, cx| {
-          let press = [
-            "github.tab:issues",
-            "github.tab:prs",
-            "github.tab:merge-queue",
-          ][ix];
+          let press = ["github.tab:issues", "github.tab:prs"][ix];
           view.update(cx, |view, cx| view.press(press, cx)).ok();
         }),
     )
@@ -1121,6 +1350,8 @@ impl GithubView {
           named(div(), format!("github-filter-{}", filter.value())),
           TextSize::Sm,
         )
+        .role(gpui::Role::Button)
+        .aria_label(filter.label())
         .px_2()
         .py_0p5()
         .rounded(radius::SM)
@@ -1399,6 +1630,7 @@ impl GithubView {
     &mut self,
     show_detail: bool,
     p: &Palette,
+    window: &Window,
     cx: &mut Context<Self>,
   ) -> gpui::AnyElement {
     match &self.remote {
@@ -1407,17 +1639,14 @@ impl GithubView {
         return div()
           .size_full()
           .flex()
-          .flex_col()
           .items_center()
           .justify_center()
-          .p_8()
-          .gap_3()
-          .text_center()
-          .child(ui::icon(theme::ICON_CIRCLE_ALERT, 32., p.muted_foreground))
           .child(
-            ui::text(div(), TextSize::Sm)
-              .text_color(p.muted_foreground)
-              .child("No GitHub remote detected for this repository."),
+            ui::EmptyState::new("github-no-remote", "No GitHub remote", p)
+              .icon(theme::ICON_GITHUB)
+              .message(
+                "Add a github.com remote to this repository to see its pull requests and issues.",
+              ),
           )
           .into_any_element()
       }
@@ -1427,155 +1656,242 @@ impl GithubView {
       || -> parts::OnClick { Box::new(cx.listener(|view, _, _, cx| view.reload_list(false, cx))) };
     match self.route.tab {
       Tab::Issues => {
-        let pages = &self.issues;
-        if pages.loading {
-          return div()
-            .py_12()
-            .child(ui::Loading::new("github-list-loading", p))
-            .into_any_element();
+        if self.issues.loading {
+          return scrolled(
+            ui::delayed(
+              "github-list-loading",
+              div()
+                .py_12()
+                .child(ui::Loading::new("github-list-loading-spinner", p)),
+            )
+            .into_any_element(),
+          );
         }
         let issues = self.issue_items();
-        if let (Some(err), true) = (&pages.error, issues.is_empty()) {
-          return parts::error_state(
-            "github-list",
-            "Could not load issues",
-            err,
-            p,
-            Some(retry()),
-          )
-          .into_any_element();
+        if let (Some(err), true) = (&self.issues.error, issues.is_empty()) {
+          return scrolled(
+            div()
+              .py_12()
+              .child(
+                ui::EmptyState::failed("github-list-error", "Couldn't load issues", err.clone(), p)
+                  .action(ui::error_actions(
+                    "github-list",
+                    err.clone(),
+                    Some(retry()),
+                    p,
+                  )),
+              )
+              .into_any_element(),
+          );
         }
         if issues.is_empty() {
-          return ui::EmptyState::new("github-no-issues", "No issues found.", p)
-            .icon(theme::ICON_CIRCLE_DOT)
-            .into_any_element();
+          return scrolled(
+            ui::EmptyState::new("github-no-issues", "No issues", p)
+              .message("This repository has no issues in this state.")
+              .icon(theme::ICON_CIRCLE_DOT)
+              .into_any_element(),
+          );
         }
-        let (has_next, next) = (pages.has_next(), pages.fetching_next);
-        let selected = self.route.selected;
-        div()
-          .children(issues.iter().map(|issue| {
-            let n = issue.number;
-            self
-              .row(
-                format!("github-issue-{n}"),
-                selected == Some(n),
-                p,
-                cx,
-                move |view, cx| view.press(format!("github.select:{n}"), cx),
-              )
-              .child(
-                div()
-                  .flex_1()
-                  .min_w_0()
-                  .child(parts::row_title(&issue.title, n, p))
-                  .child(
-                    parts::row_meta(p)
-                      .child(parts::state_chip(&issue.state, false, p))
-                      .child(
-                        div()
-                          .flex_none()
-                          .child(crate::gpui_shell::time::date(&issue.created_at)),
-                      ),
-                  ),
-              )
-              .child(chevron(p))
-          }))
-          .when(has_next, |d| {
-            d.child(parts::load_more(
-              "github-load-more",
-              next,
-              p,
-              Box::new(cx.listener(|view, _, _, cx| view.reload_list(true, cx))),
-            ))
+        let rows = issues
+          .iter()
+          .enumerate()
+          .map(|(ix, issue)| ListRow::Item {
+            ix,
+            number: issue.number,
+            sig: signature(&[&issue.title, &issue.state, &issue.created_at], false),
+            branches: false,
           })
-          .into_any_element()
+          .chain(self.issues.has_next().then_some(ListRow::LoadMore))
+          .collect();
+        self.issue_rows.sync(window, rows, |a, b| a == b);
+        gpui::list(
+          self.issue_rows.list.clone(),
+          cx.processor(|view, ix, _, cx| view.issue_list_row(ix, cx)),
+        )
+        .size_full()
+        .into_any_element()
       }
       Tab::Prs => {
-        let pages = &self.prs;
-        if pages.loading {
-          return div()
-            .py_12()
-            .child(ui::Loading::new("github-list-loading", p))
-            .into_any_element();
+        if self.prs.loading {
+          return scrolled(
+            ui::delayed(
+              "github-list-loading",
+              div()
+                .py_12()
+                .child(ui::Loading::new("github-list-loading-spinner", p)),
+            )
+            .into_any_element(),
+          );
         }
         let prs = self.pr_items();
-        if let (Some(err), true) = (&pages.error, prs.is_empty()) {
-          return parts::error_state(
-            "github-list",
-            "Could not load pull requests",
-            err,
-            p,
-            Some(retry()),
-          )
-          .into_any_element();
+        if let (Some(err), true) = (&self.prs.error, prs.is_empty()) {
+          return scrolled(
+            div()
+              .py_12()
+              .child(
+                ui::EmptyState::failed(
+                  "github-list-error",
+                  "Couldn't load pull requests",
+                  err.clone(),
+                  p,
+                )
+                .action(ui::error_actions(
+                  "github-list",
+                  err.clone(),
+                  Some(retry()),
+                  p,
+                )),
+              )
+              .into_any_element(),
+          );
         }
         if prs.is_empty() {
-          return ui::EmptyState::new("github-no-prs", "No pull requests found.", p)
-            .icon(theme::ICON_PR)
-            .into_any_element();
+          return scrolled(
+            ui::EmptyState::new("github-no-prs", "No pull requests", p)
+              .message("This repository has no pull requests in this state.")
+              .icon(theme::ICON_PR)
+              .into_any_element(),
+          );
         }
-        let (has_next, next) = (pages.has_next(), pages.fetching_next);
-        let visible = self.visible_prs();
-        let selected = self.route.selected;
-        div()
-          .when(visible.is_empty(), |d| {
-            d.child(
-              ui::EmptyState::new(
-                "github-no-matching-prs",
-                "No loaded pull requests match the filters.",
-                p,
-              )
-              .icon(theme::ICON_PR),
-            )
-          })
-          .children(visible.iter().map(|pr| {
-            let n = pr.number;
-            self
-              .row(
-                format!("github-pr-{n}"),
-                selected == Some(n),
-                p,
-                cx,
-                move |view, cx| view.press(format!("github.select:{n}"), cx),
-              )
-              .child(parts::pr_list_item(pr, !show_detail, p))
-              .child(chevron(p))
-          }))
-          .when(has_next, |d| {
-            d.child(parts::load_more(
-              "github-load-more",
-              next,
-              p,
-              Box::new(cx.listener(|view, _, _, cx| view.reload_list(true, cx))),
-            ))
-          })
-          .into_any_element()
+        let rows = self.pr_list_rows(!show_detail);
+        self.pr_rows.sync(window, rows, |a, b| a == b);
+        gpui::list(
+          self.pr_rows.list.clone(),
+          cx.processor(|view, ix, _, cx| view.pr_list_row(ix, cx)),
+        )
+        .size_full()
+        .into_any_element()
       }
     }
   }
 
-  /// An `IssueListItem` or `PrListItem` button.
+  fn issue_list_row(&mut self, ix: usize, cx: &mut Context<Self>) -> gpui::AnyElement {
+    let p = theme::palette(self.dark);
+    let Some(row) = self.issue_rows.get(ix).cloned() else {
+      return div().into_any_element();
+    };
+    match row {
+      ListRow::Item { ix, number: n, .. } => {
+        let issues = self.issue_items();
+        let Some(issue) = issues.get(ix).filter(|issue| issue.number == n) else {
+          return div().into_any_element();
+        };
+        let selected = self.route.selected;
+        self
+          .row(
+            format!("github-issue-{n}"),
+            &issue.title,
+            selected == Some(n),
+            &p,
+            cx,
+            move |view, cx| view.press(format!("github.select:{n}"), cx),
+          )
+          .on_hover(
+            cx.listener(move |view, hovered: &bool, _, cx| view.hover_item(n, *hovered, cx)),
+          )
+          .child(
+            div()
+              .flex_1()
+              .min_w_0()
+              .child(parts::row_title(&issue.title, n, &p))
+              .child(
+                parts::row_meta(&p)
+                  .child(parts::state_chip(&issue.state, false, &p))
+                  .child(
+                    div()
+                      .flex_none()
+                      .child(crate::gpui_shell::time::date(&issue.created_at)),
+                  ),
+              ),
+          )
+          .child(chevron(&p))
+          .into_any_element()
+      }
+      ListRow::NoMatch => div().into_any_element(),
+      ListRow::LoadMore => self.load_more_row(&p, cx),
+    }
+  }
+
+  fn pr_list_row(&mut self, ix: usize, cx: &mut Context<Self>) -> gpui::AnyElement {
+    let p = theme::palette(self.dark);
+    let Some(row) = self.pr_rows.get(ix).cloned() else {
+      return div().into_any_element();
+    };
+    match row {
+      ListRow::Item {
+        ix,
+        number: n,
+        branches,
+        ..
+      } => {
+        let prs = self.pr_items();
+        let Some(pr) = prs.get(ix).filter(|pr| pr.number == n) else {
+          return div().into_any_element();
+        };
+        let selected = self.route.selected;
+        self
+          .row(
+            format!("github-pr-{n}"),
+            &pr.title,
+            selected == Some(n),
+            &p,
+            cx,
+            move |view, cx| view.press(format!("github.select:{n}"), cx),
+          )
+          .on_hover(
+            cx.listener(move |view, hovered: &bool, _, cx| view.hover_item(n, *hovered, cx)),
+          )
+          .child(parts::pr_list_item(pr, branches, &p))
+          .child(chevron(&p))
+          .into_any_element()
+      }
+      ListRow::NoMatch => ui::EmptyState::new(
+        "github-no-matching-prs",
+        "No pull requests match",
+        &p,
+      )
+      .icon(theme::ICON_PR)
+      .message("Only loaded pull requests are searched. Clear the search, change the filters or load more.")
+      .into_any_element(),
+      ListRow::LoadMore => self.load_more_row(&p, cx),
+    }
+  }
+
+  fn load_more_row(&self, p: &Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
+    let next = match self.route.tab {
+      Tab::Issues => self.issues.fetching_next,
+      Tab::Prs => self.prs.fetching_next,
+    };
+    ui::Row::load_more("github-load-more", next, p)
+      .when(!next, |row| {
+        row.on_click(cx.listener(|view, _, _, cx| view.reload_list(true, cx)))
+      })
+      .into_any_element()
+  }
+
+  /// An `IssueListItem` or `PrListItem` row, named by its title.
   fn row(
     &self,
     id: String,
+    label: &str,
     selected: bool,
     p: &Palette,
     cx: &mut Context<Self>,
     on_click: impl Fn(&mut Self, &mut Context<Self>) + 'static,
-  ) -> gpui::Stateful<Div> {
-    let muted = p.muted;
-    named(div(), id)
+  ) -> ui::Row {
+    // A list entry that opens on a click, marked selected while open.
+    ui::Row::new(id, p)
+      .role(gpui::Role::ListItem)
+      .density(ui::RowDensity::Default)
+      .label(label.to_string())
+      .selected(selected)
       .w_full()
       .px_3()
       .py_2p5()
       .border_b_1()
       .border_color(p.border)
-      .flex()
+      .rounded_none()
       .items_start()
-      .gap_2()
-      .cursor_pointer()
-      .when(selected, |d| d.bg(p.selected()))
-      .when(!selected, |d| d.hover(move |s| s.bg(muted.opacity(0.5))))
       .on_click(cx.listener(move |view, _, _, cx| on_click(view, cx)))
   }
 
@@ -1608,7 +1924,7 @@ impl GithubView {
       .child(
         ui::text(div(), TextSize::Sm)
           .font_weight(FontWeight::SEMIBOLD)
-          .child("New Issue"),
+          .child("New issue"),
       )
       .child(ui::text(
         div().child(form::input_field(
@@ -1637,7 +1953,7 @@ impl GithubView {
               pending,
               p.primary_foreground,
             )
-            .label("Submit Issue")
+            .label("Submit issue")
             .on_click(cx.listener(|view, _, _, cx| view.create_issue(cx))),
           )
           .child(
@@ -1654,6 +1970,16 @@ impl GithubView {
           .child(err)
       }))
   }
+}
+
+/// A list's message, which scrolls like a list would.
+fn scrolled(content: gpui::AnyElement) -> gpui::AnyElement {
+  div()
+    .id("github-list-scroll")
+    .size_full()
+    .overflow_y_scroll()
+    .child(content)
+    .into_any_element()
 }
 
 fn chevron(p: &Palette) -> impl IntoElement {

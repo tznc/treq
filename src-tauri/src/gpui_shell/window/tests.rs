@@ -16,7 +16,7 @@ use tauri_plugin_gpui::gpui;
 use super::{
   actions::{Menu, Shortcut},
   controller::{Presentation, WindowController},
-  data::{Flags, POLL, SESSIONS_POLL},
+  data::{Flags, BACKGROUND_EVERY, POLL, SESSIONS_POLL},
   host::{FileWatch, WindowHost},
   remote::{RemoteHost, UserManagedValues},
   tree::tests::workspace,
@@ -30,12 +30,13 @@ use crate::{
     remote_records::{self, RestoreFailure, SavedRepository},
     repo::RepoBranch,
     supporting_repos::SupportingRepo,
+    workspaces::WorkspaceSummary,
     SingleRebaseResult, WorkspaceSidebarStatus,
   },
   github::{GitRemoteInfo, PrInfo},
   gpui_shell::{
     confirm::Question,
-    native::{NativeEvent, ToastTone},
+    native::NativeEvent,
     remote_repo::{Mutation, RemoteRepository},
     screen::{account_data::CloudAction, ScreenAction, View},
     sidebar::SidebarAction,
@@ -64,10 +65,22 @@ struct FakeHost {
   /// The next branch read fails, as one before `prepare_repo`'s jj init
   /// does.
   no_branch_once: std::sync::atomic::AtomicBool,
+  /// The checkout's label, `main` unless set (a git-side checkout moves it).
+  branch_ref: Mutex<Option<String>>,
+  /// The workspaces come from a database the window can list at once.
+  from_db: bool,
+  /// What `summaries` answers, when the host reads in one round trip.
+  summaries: Mutex<Option<Vec<WorkspaceSummary>>>,
+  /// Every remote read fails so, as when the host refuses the login.
+  read_error: Option<String>,
   /// Every call, in order.
   calls: Mutex<Vec<String>>,
+  /// The name of the project the window keeps its repositories in.
+  project_name: Mutex<Option<String>>,
   /// The watched checkouts, each with the sender that reports an edit.
   watches: Mutex<Vec<(String, UnboundedSender<()>)>>,
+  /// The watched workspace databases, each with the sender that reports a write.
+  db_watches: Mutex<Vec<(String, UnboundedSender<()>)>>,
 }
 
 impl FakeHost {
@@ -114,6 +127,14 @@ impl WindowHost for FakeHost {
     )
   }
 
+  fn listed_workspaces(&self, repo: &str) -> Option<Vec<Workspace>> {
+    if !self.from_db {
+      return None;
+    }
+    self.record(format!("listed {repo}"));
+    self.workspaces.lock().unwrap().get(repo).cloned()
+  }
+
   fn statuses(&self, _: &str) -> Result<Vec<WorkspaceSidebarStatus>, String> {
     Ok(Vec::new())
   }
@@ -121,6 +142,11 @@ impl WindowHost for FakeHost {
   fn has_changes(&self, _: &str, id: i64) -> Option<bool> {
     self.record(format!("detail {id}"));
     Some(false)
+  }
+
+  fn summaries(&self, repo: &str) -> Option<Vec<WorkspaceSummary>> {
+    self.record(format!("summaries {repo}"));
+    self.summaries.lock().unwrap().clone()
   }
 
   fn sessions(&self, repo: &str) -> Vec<Session> {
@@ -135,9 +161,15 @@ impl WindowHost for FakeHost {
     {
       return None;
     }
+    let name = self
+      .branch_ref
+      .lock()
+      .unwrap()
+      .clone()
+      .unwrap_or_else(|| "main".into());
     Some(RepoBranch {
-      current_branch: Some("main".into()),
-      display_ref: "main".into(),
+      current_branch: Some(name.clone()),
+      display_ref: name,
       is_detached: false,
     })
   }
@@ -213,6 +245,14 @@ impl WindowHost for FakeHost {
     Ok(path.into())
   }
 
+  fn project_name(&self) -> Option<String> {
+    self.project_name.lock().unwrap().clone()
+  }
+
+  fn clear_repo(&self) {
+    self.record("clear repo");
+  }
+
   fn remove_supporting(&self, _: &str, path: &str) -> Result<(), String> {
     self.record(format!("remove {path}"));
     self.supporting.lock().unwrap().retain(|r| r.path != path);
@@ -227,8 +267,12 @@ impl WindowHost for FakeHost {
     Ok(())
   }
 
-  fn toast(&self, _: ToastTone, title: &str, _: &str) {
-    self.record(format!("toast {title}"));
+  fn show_toast(&self, toast: crate::gpui_shell::native::Toast) {
+    self.record(format!("toast {}", toast.title));
+  }
+
+  fn review_done(&self, repo_path: &str, workspace_id: i64) {
+    self.record(format!("review done {repo_path} {workspace_id}"));
   }
 
   fn open_url(&self, url: &str) {
@@ -242,6 +286,15 @@ impl WindowHost for FakeHost {
   fn watch_files(&self, path: &str) -> Option<FileWatch> {
     let (tx, changes) = futures::channel::mpsc::unbounded();
     self.watches.lock().unwrap().push((path.into(), tx));
+    Some(FileWatch {
+      changes,
+      _watcher: Box::new(()),
+    })
+  }
+
+  fn watch_db(&self, repo: &str) -> Option<FileWatch> {
+    let (tx, changes) = futures::channel::mpsc::unbounded();
+    self.db_watches.lock().unwrap().push((repo.into(), tx));
     Some(FileWatch {
       changes,
       _watcher: Box::new(()),
@@ -312,9 +365,10 @@ impl RemoteHost for FakeHost {
     vec![saved(endpoint_id, generation, "/srv/app")]
   }
 
-  fn register_user_managed(&self, values: &UserManagedValues) -> SshEndpoint {
+  fn register_user_managed(&self, values: &UserManagedValues) -> Result<SshEndpoint, String> {
+    super::remote::check_login(self, &endpoint())?;
     self.record(format!("register {}", values.hostname));
-    endpoint()
+    Ok(endpoint())
   }
 
   fn remote_read(
@@ -323,6 +377,9 @@ impl RemoteHost for FakeHost {
     request: TreqCommandRequest,
   ) -> Result<serde_json::Value, String> {
     self.record(format!("read {}", request.kind_name()));
+    if let Some(error) = &self.read_error {
+      return Err(error.clone());
+    }
     match request {
       TreqCommandRequest::ProbeRepo { repo } => Ok(serde_json::json!({
         "host": "devbox.example", "path": repo, "exists": !self.no_repo,
@@ -330,6 +387,23 @@ impl RemoteHost for FakeHost {
       })),
       TreqCommandRequest::InspectRepository { repo } => {
         Ok(serde_json::to_value(inspection(&repo)).unwrap())
+      }
+      TreqCommandRequest::ListDirectories { path } => {
+        let path = if path == "~" {
+          "/home/me".to_string()
+        } else {
+          path
+        };
+        let parent = path
+          .rsplit_once('/')
+          .map(|(p, _)| if p.is_empty() { "/" } else { p });
+        Ok(serde_json::json!({
+          "path": path, "parent": parent, "is_repo": path == "/srv/app" && !self.no_repo,
+          "entries": [
+            {"name": ".cache", "path": format!("{path}/.cache"), "hidden": true, "is_repo": false},
+            {"name": "app", "path": format!("{path}/app"), "hidden": false, "is_repo": true},
+          ],
+        }))
       }
       _ => Err("unexpected read".into()),
     }
@@ -377,6 +451,16 @@ impl RemoteHost for FakeHost {
     Some((descriptor, endpoint(), generation))
   }
 
+  fn saved_remote(&self, id: &str) -> Option<(SavedRepository, SshEndpoint, u64)> {
+    self
+      .last_remote()
+      .filter(|(descriptor, ..)| descriptor.id == id)
+  }
+
+  fn machine_endpoint(&self, id: &str) -> Option<(SshEndpoint, u64)> {
+    Some((endpoint(), 0)).filter(|(e, _)| e.id == id)
+  }
+
   fn cloud_action(&self, action: CloudAction) {
     self.record(format!("cloud {action:?}"));
   }
@@ -400,7 +484,13 @@ impl Window {
     let repo = repo.map(String::from);
     let controller = cx.update(|cx| {
       cx.new(|cx| {
-        WindowController::new(host, repo, Rc::new(move |p, _| s.borrow_mut().push(p)), cx)
+        WindowController::new(
+          host,
+          repo,
+          Rc::new(move |p, _| s.borrow_mut().push(p)),
+          None,
+          cx,
+        )
       })
     });
     cx.run_until_parked();
@@ -470,7 +560,7 @@ impl gpui::Render for ConfirmView {
   fn render(&mut self, window: &mut gpui::Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
     let controller = self.controller.clone();
     let p = crate::gpui_shell::theme::palette(false);
-    gpui::div().size_full().child(self.question.dialog(
+    gpui::div().size_full().child(self.question.confirm_dialog(
       &self.focus,
       window,
       &p,
@@ -534,6 +624,50 @@ fn opens_on_its_repository_and_draws_it(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn draws_the_rows_before_the_branch_and_the_jj_reads(cx: &mut TestAppContext) {
+  let mut host = FakeHost::on("/repo", vec![workspace(1, "a", Some("main"))]);
+  host.from_db = true;
+  let host = Arc::new(host);
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  let first_rows = window
+    .shown
+    .borrow()
+    .iter()
+    .position(|p| {
+      p.sidebar
+        .as_ref()
+        .is_some_and(|s| !s.repos[0].workspaces.is_empty())
+    })
+    .expect("rows are drawn");
+  let rows_without_branch = window.shown.borrow()[first_rows]
+    .sidebar
+    .as_ref()
+    .is_some_and(|s| s.repos[0].home_ref.is_none());
+  assert!(rows_without_branch, "the rows come before the branch");
+  assert_eq!(window.sidebar_ids(), [1]);
+  assert_eq!(
+    window.last().sidebar.unwrap().repos[0].home_ref.as_deref(),
+    Some("main")
+  );
+  let calls = host.calls();
+  let at = |call: &str| calls.iter().position(|c| c == call).expect(call);
+  assert!(at("listed /repo") < at("detail 1"));
+  assert_eq!(host.count("workspaces /repo"), 1, "listed once more, whole");
+}
+
+#[gpui::test]
+fn draws_the_saved_theme_in_the_first_presentation(cx: &mut TestAppContext) {
+  let host = repo_host();
+  host
+    .settings
+    .lock()
+    .unwrap()
+    .insert("theme".into(), "dark".into());
+  let window = Window::open(cx, host, Some("/repo"));
+  assert!(window.shown.borrow().iter().all(|p| p.dark), "never light");
+}
+
+#[gpui::test]
 fn shows_onboarding_without_a_repository(cx: &mut TestAppContext) {
   let host = Arc::new(FakeHost::default());
   let window = Window::open(cx, host.clone(), None);
@@ -585,7 +719,7 @@ fn declining_to_initialize_a_folder_leaves_it_alone(cx: &mut TestAppContext) {
   window.click_in_confirm(cx, "Cancel");
   assert_eq!(host.count("init /plain"), 0);
   assert_eq!(host.count("open /plain"), 0);
-  assert_eq!(host.count("toast Not a Git Repository"), 1);
+  assert_eq!(host.count("toast Not a Git repository"), 1);
   assert_eq!(window.asked(), None);
 }
 
@@ -673,10 +807,12 @@ fn a_read_that_panics_does_not_stop_the_window_reading(cx: &mut TestAppContext) 
     .panic_once
     .store(true, std::sync::atomic::Ordering::SeqCst);
   let window = Window::open(cx, host.clone(), Some("/repo"));
-  assert!(window.sidebar_ids().is_empty(), "the first read failed");
+  // The first read failed; `prepare_repo` finishing after it reads again,
+  // and otherwise the poll does.
   cx.executor().advance_clock(POLL);
   cx.run_until_parked();
   assert_eq!(window.sidebar_ids(), [1, 2]);
+  assert!(!host.panic_once.load(std::sync::atomic::Ordering::SeqCst));
 }
 
 #[gpui::test]
@@ -685,9 +821,25 @@ fn reads_the_branch_again_when_the_first_read_raced_the_repo_init(cx: &mut TestA
   host
     .no_branch_once
     .store(true, std::sync::atomic::Ordering::SeqCst);
-  let window = Window::open(cx, host.clone(), Some("/repo"));
+  let window = Window::open(cx, host, Some("/repo"));
   let repos = window.last().sidebar.unwrap().repos;
   assert_eq!(repos[0].home_ref.as_deref(), Some("main"));
+}
+
+#[gpui::test]
+fn a_checkout_outside_treq_relabels_the_home_row(cx: &mut TestAppContext) {
+  let host = repo_host();
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  cx.run_until_parked();
+  *host.branch_ref.lock().unwrap() = Some("pr4232".into());
+  {
+    let watches = host.watches.lock().unwrap();
+    let (_, tx) = watches.iter().rev().find(|(p, _)| p == "/repo").unwrap();
+    let _ = tx.unbounded_send(());
+  }
+  cx.run_until_parked();
+  let repos = window.last().sidebar.unwrap().repos;
+  assert_eq!(repos[0].home_ref.as_deref(), Some("pr4232"));
 }
 
 #[gpui::test]
@@ -705,6 +857,57 @@ fn polls_on_swr_intervals(cx: &mut TestAppContext) {
   cx.executor().advance_clock(SESSIONS_POLL - POLL);
   cx.run_until_parked();
   assert_eq!(host.count("sessions /repo"), 2);
+}
+
+/// A window in the background polls a third as often, and reads what it
+/// skipped as soon as it is back in front.
+#[gpui::test]
+fn a_background_window_polls_less_and_catches_up_on_focus(cx: &mut TestAppContext) {
+  let host = repo_host();
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  window.controller.update(cx, |c, _| c.blurred());
+  for _ in 0..BACKGROUND_EVERY {
+    cx.executor().advance_clock(POLL);
+    cx.run_until_parked();
+  }
+  assert_eq!(host.count("workspaces /repo"), 2, "one read in three ticks");
+  cx.executor().advance_clock(POLL);
+  cx.run_until_parked();
+  assert_eq!(host.count("workspaces /repo"), 2);
+  window.controller.update(cx, |c, cx| c.focused(cx));
+  cx.run_until_parked();
+  assert_eq!(host.count("workspaces /repo"), 3, "the skipped tick, read");
+  window.controller.update(cx, |c, cx| c.focused(cx));
+  cx.run_until_parked();
+  assert_eq!(
+    host.count("workspaces /repo"),
+    3,
+    "nothing more to catch up"
+  );
+  cx.executor().advance_clock(POLL);
+  cx.run_until_parked();
+  assert_eq!(host.count("workspaces /repo"), 4, "every tick in front");
+}
+
+#[gpui::test]
+fn a_pr_poll_that_moved_stacks_reads_the_workspaces_again(cx: &mut TestAppContext) {
+  let host = repo_host();
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  cx.run_until_parked();
+  window
+    .controller
+    .update(cx, |c, cx| c.prs_changed("/repo", false, cx));
+  cx.run_until_parked();
+  assert_eq!(
+    host.count("workspaces /repo"),
+    1,
+    "PR state alone reads no workspaces"
+  );
+  window
+    .controller
+    .update(cx, |c, cx| c.prs_changed("/repo", true, cx));
+  cx.run_until_parked();
+  assert_eq!(host.count("workspaces /repo"), 2);
 }
 
 #[gpui::test]
@@ -755,6 +958,30 @@ fn selects_a_workspace_from_the_sidebar(cx: &mut TestAppContext) {
   assert_eq!(window.route_workspace(), Some(2));
   let sidebar = window.last().sidebar.unwrap();
   assert!(sidebar.repos[0].workspaces[1].selected);
+}
+
+/// What a click on a workspace row would show, for reading it ahead, is
+/// the route the click then presents; the model itself does not move.
+#[gpui::test]
+fn reads_ahead_the_route_a_workspace_click_shows(cx: &mut TestAppContext) {
+  let window = Window::open(cx, repo_host(), Some("/repo"));
+  let ahead = window
+    .controller
+    .read_with(cx, |c, _| c.workspace_route(2))
+    .expect("route");
+  assert_eq!(window.route_workspace(), None);
+  assert!(window.sidebar(
+    cx,
+    SidebarAction::SelectWorkspace {
+      id: 2,
+      shift: false,
+      toggle: false
+    }
+  ));
+  match window.screen_snapshot().view {
+    View::Workspace(route) => assert_eq!(*route, ahead),
+    _ => panic!("not the workspace view"),
+  }
 }
 
 #[gpui::test]
@@ -862,6 +1089,24 @@ fn edits_on_disk_in_the_selected_checkout_read_the_changes_again(cx: &mut TestAp
 }
 
 #[gpui::test]
+fn a_write_to_the_workspace_database_reads_the_workspaces_again(cx: &mut TestAppContext) {
+  let host = repo_host();
+  let _window = Window::open(cx, host.clone(), Some("/repo"));
+  cx.run_until_parked();
+  let before = host.count("workspaces /repo");
+  {
+    let watches = host.db_watches.lock().unwrap();
+    let (_, tx) = watches
+      .iter()
+      .find(|(p, _)| p == "/repo")
+      .expect("no db watch");
+    let _ = tx.unbounded_send(());
+  }
+  cx.run_until_parked();
+  assert!(host.count("workspaces /repo") > before);
+}
+
+#[gpui::test]
 fn opens_the_dialogs_and_file_picker_from_shortcuts(cx: &mut TestAppContext) {
   let window = Window::open(cx, repo_host(), Some("/repo"));
   window
@@ -869,6 +1114,7 @@ fn opens_the_dialogs_and_file_picker_from_shortcuts(cx: &mut TestAppContext) {
     .update(cx, |c, cx| c.shortcut(Shortcut::FilePicker, cx));
   let picker = window.last().file_picker.expect("no file picker");
   assert_eq!(picker.workspace_path, "/repo");
+  assert_eq!(picker.query, "");
   window.screen(
     cx,
     ScreenAction::Press {
@@ -938,6 +1184,10 @@ fn the_agent_prompt_starts_on_the_open_workspace(cx: &mut TestAppContext) {
   });
   cx.run_until_parked();
   assert_eq!(initial(&window), Some(2), "the palette's command");
+  window.press(cx, "agentPrompt.close");
+
+  window.press(cx, "code.agentPrompt");
+  assert_eq!(initial(&window), Some(2), "the Code tab's Agent button");
 }
 
 #[gpui::test]
@@ -956,7 +1206,7 @@ fn factory_reset_asks_then_returns_to_onboarding(cx: &mut TestAppContext) {
   window.click_in_confirm(cx, "Reset");
   let calls = host.calls();
   assert!(calls.contains(&"factory reset".to_string()));
-  assert!(calls.contains(&"toast Factory reset complete".to_string()));
+  assert!(calls.contains(&"toast Settings reset to defaults".to_string()));
   assert!(matches!(
     window.last().screen.unwrap().view,
     View::Onboarding(_)
@@ -1037,6 +1287,112 @@ fn adds_and_removes_supporting_repositories(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn removing_the_main_repository_shows_the_next_one(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::on("/repo", vec![workspace(1, "a", Some("main"))]));
+  host.supporting.lock().unwrap().push(SupportingRepo {
+    path: "/other".into(),
+    exists: true,
+  });
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  window.controller.update(cx, |c, cx| {
+    c.native_event(
+      &NativeEvent::Open {
+        what: crate::gpui_shell::native::OpenRequest::RemoveRepo {
+          repo_path: "/repo".into(),
+        },
+      },
+      cx,
+    )
+  });
+  cx.run_until_parked();
+  window.click_in_confirm(cx, "Remove repository");
+  let calls = host.calls();
+  let removed = calls
+    .iter()
+    .position(|c| c == "remove /repo")
+    .expect("removed");
+  let opened = calls
+    .iter()
+    .position(|c| c == "open /other")
+    .expect("opens the next");
+  assert!(removed < opened);
+}
+
+fn remove_repo(window: &Window, cx: &mut TestAppContext, path: &str) {
+  window.controller.update(cx, |c, cx| {
+    c.native_event(
+      &NativeEvent::Open {
+        what: crate::gpui_shell::native::OpenRequest::RemoveRepo {
+          repo_path: path.into(),
+        },
+      },
+      cx,
+    )
+  });
+  cx.run_until_parked();
+  window.click_in_confirm(cx, "Remove repository");
+}
+
+fn project_host(folder: Option<&str>) -> Arc<FakeHost> {
+  let host = FakeHost {
+    folder: folder.map(str::to_string),
+    ..FakeHost::on("/repo", vec![workspace(1, "a", Some("main"))])
+  };
+  *host.project_name.lock().unwrap() = Some("Checkout".into());
+  Arc::new(host)
+}
+
+#[gpui::test]
+fn removing_the_last_repository_leaves_an_empty_project(cx: &mut TestAppContext) {
+  let host = project_host(None);
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  remove_repo(&window, cx, "/repo");
+  assert!(host.calls().contains(&"clear repo".to_string()));
+  let sidebar = window.last().sidebar.expect("the sidebar stays");
+  assert!(sidebar.repos.is_empty());
+  assert_eq!(sidebar.project.as_deref(), Some("Checkout"));
+  assert!(matches!(
+    window.screen_snapshot().view,
+    View::ProjectHome(_)
+  ));
+}
+
+#[gpui::test]
+fn adding_a_repository_to_an_empty_project_opens_it(cx: &mut TestAppContext) {
+  let host = project_host(Some("/new"));
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  remove_repo(&window, cx, "/repo");
+  window
+    .controller
+    .update(cx, |c, cx| c.menu(Menu::AddRepository, cx));
+  cx.run_until_parked();
+  let calls = host.calls();
+  let added = calls.iter().position(|c| c == "add /new").expect("added");
+  let opened = calls.iter().position(|c| c == "open /new").expect("opened");
+  assert!(added < opened);
+}
+
+#[gpui::test]
+fn a_window_on_an_empty_project_shows_it(cx: &mut TestAppContext) {
+  let host = project_host(None);
+  let window = Window::open(cx, host, None);
+  cx.run_until_parked();
+  let sidebar = window.last().sidebar.expect("a sidebar");
+  assert!(sidebar.repos.is_empty());
+  assert!(matches!(
+    window.screen_snapshot().view,
+    View::ProjectHome(_)
+  ));
+}
+
+#[gpui::test]
+fn a_window_without_a_project_or_repo_shows_onboarding(cx: &mut TestAppContext) {
+  let window = Window::open(cx, Arc::new(FakeHost::default()), None);
+  cx.run_until_parked();
+  assert!(window.last().sidebar.is_none());
+}
+
+#[gpui::test]
 fn force_rebases_the_selected_workspace(cx: &mut TestAppContext) {
   let host = repo_host();
   let window = Window::open(cx, host.clone(), Some("/repo"));
@@ -1061,7 +1417,7 @@ fn force_rebases_the_selected_workspace(cx: &mut TestAppContext) {
   cx.run_until_parked();
   let calls = host.calls();
   assert!(calls.contains(&"rebase 2 a".to_string()));
-  assert!(calls.contains(&"toast Force rebase complete".to_string()));
+  assert!(calls.contains(&"toast Rebased".to_string()));
 }
 
 #[gpui::test]
@@ -1099,7 +1455,7 @@ fn opens_a_picked_folder_in_this_window(cx: &mut TestAppContext) {
 #[gpui::test]
 fn opens_the_remote_setup_itself(cx: &mut TestAppContext) {
   let window = Window::open(cx, repo_host(), Some("/repo"));
-  assert!(window.screen(cx, ScreenAction::OpenRemote));
+  assert!(window.press(cx, "machines.addSsh"));
   assert!(window.screen_snapshot().remote.setup.is_some());
   assert!(window.press(cx, "remote.setup.close"));
   assert!(window.screen_snapshot().remote.setup.is_none());
@@ -1113,7 +1469,7 @@ fn opens_the_remote_setup_itself(cx: &mut TestAppContext) {
 #[gpui::test]
 fn escape_closes_the_remote_setup(cx: &mut TestAppContext) {
   let window = Window::open(cx, repo_host(), Some("/repo"));
-  assert!(window.screen(cx, ScreenAction::OpenRemote));
+  assert!(window.press(cx, "machines.addSsh"));
   window
     .controller
     .update(cx, |c, cx| c.shortcut(Shortcut::Escape, cx));
@@ -1124,7 +1480,7 @@ fn escape_closes_the_remote_setup(cx: &mut TestAppContext) {
 /// A window that registered `endpoint()` and opened `/srv/app` on it.
 fn remote_window(cx: &mut TestAppContext, host: Arc<FakeHost>) -> Window {
   let window = Window::open(cx, host, None);
-  window.screen(cx, ScreenAction::OpenRemote);
+  window.press(cx, "machines.addSsh");
   window.field(
     cx,
     "remote.registerUserManaged",
@@ -1134,7 +1490,7 @@ fn remote_window(cx: &mut TestAppContext, host: Arc<FakeHost>) -> Window {
       "auth_identity_reference": "/k",
     }),
   );
-  window.field(cx, "remoteRepo.path", "/srv/app".into());
+  window.field(cx, "remoteRepo.browse", "/srv/app".into());
   window.press(cx, "remoteRepo.open");
   window
 }
@@ -1146,7 +1502,7 @@ fn registers_an_endpoint_and_opens_a_repository_on_it(cx: &mut TestAppContext) {
     vec![workspace(1, "a", Some("main"))],
   ));
   let window = Window::open(cx, host.clone(), None);
-  window.screen(cx, ScreenAction::OpenRemote);
+  window.press(cx, "machines.addSsh");
   window.field(
     cx,
     "remote.registerUserManaged",
@@ -1163,12 +1519,16 @@ fn registers_an_endpoint_and_opens_a_repository_on_it(cx: &mut TestAppContext) {
   };
   let form = route.remote_repo.expect("no repository form");
   assert_eq!(form.saved.len(), 1, "the endpoint's saved repositories");
-  window.field(cx, "remoteRepo.path", "/srv/app".into());
+  assert_eq!(form.path, "/home/me", "browsing starts at the host's home");
+  assert!(!form.show_hidden);
+  assert_eq!(form.listing.map(|l| l.entries.len()), Some(2));
+  window.field(cx, "remoteRepo.browse", "/srv/app".into());
   window.press(cx, "remoteRepo.open");
   let calls = host.calls();
   for call in [
     "register devbox.example",
     "saved ep-1 0",
+    "read ListDirectories",
     "read ProbeRepo",
     "read InspectRepository",
     "save remote /srv/app",
@@ -1209,6 +1569,60 @@ fn a_path_without_a_repository_offers_clone_and_init(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn the_folder_browser_moves_up_shows_hidden_and_uses_a_plain_folder(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    no_repo: true,
+    ..FakeHost::default()
+  });
+  let window = Window::open(cx, host, None);
+  window.press(cx, "machines.addSsh");
+  window.field(
+    cx,
+    "remote.registerUserManaged",
+    serde_json::json!({
+      "display_name": "Dev box", "hostname": "devbox.example", "port": 22,
+      "username": "me", "host_key_fingerprint": "SHA256:x",
+      "auth_identity_reference": "/k",
+    }),
+  );
+  let form = |window: &Window| {
+    let View::Onboarding(route) = window.screen_snapshot().view else {
+      panic!("not onboarding");
+    };
+    route.remote_repo.unwrap()
+  };
+  window.press(cx, "remoteRepo.up");
+  assert_eq!(form(&window).path, "/home");
+  window.field(cx, "remoteRepo.showHidden", true.into());
+  assert!(form(&window).show_hidden);
+  window.press(cx, "remoteRepo.useFolder");
+  let probe = form(&window).probe.expect("clone and init offered");
+  assert!(!probe.is_repo && probe.needs_clone);
+  window.field(cx, "remoteRepo.browse", "/home/me".into());
+  assert!(form(&window).probe.is_none(), "a new folder starts over");
+}
+
+#[gpui::test]
+fn the_cloud_row_opens_setup_on_the_cloud_workspace(cx: &mut TestAppContext) {
+  let window = Window::open(cx, Arc::new(FakeHost::default()), None);
+  let screen = |window: &Window| {
+    let setup = window.screen_snapshot().remote.setup.expect("setup open");
+    setup.screen
+  };
+  assert!(window.press(cx, "machines.cloud"));
+  assert_eq!(screen(&window).as_deref(), Some("managed"));
+  window.press(cx, "remote.setup.close");
+  assert!(window.press(cx, "machines.addSsh"));
+  assert_eq!(screen(&window).as_deref(), Some("ownVm"));
+  window.press(cx, "remote.setup.close");
+  window
+    .controller
+    .update(cx, |c, cx| c.menu(Menu::OpenSsh, cx));
+  cx.run_until_parked();
+  assert_eq!(screen(&window), None, "Open via SSH starts at the choice");
+}
+
+#[gpui::test]
 fn restores_the_last_remote_repository_at_launch(cx: &mut TestAppContext) {
   let host = Arc::new(FakeHost {
     last_remote: Some(saved("ep-1", 0, "/srv/app")),
@@ -1216,6 +1630,52 @@ fn restores_the_last_remote_repository_at_launch(cx: &mut TestAppContext) {
   });
   let window = Window::open(cx, host.clone(), None);
   assert!(host.calls().contains(&"restore /srv/app".to_string()));
+  assert!(window.screen_snapshot().repository.is_some());
+}
+
+#[gpui::test]
+fn a_machine_shows_its_repository_form_or_the_setup(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let window = Window::open(cx, host, None);
+  assert!(window.press(cx, &format!("machines.connect:{}", endpoint().id)));
+  let View::Onboarding(route) = window.screen_snapshot().view else {
+    panic!("not onboarding");
+  };
+  let form = route.remote_repo.expect("no repository form");
+  assert_eq!(form.endpoint_id, endpoint().id);
+  assert!(window.screen_snapshot().remote.setup.is_none());
+  // A machine that cannot be reached opens the setup dialog instead.
+  assert!(window.press(cx, "machines.connect:gone"));
+  assert!(window.screen_snapshot().remote.setup.is_some());
+}
+
+#[gpui::test]
+fn opens_a_recent_remote_repository_by_its_saved_id(cx: &mut TestAppContext) {
+  let descriptor = saved(&endpoint().id, 0, "/srv/app");
+  let host = Arc::new(FakeHost {
+    last_remote: Some(descriptor.clone()),
+    ..FakeHost::default()
+  });
+  let window = Window::open(cx, host.clone(), None);
+  // Launch restored it; leave it to open it again from the list.
+  host.calls.lock().unwrap().clear();
+  assert!(window.press(cx, &format!("machines.openSaved:{}", descriptor.id)));
+  assert!(host.calls().contains(&"restore /srv/app".to_string()));
+  assert!(window.screen_snapshot().repository.is_some());
+}
+
+#[gpui::test]
+fn opens_a_remote_project_repository_on_its_host(cx: &mut TestAppContext) {
+  let descriptor = saved(&endpoint().id, 0, "/srv/app");
+  let host = Arc::new(FakeHost {
+    last_remote: Some(descriptor),
+    ..FakeHost::default()
+  });
+  let key = crate::gpui_shell::window::remote::cache_key(&endpoint().id, 0, "/srv/app");
+  let window = Window::open(cx, host.clone(), Some(&key));
+  let calls = host.calls();
+  assert!(calls.contains(&"restore /srv/app".to_string()), "{calls:?}");
+  assert!(!calls.iter().any(|c| c.contains("ssh:")), "{calls:?}");
   assert!(window.screen_snapshot().repository.is_some());
 }
 
@@ -1308,6 +1768,20 @@ fn runs_the_cloud_workspace_buttons_in_rust(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn raise_cap_on_the_cloud_card_opens_account_settings(cx: &mut TestAppContext) {
+  let window = Window::open(cx, Arc::new(FakeHost::default()), None);
+  assert!(window.press(cx, "remote.cloud.spendCap.edit"));
+  assert_eq!(
+    window
+      .controller
+      .read_with(cx, |c, _| c.model().page.clone()),
+    super::model::Page::Settings {
+      tab: "account".into()
+    }
+  );
+}
+
+#[gpui::test]
 fn an_unverified_change_shows_its_notice_until_dismissed(cx: &mut TestAppContext) {
   let window = remote_window(cx, Arc::new(FakeHost::default()));
   window.controller.update(cx, |c, cx| {
@@ -1379,6 +1853,38 @@ fn deep_links_start_on_their_branch_or_toast_that_it_is_missing() {
     .lock()
     .unwrap()
     .is_processed("window-test-found"));
+}
+
+/// A remote poll reads every workspace's status in one request, not one
+/// per workspace, and falls back to those reads when the host has none.
+#[test]
+fn a_summaries_read_replaces_the_per_workspace_reads() {
+  use super::{data::Read, host::read_repo};
+  let host = FakeHost::on(
+    "/repo",
+    vec![workspace(1, "a", None), workspace(2, "b", None)],
+  );
+  let summary = |id, has_conflicts, has_changes| WorkspaceSummary {
+    workspace: workspace(id, "w", None),
+    has_conflicts,
+    has_changes,
+    commits_ahead: 0,
+    terminals: 0,
+    last_activity_at: None,
+  };
+  *host.summaries.lock().unwrap() = Some(vec![summary(1, false, true), summary(2, true, true)]);
+
+  let out = read_repo(&host, "/repo", Read::ALL, &[]);
+  assert_eq!(host.calls(), ["summaries /repo", "sessions /repo"]);
+  assert_eq!(out.workspaces.unwrap().len(), 2);
+  assert_eq!(out.statuses.unwrap().len(), 2);
+  // The conflicted workspace is not "open".
+  assert_eq!(out.has_changes.unwrap(), HashMap::from([(1, true)]));
+
+  *host.summaries.lock().unwrap() = None;
+  read_repo(&host, "/repo", Read::ALL, &[]);
+  assert_eq!(host.count("workspaces /repo"), 1);
+  assert_eq!(host.count("detail 1"), 1);
 }
 
 fn session_started(workspace_id: Option<i64>, select: bool) -> NativeEvent {
@@ -1519,6 +2025,52 @@ fn archiving_the_open_workspace_lands_on_its_stack_parent(cx: &mut TestAppContex
   remove(&host, 2);
   archived(&window, cx, vec![2]);
   assert_eq!(window.route_workspace(), None);
+}
+
+fn removal(window: &Window, cx: &mut TestAppContext, event: fn(String, Vec<i64>) -> NativeEvent) {
+  window.controller.update(cx, |c, cx| {
+    c.native_event(&event("/repo".into(), vec![3]), cx)
+  });
+  cx.run_until_parked();
+}
+
+/// The row goes and the view leaves it as the removal starts, while the
+/// workspace is still listed, and a read meanwhile does not bring it back.
+#[gpui::test]
+fn a_removal_hides_the_row_before_it_finishes(cx: &mut TestAppContext) {
+  let host = stack_host();
+  let window = Window::open(cx, host.clone(), Some("/repo"));
+  select(&window, cx, 3, false);
+  removal(&window, cx, |repo_path, ids| {
+    NativeEvent::WorkspacesRemoving { repo_path, ids }
+  });
+  assert!(!window.sidebar_ids().contains(&3));
+  assert_eq!(window.route_workspace(), Some(1), "onto its stack parent");
+  cx.executor().advance_clock(POLL);
+  cx.run_until_parked();
+  assert!(
+    !window.sidebar_ids().contains(&3),
+    "the host still lists it"
+  );
+  remove(&host, 3);
+  removal(&window, cx, |repo_path, ids| {
+    NativeEvent::WorkspacesRemoved { repo_path, ids }
+  });
+  assert!(!window.sidebar_ids().contains(&3));
+}
+
+#[gpui::test]
+fn a_failed_removal_brings_the_row_back(cx: &mut TestAppContext) {
+  let host = stack_host();
+  let window = Window::open(cx, host, Some("/repo"));
+  removal(&window, cx, |repo_path, ids| {
+    NativeEvent::WorkspacesRemoving { repo_path, ids }
+  });
+  assert!(!window.sidebar_ids().contains(&3));
+  removal(&window, cx, |repo_path, ids| {
+    NativeEvent::WorkspacesRestored { repo_path, ids }
+  });
+  assert!(window.sidebar_ids().contains(&3));
 }
 
 /// The listed-ids effect: a poll that no longer lists the open workspace.
@@ -1666,4 +2218,114 @@ fn draws_a_home_row_and_group_for_each_repository(cx: &mut TestAppContext) {
   );
   assert_eq!(window.route_workspace(), None);
   assert!(window.last().sidebar.unwrap().repos[0].home_selected);
+}
+
+/// What the model costs per action and per poll with many workspaces
+/// (ignored): `cargo test --features gpui-shell --lib window_model_perf --
+/// --ignored --nocapture --test-threads=1`.
+#[gpui::test]
+#[ignore = "perf report"]
+fn window_model_perf(cx: &mut TestAppContext) {
+  fn report(name: &str, samples: &mut [std::time::Duration]) {
+    samples.sort();
+    let ms = |d: std::time::Duration| d.as_secs_f64() * 1000.;
+    let mean = samples.iter().map(|d| ms(*d)).sum::<f64>() / samples.len() as f64;
+    println!(
+      "{name:<34} n={:<3} mean={mean:>8.3}ms  p50={:>8.3}ms  max={:>8.3}ms",
+      samples.len(),
+      ms(samples[samples.len() / 2]),
+      ms(samples[samples.len() - 1]),
+    );
+  }
+  for count in [50, 200] {
+    // Stacks of three, as agents stack work.
+    let workspaces: Vec<Workspace> = (1..=count)
+      .map(|i| {
+        let target = (i % 3 != 1).then(|| format!("feat/ws-{}", i - 1));
+        let mut w = workspace(i, &format!("feat/ws-{i}"), target.as_deref());
+        w.created_at = format!("2026-10-01T00:00:{:02}Z", i % 60);
+        w
+      })
+      .collect();
+    let host = Arc::new(FakeHost::on("/repo", workspaces));
+    let window = Window::open(cx, host, Some("/repo"));
+    let mut select: Vec<_> = (1..=30)
+      .map(|i| {
+        let start = std::time::Instant::now();
+        window.controller.update(cx, |c, cx| {
+          c.sidebar_action(
+            &SidebarAction::SelectWorkspace {
+              id: i,
+              shift: false,
+              toggle: false,
+            },
+            cx,
+          )
+        });
+        start.elapsed()
+      })
+      .collect();
+    report(&format!("{count} workspaces: select"), &mut select);
+    let mut poll: Vec<_> = (0..10)
+      .map(|_| {
+        let start = std::time::Instant::now();
+        cx.executor().advance_clock(POLL);
+        cx.run_until_parked();
+        start.elapsed()
+      })
+      .collect();
+    report(&format!("{count} workspaces: unchanged poll"), &mut poll);
+  }
+}
+
+/// A login the host refuses saves no host: the form stays open with why.
+#[gpui::test]
+fn a_refused_login_saves_no_host(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    read_error: Some(
+      "transport_error: ssh authentication failed: no authentication method succeeded".into(),
+    ),
+    ..FakeHost::default()
+  });
+  let window = Window::open(cx, host.clone(), None);
+  window.press(cx, "machines.addSsh");
+  window.field(
+    cx,
+    "remote.registerUserManaged",
+    serde_json::json!({
+      "display_name": "Dev box", "hostname": "devbox.example", "port": 22,
+      "username": "nobody", "host_key_fingerprint": "SHA256:x",
+      "auth_identity_reference": "/k",
+    }),
+  );
+  let calls = host.calls();
+  assert!(
+    !calls.iter().any(|c| c.starts_with("register")),
+    "{calls:?}"
+  );
+  let setup = window
+    .screen_snapshot()
+    .remote
+    .setup
+    .expect("setup stays open");
+  assert!(!setup.registering);
+  let error = setup.register_error.expect("an error");
+  assert!(error.starts_with("Authentication failed"), "{error}");
+}
+
+/// A host that runs no treq, or anything but a refused login, still saves.
+#[test]
+fn only_a_refused_login_fails_the_check() {
+  let refused = FakeHost {
+    read_error: Some("transport_error: ssh authentication failed: x".into()),
+    ..FakeHost::default()
+  };
+  assert!(super::remote::check_login(&refused, &endpoint()).is_err());
+  let no_treq = FakeHost {
+    read_error: Some(
+      "transport_error: remote command failed (exit=Some(127)): treq: not found".into(),
+    ),
+    ..FakeHost::default()
+  };
+  assert!(super::remote::check_login(&no_treq, &endpoint()).is_ok());
 }

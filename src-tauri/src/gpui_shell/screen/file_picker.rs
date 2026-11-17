@@ -4,12 +4,10 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::{sync::Arc, time::Duration};
 
-use gpui_kit::{
-  base::TestSupportExt as _,
-  component::input::{Escape, InputEvent, InputState, MoveDown, MoveUp},
-};
+use gpui_kit::component::input::{Escape, InputEvent, InputState, MoveDown, MoveUp};
 use tauri_plugin_gpui::gpui::{
   self, anchored, deferred, div, point, prelude::*, px, Context, Entity, EventEmitter,
   SharedString, Subscription, Task, Window,
@@ -21,9 +19,6 @@ use crate::gpui_shell::{
   ui::{self, TextSize},
 };
 
-/// `useDebounce(query, 150)`.
-const DEBOUNCE: Duration = Duration::from_millis(150);
-
 /// Which files the picker searches.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Scope {
@@ -31,6 +26,8 @@ pub struct Scope {
   pub workspace_id: Option<i64>,
   /// The checkout to index (workspace or repository root).
   pub workspace_path: String,
+  /// What it opens searching for.
+  pub query: String,
 }
 
 pub enum FilePickerEvent {
@@ -55,6 +52,7 @@ impl EventEmitter<FilePickerEvent> for FilePicker {}
 
 impl FilePicker {
   pub fn new(host: Arc<dyn CodeHost>, scope: Scope, dark: bool, cx: &mut Context<Self>) -> Self {
+    let query = scope.query.clone();
     let mut this = Self {
       host,
       scope,
@@ -66,16 +64,25 @@ impl FilePicker {
       _search: None,
       _subscription: None,
     };
-    this.search(String::new(), cx);
+    this.search(query, cx);
     this
   }
 
-  /// Searches for `query` once typing pauses (an empty one lists nothing).
+  /// Searches for `query` once typing pauses, if the host wants a pause (an
+  /// empty one searches at once: the picker opening, or the query cleared).
+  /// The shown results stay until the new ones arrive.
   pub(super) fn search(&mut self, query: String, cx: &mut Context<Self>) {
     self.query = query.clone();
     let (host, scope) = (self.host.clone(), self.scope.clone());
+    let delay = if query.trim().is_empty() {
+      Duration::ZERO
+    } else {
+      host.file_search_delay(&scope.repo_path)
+    };
     self._search = Some(cx.spawn(async move |this, cx| {
-      cx.background_executor().timer(DEBOUNCE).await;
+      if !delay.is_zero() {
+        cx.background_executor().timer(delay).await;
+      }
       let results = cx
         .background_spawn(async move {
           host.search_files(
@@ -88,11 +95,13 @@ impl FilePicker {
         })
         .await
         .unwrap_or_default();
-      let _ = this.update(cx, |picker, cx| {
-        picker.results = results;
-        picker.selected = 0;
-        cx.notify();
-      });
+      this
+        .update(cx, |picker, cx| {
+          picker.results = results;
+          picker.selected = 0;
+          cx.notify();
+        })
+        .ignore_closed();
     }));
   }
 
@@ -114,7 +123,12 @@ impl FilePicker {
     if let Some(input) = &self.input {
       return input.clone();
     }
-    let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search files..."));
+    let query = self.query.clone();
+    let input = cx.new(|cx| {
+      let mut input = InputState::new(window, cx).placeholder("Go to file…");
+      input.set_value(query, window, cx);
+      input
+    });
     input.update(cx, |input, cx| input.focus(window, cx));
     self._subscription =
       Some(cx.subscribe(
@@ -141,41 +155,34 @@ impl Render for FilePicker {
     let width = viewport.width * 0.4;
     let selected = self.selected;
     let list = if self.results.is_empty() {
-      ui::text(div(), TextSize::Sm)
-        .px_4()
-        .py_8()
-        .text_center()
-        .text_color(p.muted_foreground)
-        .child(if self.query.trim().is_empty() {
-          "Type to search files..."
-        } else {
-          "No files found"
-        })
-        .into_any_element()
+      if self.query.trim().is_empty() {
+        ui::text(div(), TextSize::Sm)
+          .px_4()
+          .py_8()
+          .text_center()
+          .text_color(p.muted_foreground)
+          .child("Type to search files…")
+          .into_any_element()
+      } else {
+        ui::EmptyState::new("file-picker-empty", "No files match", &p)
+          .icon(theme::ICON_FILE_SEARCH)
+          .message("Try part of the file name or its folder.")
+          .into_any_element()
+      }
     } else {
       div()
         .children(self.results.iter().enumerate().map(|(i, path)| {
           let id = SharedString::from(format!("file-picker-item-{i}"));
-          let selector = id.to_string();
-          div()
-            .id(id)
-            .debug_selector(move || selector)
+          ui::Row::new(id, &p)
             .role(gpui::Role::ListBoxOption)
-            .aria_label(path.clone())
-            .aria_selected(i == selected)
+            .label(path.clone())
+            .selected(i == selected)
+            .density(ui::RowDensity::Default)
             .px_3()
-            .py_1p5()
             .mx_2()
             .rounded(radius::MD)
-            .flex()
-            .items_center()
             .gap_3()
-            .cursor_pointer()
-            .when(i == selected, |this| this.bg(p.accent.opacity(0.5)))
-            .when(i != selected, |this| {
-              this.hover(move |s| s.bg(p.accent.opacity(0.3)))
-            })
-            .child(ui::icon(theme::ICON_FILE_TEXT, 16., p.muted_foreground))
+            .leading(ui::icon(theme::ICON_FILE_TEXT, 16., p.muted_foreground))
             .child(
               ui::text(div(), TextSize::Sm)
                 .font_family(theme::MONO_FONT)
@@ -184,7 +191,6 @@ impl Render for FilePicker {
                 .child(path.clone()),
             )
             .on_click(cx.listener(move |picker, _, _, cx| picker.choose(i, cx)))
-            .test_support()
         }))
         .into_any_element()
     };
@@ -192,12 +198,9 @@ impl Render for FilePicker {
       .id("file-picker")
       .debug_selector(|| "file-picker".into())
       .w(width)
-      .rounded(radius::LG)
-      .border_1()
-      .border_color(p.border)
+      .map(|el| ui::floating(el, &p))
       .bg(p.background)
       .text_color(p.foreground)
-      .shadow_2xl()
       .overflow_hidden()
       .occlude()
       .capture_action(cx.listener(|picker, _: &MoveDown, _, cx| {
@@ -266,6 +269,8 @@ impl Render for FilePicker {
       anchored().position(point(px(0.), px(0.))).child(
         div()
           .id("file-picker-backdrop")
+          // A dismiss target, not a control.
+          .cursor_default()
           .w(viewport.width)
           .h(viewport.height)
           .bg(p.scrim())

@@ -4,10 +4,13 @@
 //! issue picked from the integrations beside it, all at once and stacked on
 //! one branch.
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::{
   collections::{HashMap, HashSet},
+  rc::Rc,
   sync::Arc,
   time::{Duration, Instant},
 };
@@ -21,24 +24,25 @@ use gpui_kit::{
   },
 };
 use tauri_plugin_gpui::gpui::{
-  self, anchored, deferred, div, point, prelude::*, px, Context, Div, Entity, FocusHandle,
-  FontWeight, KeyDownEvent, MouseButton, SharedString, Subscription, Task, Window,
+  self, anchored, deferred, div, prelude::*, px, Context, Div, Entity, FocusHandle, FontWeight,
+  MouseButton, SharedString, Subscription, Task, Window,
 };
 
 use super::{
   github::parts,
+  integrations_cache::cache,
   linear,
   open_workspaces_data::{self as data, Checked, Line, OpenWorkspacesHost, Route, Target},
   workspace_data::WorkspaceHost,
   workspace_dialog_data::{self as dialog_data, WorkspaceDialogHost},
-  workspace_modal::{dialog_description, dialog_header, dialog_panel, label_xs, press},
+  workspace_modal::{field_hint, field_label, press},
   ActionSink, ScreenAction,
 };
 use crate::{
   github::GhPullRequest,
   gpui_shell::{
     form::SelectOption,
-    native::{NativeEvent, ToastTone},
+    native::NativeEvent,
     theme::{self, Palette},
     ui::{self, Button, TextSize, Variant},
   },
@@ -62,6 +66,58 @@ pub(super) struct PrList {
   pub(super) mine: bool,
   /// Bumped per load, so an older answer is dropped.
   generation: u64,
+}
+
+impl PrList {
+  /// Starts a load, so any answer still in flight is dropped; the generation
+  /// to settle it with.
+  pub(super) fn start(&mut self) -> u64 {
+    self.generation += 1;
+    self.loading = true;
+    self.error = None;
+    self.generation
+  }
+
+  /// Takes a load's answer, unless a newer load started since.
+  pub(super) fn settle(
+    &mut self,
+    generation: u64,
+    result: Result<(Vec<GhPullRequest>, bool), String>,
+  ) -> bool {
+    if generation != self.generation {
+      return false;
+    }
+    self.loading = false;
+    match result {
+      Ok((items, mine)) => {
+        self.items = items;
+        self.mine = mine;
+      }
+      Err(err) => self.error = Some(err),
+    }
+    true
+  }
+}
+
+/// What the pull request list reads.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum PrQuery {
+  /// The user's own, or everyone's when they have none.
+  MineFirst,
+  /// Everyone's that match this GitHub search.
+  Search(String),
+}
+
+/// The read for a search box's `query`, narrowed to the pull requests
+/// assigned to the user when `assigned` is on.
+pub(super) fn pr_query(query: &str, assigned: bool) -> PrQuery {
+  let query = query.trim();
+  match (assigned, query.is_empty()) {
+    (false, true) => PrQuery::MineFirst,
+    (false, false) => PrQuery::Search(query.to_string()),
+    (true, true) => PrQuery::Search("assignee:@me".into()),
+    (true, false) => PrQuery::Search(format!("assignee:@me {query}")),
+  }
 }
 
 /// The Linear issues beside the lines.
@@ -132,6 +188,9 @@ pub struct OpenWorkspacesDialog {
   pub(super) github: Option<String>,
   pub(super) prs: PrList,
   pub(super) query: String,
+  /// The list holds only pull requests assigned to the user. Off each time
+  /// the dialog opens.
+  pub(super) assigned: bool,
   _search: Option<Task<()>>,
   /// The picked pull requests, in the order picked.
   pub(super) chosen: Vec<GhPullRequest>,
@@ -148,6 +207,8 @@ pub struct OpenWorkspacesDialog {
   lines_closed: Option<Instant>,
   /// Branches of the repository on screen that have a workspace.
   open_branches: HashSet<String>,
+  /// Those branches by the Linear issue key their workspace is linked to.
+  linear_branches: HashMap<String, String>,
   pub(super) pending: bool,
   /// What failed in the last open, a line per workspace.
   pub(super) errors: Vec<String>,
@@ -188,6 +249,7 @@ impl OpenWorkspacesDialog {
       github: None,
       prs: PrList::default(),
       query: String::new(),
+      assigned: false,
       _search: None,
       chosen: Vec::new(),
       issues: IssueList::default(),
@@ -197,10 +259,18 @@ impl OpenWorkspacesDialog {
       lines_open: false,
       lines_closed: None,
       open_branches: HashSet::new(),
+      linear_branches: HashMap::new(),
       pending: false,
       errors: Vec::new(),
       dismissed: false,
     };
+    // A repository seen before lists its pull requests at once, without
+    // waiting for the remote to be read again.
+    let repo = view.route.repo_path.clone();
+    if let Some(name) = cache(cx).remote_names.get(&repo).cloned() {
+      view.github = Some(name);
+      view.load_prs(cx);
+    }
     view.load(cx);
     view.load_issues(cx);
     view
@@ -213,21 +283,59 @@ impl OpenWorkspacesDialog {
     }
   }
 
-  /// Reads the remotes, then lists pull requests and fetches, so pasted
-  /// branches check against the remote's latest.
+  /// Reads the remotes and lists pull requests at once, and the branch
+  /// settings beside them; then fetches, so pasted branches check against
+  /// the remote's latest.
   fn load(&mut self, cx: &mut Context<Self>) {
     let (host, route) = (self.host.clone(), self.route.clone());
+    // The pull request list needs only the remote, a file read: it does not
+    // wait for the branches and settings behind jj.
+    cx.spawn({
+      let (host, route) = (host.clone(), route.clone());
+      async move |this, cx| {
+        let remotes = cx
+          .background_spawn(async move { data::remotes(&*host, &route.repos) })
+          .await;
+        this
+          .update(cx, |view, cx| {
+            let github = remotes
+              .iter()
+              .find(|(path, _)| *path == view.route.repo_path)
+              .map(|(_, name)| name.clone());
+            match &github {
+              Some(name) => cache(cx).remote_names.insert(
+                view.route.repo_path.clone(),
+                Instant::now(),
+                name.clone(),
+              ),
+              None => {
+                cache(cx).remote_names.take(&view.route.repo_path);
+              }
+            }
+            // Already listed from a remembered remote unless it changed.
+            let listed = view.prs.generation > 0 && view.github == github;
+            view.github = github;
+            view.remotes = Some(remotes);
+            if !listed {
+              view.load_prs(cx);
+            }
+            view.check_lines(cx);
+            cx.notify();
+          })
+          .ignore_closed();
+      }
+    })
+    .detach();
     cx.spawn(async move |this, cx| {
-      let (remotes, open, settings) = cx
+      let ((open, linear), settings) = cx
         .background_spawn({
           let (host, route) = (host.clone(), route.clone());
           async move {
             let repo = route.repo_path.as_str();
-            let open: HashSet<String> = super::github_data::GithubHost::workspaces(&*host, repo)
-              .unwrap_or_default()
-              .into_iter()
-              .map(|w| w.branch_name)
-              .collect();
+            let workspaces =
+              super::github_data::GithubHost::workspaces(&*host, repo).unwrap_or_default();
+            let open: HashSet<String> = workspaces.iter().map(|w| w.branch_name.clone()).collect();
+            let linear = crate::core::linear_issue_branches(&workspaces);
             let pattern = host
               .repo_settings(repo, &["branch_name_pattern".to_string()])
               .ok()
@@ -240,40 +348,35 @@ impl OpenWorkspacesDialog {
               .map(|b| b.name)
               .collect();
             let default = WorkspaceDialogHost::default_branch(&*host, repo).ok();
-            (
-              data::remotes(&*host, &route.repos),
-              open,
-              (pattern, default, branches),
-            )
+            ((open, linear), (pattern, default, branches))
           }
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        let (pattern, default, branches) = settings;
-        if let Some(pattern) = pattern {
-          view.pattern = pattern;
-        }
-        view.default_branch = default;
-        view.branches = branches;
-        view.github = remotes
-          .iter()
-          .find(|(path, _)| *path == view.route.repo_path)
-          .map(|(_, name)| name.clone());
-        view.remotes = Some(remotes);
-        view.open_branches = open;
-        view.load_prs(cx);
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          let (pattern, default, branches) = settings;
+          if let Some(pattern) = pattern {
+            view.pattern = pattern;
+          }
+          view.default_branch = default;
+          view.branches = branches;
+          view.open_branches = open;
+          view.linear_branches = linear;
+          cx.notify();
+        })
+        .ignore_closed();
       cx.background_spawn(async move {
         for repo in &route.repos {
           host.fetch(repo);
         }
       })
       .await;
-      let _ = this.update(cx, |view, cx| {
-        view.fetched = true;
-        view.check_lines(cx);
-      });
+      this
+        .update(cx, |view, cx| {
+          view.fetched = true;
+          view.check_lines(cx);
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -284,15 +387,25 @@ impl OpenWorkspacesDialog {
     let Some(repo) = self.github.clone() else {
       return;
     };
-    self.prs.generation += 1;
-    let generation = self.prs.generation;
-    self.prs.loading = true;
-    self.prs.error = None;
-    let (host, query) = (self.host.clone(), self.query.trim().to_string());
+    let generation = self.prs.start();
+    let (host, query) = (self.host.clone(), pr_query(&self.query, self.assigned));
+    // Keyed by what is read, so Assigned to me has its own entries.
+    let read = match &query {
+      PrQuery::MineFirst => String::new(),
+      PrQuery::Search(search) => search.clone(),
+    };
+    let key = (repo.clone(), read);
+    // What this search read last shows meanwhile, then the read replaces it.
+    if self.prs.items.is_empty() {
+      if let Some((items, mine)) = cache(cx).open_prs.get(&key).cloned() {
+        self.prs.items = items;
+        self.prs.mine = mine;
+      }
+    }
     cx.spawn(async move |this, cx| {
       let result = cx
         .background_spawn(async move {
-          if !query.is_empty() {
+          if let PrQuery::Search(query) = query {
             return host.open_prs(&repo, false, &query).map(|prs| (prs, false));
           }
           match host.open_prs(&repo, true, "")? {
@@ -301,20 +414,16 @@ impl OpenWorkspacesDialog {
           }
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if view.prs.generation != generation {
-          return;
-        }
-        view.prs.loading = false;
-        match result {
-          Ok((items, mine)) => {
-            view.prs.items = items;
-            view.prs.mine = mine;
+      this
+        .update(cx, |view, cx| {
+          if let Ok(read) = &result {
+            cache(cx).open_prs.insert(key, Instant::now(), read.clone());
           }
-          Err(err) => view.prs.error = Some(err),
-        }
-        cx.notify();
-      });
+          if view.prs.settle(generation, result) {
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     })
     .detach();
     cx.notify();
@@ -328,25 +437,50 @@ impl OpenWorkspacesDialog {
     self.issues.loading = true;
     self.issues.error = None;
     let (host, repo) = (self.host.clone(), self.route.repo_path.clone());
+    if self.issues.items.is_empty() {
+      let cache = cache(cx);
+      if let Some(items) = cache.linear_issues.get(&(repo.clone(), None)).cloned() {
+        self.issues.items = Vec::clone(&items);
+        self.issues.viewer = cache.linear_viewer.get(&repo).map(|v| v.id.clone());
+      }
+    }
     cx.spawn(async move |this, cx| {
+      let key = repo.clone();
       let result = cx
         .background_spawn(async move {
-          let issues = host.linear_issues(&repo, None)?;
-          let viewer = host.linear_viewer(&repo).ok().map(|v| v.id);
-          Ok::<_, String>((issues, viewer))
+          // Two independent requests: run them side by side.
+          std::thread::scope(|scope| {
+            let viewer = scope.spawn(|| host.linear_viewer(&repo).ok());
+            let issues = host.linear_issues(&repo, None);
+            let viewer = super::joined(viewer);
+            issues.map(|issues| (issues, viewer))
+          })
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        view.issues.loading = false;
-        match result {
-          Ok((items, viewer)) => {
-            view.issues.items = items;
-            view.issues.viewer = viewer;
+      this
+        .update(cx, |view, cx| {
+          if let Ok((items, viewer)) = &result {
+            let cache = cache(cx);
+            cache
+              .linear_issues
+              .insert((key.clone(), None), Instant::now(), Rc::new(items.clone()));
+            if let Some(viewer) = viewer {
+              cache
+                .linear_viewer
+                .insert(key, Instant::now(), viewer.clone());
+            }
           }
-          Err(err) => view.issues.error = Some(err),
-        }
-        cx.notify();
-      });
+          view.issues.loading = false;
+          match result {
+            Ok((items, viewer)) => {
+              view.issues.items = items;
+              view.issues.viewer = viewer.map(|v| v.id);
+            }
+            Err(err) => view.issues.error = Some(err),
+          }
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
     cx.notify();
@@ -377,9 +511,17 @@ impl OpenWorkspacesDialog {
       return;
     }
     self.query = query;
+    if self.github.is_some() {
+      // Searching from the first keystroke: the debounce counts as the wait,
+      // and an answer for the old query no longer lands.
+      self.prs.start();
+      cx.notify();
+    }
     self._search = Some(cx.spawn(async move |this, cx| {
       cx.background_executor().timer(DEBOUNCE).await;
-      let _ = this.update(cx, |view, cx| view.load_prs(cx));
+      this
+        .update(cx, |view, cx| view.load_prs(cx))
+        .ignore_closed();
     }));
   }
 
@@ -389,7 +531,9 @@ impl OpenWorkspacesDialog {
     cx.notify();
     self._check = Some(cx.spawn(async move |this, cx| {
       cx.background_executor().timer(DEBOUNCE).await;
-      let _ = this.update(cx, |view, cx| view.check_lines(cx));
+      this
+        .update(cx, |view, cx| view.check_lines(cx))
+        .ignore_closed();
     }));
   }
 
@@ -424,13 +568,15 @@ impl OpenWorkspacesDialog {
             .collect::<Vec<_>>()
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        view.checks.extend(checked);
-        view.checking = false;
-        // Lines typed while checking.
-        view.check_lines(cx);
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.checks.extend(checked);
+          view.checking = false;
+          // Lines typed while checking.
+          view.check_lines(cx);
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -467,10 +613,12 @@ impl OpenWorkspacesDialog {
       let existing = self.open_branches.contains(&pr.head_ref_name);
       Target::from_pr(&self.route.repo_path, pr, existing)
     });
-    let from_issues = self.chosen_issues.iter().map(|issue| {
-      let existing = self.open_branches.contains(&issue.branch_name);
-      Target::from_issue(&self.route.repo_path, issue, existing)
-    });
+    let from_issues = data::issue_targets(
+      &self.route.repo_path,
+      &self.chosen_issues,
+      &self.open_branches,
+      &self.linear_branches,
+    );
     from_lines
       .chain(from_prs)
       .chain(from_issues)
@@ -532,18 +680,6 @@ impl OpenWorkspacesDialog {
     cx.notify();
   }
 
-  fn toast(&self, tone: ToastTone, title: &str, description: String) {
-    WorkspaceHost::notify(
-      &*self.host,
-      NativeEvent::Toast {
-        title: title.into(),
-        description,
-        tone,
-        action: None,
-      },
-    );
-  }
-
   /// Opens every target, a repository at a time.
   fn submit(&mut self, cx: &mut Context<Self>) {
     if !self.can_submit() {
@@ -564,7 +700,9 @@ impl OpenWorkspacesDialog {
       let results = cx
         .background_spawn(async move { plan.run(&*host, targets) })
         .await;
-      let _ = this.update(cx, |view, cx| view.opened(results, cx));
+      this
+        .update(cx, |view, cx| view.opened(results, cx))
+        .ignore_closed();
     })
     .detach();
   }
@@ -594,10 +732,9 @@ impl OpenWorkspacesDialog {
     }
     let opened = summary(created, reused);
     if self.errors.is_empty() {
-      self.toast(
-        ToastTone::Success,
-        opened.trim_end_matches('.'),
-        String::new(),
+      WorkspaceHost::notify(
+        &*self.host,
+        Toast::success(opened.trim_end_matches('.')).into(),
       );
       if let Some((repo_path, id)) = first {
         (self.sink)(
@@ -610,10 +747,11 @@ impl OpenWorkspacesDialog {
       }
       self.close(cx);
     } else {
-      self.toast(
-        ToastTone::Error,
-        "Some workspaces could not be opened",
-        format!("{} failed. {opened}", self.errors.len()),
+      WorkspaceHost::notify(
+        &*self.host,
+        Toast::error("Some workspaces could not be opened")
+          .description(format!("{} failed. {opened}", self.errors.len()))
+          .into(),
       );
       // What opened is open now, and a retry should say so.
       self.checks.clear();
@@ -628,6 +766,10 @@ impl OpenWorkspacesDialog {
     cx.notify();
   }
 
+  #[expect(
+    clippy::expect_used,
+    reason = "the fields are created before this read"
+  )]
   fn fields(&mut self, window: &mut Window, cx: &mut Context<Self>) -> &Fields {
     if self.fields.is_none() {
       let lines = cx.new(|cx| {
@@ -761,7 +903,7 @@ impl OpenWorkspacesDialog {
         .flex_1()
         .min_w_0()
         .gap_1p5()
-        .child(label_xs(label))
+        .child(field_label(label))
         .child(
           div()
             .debug_selector(move || selector.into())
@@ -800,9 +942,10 @@ impl OpenWorkspacesDialog {
                   TextSize::Sm,
                 )),
                 None => this.child(
-                  ui::text(div(), TextSize::Sm)
-                    .text_color(p.muted_foreground)
-                    .child("Loading branches..."),
+                  div().flex().child(
+                    ui::Loading::new("open-workspaces-stack-on-loading", p)
+                      .label("Loading branches…"),
+                  ),
                 ),
               }),
           )
@@ -844,7 +987,7 @@ impl OpenWorkspacesDialog {
     options: Div,
     p: &Palette,
     cx: &mut Context<Self>,
-  ) -> Div {
+  ) -> (Div, [gpui::AnyElement; 2]) {
     let checks = self.lines();
     let targets = self.targets();
     let unchecked = checks.iter().filter(|(_, c)| c.is_none()).count();
@@ -852,16 +995,12 @@ impl OpenWorkspacesDialog {
       .iter()
       .filter(|(_, c)| matches!(c, Some(Err(_))))
       .count();
-    let existing = targets.iter().filter(|t| t.existing).count();
-    let new = targets.len() - existing;
     let status = if unchecked > 0 {
-      format!("Checking {}...", plural(unchecked, "1 line", "lines"))
-    } else if targets.is_empty() {
-      "Nothing to create yet.".to_string()
+      format!("Checking {}…", plural(unchecked, "1 line", "lines"))
     } else {
-      summary_future(new, existing)
+      data::preview(&targets)
     };
-    div()
+    let column = div()
       .flex()
       .flex_col()
       .flex_1()
@@ -872,7 +1011,7 @@ impl OpenWorkspacesDialog {
           .flex()
           .flex_col()
           .gap_1p5()
-          .child(label_xs("Workspaces"))
+          .child(field_label("Workspaces"))
           .child(
             div()
               .debug_selector(|| "open-workspaces-lines".into())
@@ -884,9 +1023,7 @@ impl OpenWorkspacesDialog {
               )),
           )
           .child(
-            ui::text(div(), TextSize::Xs)
-              .text_color(p.muted_foreground)
-              .child("One per line: a title or branch name for a new workspace, an existing branch, or a GitHub pull request or branch link of one of your repositories. Indent lines (Tab) to stack each on the line above."),
+            field_hint("One per line: a title or branch name for a new workspace, an existing branch, or a GitHub pull request or branch link of one of your repositories. Indent lines (Tab) to stack each on the line above.", p),
           ),
       )
       .child(options)
@@ -908,34 +1045,28 @@ impl OpenWorkspacesDialog {
             })),
         )
       })
-      .child(
-        div()
-          .flex()
-          .items_center()
-          .gap_2()
-          .child(self.status(status, invalid, &checks, p, cx))
-          .child(
-            Button::new("open-workspaces-cancel", p)
-              .variant(Variant::Outline)
-              .disabled(self.pending)
-              .label("Cancel")
-              .on_click(cx.listener(|view, _, _, cx| view.close(cx))),
-          )
-          .child(
-            Button::new("open-workspaces-submit", p)
-              .disabled(!self.can_submit())
-              .label(if self.pending {
-                "Creating...".to_string()
-              } else {
-                match targets.len() {
-                  0 => "Create Workspaces".to_string(),
-                  1 => "Create 1 Workspace".to_string(),
-                  n => format!("Create {n} Workspaces"),
-                }
-              })
-              .on_click(cx.listener(|view, _, _, cx| view.submit(cx))),
-          ),
-      )
+;
+    // The summary sits left of the action pair in the dialog's footer.
+    let footer = [
+      div()
+        .flex_1()
+        .min_w_0()
+        .child(self.status(status, invalid, &checks, p, cx))
+        .into_any_element(),
+      Button::new("open-workspaces-submit", p)
+        .disabled(!self.can_submit())
+        .label(if self.pending {
+          "Creating…".to_string()
+        } else {
+          match targets.len() {
+            0 | 1 => "Create workspace".to_string(),
+            n => format!("Create {n} workspaces"),
+          }
+        })
+        .on_click(cx.listener(|view, _, _, cx| view.submit(cx)))
+        .into_any_element(),
+    ];
+    (column, footer)
   }
 
   /// What the lines and picks will open, beside the buttons; pressed, it
@@ -988,7 +1119,7 @@ impl OpenWorkspacesDialog {
           .when(rows > 0, |this| {
             this
               .cursor_pointer()
-              .hover(move |s| s.bg(muted))
+              .hover(move |s| s.bg(p.hover()))
               .when(self.lines_open, |this| this.bg(muted))
               .child(ui::icon(
                 if self.lines_open {
@@ -1038,13 +1169,22 @@ impl OpenWorkspacesDialog {
           Target::from_pr(repo_path, pr, existing),
         )
       })
-      .chain(self.chosen_issues.iter().map(|issue| {
-        let existing = self.open_branches.contains(&issue.branch_name);
-        (
-          format!("open-workspaces-issue-{}", issue.id),
-          Target::from_issue(repo_path, issue, existing),
+      .chain(
+        data::issue_targets(
+          repo_path,
+          &self.chosen_issues,
+          &self.open_branches,
+          &self.linear_branches,
         )
-      }));
+        .into_iter()
+        .map(|target| {
+          let id = target
+            .issue
+            .as_ref()
+            .map_or_else(String::new, |i| i.id.clone());
+          (format!("open-workspaces-issue-{id}"), target)
+        }),
+      );
     deferred(
       anchored().anchor(gpui::Anchor::BottomLeft).child(
         div()
@@ -1093,55 +1233,33 @@ impl OpenWorkspacesDialog {
     cx: &mut Context<Self>,
   ) -> Div {
     let current = self.integration();
-    let tabs = div()
-      .flex()
-      .gap_1()
-      .p_1()
-      .rounded(radius::MD)
-      .bg(p.muted)
-      .children(self.integrations().into_iter().map(|tab| {
-        let (icon, label, picked) = match tab {
-          Integration::Github => (theme::ICON_GITHUB, "GitHub", self.chosen.len()),
-          Integration::Linear => (theme::ICON_LINEAR, "Linear", self.chosen_issues.len()),
-        };
-        let active = Some(tab) == current;
-        let color = if active {
-          p.foreground
-        } else {
-          p.muted_foreground
-        };
-        ui::text(div(), TextSize::Sm)
-          .id(SharedString::from(format!("open-workspaces-tab-{label}")))
-          .role(gpui::Role::Tab)
-          .aria_label(label)
-          .aria_selected(active)
-          .flex()
-          .flex_1()
-          .justify_center()
-          .items_center()
-          .gap_1p5()
-          .px_3()
-          .py_1()
-          .rounded(radius::MD)
-          .font_weight(FontWeight::MEDIUM)
-          .cursor_pointer()
-          .text_color(color)
-          .map(|this| {
-            if active {
-              this.bg(p.selected())
-            } else {
-              this.hover(|s| s.bg(p.background.opacity(0.5)).text_color(p.foreground))
-            }
-          })
-          .child(ui::icon(icon, 14., color))
-          .child(label)
-          .when(picked > 0, |this| this.child(ui::Count::new(picked, p)))
-          .on_click(cx.listener(move |view, _, _, cx| {
-            view.picked = Some(tab);
-            cx.notify();
-          }))
-          .test_support()
-      }));
+    let integrations = self.integrations();
+    let selected = integrations
+      .iter()
+      .position(|tab| Some(*tab) == current)
+      .unwrap_or(0);
+    // One integration needs no tab to pick it: it is a header.
+    let tabs = if let [only] = integrations[..] {
+      let (icon, label) = match only {
+        Integration::Github => (theme::ICON_GITHUB, "GitHub"),
+        Integration::Linear => (theme::ICON_LINEAR, "Linear"),
+      };
+      ui::SectionHeader::new("open-workspaces-integration", label, p)
+        .icon(icon)
+        .into_any_element()
+    } else {
+      self
+        .integration_tabs(integrations, selected, p, cx)
+        .into_any_element()
+    };
+    // A rule so the tabs do not read as one of the list's filters.
+    let divider = div()
+      .id("open-workspaces-integrations-divider")
+      .debug_selector(|| "open-workspaces-integrations-divider".into())
+      .h(zpx(1.))
+      .w_full()
+      .flex_none()
+      .bg(p.border);
     div()
       .flex()
       .flex_col()
@@ -1153,9 +1271,46 @@ impl OpenWorkspacesDialog {
       .pl_4()
       .gap_2()
       .child(tabs)
+      .child(divider)
       .map(|this| match current {
         Some(Integration::Linear) => this.child(self.issues_pane(fields.1, p, cx)),
         _ => this.child(self.prs_pane(fields.0, p, cx)),
+      })
+  }
+
+  /// A tab for each integration, to pick which one's list shows.
+  fn integration_tabs(
+    &self,
+    integrations: Vec<Integration>,
+    selected: usize,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> ui::Tabs {
+    ui::Tabs::segmented("open-workspaces-tabs", p)
+      .tabs(integrations.iter().map(|tab| {
+        let (icon, label, picked) = match tab {
+          Integration::Github => (theme::ICON_GITHUB, "GitHub", self.chosen.len()),
+          Integration::Linear => (theme::ICON_LINEAR, "Linear", self.chosen_issues.len()),
+        };
+        let tab = ui::Tab::new(format!("open-workspaces-tab-{label}"), label).icon(icon);
+        if picked > 0 {
+          tab.count(picked)
+        } else {
+          tab
+        }
+      }))
+      .selected(selected)
+      .on_select({
+        let view = cx.weak_entity();
+        move |ix, _, cx| {
+          let tab = integrations[ix];
+          view
+            .update(cx, |view, cx| {
+              view.picked = Some(tab);
+              cx.notify();
+            })
+            .ok();
+        }
       })
   }
 
@@ -1173,25 +1328,45 @@ impl OpenWorkspacesDialog {
     } else {
       "Open issues"
     };
-    let list: gpui::AnyElement = if self.issues.loading {
-      div()
-        .py_12()
-        .child(crate::gpui_shell::ui::Loading::new(
-          "open-workspaces-issues-loading",
+    let list: gpui::AnyElement = if self.issues.loading && self.issues.items.is_empty() {
+      crate::gpui_shell::ui::delayed(
+        "open-workspaces-issues-loading",
+        div().py_12().child(crate::gpui_shell::ui::Loading::new(
+          "open-workspaces-issues-loading-spinner",
           p,
-        ))
-        .into_any_element()
-    } else if let Some(err) = &self.issues.error {
-      parts::error_state(
-        "open-workspaces-issues",
-        "Could not load Linear issues",
-        err,
-        p,
-        Some(Box::new(cx.listener(|view, _, _, cx| view.load_issues(cx)))),
+        )),
       )
       .into_any_element()
+    } else if let Some(err) = &self.issues.error {
+      div()
+        .py_12()
+        .child(
+          crate::gpui_shell::ui::EmptyState::failed(
+            "open-workspaces-issues-error",
+            "Couldn't load Linear issues",
+            err.clone(),
+            p,
+          )
+          .action(if err == crate::linear::PRO_REQUIRED {
+            Button::new("open-workspaces-issues-manage-account", p)
+              .size(ui::Size::Sm)
+              .label("Manage account")
+              .on_click(cx.listener(|view, _, _, cx| press(&view.sink, "account.manage", cx)))
+              .into_any_element()
+          } else {
+            crate::gpui_shell::ui::error_actions(
+              "open-workspaces-issues",
+              err.clone(),
+              Some(Box::new(cx.listener(|view, _, _, cx| view.load_issues(cx)))),
+              p,
+            )
+            .into_any_element()
+          }),
+        )
+        .into_any_element()
     } else if items.is_empty() {
-      crate::gpui_shell::ui::EmptyState::new("open-workspaces-no-open-issues", "No open issues.", p)
+      crate::gpui_shell::ui::EmptyState::new("open-workspaces-no-open-issues", "No open issues", p)
+        .message("No open Linear issues match. Type a line on the left to start a new branch.")
         .icon(theme::ICON_LINEAR)
         .into_any_element()
     } else {
@@ -1204,6 +1379,7 @@ impl OpenWorkspacesDialog {
       heading,
       self.chosen_issues.len(),
       Input::new(search).aria_label("Search issues"),
+      None,
       list,
       p,
     )
@@ -1213,46 +1389,104 @@ impl OpenWorkspacesDialog {
   fn prs_pane(&self, search: &Entity<InputState>, p: &Palette, cx: &mut Context<Self>) -> Div {
     let heading = if !self.query.trim().is_empty() {
       "Matching pull requests"
+    } else if self.assigned {
+      "Assigned to you"
     } else if self.prs.mine {
       "Your pull requests"
     } else {
       "Open pull requests"
     };
     let list: gpui::AnyElement = if self.prs.loading && self.prs.items.is_empty() {
+      crate::gpui_shell::ui::delayed(
+        "open-workspaces-prs-loading",
+        div().py_12().child(crate::gpui_shell::ui::Loading::new(
+          "open-workspaces-prs-loading-spinner",
+          p,
+        )),
+      )
+      .into_any_element()
+    } else if let Some(err) = &self.prs.error {
       div()
         .py_12()
-        .child(crate::gpui_shell::ui::Loading::new(
-          "open-workspaces-prs-loading",
-          p,
-        ))
+        .child(
+          crate::gpui_shell::ui::EmptyState::failed(
+            "open-workspaces-prs-error",
+            "Couldn't load pull requests",
+            err.clone(),
+            p,
+          )
+          .action(crate::gpui_shell::ui::error_actions(
+            "open-workspaces-prs",
+            err.clone(),
+            Some(Box::new(cx.listener(|view, _, _, cx| view.load_prs(cx)))),
+            p,
+          )),
+        )
         .into_any_element()
-    } else if let Some(err) = &self.prs.error {
-      parts::error_state(
-        "open-workspaces-prs",
-        "Could not load pull requests",
-        err,
-        p,
-        Some(Box::new(cx.listener(|view, _, _, cx| view.load_prs(cx)))),
-      )
-      .into_any_element()
     } else if self.prs.items.is_empty() {
-      crate::gpui_shell::ui::EmptyState::new(
-        "open-workspaces-no-open-pull-requests",
-        "No open pull requests.",
-        p,
-      )
-      .icon(theme::ICON_PR)
-      .into_any_element()
+      let query = self.query.trim();
+      let (id, title, why) = if query.is_empty() && self.assigned {
+        (
+          "open-workspaces-no-assigned-pull-requests",
+          "No pull requests assigned to you".to_string(),
+          "Turn off Assigned to me to see everyone's open pull requests.",
+        )
+      } else if query.is_empty() {
+        (
+          "open-workspaces-no-open-pull-requests",
+          "No open pull requests".to_string(),
+          "This repository has no open pull requests. Type a line on the left to start a new branch.",
+        )
+      } else {
+        (
+          "open-workspaces-no-matching-pull-requests",
+          format!("No pull requests match \"{query}\""),
+          "Try another title, number or branch name.",
+        )
+      };
+      crate::gpui_shell::ui::EmptyState::new(id, title, p)
+        .message(why)
+        .icon(theme::ICON_PR)
+        .into_any_element()
     } else {
+      // The last answer stays readable, dimmed, while a search replaces it.
       div()
+        .when(self.prs.loading, |d| d.opacity(0.5))
         .children(self.prs.items.iter().map(|pr| self.pr_row(pr, p, cx)))
         .into_any_element()
     };
+    // The centered spinner covers a search with nothing on screen yet.
+    let searching = (self.prs.loading && !self.prs.items.is_empty()).then(|| {
+      div()
+        .id("open-workspaces-prs-searching")
+        .role(gpui::Role::ProgressIndicator)
+        .aria_label("Searching pull requests")
+        .pr_1()
+        .child(ui::spinner(
+          "open-workspaces-prs-searching-spinner",
+          14.,
+          p.muted_foreground,
+        ))
+        .test_support()
+    });
+    let assigned = Button::new("open-workspaces-assigned", p)
+      .variant(Variant::Outline)
+      .size(ui::Size::Sm)
+      .h(zpx(28.))
+      .checked(self.assigned)
+      .label("Assigned to me")
+      .on_click(cx.listener(|view, _, _, cx| {
+        view.assigned = !view.assigned;
+        view.load_prs(cx);
+      }));
     pane(
       "open-workspaces-prs",
       heading,
       self.chosen.len(),
-      Input::new(search).aria_label("Search pull requests"),
+      Input::new(search)
+        .aria_label("Search pull requests")
+        .when_some(searching, |input, spinner| input.suffix(spinner)),
+      Some(assigned.into_any_element()),
       list,
       p,
     )
@@ -1276,7 +1510,6 @@ impl OpenWorkspacesDialog {
         view.toggle_pr(&pr_for_click, cx);
       }
     }))
-    .test_support()
   }
 
   /// A Linear issue with its checkbox.
@@ -1301,16 +1534,16 @@ impl OpenWorkspacesDialog {
         view.toggle_issue(&issue_for_click, cx);
       }
     }))
-    .test_support()
   }
 }
 
-/// A tab's heading, search and list.
+/// A tab's heading, search with an optional filter beside it, and list.
 fn pane(
   id: &'static str,
   heading: &'static str,
   picked: usize,
   search: Input,
+  filter: Option<gpui::AnyElement>,
   list: gpui::AnyElement,
   p: &Palette,
 ) -> Div {
@@ -1330,11 +1563,13 @@ fn pane(
             .id(SharedString::from(format!("{id}-heading")))
             .role(gpui::Role::Heading)
             .aria_label(heading)
-            .child(label_xs(heading))
+            .child(field_label(heading))
             .test_support(),
         )
         .when(picked > 0, |this| {
           this.child(
+            // Short label (['count']): 11px is fine.
+            // ast-grep-ignore: gpui-text-xs-short-label-only
             ui::text(div(), TextSize::Xs)
               .text_color(p.muted_foreground)
               .child(format!("{picked} selected")),
@@ -1343,14 +1578,23 @@ fn pane(
     )
     .child(
       div()
-        .debug_selector(move || format!("{id}-search"))
-        .child(ui::text(
-          Styled::h(
-            search.prefix(ui::icon(theme::ICON_SEARCH, 14., p.muted_foreground)),
-            zpx(28.),
-          ),
-          TextSize::Sm,
-        )),
+        .flex()
+        .items_center()
+        .gap_2()
+        .child(
+          div()
+            .flex_1()
+            .min_w_0()
+            .debug_selector(move || format!("{id}-search"))
+            .child(ui::text(
+              Styled::h(
+                search.prefix(ui::icon(theme::ICON_SEARCH, 14., p.muted_foreground)),
+                zpx(28.),
+              ),
+              TextSize::Sm,
+            )),
+        )
+        .children(filter),
     )
     .child(
       div()
@@ -1373,29 +1617,25 @@ fn pick_row(
   disabled: bool,
   item: Div,
   p: &Palette,
-) -> gpui::Stateful<Div> {
-  let hover = p.hover();
-  div()
-    .id(SharedString::from(format!("{id}-row")))
+) -> ui::Row {
+  ui::Row::new(SharedString::from(format!("{id}-row")), p)
     .role(gpui::Role::CheckBox)
-    .aria_label(SharedString::from(name))
+    .label(name)
     .aria_toggled(if checked {
       gpui::accesskit::Toggled::True
     } else {
       gpui::accesskit::Toggled::False
     })
+    .density(ui::RowDensity::Default)
+    .selected(checked)
     .w_full()
     .px_3()
     .py_2p5()
     .border_b_1()
     .border_color(p.border)
-    .flex()
+    .rounded_none()
     .items_start()
-    .gap_2()
-    .cursor_pointer()
-    .when(checked, |d| d.bg(p.selected()))
-    .when(!checked, |d| d.hover(move |s| s.bg(hover)))
-    .child(
+    .leading(
       div().mt_1().child(
         ui::Checkbox::new(SharedString::from(format!("{id}-check")), p)
           .checked(checked)
@@ -1515,24 +1755,6 @@ fn plural(n: usize, one: &str, many: &str) -> String {
   }
 }
 
-/// What the dialog will open, before it does.
-fn summary_future(new: usize, existing: usize) -> String {
-  let created = plural(
-    new,
-    "1 workspace will be created",
-    "workspaces will be created",
-  );
-  match (new, existing) {
-    (_, 0) => created,
-    (0, _) => plural(
-      existing,
-      "1 workspace is already open",
-      "workspaces are already open",
-    ),
-    _ => format!("{created}, {existing} already open"),
-  }
-}
-
 /// What the dialog opened.
 fn summary(created: usize, reused: usize) -> String {
   match (created, reused) {
@@ -1569,12 +1791,10 @@ fn result_row(
           .text_color(p.destructive)
           .child(reason.clone()),
       )
-      .test_support()
       .into_any_element(),
     None => row(id.clone(), format!("{raw}: checking"), p)
       .child(ui::spinner(id, 14., p.muted_foreground))
       .child(mono(raw))
-      .test_support()
       .into_any_element(),
   }
 }
@@ -1611,23 +1831,16 @@ fn target_row(id: SharedString, target: &Target, repo_path: &str, p: &Palette) -
         .text_color(p.muted_foreground)
         .child(detail),
     )
-    .test_support()
 }
 
 /// A line of the list under the text, named by its line and what it opens.
-fn row(id: SharedString, name: String, p: &Palette) -> gpui::Stateful<Div> {
-  let selector = id.to_string();
-  ui::text(div(), TextSize::Sm)
-    .id(id)
-    .debug_selector(move || selector)
-    .role(gpui::Role::ListItem)
-    .aria_label(SharedString::from(name))
-    .flex()
-    .flex_none()
-    .items_center()
-    .gap_2()
+/// It takes no click.
+fn row(id: SharedString, name: String, p: &Palette) -> ui::Row {
+  ui::Row::new(id, p)
+    .label(name)
+    .interactive(false)
+    .px_0()
     .min_w_0()
-    .text_color(p.foreground)
 }
 
 fn mono(text: &str) -> Div {
@@ -1668,71 +1881,40 @@ impl Render for OpenWorkspacesDialog {
     let options = self.create_options(select, &sparse, &symlinks, &p, cx);
     let split = self.integration().is_some();
     let viewport = window.viewport_size();
-    let (backdrop, panel) = dialog_panel(
-      "open-workspaces-dialog",
-      if split { 1040. } else { 560. },
-      viewport,
-      &p,
-    );
-    let keys = cx.listener(|view, e: &KeyDownEvent, _, cx| {
-      let k = &e.keystroke;
-      let held = crate::gpui_shell::keys::held(k.modifiers);
-      if ui::is_escape(k) {
-        cx.stop_propagation();
-        if view.lines_open {
-          view.close_lines(cx);
-        } else {
-          view.close(cx);
-        }
-      } else if k.key == "enter" && (held.platform || held.control) {
-        cx.stop_propagation();
-        view.submit(cx);
-      }
-    });
+    let (column, footer) = self.lines_column(&lines, options, &p, cx);
     let body = div()
       .flex()
       .gap_4()
       .h(zpx(500.))
-      .max_h(viewport.height - px(160.))
-      .pt_4()
-      .child(self.lines_column(&lines, options, &p, cx))
+      .max_h(viewport.height - px(200.))
+      .child(column)
       .when(split, |this| {
         this.child(self.integrations_column((&search, &issue_search), &p, cx))
       });
-    let panel = panel
-      .child(dialog_header(
-        "New Workspaces",
-        dialog_description(
-          if split {
-            "Create a workspace for each line, and for each item you pick."
-          } else {
-            "Create a workspace for each line."
-          },
-          &p,
-        ),
-      ))
-      .child(body);
-    deferred(
-      anchored().position(point(px(0.), px(0.))).child(
-        backdrop
-          .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|view, _, _, cx| {
-              if !view.pending {
-                view.close(cx)
-              }
-            }),
-          )
-          .child(
-            panel
-              .id("open-workspaces-panel")
-              .track_focus(&self.focus)
-              .capture_key_down(keys)
-              .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()),
-          ),
-      ),
-    )
-    .with_priority(2)
-    .into_any_element()
+    let can_submit = self.can_submit();
+    ui::Dialog::new("open-workspaces-dialog", &p)
+      .overlay(viewport)
+      .width(if split { 1040. } else { 560. })
+      .title("New workspace")
+      .description(if split {
+        "Create a workspace for each line, and for each item you pick."
+      } else {
+        "Create a workspace for each line."
+      })
+      .focus(&self.focus)
+      // Escape closes the lines popover first; a click outside waits
+      // while workspaces are created.
+      .on_close(ui::handler(cx, |view, _, cx| {
+        if view.lines_open {
+          view.close_lines(cx);
+        } else if !view.pending {
+          view.close(cx);
+        }
+      }))
+      .on_primary(ui::handler(cx, |view, _, cx| view.submit(cx)))
+      .primary_disabled(!can_submit)
+      .child(body)
+      .footer(footer)
+      .into_any_element()
   }
 }

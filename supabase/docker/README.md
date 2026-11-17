@@ -8,7 +8,6 @@ self-hosted treq. **No GoTrue** — there is no `/auth/v1` user login surface.
 | PostgREST | REST + RPC (`/rest/v1`) |
 | Edge Runtime | Deno functions (`/functions/v1`) |
 | nginx | Kong-compatible public gateway (`:8000`) |
-| merge-queue cron | Nudges worker (60s) + reconciler (10m) |
 
 Process supervision is **OpenRC** (`supervise-daemon`). Runtime image has no
 Python, no Node.js, and no supervisord. Functions import `@supabase/supabase-js`
@@ -40,8 +39,8 @@ This brings up `docker-compose.test.yml` and runs
 [`test/verify-self-hosted.sh`](./test/verify-self-hosted.sh), which checks:
 
 - Gateway `/health` (and that `/auth/v1` is absent)
-- Data API: OpenAPI, `profiles` read, `merge_queue_metrics` RPC via service_role
-- Edge: `exchange-desktop-token`, `merge-queue-worker`, `github-webhook` HMAC
+- Data API: OpenAPI, `profiles` read
+- Edge: `exchange-desktop-token`, `github-webhook` HMAC
 
 GitHub Actions: `.github/workflows/supabase-docker.yml`.
 

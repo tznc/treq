@@ -10,7 +10,6 @@ pub enum PreviewFeature {
   SkillsInstallation,
   RemoteSsh,
   LinearIntegration,
-  Logs,
   Devcontainers,
 }
 
@@ -20,7 +19,6 @@ impl PreviewFeature {
       Self::SkillsInstallation => "skillsInstallation",
       Self::RemoteSsh => "remoteSsh",
       Self::LinearIntegration => "linearIntegration",
-      Self::Logs => "logs",
       Self::Devcontainers => "devcontainers",
     }
   }
@@ -120,11 +118,6 @@ mod tests {
   }
 
   #[test]
-  fn package_json_enables_logs_by_default() {
-    assert!(package_json_default(PreviewFeature::Logs));
-  }
-
-  #[test]
   fn stored_false_overrides_debug_default() {
     let (_dir, db) = temp_db();
     db.set_setting(&PreviewFeature::RemoteSsh.setting_key(), "false")
@@ -156,7 +149,7 @@ mod tests {
     db.set_setting(&PreviewFeature::RemoteSsh.setting_key(), "false")
       .expect("set");
     let managed = SshEndpointSource::Managed {
-      provider: "sprites".into(),
+      provider: "boat".into(),
       generation: 1,
     };
     assert!(require_remote_for_source(&db, &managed).is_ok());

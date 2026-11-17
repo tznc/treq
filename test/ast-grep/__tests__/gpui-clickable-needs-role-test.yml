@@ -1,0 +1,39 @@
+id: gpui-clickable-needs-role
+valid:
+  - |
+    fn named() -> Stateful<Div> {
+      div().id("x").role(Role::Button).aria_label("Close").cursor_pointer().on_click(f)
+    }
+  - |
+    fn backdrop() -> Stateful<Div> {
+      div().id("backdrop").cursor_default().on_mouse_down(MouseButton::Left, close)
+    }
+  - |
+    fn handle() -> Stateful<Div> {
+      div().id("h").cursor_ew_resize().on_mouse_down(MouseButton::Left, drag)
+    }
+  - |
+    fn swallow() -> Stateful<Div> {
+      div().id("panel").on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+    }
+  - |
+    fn button(p: &Palette) -> Button {
+      Button::new("b", p).label("Save").on_click(f)
+    }
+  - |
+    fn role_in_when(link: bool) -> Stateful<Div> {
+      div().id("c").when(link, |el| el.role(Role::Link).aria_label("Check")).on_click(f)
+    }
+invalid:
+  - |
+    fn icon_only() -> Stateful<Div> {
+      div().id("close").cursor_pointer().child(icon(X)).on_click(f)
+    }
+  - |
+    fn pressed() -> Stateful<Div> {
+      div().id("line").cursor_pointer().on_mouse_down(MouseButton::Left, press)
+    }
+  - |
+    fn wrapped() -> Stateful<Div> {
+      ui::text(div(), TextSize::Xs).id("reply").cursor_pointer().child("Reply").on_click(f)
+    }

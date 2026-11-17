@@ -1,0 +1,66 @@
+id: gpui-no-local-row
+valid:
+  - |
+    fn file_row(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+      ui::Row::new("file", p)
+        .title("main.rs")
+        .on_click(cx.listener(|view, _, _, cx| view.open(cx)))
+    }
+  - |
+    fn load_more_row(&self, p: &Palette) -> ui::Row {
+      ui::Row::load_more("more", false, p)
+    }
+  - |
+    fn menu_row(id: SharedString, text: &str, p: &Palette) -> ui::Row {
+      ui::Row::new(id, p).role(gpui::Role::MenuItem).label(text.to_string())
+    }
+  - |
+    fn load_more_row(&self, p: &Palette) -> Div {
+      div().child(ui::Row::load_more("more", false, p).title("Load more commits"))
+    }
+  - |
+    fn code_line(&self, p: &Palette) -> Div {
+      div().hover(move |s| s.bg(p.hover()))
+    }
+  - |
+    fn setting_row(title: &str, control: impl IntoElement) -> Div {
+      div().flex().child(title.to_string()).child(control)
+    }
+  - |
+    mod tests {
+      fn row(p: &Palette) -> Div {
+        div().hover(move |s| s.bg(p.hover()))
+      }
+    }
+invalid:
+  - |
+    fn file_row(&self, p: &Palette, cx: &mut Context<Self>) -> Stateful<Div> {
+      div()
+        .id("file")
+        .hover(move |s| s.bg(p.hover()))
+        .on_click(cx.listener(|view, _, _, cx| view.open(cx)))
+    }
+  - |
+    fn row(id: SharedString, name: String, p: &Palette) -> Stateful<Div> {
+      div().id(id).role(gpui::Role::ListItem).aria_label(name)
+    }
+  - |
+    pub fn menu_row(id: SharedString, p: &Palette) -> Stateful<Div> {
+      div().id(id).hover(move |s| s.bg(p.hover()))
+    }
+  - |
+    fn load_more_row(&self, p: &Palette, cx: &mut Context<Self>) -> Div {
+      div()
+        .id("more")
+        .cursor_pointer()
+        .on_click(cx.listener(|view, _, _, cx| view.more(cx)))
+        .child("Load more")
+    }
+  - |
+    fn file_row(&self, p: &Palette) -> ui::Row {
+      ui::Row::new("file", p).child(div().id("x").hover(move |s| s.bg(p.hover())))
+    }
+  - |
+    pub fn load_more(id: &'static str, p: &Palette, on_click: OnClick) -> Div {
+      div().child(Button::new(id, p).label("Load more").on_click(on_click))
+    }

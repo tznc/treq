@@ -8,15 +8,66 @@ fn row(id: i64, title: &str, depth: u32) -> SidebarRow {
   SidebarRow {
     id,
     title: title.into(),
+    name: None,
     depth,
     selected: false,
     conflicted: false,
     status: None,
     pr: None,
-    queue: None,
+    target: None,
     archiving: false,
     exiting: false,
   }
+}
+
+fn pr_row(id: i64, depth: u32, pr: Option<PrState>) -> SidebarRow {
+  let mut r = row(id, &format!("b{id}"), depth);
+  r.pr = pr;
+  r
+}
+
+fn ids(rows: &[SidebarRow]) -> Vec<i64> {
+  rows.iter().map(|r| r.id).collect()
+}
+
+#[test]
+fn open_pr_first_moves_open_prs_up_stably() {
+  let rows = vec![
+    pr_row(1, 0, None),
+    pr_row(2, 0, Some(PrState::Open)),
+    pr_row(3, 0, None),
+    pr_row(4, 0, Some(PrState::Open)),
+  ];
+  assert_eq!(ids(&open_pr_first(rows)), [2, 4, 1, 3]);
+}
+
+#[test]
+fn open_pr_first_counts_drafts_but_not_merged_or_closed() {
+  let rows = vec![
+    pr_row(1, 0, Some(PrState::Merged)),
+    pr_row(2, 0, Some(PrState::Closed)),
+    pr_row(3, 0, Some(PrState::Draft)),
+    pr_row(4, 0, None),
+  ];
+  assert_eq!(ids(&open_pr_first(rows)), [3, 1, 2, 4]);
+}
+
+#[test]
+fn open_pr_first_keeps_stacks_together_by_root() {
+  let rows = vec![
+    pr_row(1, 0, None),
+    pr_row(2, 1, Some(PrState::Open)),
+    pr_row(3, 0, Some(PrState::Open)),
+    pr_row(4, 1, None),
+    pr_row(5, 2, None),
+    pr_row(6, 0, None),
+  ];
+  let sorted = open_pr_first(rows);
+  assert_eq!(ids(&sorted), [3, 4, 5, 1, 2, 6]);
+  assert_eq!(
+    sorted.iter().map(|r| r.depth).collect::<Vec<_>>(),
+    [0, 1, 2, 0, 1, 0]
+  );
 }
 
 fn snapshot(workspaces: Vec<SidebarRow>) -> SidebarSnapshot {
@@ -41,6 +92,8 @@ fn snapshot(workspaces: Vec<SidebarRow>) -> SidebarSnapshot {
       missing: false,
       collapsed: false,
     }],
+    project: None,
+    project_home: None,
     modal: None,
   }
 }
@@ -175,7 +228,7 @@ fn parses_snapshot_from_react() {
       "workspaces": [
         {"id": 7, "title": "feat-a", "depth": 1, "selected": true,
          "conflicted": true, "status": {"color": "yellow", "spin": true},
-         "pr": "draft", "queue": "testing", "archiving": false, "exiting": false},
+         "pr": "draft", "archiving": false, "exiting": false},
         {"id": 8, "title": "feat-b", "depth": 2, "selected": false,
          "status": null, "pr": null}
       ]
@@ -197,9 +250,9 @@ fn parses_snapshot_from_react() {
   );
   assert!(rows[0].conflicted);
   assert_eq!(rows[0].pr, Some(PrState::Draft));
-  assert_eq!(rows[0].queue.as_deref(), Some("testing"));
+  assert_eq!(rows[0].name, None, "rows from before titles have none");
   // Optional row fields default when React leaves them out.
-  assert!(!rows[1].conflicted && !rows[1].archiving && rows[1].queue.is_none());
+  assert!(!rows[1].conflicted && !rows[1].archiving);
 }
 
 #[test]
@@ -235,10 +288,6 @@ fn serializes_actions_for_react() {
     serde_json::json!({"kind": "startAgent", "id": null})
   );
   assert_eq!(
-    json(SidebarAction::BulkArchive),
-    serde_json::json!({"kind": "bulkArchive"})
-  );
-  assert_eq!(
     json(SidebarAction::HomeMenu {
       repo_path: "/r".into()
     }),
@@ -255,22 +304,19 @@ fn serializes_actions_for_react() {
 }
 
 #[test]
+fn names_create_buttons_by_what_they_open() {
+  assert_eq!(stack_label(None), "New workspace…");
+  assert_eq!(stack_label(Some(7)), "Stack on this…");
+  assert_eq!(OPEN_WORKSPACES_LABEL, "New workspace…");
+}
+
+#[test]
 fn indents_rows_like_the_react_sidebar() {
   assert_eq!(row_indent(0), 10.);
   assert_eq!(row_indent(1), 16.);
   assert_eq!(row_indent(3), 28.);
   assert_eq!(guide_left(2), 8.);
   assert_eq!(guide_left(4), 20.);
-}
-
-#[test]
-fn labels_merge_queue_states_like_the_react_sidebar() {
-  let palette = theme::palette(false);
-  assert_eq!(queue_dot("queued", &palette).2, "In merge queue");
-  assert!(queue_dot("testing", &palette).1);
-  assert!(queue_dot("merging", &palette).1);
-  assert_eq!(queue_dot("failed", &palette).2, "Failed in merge queue");
-  assert_eq!(queue_dot("dequeued", &palette).2, "dequeued");
 }
 
 #[gpui::test]
@@ -285,6 +331,16 @@ fn header_buttons_open_the_palette_and_settings(cx: &mut TestAppContext) {
       SidebarAction::OpenSettings
     ]
   );
+}
+
+#[gpui::test]
+fn an_empty_project_offers_to_add_a_repository(cx: &mut TestAppContext) {
+  let mut s = snapshot(vec![]);
+  s.repos.clear();
+  s.project = Some("Checkout".into());
+  let mut h = Harness::new(cx, s);
+  h.click("add-repository");
+  assert_eq!(h.sent(), vec![SidebarAction::AddRepository]);
 }
 
 #[gpui::test]
@@ -326,10 +382,14 @@ fn clicking_home_selects_its_repository(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn home_actions_show_without_hover_and_do_not_select_home(cx: &mut TestAppContext) {
+fn home_actions_show_on_hover_and_do_not_select_home(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, snapshot(vec![]));
+  assert!(h.bounds("home-start-agent").is_none(), "hidden until hover");
+  h.hover("home");
   h.click("home-start-agent");
+  h.hover("home");
   h.click("home-open-shell");
+  h.hover("home");
   h.click("home-stack");
   assert_eq!(
     h.sent(),
@@ -441,7 +501,9 @@ fn unavailable_actions_do_nothing(cx: &mut TestAppContext) {
   s.agent_unavailable = Some("Agents are not supported here".into());
   s.shell_unavailable = Some("Shells are not supported here".into());
   let mut h = Harness::new(cx, s);
+  h.hover("home");
   h.click("home-start-agent");
+  h.hover("home");
   h.click("home-open-shell");
   h.hover("workspace-7");
   h.click("workspace-7-start-agent");
@@ -461,18 +523,38 @@ fn archiving_workspace_ignores_clicks(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn shows_status_and_queue_dots(cx: &mut TestAppContext) {
+fn shows_status_dots(cx: &mut TestAppContext) {
   let mut dirty = row(7, "feat-a", 0);
   dirty.status = Some(RowStatus {
     color: StatusColor::Yellow,
     spin: false,
   });
-  dirty.queue = Some("queued".into());
   let mut h = Harness::new(cx, snapshot(vec![dirty, row(8, "clean", 0)]));
   assert!(h.bounds("status-7").is_some());
-  assert!(h.bounds("queue-7").is_some());
   assert!(h.bounds("status-8").is_none());
-  assert!(h.bounds("queue-8").is_none());
+}
+
+#[gpui::test]
+fn status_dots_name_their_state(cx: &mut TestAppContext) {
+  let mut dirty = row(7, "feat-a", 0);
+  dirty.status = Some(RowStatus {
+    color: StatusColor::Yellow,
+    spin: false,
+  });
+  let mut conflicted = row(8, "feat-b", 0);
+  conflicted.status = Some(RowStatus {
+    color: StatusColor::Red,
+    spin: false,
+  });
+  let mut h = Harness::new(cx, snapshot(vec![dirty, conflicted]));
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  use gpui_testing_library::prelude::*;
+  expect(screen.get_by_role(by::role(gpui::Role::Image).name("Uncommitted changes")))
+    .to_be_visible();
+  expect(screen.get_by_role(by::role(gpui::Role::Image).name("Conflict"))).to_be_visible();
 }
 
 #[gpui::test]
@@ -491,12 +573,29 @@ fn shows_skeleton_rows_while_loading(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn bulk_archive_button_archives_the_selection(cx: &mut TestAppContext) {
+fn multi_selection_draws_no_archive_button(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, snapshot(vec![row(7, "a", 0), row(8, "b", 0)]));
-  assert!(h.bounds("bulk-archive").is_none());
   h.update(|s| s.bulk_archive = Some(2));
-  h.click("bulk-archive");
-  assert_eq!(h.sent(), vec![SidebarAction::BulkArchive]);
+  assert!(h.bounds("bulk-archive").is_none());
+}
+
+#[gpui::test]
+fn right_click_on_a_multi_selected_row_opens_the_selection_menu(cx: &mut TestAppContext) {
+  let mut selected = row(7, "a", 0);
+  selected.selected = true;
+  let mut other = row(8, "b", 0);
+  other.selected = true;
+  let mut h = Harness::new(cx, snapshot(vec![selected, other, row(9, "c", 0)]));
+  h.update(|s| s.bulk_archive = Some(2));
+  right_click(&mut h, "workspace-7");
+  right_click(&mut h, "workspace-9");
+  assert_eq!(
+    h.sent(),
+    vec![
+      SidebarAction::WorkspacesMenu,
+      SidebarAction::WorkspaceMenu { id: 9 },
+    ]
+  );
 }
 
 #[gpui::test]
@@ -518,6 +617,7 @@ fn tooltip_shows_after_a_short_rest(cx: &mut TestAppContext) {
 #[gpui::test]
 fn row_button_tooltip_wins_over_its_row(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, snapshot(vec![]));
+  h.hover("home");
   h.hover("home-stack");
   h.cx.executor().advance_clock(TOOLTIP_DELAY);
   h.cx.run_until_parked();
@@ -552,13 +652,61 @@ fn workspace_tooltip_opens_a_popup_beside_the_row(cx: &mut TestAppContext) {
       anchor: row,
       side: Side::Right,
       content: TooltipContent::Branch {
+        name: None,
         title: "feat-a".into(),
+        target: None,
         conflicted: false,
         pr: None,
       },
       dark: false,
     }]
   );
+}
+
+#[gpui::test]
+fn workspace_tooltip_names_the_target_branch(cx: &mut TestAppContext) {
+  let mut targeted = row(7, "fix/transform-non-map-dest", 0);
+  targeted.target = Some("main".into());
+  let mut h = Harness::new(cx, snapshot(vec![targeted]));
+  h.hover("workspace-7");
+  h.cx.executor().advance_clock(TOOLTIP_DELAY);
+  h.cx.run_until_parked();
+  assert!(matches!(
+    h.popups.borrow().as_slice(),
+    [PopupRequest::ShowTooltip {
+      content: TooltipContent::Branch { target: Some(target), .. },
+      ..
+    }] if target.as_ref() == "main"
+  ));
+}
+
+#[gpui::test]
+fn titled_row_shows_its_title_and_keeps_the_branch_in_the_tooltip(cx: &mut TestAppContext) {
+  let mut titled = row(7, "zn/blissful-shannon", 0);
+  titled.name = Some("feat(spool): fail readiness".into());
+  let mut h = Harness::new(cx, snapshot(vec![titled]));
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  use gpui_testing_library::prelude::*;
+  expect(screen.get_by_text("feat(spool): fail readiness")).to_be_visible();
+  expect(screen.get_by_role(by::role(gpui::Role::Button).name("feat(spool): fail readiness")))
+    .to_be_visible();
+  assert!(
+    screen.query_by_text("zn/blissful-shannon").is_none(),
+    "the branch moves to the tooltip"
+  );
+  h.hover("workspace-7");
+  h.cx.executor().advance_clock(TOOLTIP_DELAY);
+  h.cx.run_until_parked();
+  assert!(matches!(
+    h.popups.borrow().as_slice(),
+    [PopupRequest::ShowTooltip {
+      content: TooltipContent::Branch { name: Some(name), title, .. },
+      ..
+    }] if name.as_ref() == "feat(spool): fail readiness" && title.as_ref() == "zn/blissful-shannon"
+  ));
 }
 
 #[gpui::test]
@@ -575,6 +723,26 @@ fn button_tooltip_opens_below_and_closes_on_leave(cx: &mut TestAppContext) {
   ));
   h.hover("command-palette");
   h.cx.run_until_parked();
+  assert_eq!(h.popups.borrow().last(), Some(&PopupRequest::HideTooltip));
+}
+
+/// Clicking a button closes its tooltip: the dialog or menu it opens would
+/// otherwise sit under a tooltip that no pointer move takes away.
+#[gpui::test]
+fn clicking_a_row_button_closes_its_tooltip(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![]));
+  h.hover("home");
+  h.hover("home-stack");
+  h.cx.executor().advance_clock(TOOLTIP_DELAY);
+  h.cx.run_until_parked();
+  assert!(matches!(
+    h.popups.borrow().last(),
+    Some(PopupRequest::ShowTooltip { .. })
+  ));
+  h.click("home-stack");
+  h.cx.run_until_parked();
+  h.sidebar
+    .read_with(&h.cx, |s, _| assert!(!s.tooltip_shown("home-stack")));
   assert_eq!(h.popups.borrow().last(), Some(&PopupRequest::HideTooltip));
 }
 
@@ -843,4 +1011,309 @@ fn parses_repo_labels_with_defaults() {
   let repo: RepoSection = serde_json::from_str(json).expect("parse");
   assert_eq!(repo.label.as_deref(), Some("lib"));
   assert!(repo.missing && !repo.collapsed);
+}
+
+/// Resting on another workspace's row asks for it to be read ahead;
+/// passing over it, or resting on the selected row, does not.
+#[gpui::test]
+fn resting_on_a_workspace_row_reads_it_ahead(cx: &mut TestAppContext) {
+  use crate::gpui_shell::screen::prefetch::HOVER_INTENT;
+  let mut selected = row(8, "feat-b", 0);
+  selected.selected = true;
+  let mut h = Harness::new(cx, snapshot(vec![row(7, "feat-a", 0), selected]));
+  let prefetches = |h: &Harness| {
+    h.sent()
+      .into_iter()
+      .filter(|a| matches!(a, SidebarAction::PrefetchWorkspace { .. }))
+      .collect::<Vec<_>>()
+  };
+  h.hover("workspace-7");
+  h.cx.executor().advance_clock(HOVER_INTENT / 2);
+  h.hover("workspace-8");
+  h.cx.executor().advance_clock(HOVER_INTENT * 2);
+  h.cx.run_until_parked();
+  assert!(prefetches(&h).is_empty());
+  h.hover("workspace-7");
+  h.cx.executor().advance_clock(HOVER_INTENT);
+  h.cx.run_until_parked();
+  assert_eq!(prefetches(&h), [SidebarAction::PrefetchWorkspace { id: 7 }]);
+}
+
+#[gpui::test]
+fn a_long_list_draws_only_the_rows_on_screen_and_keeps_its_scroll(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(many_rows(200)));
+  assert!(h.bounds("workspace-0").is_some());
+  assert!(h.bounds("workspace-199").is_none(), "far below the window");
+  let at = h.bounds("workspaces").expect("list").center();
+  for _ in 0..40 {
+    h.cx.simulate_event(gpui::ScrollWheelEvent {
+      position: at,
+      delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(-400.))),
+      modifiers: Modifiers::none(),
+      touch_phase: gpui::TouchPhase::Moved,
+    });
+  }
+  assert!(h.bounds("workspace-199").is_some(), "scrolled to the end");
+  assert!(h.bounds("workspace-0").is_none());
+  h.update(|s| s.repos[0].workspaces.insert(0, row(500, "feat/new", 0)));
+  // As a scrolled div did, the rows below the new one move down a row.
+  assert!(
+    h.bounds("workspace-190").is_some(),
+    "a new row keeps the scroll"
+  );
+  h.click("workspace-190");
+  assert_eq!(
+    h.sent().last(),
+    Some(&SidebarAction::SelectWorkspace {
+      id: 190,
+      shift: false,
+      toggle: false
+    })
+  );
+}
+
+/// `n` workspaces in stacks of three, some with changes, one streaming.
+fn many_rows(n: i64) -> Vec<SidebarRow> {
+  (0..n)
+    .map(|i| {
+      let mut r = row(i, &format!("feat/workspace-{i}"), (i % 3) as u32);
+      r.status = (i % 4 == 0).then_some(RowStatus {
+        color: StatusColor::Yellow,
+        spin: false,
+      });
+      r.pr = (i % 5 == 0).then_some(PrState::Open);
+      r
+    })
+    .collect()
+}
+
+fn draw(h: &mut Harness, refresh: bool) -> std::time::Duration {
+  h.cx.run_until_parked();
+  h.cx.update(|window, cx| {
+    let start = std::time::Instant::now();
+    if refresh {
+      window.refresh();
+    }
+    window.draw(cx).clear(cx);
+    start.elapsed()
+  })
+}
+
+fn report(name: &str, samples: &mut [std::time::Duration]) {
+  samples.sort();
+  let ms = |d: std::time::Duration| d.as_secs_f64() * 1000.;
+  let mean = samples.iter().map(|d| ms(*d)).sum::<f64>() / samples.len() as f64;
+  println!(
+    "{name:<34} n={:<3} mean={mean:>8.2}ms  p50={:>8.2}ms  max={:>8.2}ms",
+    samples.len(),
+    ms(samples[samples.len() / 2]),
+    ms(samples[samples.len() - 1]),
+  );
+}
+
+/// The sidebar's frame cost with many workspaces (ignored):
+/// `cargo test --features gpui-shell --lib sidebar_perf -- --ignored --nocapture --test-threads=1`.
+#[gpui::test]
+#[ignore = "perf report"]
+fn sidebar_perf(cx: &mut TestAppContext) {
+  for count in [50, 200] {
+    let mut h = Harness::new(cx, snapshot(many_rows(count)));
+    for _ in 0..3 {
+      draw(&mut h, true);
+    }
+    let mut full: Vec<_> = (0..20).map(|_| draw(&mut h, true)).collect();
+    report(&format!("{count} rows: full frame"), &mut full);
+    // The pointer moves down the rows: each crossing redraws.
+    let centers: Vec<_> = (0..20)
+      .map(|i| {
+        let selector: &'static str = Box::leak(format!("workspace-{i}").into_boxed_str());
+        h.bounds(selector).expect("row drawn").center()
+      })
+      .collect();
+    let mut hover: Vec<_> = centers
+      .iter()
+      .map(|&at| {
+        let start = std::time::Instant::now();
+        h.cx.simulate_mouse_move(at, None, Modifiers::none());
+        draw(&mut h, false);
+        start.elapsed()
+      })
+      .collect();
+    report(&format!("{count} rows: hover next row"), &mut hover);
+    // A selection moves: the model sends a new snapshot.
+    let mut select: Vec<_> = (0..20)
+      .map(|i| {
+        let start = std::time::Instant::now();
+        h.update(|s| {
+          for r in &mut s.repos[0].workspaces {
+            r.selected = r.id == i;
+          }
+        });
+        draw(&mut h, false);
+        start.elapsed()
+      })
+      .collect();
+    report(&format!("{count} rows: select"), &mut select);
+    // Another view beside the sidebar redraws (a terminal's output, a
+    // hover in the screen), as in the shell.
+    for cached in [false, true] {
+      let sidebar = h.sidebar.clone();
+      let (shell, vcx) = cx.add_window_view(|_, cx| Beside {
+        sidebar,
+        other: cx.new(|_| Other),
+        cached,
+      });
+      vcx.run_until_parked();
+      let other = shell.read_with(vcx, |s, _| s.other.clone());
+      let mut frames: Vec<_> = (0..20)
+        .map(|_| {
+          other.update(vcx, |_, cx| cx.notify());
+          vcx.update(|window, cx| {
+            let start = std::time::Instant::now();
+            window.draw(cx).clear(cx);
+            start.elapsed()
+          })
+        })
+        .collect();
+      let how = if cached { "cached" } else { "uncached" };
+      report(&format!("{count} rows: other view, {how}"), &mut frames);
+    }
+  }
+}
+
+/// The shell's layout in short: the sidebar beside another view.
+struct Beside {
+  sidebar: Entity<Sidebar>,
+  other: Entity<Other>,
+  cached: bool,
+}
+
+impl Render for Beside {
+  fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    div()
+      .size_full()
+      .flex()
+      .map(|this| match self.cached {
+        true => this.child(Sidebar::element(&self.sidebar, cx)),
+        false => this.child(self.sidebar.clone()),
+      })
+      .child(div().flex_1().child(self.other.clone()))
+  }
+}
+
+struct Other;
+
+impl Render for Other {
+  fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    div().size_full().child("screen")
+  }
+}
+
+#[gpui::test]
+fn project_button_opens_the_project_menu(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![]));
+  assert!(h.bounds("project-button").is_some());
+  h.click("project-button");
+  assert_eq!(h.sent(), vec![SidebarAction::ProjectMenu]);
+  // The menu opens under the button, not over it.
+  let button = h.bounds("project-button").expect("button");
+  let at = h.sidebar.read_with(&h.cx, |s, _| s.menu_anchor());
+  assert!(at.y >= button.bottom(), "{at:?} below {button:?}");
+  assert!(
+    (at.x - button.left()).abs() <= gpui::px(2.),
+    "{at:?} {button:?}"
+  );
+}
+
+#[gpui::test]
+fn project_button_sits_left_of_the_command_palette(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![]));
+  let project = h.bounds("project-button").expect("project button");
+  let palette = h.bounds("command-palette").expect("palette");
+  assert!(project.origin.x < palette.origin.x);
+  assert!((project.center().y - palette.center().y).abs() < gpui::px(1.));
+  let settings = h.bounds("settings").expect("settings");
+  assert_eq!(
+    project.size.height, palette.size.height,
+    "same height as search"
+  );
+  assert_eq!(
+    project.size.height, settings.size.height,
+    "same height as settings"
+  );
+}
+
+#[gpui::test]
+fn repo_group_headers_are_home_rows(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, two_repos());
+  let header = h.bounds("home-lib").expect("lib home in its group header");
+  let row = h.bounds("repo1-workspace-7").expect("lib workspace");
+  assert!(header.origin.y < row.origin.y);
+  h.click("home-lib");
+  assert_eq!(
+    h.sent(),
+    vec![SidebarAction::SelectHome {
+      repo_path: "/src/lib".into()
+    }]
+  );
+}
+
+#[gpui::test]
+fn single_repo_keeps_its_home_row_above_the_list(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![row(1, "feat-a", 0)]));
+  let home = h.bounds("home").expect("home row");
+  let github = h.bounds("github").expect("github row");
+  assert!(home.origin.y < github.origin.y);
+}
+
+#[test]
+fn project_label_of_unsaved_window_is_unsaved() {
+  assert_eq!(project_label(None), ("Unsaved".into(), "?".into()));
+}
+
+#[test]
+fn project_label_of_saved_project_is_its_name_and_initial() {
+  assert_eq!(
+    project_label(Some("checkout")),
+    ("checkout".into(), "C".into())
+  );
+  assert_eq!(project_label(Some("ébène")), ("ébène".into(), "É".into()));
+}
+
+#[gpui::test]
+fn project_home_row_hides_without_a_project_home(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, two_repos());
+  assert!(h.bounds("project-home").is_none());
+}
+
+#[gpui::test]
+fn project_home_row_opens_the_project_home(cx: &mut TestAppContext) {
+  let mut s = two_repos();
+  s.project_home = Some(false);
+  let mut h = Harness::new(cx, s);
+  let home = h.bounds("project-home").expect("home row");
+  let github = h.bounds("github").expect("github row");
+  assert!(home.origin.y < github.origin.y, "Home above Github");
+  h.click("project-home");
+  assert_eq!(h.sent(), vec![SidebarAction::OpenProjectHome]);
+}
+
+#[gpui::test]
+fn project_home_row_stays_drawn_while_selected(cx: &mut TestAppContext) {
+  let mut s = two_repos();
+  s.project_home = Some(true);
+  s.repos[0].home_selected = false;
+  let mut h = Harness::new(cx, s);
+  assert!(h.bounds("project-home").is_some());
+  h.update(|s| s.project_home = None);
+  assert!(h.bounds("project-home").is_none());
+}
+
+#[gpui::test]
+fn project_button_draws_for_saved_and_unsaved_projects(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, two_repos());
+  assert!(h.bounds("project-button").is_some());
+  h.update(|s| s.project = Some("Checkout".into()));
+  h.click("project-button");
+  assert_eq!(h.sent(), vec![SidebarAction::ProjectMenu]);
 }

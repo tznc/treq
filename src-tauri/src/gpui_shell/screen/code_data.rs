@@ -3,6 +3,7 @@
 //! the task input's agent, branch names and mentions, the stack, and the
 //! commit history column.
 
+use crate::result_ext::ResultExt;
 use std::{
   collections::{HashMap, HashSet},
   sync::LazyLock,
@@ -24,7 +25,7 @@ use crate::{
     time,
   },
   jj::{JjLogCommit, JjLogResult},
-  local_db::{self, Workspace},
+  local_db::Workspace,
 };
 
 /// The agents treq launches (`lib/agents.ts`'s `AGENTS`), in picker order.
@@ -35,10 +36,19 @@ pub enum Agent {
   Codex,
   Cursor,
   Copilot,
+  Devin,
+  Gemini,
 }
 
 impl Agent {
-  pub const ALL: [Agent; 4] = [Agent::Claude, Agent::Codex, Agent::Cursor, Agent::Copilot];
+  pub const ALL: [Agent; 6] = [
+    Agent::Claude,
+    Agent::Codex,
+    Agent::Cursor,
+    Agent::Copilot,
+    Agent::Devin,
+    Agent::Gemini,
+  ];
 
   pub fn id(self) -> &'static str {
     match self {
@@ -46,6 +56,8 @@ impl Agent {
       Agent::Codex => "codex",
       Agent::Cursor => "cursor",
       Agent::Copilot => "copilot",
+      Agent::Devin => "devin",
+      Agent::Gemini => "gemini",
     }
   }
 
@@ -55,6 +67,8 @@ impl Agent {
       Agent::Codex => "Codex",
       Agent::Cursor => "Cursor",
       Agent::Copilot => "Copilot",
+      Agent::Devin => "Devin",
+      Agent::Gemini => "Gemini",
     }
   }
 
@@ -65,12 +79,9 @@ impl Agent {
       Agent::Codex => "codex",
       Agent::Cursor => "cursor-agent",
       Agent::Copilot => "copilot",
+      Agent::Devin => "devin",
+      Agent::Gemini => "gemini",
     }
-  }
-
-  /// Offers "Plan" next to Edit.
-  pub fn has_plan_mode(self) -> bool {
-    matches!(self, Agent::Claude | Agent::Cursor)
   }
 
   /// `toAgentKind`: a stored setting, dropping anything unrecognized.
@@ -85,12 +96,14 @@ pub const NEW_WORKSPACE_SETTING: &str = "home_task_new_workspace";
 pub const ENVIRONMENT_SETTING: &str = "environment";
 
 /// The files and README the Code tab lists.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Overview {
   pub entries: Vec<WorkspaceEntry>,
   pub readme: Option<String>,
   /// The repository is remote, which has no file tree yet.
   pub unavailable: bool,
+  /// The read failed for another reason, such as a deleted checkout.
+  pub error: Option<String>,
 }
 
 /// What the Code tab's file list says for a remote repository.
@@ -98,7 +111,7 @@ pub const REMOTE_FILE_TREE_REASON: &str = "Browsing the file tree is not availab
 
 impl Overview {
   /// `ShowWorkspace`'s overview read: a remote repository's refusal shows
-  /// as an empty, unavailable tree; any other failure as an empty one.
+  /// as an empty, unavailable tree; any other failure keeps its error.
   pub fn or_unavailable(read: Result<Overview, String>) -> Overview {
     read.unwrap_or_else(|err| {
       let unavailable = err.starts_with(UNSUPPORTED);
@@ -106,6 +119,7 @@ impl Overview {
         log::warn!("Failed to load workspace overview: {err}");
       }
       Overview {
+        error: (!unavailable).then_some(err),
         unavailable,
         ..Overview::default()
       }
@@ -123,7 +137,9 @@ pub struct TaskSettings {
   pub new_workspace: bool,
   /// The editor font size the file list uses (`terminal_font_size`).
   pub font_size: f32,
-  /// `None` while the devcontainers preview is off.
+  /// `None` while the devcontainers preview is off. Its `status` is left
+  /// for [`CodeHost::devcontainer_status`] to fill, a `docker ps` the
+  /// settings should not wait for.
   pub environment: Option<Environment>,
 }
 
@@ -144,7 +160,7 @@ pub trait CodeHost: WorkspaceHost + SettingsHost {
     include_target: bool,
     limit: Option<usize>,
   ) -> Result<JjLogResult, String>;
-  /// Every workspace's current record (`listWorkspaceStatuses`).
+  /// Every workspace's current record, for the stack panel.
   fn workspaces(&self, repo_path: &str) -> Result<Vec<Workspace>, String>;
   fn set_submodule_synced(&self, repo_path: &str, path: &str, enabled: bool) -> Result<(), String>;
   fn set_description(
@@ -154,6 +170,26 @@ pub trait CodeHost: WorkspaceHost + SettingsHost {
     description: &str,
   ) -> Result<(), String>;
   fn set_title(&self, repo_path: &str, workspace_id: i64, title: &str) -> Result<(), String>;
+  /// The pull request text last copied into the workspace, or `None` when
+  /// it wasn't opened from one (`core::pr_sync`).
+  fn pr_sync(&self, repo_path: &str, workspace_id: i64) -> Option<crate::local_db::PrSyncRecord>;
+  /// Why the workspace's last rebase was held back, or ran onto a stale
+  /// target (`core::rebase_guard`).
+  fn rebase_hold(
+    &self,
+    repo_path: &str,
+    workspace_id: i64,
+  ) -> Option<crate::core::rebase_guard::RebaseHold>;
+  /// The workspace's branch no longer exists, as after a fetch dropped a
+  /// branch deleted on the remote (`core::workspace_branch_deleted`).
+  fn branch_deleted(&self, repo_path: &str, workspace_id: i64) -> bool;
+  /// Copies the pull request's title and body over local edits.
+  fn resync_from_pr(&self, repo_path: &str, workspace_id: i64) -> Result<(), String>;
+  /// Sends the workspace's local title and description edits to its pull
+  /// request.
+  fn push_to_pr(&self, repo_path: &str, workspace_id: i64) -> Result<(), String>;
+  /// The pull request's title and body as GitHub has them.
+  fn pr_text(&self, repo_path: &str, workspace: &Workspace) -> Option<(String, String)>;
   /// Builds the file index the first time, then searches it.
   fn search_files(
     &self,
@@ -163,21 +199,34 @@ pub trait CodeHost: WorkspaceHost + SettingsHost {
     query: &str,
     limit: usize,
   ) -> Result<Vec<String>, String>;
+  /// How long typing pauses before `search_files` runs: nothing for a local
+  /// in-memory index, a debounce for a remote host's round trip.
+  fn file_search_delay(&self, _repo_path: &str) -> std::time::Duration {
+    std::time::Duration::from_millis(150)
+  }
+  /// Builds the file index `search_files` reads, or reads the files again
+  /// when it is built: a search meanwhile uses the one it has.
+  fn warm_file_index(&self, repo_path: &str, workspace_id: Option<i64>, workspace_path: &str);
   fn devcontainers_enabled(&self) -> bool;
   fn devcontainer_status(&self, repo_path: &str) -> DevcontainerStatus;
   fn devcontainer_up(&self, repo_path: &str) -> Result<DevcontainerStatus, String>;
-  /// Taken branch names: workspaces' and local branches'.
-  fn branch_names(&self, repo_path: &str) -> Result<HashSet<String>, String>;
-  /// `create_workspace`, with the repository's copy files and setup script.
-  fn create_workspace(&self, repo_path: &str, branch: &str, title: &str) -> Result<i64, String>;
   fn create_session(
     &self,
     repo_path: &str,
     workspace_id: Option<i64>,
     name: &str,
   ) -> Result<i64, String>;
-  /// The native "Attach Files" dialog; `None` when cancelled.
+  /// The native "Attach files" dialog; `None` when cancelled.
   fn pick_files(&self) -> Option<Vec<String>>;
+  /// The workspace setup script's status; `None` when it cannot be read.
+  fn setup(&self, repo_path: &str, workspace_id: i64) -> Option<crate::core::SetupScriptStatus>;
+  /// The Logs preview is on.
+  fn logs_enabled(&self) -> bool;
+  /// Runs the workspace setup script to the end.
+  fn run_setup(
+    &self,
+    target: &crate::core::running_checks::ChecksTarget,
+  ) -> Result<Vec<crate::core::checks::JobResult>, String>;
 }
 
 impl CodeHost for Backend {
@@ -185,10 +234,12 @@ impl CodeHost for Backend {
     if self.remote_containing(repo_path).is_some() {
       return Err(unsupported("Browsing the file tree"));
     }
+    let (entries, readme) = core::workspace_overview(repo_path, workspace_id)?;
     Ok(Overview {
-      entries: core::ls_workspace_with_status(repo_path, workspace_id)?,
-      readme: core::get_workspace_readme(repo_path, workspace_id)?,
+      entries,
+      readme,
       unavailable: false,
+      error: None,
     })
   }
 
@@ -209,12 +260,10 @@ impl CodeHost for Backend {
     if let Some(remote) = self.remote_containing(repo_path) {
       return remote.workspaces();
     }
-    Ok(
-      core::list_workspace_statuses(repo_path)?
-        .into_iter()
-        .map(|status| status.current)
-        .collect(),
-    )
+    // The stored records: the stack needs only branches and targets, and
+    // the window poll keeps them in step with jj. Statuses would rediscover
+    // every workspace under the repo's commit lock, behind any rebase.
+    core::list_all_workspaces(repo_path)
   }
 
   fn set_submodule_synced(&self, repo_path: &str, path: &str, enabled: bool) -> Result<(), String> {
@@ -264,6 +313,53 @@ impl CodeHost for Backend {
     .map(|_| ())
   }
 
+  fn rebase_hold(
+    &self,
+    repo_path: &str,
+    workspace_id: i64,
+  ) -> Option<crate::core::rebase_guard::RebaseHold> {
+    if self.remote_containing(repo_path).is_some() {
+      return None;
+    }
+    core::rebase_guard::hold(repo_path, workspace_id)
+  }
+
+  fn branch_deleted(&self, repo_path: &str, workspace_id: i64) -> bool {
+    if let Some(remote) = self.remote_containing(repo_path) {
+      return remote.branch_deleted(workspace_id);
+    }
+    core::workspace_branch_deleted(repo_path, workspace_id)
+  }
+
+  fn pr_sync(&self, repo_path: &str, workspace_id: i64) -> Option<crate::local_db::PrSyncRecord> {
+    if self.remote_containing(repo_path).is_some() {
+      return None;
+    }
+    core::pr_sync::record(repo_path, workspace_id)
+  }
+
+  fn resync_from_pr(&self, repo_path: &str, workspace_id: i64) -> Result<(), String> {
+    if self.remote_containing(repo_path).is_some() {
+      return Err(unsupported("Syncing from the pull request"));
+    }
+    core::pr_sync::resync_workspace(repo_path, workspace_id)
+  }
+
+  fn push_to_pr(&self, repo_path: &str, workspace_id: i64) -> Result<(), String> {
+    // A remote host doesn't sync PR text; saving there stays local.
+    if self.remote_containing(repo_path).is_some() {
+      return Ok(());
+    }
+    core::pr_sync::push_edits_to_github(repo_path, workspace_id)
+  }
+
+  fn pr_text(&self, repo_path: &str, workspace: &Workspace) -> Option<(String, String)> {
+    if self.remote_containing(repo_path).is_some() {
+      return None;
+    }
+    core::pr_sync::github_text(repo_path, workspace)
+  }
+
   fn search_files(
     &self,
     repo_path: &str,
@@ -276,17 +372,23 @@ impl CodeHost for Backend {
     if let Some(remote) = self.remote_containing(repo_path) {
       return remote.search_files(workspace_id, query, limit);
     }
-    crate::commands::workspace::ensure_workspace_indexed(
-      repo_path.to_string(),
-      workspace_id,
-      workspace_path.to_string(),
-    )?;
-    Ok(
-      local_db::search_workspace_files(repo_path, workspace_id, query, limit)?
-        .into_iter()
-        .map(|file| file.relative_path)
-        .collect(),
-    )
+    Ok(crate::commands::workspace::workspace_file_index(workspace_path)?.search(query, limit))
+  }
+
+  fn file_search_delay(&self, repo_path: &str) -> std::time::Duration {
+    if self.remote_containing(repo_path).is_some() {
+      return std::time::Duration::from_millis(150);
+    }
+    std::time::Duration::ZERO
+  }
+
+  fn warm_file_index(&self, repo_path: &str, _workspace_id: Option<i64>, workspace_path: &str) {
+    if self.remote_containing(repo_path).is_some() {
+      return;
+    }
+    if let Err(err) = crate::commands::workspace::refresh_workspace_file_index(workspace_path) {
+      log::warn!("file index: {err}");
+    }
   }
 
   fn devcontainers_enabled(&self) -> bool {
@@ -307,50 +409,6 @@ impl CodeHost for Backend {
     devcontainer::up(repo_path, claude_code)
   }
 
-  fn branch_names(&self, repo_path: &str) -> Result<HashSet<String>, String> {
-    let (workspaces, branches) = match self.remote_containing(repo_path) {
-      Some(remote) => (remote.workspaces()?, remote.branches()?),
-      None => (
-        core::list_workspaces(repo_path)?,
-        core::list_repo_branches(repo_path)?,
-      ),
-    };
-    Ok(
-      workspaces
-        .into_iter()
-        .map(|w| w.branch_name)
-        .chain(branches.into_iter().map(|b| b.name))
-        .collect(),
-    )
-  }
-
-  fn create_workspace(&self, repo_path: &str, branch: &str, title: &str) -> Result<i64, String> {
-    if let Some(remote) = self.remote_containing(repo_path) {
-      // Copy files and the setup script are local repository settings,
-      // which a remote repository has none of.
-      let metadata = core::WorkspaceMetadata {
-        title: Some(title.trim().to_string()).filter(|t| !t.is_empty()),
-        ..Default::default()
-      };
-      let metadata = serde_json::to_string(&metadata).map_err(|e| e.to_string())?;
-      return remote.create_workspace(branch, None, Some(metadata));
-    }
-    let copy_files = self.with_db(|db| {
-      let raw = db
-        .get_repo_setting(repo_path, "included_copy_files")
-        .ok()
-        .flatten();
-      core::parse_included_copy_files(raw.as_deref())
-    });
-    let metadata = core::WorkspaceMetadata {
-      title: Some(title.trim().to_string()).filter(|t| !t.is_empty()),
-      ..Default::default()
-    };
-    let workspace = core::create_new_workspace(repo_path, branch, None, metadata, copy_files)?;
-    crate::commands::workspace::spawn_setup_script_if_configured(&workspace);
-    Ok(workspace.id)
-  }
-
   fn create_session(
     &self,
     repo_path: &str,
@@ -365,16 +423,19 @@ impl CodeHost for Backend {
     let (tx, rx) = std::sync::mpsc::channel();
     let app = self.app().clone();
     // The dialog opens from the main thread; this waits off it.
-    let _ = self.app().run_on_main_thread(move || {
-      use tauri_plugin_dialog::DialogExt;
-      app
-        .dialog()
-        .file()
-        .set_title("Attach Files")
-        .pick_files(move |files| {
-          let _ = tx.send(files);
-        });
-    });
+    self
+      .app()
+      .run_on_main_thread(move || {
+        use tauri_plugin_dialog::DialogExt;
+        app
+          .dialog()
+          .file()
+          .set_title("Attach files")
+          .pick_files(move |files| {
+            tx.send(files).ignore_closed();
+          });
+      })
+      .ignore_closed();
     let files = rx.recv().ok()??;
     Some(
       files
@@ -384,10 +445,27 @@ impl CodeHost for Backend {
         .collect(),
     )
   }
+
+  fn setup(&self, repo_path: &str, workspace_id: i64) -> Option<crate::core::SetupScriptStatus> {
+    core::get_setup_script_status_sync(repo_path, workspace_id).ok()
+  }
+
+  fn logs_enabled(&self) -> bool {
+    true
+  }
+
+  fn run_setup(
+    &self,
+    target: &crate::core::running_checks::ChecksTarget,
+  ) -> Result<Vec<crate::core::checks::JobResult>, String> {
+    core::running_checks::run(target, &core::running_checks::CheckRun::Setup)
+  }
 }
 
 /// Reads the task input's settings (`TaskInput`'s `agentSettings` and
-/// `newWorkspaceSetting`, `useRepoEnvironment`).
+/// `newWorkspaceSetting`, `useRepoEnvironment`). The environment's status
+/// is not read: the caller asks for it next, so the agent and the other
+/// settings show without waiting for `docker ps`.
 pub fn task_settings(host: &dyn CodeHost, repo_path: &str) -> TaskSettings {
   let keys = |keys: &[&str]| keys.iter().map(|k| k.to_string()).collect::<Vec<_>>();
   let repo = host
@@ -404,7 +482,7 @@ pub fn task_settings(host: &dyn CodeHost, repo_path: &str) -> TaskSettings {
   let repo_agent = Agent::parse(get(&repo, "default_agent").as_deref());
   let environment = host.devcontainers_enabled().then(|| Environment {
     devcontainer: get(&repo, ENVIRONMENT_SETTING).as_deref() == Some("devcontainer"),
-    status: Some(host.devcontainer_status(repo_path)),
+    status: None,
   });
   TaskSettings {
     agent: repo_agent
@@ -421,42 +499,25 @@ pub fn task_settings(host: &dyn CodeHost, repo_path: &str) -> TaskSettings {
 
 pub use crate::core::new_workspaces::apply_branch_name_pattern;
 
-/// `taskBranchSlug`: lowercase ASCII words joined by `-`, cut on a word.
-fn task_branch_slug(prompt: &str) -> String {
-  const MAX: usize = 48;
-  let slug = Regex::new("[a-z0-9]+")
-    .expect("regex")
-    .find_iter(&prompt.to_lowercase())
-    .map(|m| m.as_str().to_string())
-    .collect::<Vec<_>>()
-    .join("-");
-  if slug.len() <= MAX {
-    return slug;
-  }
-  let cut = &slug[..MAX];
-  match cut.rfind('-') {
-    Some(dash) if dash > 0 => cut[..dash].to_string(),
-    _ => cut.to_string(),
-  }
+/// `text` with the bytes from `start` to `end` replaced by `insertion`. Both
+/// offsets are clamped to the text and moved back to a char boundary, so a
+/// stale offset never splits a multi-byte char.
+pub fn replace_range(text: &str, start: usize, end: usize, insertion: &str) -> String {
+  let start = text.floor_char_boundary(start);
+  let end = text.floor_char_boundary(end);
+  format!(
+    "{}{insertion}{}",
+    text.get(..start).unwrap_or_default(),
+    text.get(end.max(start)..).unwrap_or_default()
+  )
 }
-
-/// `taskBranchName`: a branch for the task no workspace or branch uses yet.
-pub fn task_branch_name(prompt: &str, taken: &HashSet<String>, pattern: &str) -> String {
-  let slug = task_branch_slug(prompt);
-  let base = apply_branch_name_pattern(pattern, if slug.is_empty() { "task" } else { &slug });
-  let mut name = base.clone();
-  let mut n = 2;
-  while taken.contains(&name) {
-    name = format!("{base}-{n}");
-    n += 1;
-  }
-  name
-}
-
-pub use crate::core::agent_launch::session_name;
 
 /// The `@` being typed before `cursor` (a byte offset): its offset and the
 /// query after it, if it starts the text or follows whitespace.
+#[expect(
+  clippy::string_slice,
+  reason = "offsets come from char_indices() and a checked get(..cursor)"
+)]
 pub fn mention_at(text: &str, cursor: usize) -> Option<(usize, String)> {
   let before = text.get(..cursor)?;
   for (i, ch) in before.char_indices().rev() {
@@ -494,6 +555,7 @@ pub fn insert_at(text: &str, cursor: usize, insertion: &str) -> (String, usize) 
 /// `looksLikeMarkdown`: block syntax at a line start, or inline emphasis,
 /// code or a link.
 pub fn looks_like_markdown(text: &str) -> bool {
+  #[expect(clippy::expect_used, reason = "constant patterns")]
   static PATTERNS: LazyLock<RegexSet> = LazyLock::new(|| {
     RegexSet::new([
       r"(?m)^#{1,6}\s",
@@ -511,9 +573,45 @@ pub fn looks_like_markdown(text: &str) -> bool {
   PATTERNS.is_match(text)
 }
 
+/// GitHub media links on a line of their own, as `MarkdownContent` draws
+/// them: an image URL shows inline, and an attachment URL (GitHub's videos)
+/// shows as a card that opens it in the browser, since GPUI cannot play it.
+pub fn embed_media(text: &str) -> String {
+  #[expect(clippy::expect_used, reason = "constant pattern")]
+  static ATTACHMENT: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^https://github\.com/user-attachments/assets/[0-9a-fA-F-]+$").expect("regex")
+  });
+  #[expect(clippy::expect_used, reason = "constant pattern")]
+  static IMAGE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)^https?://\S+\.(png|jpe?g|gif|webp|svg)(\?\S*)?$").expect("regex")
+  });
+  let mut fenced = false;
+  text
+    .split_inclusive('\n')
+    .map(|line| {
+      let trimmed = line.trim();
+      if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+        fenced = !fenced;
+      }
+      if fenced {
+        return line.to_string();
+      }
+      let end = line.get(line.trim_end().len()..).unwrap_or_default();
+      if ATTACHMENT.is_match(trimmed) {
+        format!("\n> ▶ **[Video attachment, open in browser]({trimmed})**\n{end}")
+      } else if IMAGE.is_match(trimmed) {
+        format!("![]({trimmed}){end}")
+      } else {
+        line.to_string()
+      }
+    })
+    .collect()
+}
+
 /// GitHub emoji shortcodes (`:robot:`) as emoji, outside code. Unknown
 /// shortcodes stay as typed.
 pub fn emojify(text: &str) -> String {
+  #[expect(clippy::expect_used, reason = "constant pattern")]
   static SHORTCODE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r":([a-z0-9_+-]+):").expect("regex"));
   let mut fenced = false;
@@ -628,15 +726,12 @@ pub fn workspace_stack(
   if descendants.is_empty() && ancestors.is_empty() {
     return None;
   }
-  let chain: Vec<&Workspace> = ancestors
-    .into_iter()
-    .rev()
-    .chain(std::iter::once(current))
-    .chain(descendants)
-    .collect();
   Some(
-    chain
+    ancestors
       .into_iter()
+      .rev()
+      .chain(std::iter::once(current))
+      .chain(descendants)
       .rev()
       .map(|w| (w.clone(), w.id == current_id))
       .collect(),
@@ -654,8 +749,8 @@ pub fn diff_stats(commits: &[JjLogCommit]) -> (u32, u32) {
 /// `LinearCommitHistory`'s split of a log: the workspace's own commits
 /// (without the working copy, or the empty commit on top of it) and the
 /// target branch's.
-pub fn history_commits(log: &JjLogResult) -> (Vec<JjLogCommit>, Vec<JjLogCommit>) {
-  let (target, own): (Vec<_>, Vec<_>) = log.commits.iter().cloned().partition(|c| c.on_target_only);
+pub fn history_commits(log: &JjLogResult) -> (Vec<&JjLogCommit>, Vec<&JjLogCommit>) {
+  let (target, own): (Vec<_>, Vec<_>) = log.commits.iter().partition(|c| c.on_target_only);
   let own: Vec<_> = own.into_iter().filter(|c| !c.is_working_copy).collect();
   let own = match own.as_slice() {
     [first, second, ..]
@@ -672,17 +767,17 @@ pub fn history_commits(log: &JjLogResult) -> (Vec<JjLogCommit>, Vec<JjLogCommit>
 }
 
 /// `groupCommitsByDay`: runs of commits on the same local day, labelled.
-pub fn group_by_day(commits: &[JjLogCommit]) -> Vec<(String, Vec<JjLogCommit>)> {
-  let mut groups: Vec<(Option<chrono::NaiveDate>, String, Vec<JjLogCommit>)> = Vec::new();
+/// Takes the commits or references to them, and keeps what it is given.
+pub fn group_by_day<C: std::borrow::Borrow<JjLogCommit>>(
+  commits: impl IntoIterator<Item = C>,
+) -> Vec<(String, Vec<C>)> {
+  let mut groups: Vec<(Option<chrono::NaiveDate>, String, Vec<C>)> = Vec::new();
   for commit in commits {
-    let day = time::day(&commit.timestamp);
+    let timestamp = &commit.borrow().timestamp;
+    let day = time::day(timestamp);
     match groups.last_mut() {
-      Some((last, _, list)) if *last == day => list.push(commit.clone()),
-      _ => groups.push((
-        day,
-        time::day_label(&commit.timestamp),
-        vec![commit.clone()],
-      )),
+      Some((last, _, list)) if *last == day => list.push(commit),
+      _ => groups.push((day, time::day_label(timestamp), vec![commit])),
     }
   }
   groups
@@ -713,9 +808,222 @@ pub fn conflict_count(paths: &[String]) -> usize {
     .len()
 }
 
+/// What the Code tab's alerts are read from.
+pub struct AlertState<'a> {
+  pub conflicted_files: &'a [String],
+  pub rebase_hold: Option<&'a core::rebase_guard::RebaseHold>,
+  pub setup: Option<&'a core::SetupScriptStatus>,
+  /// A workspace, not the home repository: only a workspace has a setup run.
+  pub in_workspace: bool,
+  /// A re-run of the setup script is in flight.
+  pub setup_rerunning: bool,
+  /// The workspace's branch, when it was deleted on the remote.
+  pub branch_deleted: Option<&'a str>,
+}
+
+/// One alert the Code tab's status button gathers.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CodeAlert {
+  Conflicts {
+    count: usize,
+  },
+  BranchDeleted {
+    branch: String,
+  },
+  Rebase(core::rebase_guard::RebaseHold),
+  Setup {
+    status: String,
+    running: bool,
+    run_id: Option<i64>,
+  },
+}
+
+impl CodeAlert {
+  pub fn severity(&self) -> crate::gpui_shell::ui::Severity {
+    use crate::gpui_shell::ui::Severity;
+    use core::rebase_guard::RebaseHold;
+    match self {
+      CodeAlert::Conflicts { .. } => Severity::Danger,
+      CodeAlert::BranchDeleted { .. } => Severity::Warning,
+      CodeAlert::Rebase(RebaseHold::StaleTarget { .. }) => Severity::Info,
+      CodeAlert::Rebase(_) => Severity::Warning,
+      CodeAlert::Setup {
+        status, running, ..
+      } if !running && status == "failed" => Severity::Danger,
+      CodeAlert::Setup { .. } => Severity::Info,
+    }
+  }
+}
+
+/// The Code tab's alerts, in the order they show.
+pub fn code_alerts(state: &AlertState) -> Vec<CodeAlert> {
+  let mut alerts = Vec::new();
+  let count = conflict_count(state.conflicted_files);
+  if count > 0 {
+    alerts.push(CodeAlert::Conflicts { count });
+  }
+  if let Some(branch) = state.branch_deleted {
+    alerts.push(CodeAlert::BranchDeleted {
+      branch: branch.to_string(),
+    });
+  }
+  if let Some(hold) = state.rebase_hold {
+    alerts.push(CodeAlert::Rebase(hold.clone()));
+  }
+  if let Some(setup) = state.setup.filter(|s| s.configured && state.in_workspace) {
+    alerts.push(CodeAlert::Setup {
+      status: setup.status.clone(),
+      running: state.setup_rerunning || matches!(setup.status.as_str(), "pending" | "running"),
+      run_id: setup.run_id,
+    });
+  }
+  alerts
+}
+
+/// How many alerts of each severity there are, most serious first, leaving
+/// out the severities with none.
+pub fn severity_counts(alerts: &[CodeAlert]) -> Vec<(crate::gpui_shell::ui::Severity, usize)> {
+  use crate::gpui_shell::ui::Severity;
+  [Severity::Danger, Severity::Warning, Severity::Info]
+    .into_iter()
+    .map(|level| {
+      (
+        level,
+        alerts.iter().filter(|a| a.severity() == level).count(),
+      )
+    })
+    .filter(|(_, n)| *n > 0)
+    .collect()
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::core::{rebase_guard::RebaseHold, SetupScriptStatus};
+  use crate::gpui_shell::ui::Severity;
+
+  fn setup(status: &str) -> SetupScriptStatus {
+    SetupScriptStatus {
+      configured: true,
+      status: status.into(),
+      run_id: Some(3),
+    }
+  }
+
+  fn alerts_state<'a>(
+    conflicted: &'a [String],
+    hold: Option<&'a RebaseHold>,
+    setup: Option<&'a SetupScriptStatus>,
+  ) -> AlertState<'a> {
+    AlertState {
+      conflicted_files: conflicted,
+      rebase_hold: hold,
+      setup,
+      in_workspace: true,
+      setup_rerunning: false,
+      branch_deleted: None,
+    }
+  }
+
+  #[test]
+  fn code_alerts_puts_a_deleted_branch_after_conflicts() {
+    let files = vec!["a.rs".to_string()];
+    let hold = RebaseHold::StaleTarget {
+      error: "offline".into(),
+    };
+    let mut state = alerts_state(&files, Some(&hold), None);
+    state.branch_deleted = Some("feat/x");
+    let alerts = code_alerts(&state);
+    assert_eq!(
+      alerts,
+      vec![
+        CodeAlert::Conflicts { count: 1 },
+        CodeAlert::BranchDeleted {
+          branch: "feat/x".into()
+        },
+        CodeAlert::Rebase(hold.clone()),
+      ]
+    );
+    assert_eq!(
+      alerts[1].severity(),
+      crate::gpui_shell::ui::Severity::Warning
+    );
+  }
+
+  #[test]
+  fn code_alerts_is_empty_for_a_clean_workspace() {
+    assert!(code_alerts(&alerts_state(&[], None, None)).is_empty());
+  }
+
+  #[test]
+  fn code_alerts_lists_conflicts_rebase_and_setup_in_order() {
+    let files = vec!["a.rs".to_string(), "b.rs".to_string()];
+    let hold = RebaseHold::StaleTarget {
+      error: "offline".into(),
+    };
+    let failed = setup("failed");
+    let alerts = code_alerts(&alerts_state(&files, Some(&hold), Some(&failed)));
+    assert_eq!(
+      alerts,
+      vec![
+        CodeAlert::Conflicts { count: 2 },
+        CodeAlert::Rebase(hold),
+        CodeAlert::Setup {
+          status: "failed".into(),
+          running: false,
+          run_id: Some(3),
+        },
+      ]
+    );
+    let levels: Vec<Severity> = alerts.iter().map(CodeAlert::severity).collect();
+    assert_eq!(levels, [Severity::Danger, Severity::Info, Severity::Danger]);
+  }
+
+  #[test]
+  fn code_alerts_skips_an_unconfigured_setup_script_and_the_home_repo() {
+    let unconfigured = SetupScriptStatus {
+      configured: false,
+      ..setup("passed")
+    };
+    assert!(code_alerts(&alerts_state(&[], None, Some(&unconfigured))).is_empty());
+    let passed = setup("passed");
+    let home = AlertState {
+      in_workspace: false,
+      ..alerts_state(&[], None, Some(&passed))
+    };
+    assert!(code_alerts(&home).is_empty());
+  }
+
+  #[test]
+  fn code_alerts_marks_a_rerunning_setup_script_running() {
+    let passed = setup("passed");
+    let state = AlertState {
+      setup_rerunning: true,
+      ..alerts_state(&[], None, Some(&passed))
+    };
+    assert_eq!(
+      code_alerts(&state),
+      vec![CodeAlert::Setup {
+        status: "passed".into(),
+        running: true,
+        run_id: Some(3),
+      }]
+    );
+  }
+
+  #[test]
+  fn severity_counts_lists_each_present_severity_most_serious_first() {
+    let alerts = vec![
+      CodeAlert::Rebase(RebaseHold::StaleTarget { error: "x".into() }),
+      CodeAlert::Conflicts { count: 1 },
+      CodeAlert::Rebase(RebaseHold::StaleTarget { error: "y".into() }),
+    ];
+    assert_eq!(
+      severity_counts(&alerts),
+      vec![(Severity::Danger, 1), (Severity::Info, 2)]
+    );
+    assert!(severity_counts(&[]).is_empty());
+  }
 
   fn workspace(id: i64, branch: &str, target: Option<&str>) -> Workspace {
     Workspace {
@@ -758,23 +1066,6 @@ mod tests {
   }
 
   #[test]
-  fn branch_names_follow_the_pattern_and_skip_taken_ones() {
-    let taken = HashSet::from(["treq/fix-the-login-bug".to_string()]);
-    assert_eq!(
-      task_branch_name("Fix the login bug!", &HashSet::new(), "treq/{name}"),
-      "treq/fix-the-login-bug"
-    );
-    assert_eq!(
-      task_branch_name("Fix the login bug!", &taken, "treq/{name}"),
-      "treq/fix-the-login-bug-2"
-    );
-    assert_eq!(task_branch_name("???", &HashSet::new(), "{name}"), "task");
-    let long = "word ".repeat(20);
-    let name = task_branch_name(&long, &HashSet::new(), "{name}");
-    assert!(name.len() <= 48 && !name.ends_with('-'), "{name}");
-  }
-
-  #[test]
   fn branch_patterns_drop_trailing_single_letters() {
     assert_eq!(
       apply_branch_name_pattern("{name}", "feat thing r"),
@@ -788,10 +1079,9 @@ mod tests {
   }
 
   #[test]
-  fn session_names_cut_long_prompts() {
-    assert_eq!(session_name("short"), "short");
-    let long = "x".repeat(60);
-    assert_eq!(session_name(&long), format!("{}...", "x".repeat(47)));
+  fn branch_patterns_keep_a_one_letter_name() {
+    assert_eq!(apply_branch_name_pattern("treq/{name}", "a"), "treq/a");
+    assert_eq!(apply_branch_name_pattern("{name}-wip", "a"), "a-wip");
   }
 
   #[test]
@@ -804,10 +1094,39 @@ mod tests {
   }
 
   #[test]
+  fn replace_range_never_splits_a_char() {
+    assert_eq!(
+      replace_range("look @ma now", 5, 8, "@main.rs "),
+      "look @main.rs  now"
+    );
+    // Offsets inside a multi-byte char used to panic the slice.
+    assert_eq!(replace_range("你好@ma", 1, 100, "@x "), "@x ");
+    assert_eq!(replace_range("😀@ma", 4, 7, "@x "), "😀@x ");
+    assert_eq!(replace_range("😀@ma", 1, 6, "@x "), "@x a");
+    assert_eq!(replace_range("é", 1, 0, "@"), "@é");
+  }
+
+  #[test]
   fn inserts_after_a_space() {
     assert_eq!(insert_at("fix", 3, "@a.rs "), ("fix @a.rs ".into(), 10));
     assert_eq!(insert_at("fix ", 4, "@a.rs "), ("fix @a.rs ".into(), 10));
     assert_eq!(insert_at("", 0, "x"), ("x".into(), 1));
+  }
+
+  #[test]
+  fn embeds_bare_media_links() {
+    let video = "https://github.com/user-attachments/assets/0f1e2d3c-aaaa-bbbb-cccc-123456789abc";
+    assert_eq!(
+      embed_media(&format!("Demo:\n{video}\nend")),
+      format!("Demo:\n\n> ▶ **[Video attachment, open in browser]({video})**\n\nend")
+    );
+    assert_eq!(
+      embed_media("https://example.com/shot.png\n"),
+      "![](https://example.com/shot.png)\n"
+    );
+    // Inline links, code and other URLs stay as typed.
+    let kept = format!("see {video}\n```\n{video}\n```\nhttps://example.com/page\n");
+    assert_eq!(embed_media(&kept), kept);
   }
 
   #[test]

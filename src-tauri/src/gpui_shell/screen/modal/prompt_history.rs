@@ -1,8 +1,11 @@
 //! `PromptHistoryModal`: every prompt sent in the repository, newest first,
-//! and the selected one in full.
+//! and the selected one in full. It reads a page of them, and the next as the
+//! list scrolls near the end.
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use serde::Deserialize;
 use serde_json::json;
 use std::{ops::Range, rc::Rc};
@@ -10,10 +13,9 @@ use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, uniform_list, ClipboardItem, Context, FontWeight, SharedString, Window,
 };
 
-use super::{dialog, message, overlay, title, Env};
+use super::Env;
 use crate::{
   gpui_shell::{
-    native::ToastTone,
     theme::{self, Palette},
     time,
     ui::{self, Button, Size, TextSize, Variant},
@@ -36,11 +38,20 @@ pub struct PromptHistoryView {
   dark: bool,
   /// `None` until the first read returns.
   pub(in crate::gpui_shell::screen) entries: Option<Rc<Vec<PromptHistoryEntry>>>,
+  /// Every prompt is in `entries`.
+  all_read: bool,
+  /// A page is being read.
+  reading: bool,
   pub(in crate::gpui_shell::screen) selected: Option<i64>,
   /// Takes the keyboard on opening, so Escape reaches the dialog.
   focus: gpui::FocusHandle,
   focused: bool,
 }
+
+/// Prompts read at a time, and how near the end of those listed the list
+/// scrolls before the next page is read.
+const PAGE: usize = 100;
+const READ_AHEAD: usize = 30;
 
 /// `workspaceLabelFor`.
 pub fn workspace_label(entry: &PromptHistoryEntry) -> String {
@@ -53,8 +64,16 @@ pub fn workspace_label(entry: &PromptHistoryEntry) -> String {
 
 /// A prompt's opening, for its row: the row truncates it anyway, and
 /// shaping a long prompt whole for one line is wasted.
+/// The prompt's first 200 characters on one line: a uniform list's rows
+/// share one height, so a line break would spill into the next row.
 fn preview(text: &str) -> String {
-  text.chars().take(200).collect()
+  text
+    .split_whitespace()
+    .collect::<Vec<_>>()
+    .join(" ")
+    .chars()
+    .take(200)
+    .collect()
 }
 
 /// `formatPromptsForCopy`.
@@ -81,6 +100,8 @@ impl PromptHistoryView {
       route,
       dark,
       entries: None,
+      all_read: false,
+      reading: false,
       focus: cx.focus_handle(),
       focused: false,
     };
@@ -97,34 +118,122 @@ impl PromptHistoryView {
     self.dark = dark;
     if moved {
       self.entries = None;
+      self.all_read = false;
+      self.reading = false;
       self.selected = None;
       self.load(cx);
     }
     cx.notify();
   }
 
+  /// Reads the first page; every prompt when the one asked for is older.
   fn load(&mut self, cx: &mut Context<Self>) {
     let (host, repo) = (self.env.host.clone(), self.route.repo_path.clone());
     let key = repo.clone();
+    let wanted = self.route.initial_selected_id;
+    self.reading = true;
     cx.spawn(async move |this, cx| {
-      let entries = cx
-        .background_spawn(async move { host.prompt_history(&repo) })
-        .await
-        .unwrap_or_else(|err| {
-          log::warn!("Failed to load prompt history: {err}");
-          Vec::new()
-        });
-      let _ = this.update(cx, |view, cx| {
-        if view.route.repo_path != key {
-          return;
-        }
-        // The most recent entry, unless one was already asked for or picked.
-        if view.selected.is_none() {
-          view.selected = entries.first().map(|e| e.id);
-        }
-        view.entries = Some(Rc::new(entries));
-        cx.notify();
+      let read = cx
+        .background_spawn(async move {
+          let mut entries = host.prompt_history_page(&repo, 0, PAGE)?;
+          let mut all = entries.len() < PAGE;
+          if !all && wanted.is_some_and(|id| entries.iter().all(|e| e.id != id)) {
+            entries = host.prompt_history(&repo)?;
+            all = true;
+          }
+          Ok::<_, String>((entries, all))
+        })
+        .await;
+      let (entries, all) = read.unwrap_or_else(|err| {
+        log::warn!("Failed to load prompt history: {err}");
+        (Vec::new(), true)
       });
+      this
+        .update(cx, |view, cx| {
+          if view.route.repo_path != key {
+            return;
+          }
+          // The most recent entry, unless one was already asked for or picked.
+          if view.selected.is_none() {
+            view.selected = entries.first().map(|e| e.id);
+          }
+          view.entries = Some(Rc::new(entries));
+          view.all_read = all;
+          view.reading = false;
+          cx.notify();
+        })
+        .ignore_closed();
+    })
+    .detach();
+  }
+
+  /// Reads the next page once the list shows rows near the end of those read.
+  fn read_ahead(&mut self, shown: usize, cx: &mut Context<Self>) {
+    let Some(entries) = self.entries.as_ref() else {
+      return;
+    };
+    if self.all_read || self.reading || shown + READ_AHEAD < entries.len() {
+      return;
+    }
+    self.reading = true;
+    let (host, repo, offset) = (
+      self.env.host.clone(),
+      self.route.repo_path.clone(),
+      entries.len(),
+    );
+    cx.spawn(async move |this, cx| {
+      let key = repo.clone();
+      let page = cx
+        .background_spawn(async move { host.prompt_history_page(&repo, offset, PAGE) })
+        .await;
+      this
+        .update(cx, |view, cx| {
+          if view.route.repo_path != key {
+            return;
+          }
+          view.reading = false;
+          match page {
+            Ok(page) => {
+              view.all_read = page.len() < PAGE;
+              if let Some(entries) = view.entries.as_mut() {
+                Rc::make_mut(entries).extend(page);
+              }
+            }
+            Err(err) => {
+              log::warn!("Failed to load prompt history: {err}");
+              view.all_read = true;
+            }
+          }
+          cx.notify();
+        })
+        .ignore_closed();
+    })
+    .detach();
+  }
+
+  /// Copies every prompt, reading the ones not read yet first.
+  fn copy_all(&mut self, cx: &mut Context<Self>) {
+    if self.all_read {
+      let all = self.entries.clone().unwrap_or_default();
+      self.copy(format_for_copy(&all), "All prompts copied", cx);
+      return;
+    }
+    let (host, repo) = (self.env.host.clone(), self.route.repo_path.clone());
+    cx.spawn(async move |this, cx| {
+      let all = cx
+        .background_spawn(async move { host.prompt_history(&repo) })
+        .await;
+      this
+        .update(cx, |view, cx| match all {
+          Ok(all) => {
+            view.copy(format_for_copy(&all), "All prompts copied", cx);
+            view.entries = Some(Rc::new(all));
+            view.all_read = true;
+            cx.notify();
+          }
+          Err(err) => log::warn!("Failed to load prompt history: {err}"),
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -132,7 +241,7 @@ impl PromptHistoryView {
   /// `handleCopy`.
   fn copy(&self, text: String, description: &str, cx: &mut Context<Self>) {
     cx.write_to_clipboard(ClipboardItem::new_string(text));
-    self.env.toast(ToastTone::Success, description, "");
+    self.env.notify(Toast::success(description).into());
   }
 
   fn close(&self, cx: &mut Context<Self>) {
@@ -167,9 +276,10 @@ impl PromptHistoryView {
       )
   }
 
-  fn rows(&self, range: Range<usize>, cx: &mut Context<Self>) -> Vec<gpui::AnyElement> {
+  fn rows(&mut self, range: Range<usize>, cx: &mut Context<Self>) -> Vec<gpui::AnyElement> {
+    self.read_ahead(range.end, cx);
     let p = theme::palette(self.dark);
-    let (selected_bg, hover_bg, muted) = (p.selected(), p.hover(), p.muted_foreground);
+    let muted = p.muted_foreground;
     let Some(entries) = self.entries.clone() else {
       return Vec::new();
     };
@@ -183,40 +293,41 @@ impl PromptHistoryView {
         div()
           .pb_1()
           .child(
-            ui::text(div(), TextSize::Xs)
-              .id(SharedString::from(selector.clone()))
-              .debug_selector(move || selector)
-              .w_full()
-              .px_2()
-              .py_2()
-              .rounded(radius::MD)
-              .cursor_pointer()
-              .when(selected, |this| this.bg(selected_bg))
-              .when(!selected, |this| this.hover(move |s| s.bg(hover_bg)))
-              .child(
-                div()
-                  .font_family(theme::MONO_FONT)
-                  .font_weight(FontWeight::MEDIUM)
-                  .truncate()
-                  .child(workspace_label(entry)),
-              )
-              .child(
-                div()
-                  .text_color(muted)
-                  .truncate()
-                  .child(time::locale(&entry.created_at)),
-              )
-              .child(
-                div()
-                  .mt_1()
-                  .text_color(muted)
-                  .truncate()
-                  .child(preview(&entry.prompt_text)),
-              )
-              .on_click(cx.listener(move |view, _, _, cx| {
-                view.selected = Some(id);
-                cx.notify();
-              })),
+            ui::text(
+              ui::Row::new(SharedString::from(selector), &p)
+                .density(ui::RowDensity::TwoLine)
+                .label(workspace_label(entry))
+                .selected(selected),
+              TextSize::Sm,
+            )
+            .w_full()
+            .py_2()
+            .rounded(radius::MD)
+            .items_start()
+            .child(
+              div()
+                .font_family(theme::MONO_FONT)
+                .font_weight(FontWeight::MEDIUM)
+                .truncate()
+                .child(workspace_label(entry)),
+            )
+            .child(
+              div()
+                .text_color(muted)
+                .truncate()
+                .child(time::locale(&entry.created_at)),
+            )
+            .child(
+              div()
+                .mt_1()
+                .text_color(muted)
+                .truncate()
+                .child(preview(&entry.prompt_text)),
+            )
+            .on_click(cx.listener(move |view, _, _, cx| {
+              view.selected = Some(id);
+              cx.notify();
+            })),
           )
           .into_any_element()
       })
@@ -235,14 +346,13 @@ impl PromptHistoryView {
       .min_w_0()
       .h_full();
     let Some(entry) = entries.iter().find(|e| Some(e.id) == self.selected) else {
-      return pane.child(message(
-        "prompt-history-select",
-        "Select a prompt to view its full text.",
-        p,
-      ));
+      return pane.child(
+        ui::EmptyState::new("prompt-history-select", "No prompt selected", p)
+          .message("Select a prompt to view its full text."),
+      );
     };
     let text = entry.prompt_text.clone();
-    let header = ui::text(div(), TextSize::Xs)
+    let header = ui::text(div(), TextSize::Sm)
       .flex()
       .items_center()
       .justify_between()
@@ -272,19 +382,29 @@ impl PromptHistoryView {
               .child(agent)
           })),
       )
-      .child(
-        Button::new("prompt-history-copy", p)
-          .aria_label("Copy")
-          .variant(Variant::Ghost)
-          .size(Size::Sm)
-          .h(zpx(24.))
-          .px_2()
-          .child(ui::icon(theme::ICON_COPY, 12., p.foreground).mr_1())
-          .child(ui::text(div(), TextSize::Xs).child("Copy"))
-          .on_click(
-            cx.listener(move |view, _, _, cx| view.copy(text.clone(), "Prompt copied", cx)),
-          ),
-      );
+      .child(ui::copy_feedback::copyable(
+        "prompt-history-copy-feedback",
+        {
+          let p = *p;
+          let copy =
+            cx.listener(move |view, _, _, cx| view.copy(text.clone(), "Prompt copied", cx));
+          move |copied| {
+            Button::new("prompt-history-copy", &p)
+              .aria_label("Copy")
+              .variant(Variant::Ghost)
+              .size(Size::Sm)
+              .h(zpx(24.))
+              .px_2()
+              .gap_1()
+              .copy_icon(copied, 12.)
+              // Short label (['button label']): 11px is fine.
+              // ast-grep-ignore: gpui-text-xs-short-label-only
+              .child(ui::text(div(), TextSize::Xs).child("Copy"))
+              .on_click(copy)
+              .into_any_element()
+          }
+        },
+      ));
     let entry = entry.clone();
     pane.child(
       div()
@@ -305,7 +425,7 @@ impl PromptHistoryView {
             Button::new("prompt-history-run", p)
               .size(Size::Sm)
               .child(ui::icon(theme::ICON_PLAY, 14., p.primary_foreground).mr_1p5())
-              .label("Run prompt...")
+              .label("Run prompt…")
               .on_click(cx.listener(move |view, _, _, cx| view.run(&entry, cx))),
           ),
         ),
@@ -321,24 +441,19 @@ impl Render for PromptHistoryView {
       window.focus(&self.focus, cx);
     }
     let viewport = window.viewport_size();
-    let (backdrop, panel) = dialog(
-      "prompt-history-modal",
-      viewport.width * 0.65,
-      Some(viewport.height * 0.75),
-      viewport,
-      &p,
-    );
     let entries = self.entries.clone();
-    let copy_all = entries.as_ref().filter(|all| !all.is_empty()).map(|all| {
-      let all = all.clone();
-      Button::new("prompt-history-copy-all", &p)
-        .variant(Variant::Outline)
-        .size(Size::Sm)
-        .child(ui::icon(theme::ICON_COPY, 16., p.foreground).mr_1p5())
-        .label("Copy all")
-        .on_click(cx.listener(move |view, _, _, cx| {
-          view.copy(format_for_copy(&all), "All prompts copied", cx)
-        }))
+    let copy_all = entries.as_ref().filter(|all| !all.is_empty()).map(|_| {
+      let copy = cx.listener(|view, _, _, cx| view.copy_all(cx));
+      ui::copy_feedback::copyable("prompt-history-copy-all-feedback", move |copied| {
+        Button::new("prompt-history-copy-all", &p)
+          .variant(Variant::Outline)
+          .size(Size::Sm)
+          .gap_1p5()
+          .copy_icon(copied, 16.)
+          .label("Copy all")
+          .on_click(copy)
+          .into_any_element()
+      })
     });
     let header = div()
       .flex_none()
@@ -347,21 +462,27 @@ impl Render for PromptHistoryView {
       .justify_between()
       .gap_2()
       .child(
-        title(
-          div()
-            .flex()
-            .items_center()
-            .gap_2()
-            .child(ui::icon(theme::ICON_HISTORY, 16., p.popover_foreground))
-            .child("Prompt History"),
-        )
-        .text_color(p.popover_foreground),
+        ui::text(div(), TextSize::Lg)
+          .font_weight(FontWeight::SEMIBOLD)
+          .flex()
+          .items_center()
+          .gap_2()
+          .child(ui::icon(theme::ICON_HISTORY, 16., p.popover_foreground))
+          .child("Prompt history"),
       )
       .children(copy_all);
     let body = match &entries {
-      None => message("prompt-history-loading", "Loading prompt history...", &p).into_any_element(),
+      None => ui::delayed(
+        "prompt-history-loading",
+        div()
+          .py_8()
+          .child(ui::Loading::new("prompt-history-loading", &p).label("Loading prompt history…")),
+      )
+      .into_any_element(),
       Some(entries) if entries.is_empty() => {
-        message("prompt-history-empty", "No prompts sent yet.", &p).into_any_element()
+        ui::EmptyState::new("prompt-history-empty", "No prompts sent yet", &p)
+          .message("Prompts you send to agents in this repository appear here.")
+          .into_any_element()
       }
       Some(entries) => div()
         .flex_1()
@@ -373,24 +494,26 @@ impl Render for PromptHistoryView {
         .child(self.detail(entries, &p, cx))
         .into_any_element(),
     };
-    let keys = cx.listener(|view, e: &gpui::KeyDownEvent, _, cx| {
-      if ui::is_escape(&e.keystroke) {
-        cx.stop_propagation();
-        view.close(cx);
-      }
-    });
-    overlay(
-      backdrop.on_mouse_down(
-        gpui::MouseButton::Left,
-        cx.listener(|view, _, _, cx| view.close(cx)),
-      ),
-      panel
-        .id("prompt-history-panel")
-        .track_focus(&self.focus)
-        .capture_key_down(keys)
-        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-        .child(header)
-        .child(body),
-    )
+    ui::Dialog::new("prompt-history-modal", &p)
+      .overlay(viewport)
+      .relative_size(0.65, Some(0.75))
+      .title("Prompt history")
+      .header(header)
+      .focus(&self.focus)
+      .on_close(ui::handler(cx, |view, _, cx| view.close(cx)))
+      .child(body)
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::preview;
+
+  #[test]
+  fn preview_keeps_a_multi_line_prompt_on_one_line() {
+    assert_eq!(
+      preview("## Code Review\n\n### Comments\n  - one"),
+      "## Code Review ### Comments - one"
+    );
   }
 }

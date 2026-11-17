@@ -8,8 +8,8 @@ use serde::Deserialize;
 use super::{
   checklist::ToolsHost,
   workspace::{
-    Checks, CommitsLabel, CreatePr, Disabled, Header, HomeTarget, Linear, Loc, Merge, MergeQueue,
-    Pill, PrState, Rebase, Sync, Tab, TabRow, Target, Tone, Tooltip, ViewPr,
+    Checks, CommitsLabel, CreatePr, Disabled, Header, HomeTarget, Linear, Loc, Merge, Pill,
+    PrState, Rebase, Sync, Tab, TabRow, Target, Tone, Tooltip, ViewPr,
   },
 };
 use crate::{
@@ -24,7 +24,7 @@ use crate::{
     popover::data::{read_checks, ChecksData},
     remote_repo::{unsupported, Remote},
   },
-  jj::{self, HomeRebaseDryRunResult, JjLogResult},
+  jj::{HomeRebaseDryRunResult, JjFileChange, JjLogResult},
   local_db,
 };
 
@@ -47,8 +47,6 @@ pub struct Route {
   pub creating_pr: bool,
   /// Workflows started from this window that have not reported yet.
   pub running_checks: Vec<String>,
-  /// The merge queue button, from Supabase.
-  pub merge_queue: Option<MergeQueue>,
   /// Workflow files running as a whole (`isRunning(filename)`), where
   /// `running_checks` also holds those running a single job.
   #[serde(default)]
@@ -87,6 +85,10 @@ pub struct Route {
   /// absent for a local one. (`remote` is the snapshot's remote dialogs.)
   #[serde(default)]
   pub remote_chrome: Option<super::remote_chrome::RemoteChrome>,
+  /// The workspace as the window last listed it, so the tabs start on it
+  /// before the header's own read lands.
+  #[serde(default)]
+  pub workspace: Option<local_db::Workspace>,
 }
 
 impl Route {
@@ -154,11 +156,65 @@ pub trait WorkspaceHost: ToolsHost + super::launch_data::LaunchHost {
   fn push(&self, repo_path: &str, workspace_id: Option<i64>) -> Outcome;
   fn sync(&self, repo_path: &str, workspace_id: Option<i64>) -> Outcome;
   fn rebase_home(&self, repo_path: &str, branch: &str) -> Outcome;
+  /// Fetches, then resets the workspace's branch to `origin`.
+  fn reset_to_remote(&self, repo_path: &str, workspace_id: i64) -> Outcome;
   fn notify(&self, event: NativeEvent);
 }
 
 fn unique_paths<'a>(paths: impl Iterator<Item = &'a str>) -> usize {
   paths.collect::<HashSet<_>>().len()
+}
+
+/// The Changes pill's counts: unique paths changed (committed too, off
+/// the home branch) and those uncommitted.
+fn changed_counts(
+  repo: &str,
+  route: &Route,
+  workspace: Option<&local_db::Workspace>,
+) -> (usize, usize) {
+  let warn = |what: &str, err: String| log::warn!("workspace header: {what}: {err}");
+  let include_committed = workspace.is_some_and(|w| w.branch_name != route.default_target());
+  match route.workspace_id {
+    Some(id) if include_committed => core::workspace_diff(repo, id)
+      .map(|diff| {
+        let all = diff.uncommitted_files.iter().chain(&diff.committed_files);
+        (
+          unique_paths(all.map(|f| f.path.as_str())),
+          diff.uncommitted_files.len(),
+        )
+      })
+      .unwrap_or_else(|e| {
+        warn("diff", e);
+        (0, 0)
+      }),
+    id => core::list_changed_files(repo, id)
+      .map(|files| {
+        let count = unique_paths(files.iter().map(|f| f.path.as_str()));
+        (count, count)
+      })
+      .unwrap_or_else(|e| {
+        warn("changed files", e);
+        (0, 0)
+      }),
+  }
+}
+
+/// The home branch's commits behind its target, and the dry-run rebase
+/// onto it, on a home feature branch.
+fn home_rebase(repo: &str, route: &Route) -> (usize, Option<HomeRebaseDryRunResult>) {
+  let home_branch = route.home_branch.as_str();
+  let on_home_feature = route.workspace_id.is_none() && home_branch != DEFAULT_BRANCH;
+  let home_ahead = if on_home_feature {
+    core::list_commits(repo, None, true, None, Some(14))
+      .map(|log| log.commits.iter().filter(|c| c.on_target_only).count())
+      .unwrap_or(0)
+  } else {
+    0
+  };
+  let home_dry_run = (on_home_feature && home_ahead > 0 && !home_branch.is_empty())
+    .then(|| core::repo::dry_run_home_rebase(repo, home_branch, DEFAULT_BRANCH))
+    .flatten();
+  (home_ahead, home_dry_run)
 }
 
 impl WorkspaceHost for Backend {
@@ -168,83 +224,56 @@ impl WorkspaceHost for Backend {
     }
     let repo = route.repo_path.as_str();
     let warn = |what: &str, err: String| log::warn!("workspace header: {what}: {err}");
-    let workspace = route.workspace_id.and_then(|id| {
-      core::list_workspaces(repo)
-        .map_err(|e| warn("workspaces", e))
-        .ok()?
-        .into_iter()
-        .find(|w| w.id == id)
-    });
-    let status = core::workspace_status(repo, route.workspace_id)
-      .map_err(|e| warn("status", e))
-      .ok();
-    let remote = crate::github::get_git_remote_url_impl(repo)
-      .map_err(|e| warn("remote", e))
-      .ok()
-      .flatten();
-    let commits = route.workspace_id.and_then(|id| {
-      core::list_commits(repo, Some(id), false, None, None)
-        .map_err(|e| warn("commits", e))
-        .ok()
-    });
-    let include_committed = workspace
-      .as_ref()
-      .is_some_and(|w| w.branch_name != route.default_target());
-    let (review_count, uncommitted_count) = match route.workspace_id {
-      Some(id) if include_committed => core::workspace_diff(repo, id)
-        .map(|diff| {
-          let all = diff.uncommitted_files.iter().chain(&diff.committed_files);
-          (
-            unique_paths(all.map(|f| f.path.as_str())),
-            diff.uncommitted_files.len(),
-          )
+    // The reads are independent but for the counts, which need the
+    // workspace: run them side by side, so the header waits for the
+    // slowest rather than for all of them in turn.
+    std::thread::scope(|scope| {
+      let status = scope.spawn(|| {
+        core::workspace_status(repo, route.workspace_id)
+          .map_err(|e| warn("status", e))
+          .ok()
+      });
+      let remote = scope.spawn(|| {
+        crate::core::github_cli::remote(repo)
+          .map_err(|e| warn("remote", e))
+          .ok()
+          .flatten()
+      });
+      let commits = scope.spawn(|| {
+        route.workspace_id.and_then(|id| {
+          core::list_commits(repo, Some(id), false, None, None)
+            .map_err(|e| warn("commits", e))
+            .ok()
         })
-        .unwrap_or_else(|e| {
-          warn("diff", e);
-          (0, 0)
-        }),
-      id => core::list_changed_files(repo, id)
-        .map(|files| {
-          let count = unique_paths(files.iter().map(|f| f.path.as_str()));
-          (count, count)
-        })
-        .unwrap_or_else(|e| {
-          warn("changed files", e);
-          (0, 0)
-        }),
-    };
-    let home_branch = route.home_branch.as_str();
-    let on_home_feature = route.workspace_id.is_none() && home_branch != DEFAULT_BRANCH;
-    let home_ahead = if on_home_feature {
-      core::list_commits(repo, None, true, None, Some(14))
-        .map(|log| log.commits.iter().filter(|c| c.on_target_only).count())
-        .unwrap_or(0)
-    } else {
-      0
-    };
-    let home_dry_run = (on_home_feature && home_ahead > 0 && !home_branch.is_empty())
-      .then(|| jj::jj_dry_run_home_repo_rebase(repo, home_branch, DEFAULT_BRANCH).ok())
-      .flatten();
-    let checks = route.workspace_id.map(|id| read_checks(repo, id));
-    let (linear_enabled, logs_enabled) = self.with_db(|db| {
-      (
-        feature_preview::is_enabled(db, PreviewFeature::LinearIntegration),
-        feature_preview::is_enabled(db, PreviewFeature::Logs),
-      )
-    });
-    Loaded {
-      workspace,
-      status,
-      remote,
-      commits,
-      review_count,
-      uncommitted_count,
-      home_ahead,
-      home_dry_run,
-      checks,
-      linear_enabled,
-      logs_enabled,
-    }
+      });
+      let home = scope.spawn(|| home_rebase(repo, route));
+      let checks = scope.spawn(|| route.workspace_id.map(|id| read_checks(repo, id)));
+      let workspace = route.workspace_id.and_then(|id| {
+        core::list_workspaces(repo)
+          .map_err(|e| warn("workspaces", e))
+          .ok()?
+          .into_iter()
+          .find(|w| w.id == id)
+      });
+      let (review_count, uncommitted_count) = changed_counts(repo, route, workspace.as_ref());
+      let linear_enabled =
+        self.with_db(|db| feature_preview::is_enabled(db, PreviewFeature::LinearIntegration));
+      let logs_enabled = true;
+      let (home_ahead, home_dry_run) = super::joined(home);
+      Loaded {
+        workspace,
+        status: super::joined(status),
+        remote: super::joined(remote),
+        commits: super::joined(commits),
+        review_count,
+        uncommitted_count,
+        home_ahead,
+        home_dry_run,
+        checks: super::joined(checks),
+        linear_enabled,
+        logs_enabled,
+      }
+    })
   }
 
   fn pr_cache(&self, repo_path: &str, branch: &str) -> PrCache {
@@ -307,9 +336,9 @@ impl WorkspaceHost for Backend {
         unsupported("Rebasing the repository branch"),
       );
     }
-    match jj::jj_rebase_home_repo_branch(repo_path, branch, DEFAULT_BRANCH) {
+    match core::repo::rebase_home_branch(repo_path, branch, DEFAULT_BRANCH) {
       Ok(result) if result.success => Outcome::ok(
-        "Rebase complete",
+        "Rebased",
         if result.message.is_empty() {
           "Branch rebased onto target".to_string()
         } else {
@@ -317,7 +346,20 @@ impl WorkspaceHost for Backend {
         },
       ),
       Ok(result) => Outcome::failed("Rebase failed", result.message),
-      Err(err) => Outcome::failed("Rebase failed", err.to_string()),
+      Err(err) => Outcome::failed("Rebase failed", err),
+    }
+  }
+
+  fn reset_to_remote(&self, repo_path: &str, workspace_id: i64) -> Outcome {
+    if self.remote_containing(repo_path).is_some() {
+      return Outcome::failed("Reset failed", unsupported("Resetting to the remote"));
+    }
+    match core::reset_workspace_to_remote(repo_path, workspace_id) {
+      Ok(dropped) => Outcome::ok(
+        "Reset to remote",
+        format!("Dropped {}", plural(dropped, "local commit")),
+      ),
+      Err(err) => Outcome::failed("Reset failed", err),
     }
   }
 
@@ -326,40 +368,101 @@ impl WorkspaceHost for Backend {
   }
 }
 
-/// `ShowWorkspace`'s reads for a remote repository, through its typed
-/// commands. The home branch's dry-run rebase and the workflow checks are
-/// local-only (`assertLocalOperation`), so they stay empty.
-fn load_remote(backend: &Backend, remote: &Remote, route: &Route) -> Loaded {
+/// What the header reads of a remote repository.
+struct RemoteHeader {
+  workspace: Option<local_db::Workspace>,
+  status: Option<WorkspaceStatus>,
+  origin: Option<GitRemoteInfo>,
+  commits: Option<JjLogResult>,
+  review_count: usize,
+  uncommitted_count: usize,
+  home_ahead: usize,
+}
+
+/// The header's reads, side by side: each is a round trip to the host, so
+/// the header waits for the slowest rather than for all of them in turn.
+/// The workspace's diff, which tells committed from uncommitted files, is
+/// started before its branch is known, as it is wanted for any workspace
+/// off the default branch.
+fn read_remote_header(remote: &Remote, route: &Route) -> RemoteHeader {
   let warn = |what: &str, err: String| log::warn!("remote workspace header: {what}: {err}");
-  let workspace = route.workspace_id.and_then(|id| {
-    remote
-      .workspaces()
-      .map_err(|e| warn("workspaces", e))
-      .ok()?
-      .into_iter()
-      .find(|w| w.id == id)
-  });
-  let status = remote
-    .status(route.workspace_id)
-    .map_err(|e| warn("status", e))
-    .ok();
-  let origin = remote
-    .git_remote()
-    .map_err(|e| warn("remote", e))
-    .ok()
-    .flatten();
-  let commits = route.workspace_id.and_then(|id| {
-    remote
-      .commits(Some(id))
-      .map_err(|e| warn("commits", e))
-      .ok()
-  });
+  let on_home_feature = route.workspace_id.is_none() && route.home_branch != DEFAULT_BRANCH;
+  let (workspace, status, origin, commits, diff, home_files, home_ahead) =
+    std::thread::scope(|scope| {
+      let workspace = scope.spawn(|| {
+        route.workspace_id.and_then(|id| {
+          remote
+            .workspaces()
+            .map_err(|e| warn("workspaces", e))
+            .ok()?
+            .into_iter()
+            .find(|w| w.id == id)
+        })
+      });
+      let status = scope.spawn(|| {
+        remote
+          .status(route.workspace_id)
+          .map_err(|e| warn("status", e))
+          .ok()
+      });
+      let origin = scope.spawn(|| {
+        remote
+          .git_remote()
+          .map_err(|e| warn("remote", e))
+          .ok()
+          .flatten()
+      });
+      let commits = scope.spawn(|| {
+        route.workspace_id.and_then(|id| {
+          remote
+            .commits(Some(id))
+            .map_err(|e| warn("commits", e))
+            .ok()
+        })
+      });
+      let diff = scope.spawn(|| route.workspace_id.map(|id| remote.workspace_diff(id)));
+      let home_files = scope.spawn(|| {
+        route
+          .workspace_id
+          .is_none()
+          .then(|| remote.changed_files(None))
+      });
+      let home_ahead = scope.spawn(|| {
+        if on_home_feature {
+          remote
+            .commits(None)
+            .map(|log| log.commits.iter().filter(|c| c.on_target_only).count())
+            .unwrap_or(0)
+        } else {
+          0
+        }
+      });
+      (
+        super::joined(workspace),
+        super::joined(status),
+        super::joined(origin),
+        super::joined(commits),
+        super::joined(diff),
+        super::joined(home_files),
+        super::joined(home_ahead),
+      )
+    });
   let include_committed = workspace
     .as_ref()
     .is_some_and(|w| w.branch_name != route.default_target());
-  let (review_count, uncommitted_count) = match route.workspace_id {
-    Some(id) if include_committed => remote
-      .workspace_diff(id)
+  let changed = |files: Result<Vec<JjFileChange>, String>| {
+    files
+      .map(|files| {
+        let count = unique_paths(files.iter().map(|f| f.path.as_str()));
+        (count, count)
+      })
+      .unwrap_or_else(|e| {
+        warn("changed files", e);
+        (0, 0)
+      })
+  };
+  let (review_count, uncommitted_count) = match (route.workspace_id, diff) {
+    (Some(_), Some(diff)) if include_committed => diff
       .map(|diff| {
         let all = diff.uncommitted_files.iter().chain(&diff.committed_files);
         (
@@ -371,40 +474,36 @@ fn load_remote(backend: &Backend, remote: &Remote, route: &Route) -> Loaded {
         warn("diff", e);
         (0, 0)
       }),
-    id => remote
-      .changed_files(id)
-      .map(|files| {
-        let count = unique_paths(files.iter().map(|f| f.path.as_str()));
-        (count, count)
-      })
-      .unwrap_or_else(|e| {
-        warn("changed files", e);
-        (0, 0)
-      }),
+    (None, _) => changed(home_files.unwrap_or_else(|| remote.changed_files(None))),
+    (id, _) => changed(remote.changed_files(id)),
   };
-  let on_home_feature = route.workspace_id.is_none() && route.home_branch != DEFAULT_BRANCH;
-  let home_ahead = if on_home_feature {
-    remote
-      .commits(None)
-      .map(|log| log.commits.iter().filter(|c| c.on_target_only).count())
-      .unwrap_or(0)
-  } else {
-    0
-  };
-  let (linear_enabled, logs_enabled) = backend.with_db(|db| {
-    (
-      feature_preview::is_enabled(db, PreviewFeature::LinearIntegration),
-      feature_preview::is_enabled(db, PreviewFeature::Logs),
-    )
-  });
-  Loaded {
+  RemoteHeader {
     workspace,
     status,
-    remote: origin,
+    origin,
     commits,
     review_count,
     uncommitted_count,
     home_ahead,
+  }
+}
+
+/// `ShowWorkspace`'s reads for a remote repository, through its typed
+/// commands. The home branch's dry-run rebase and the workflow checks are
+/// local-only (`assertLocalOperation`), so they stay empty.
+fn load_remote(backend: &Backend, remote: &Remote, route: &Route) -> Loaded {
+  let header = read_remote_header(remote, route);
+  let linear_enabled =
+    backend.with_db(|db| feature_preview::is_enabled(db, PreviewFeature::LinearIntegration));
+  let logs_enabled = true;
+  Loaded {
+    workspace: header.workspace,
+    status: header.status,
+    remote: header.origin,
+    commits: header.commits,
+    review_count: header.review_count,
+    uncommitted_count: header.uncommitted_count,
+    home_ahead: header.home_ahead,
     home_dry_run: None,
     checks: None,
     linear_enabled,
@@ -440,6 +539,7 @@ pub enum Pending {
   Push,
   Sync,
   HomeRebase,
+  Reset,
 }
 
 /// The workspace row's `metadata` JSON.
@@ -508,7 +608,16 @@ pub fn workspace_view(
   let pr_info = pr.pr.clone().flatten();
   let pr_loaded = pr.pr.is_some();
   let has_remote = loaded.remote.is_some();
-  let commits_ahead = status.map_or(0, |s| s.commits_ahead_of_target.len());
+  // The badge counts the list the Commits tab draws, so the two can't drift
+  // apart when history is rewritten between two reads.
+  let commits_ahead = match loaded.commits.as_ref() {
+    Some(log) => log
+      .commits
+      .iter()
+      .filter(|c| !c.on_target_only && !c.is_working_copy)
+      .count(),
+    None => status.map_or(0, |s| s.commits_ahead_of_target.len()),
+  };
   let has_workspace_commits = loaded.commits.as_ref().is_some_and(|log| {
     log
       .commits
@@ -520,7 +629,7 @@ pub fn workspace_view(
     branch: DEFAULT_BRANCH.into(),
     rebase: (loaded.home_ahead > 0).then(|| Rebase {
       tooltip: if pending == Pending::HomeRebase {
-        "Rebasing...".into()
+        "Rebasing…".into()
       } else {
         format!(
           "Rebase {branch} onto {DEFAULT_BRANCH} ({})",
@@ -620,13 +729,14 @@ pub fn workspace_view(
     .collect();
     Some(Checks {
       status: combined.map(str::to_string),
-      count: format!("{}/{}", passed + ci_passed, total + ci_total),
+      count: checks_label(combined, passed + ci_passed, total + ci_total),
       name: format!("Checks: {}", parts.join(", ")),
     })
   });
 
   let header = Header {
     branch: branch.clone(),
+    title: workspace.map(super::code_data::display_title),
     home: workspace.is_none(),
     linear: match (&metadata.linear_issue_key, &metadata.linear_issue_url) {
       (Some(key), Some(url)) if workspace.is_some() && loaded.linear_enabled => Some(Linear {
@@ -646,8 +756,12 @@ pub fn workspace_view(
       disabled: route.retargeting,
     }),
     home_target,
-    stack: workspace.is_none().then(|| Tooltip {
-      tooltip: format!("Create stacked workspace from {branch}"),
+    stack: Some(Tooltip {
+      tooltip: if workspace.is_none() {
+        format!("Create a workspace from {branch}")
+      } else {
+        format!("Stack a new workspace on {branch}")
+      },
     }),
     push: workspace
       .filter(|w| w.not_on_remote && (!has_remote || w.branch_name == DEFAULT_BRANCH))
@@ -665,27 +779,24 @@ pub fn workspace_view(
         draft: p.is_draft,
       }),
     create_pr,
-    status_loading: status.is_none(),
     sync: (!not_on_remote && (ahead > 0 || behind > 0)).then_some(Sync {
       ahead: ahead as u32,
       behind: behind as u32,
       disabled: busy,
-      spinning: pending == Pending::Sync,
+      spinning: matches!(pending, Pending::Sync | Pending::Reset),
     }),
     checks,
-    merge_queue: route
-      .merge_queue
-      .clone()
-      .filter(|_| on_feature && !not_on_remote),
-    merge: on_feature.then(|| Merge {
+    // A remote workspace can't merge; its capability notice says why.
+    merge: (on_feature && route.remote_chrome.is_none()).then(|| Merge {
       passing: ci_passing,
       disabled: merge_blocked,
       tooltip: merge_blocked.then(|| {
+        // It opens with what to do to merge.
         if route.retargeting {
-          "Rebasing in progress...".to_string()
+          "Wait for the rebase to finish to merge".to_string()
         } else {
           format!(
-            "Cannot merge: {} detected",
+            "Resolve conflicts to merge ({})",
             plural(conflict_count, "conflict")
           )
         }
@@ -726,7 +837,7 @@ pub fn workspace_view(
       }),
       logs: loaded.logs_enabled,
       busy: if route.retargeting {
-        Some("Rebasing...".into())
+        Some("Rebasing…".into())
       } else {
         None
       },
@@ -748,4 +859,114 @@ pub fn workspace_view(
     }
   });
   (header, tab_row)
+}
+
+/// The header's checks pill: how many fail, else how many passed.
+fn checks_label(status: Option<&str>, passed: usize, total: usize) -> String {
+  match status {
+    Some("failed") => format!("{} of {total} checks failing", total.saturating_sub(passed)),
+    _ => format!("{passed}/{total} checks passed"),
+  }
+}
+
+#[cfg(test)]
+mod remote_header_tests {
+  use std::{sync::Arc, time::Duration};
+
+  use super::*;
+  use crate::gpui_shell::remote_repo::tests::{repository, workspace_json, FakeTransport};
+
+  fn route(workspace_id: Option<i64>) -> Route {
+    serde_json::from_value(serde_json::json!({
+      "repoPath": "/srv/app",
+      "workspaceId": workspace_id,
+      "homeBranch": "main",
+      "tab": "changes",
+      "retargeting": false,
+      "creatingPr": false,
+      "runningChecks": [],
+      "revision": 0,
+    }))
+    .unwrap()
+  }
+
+  fn answered(latency: Duration) -> (Remote, Arc<FakeTransport>) {
+    let transport = Arc::new(FakeTransport::default());
+    *transport.latency.lock().unwrap() = latency;
+    transport.answer(
+      "ListWorkspaces",
+      serde_json::json!([workspace_json(3, "feat", "feat/x")]),
+    );
+    transport.answer(
+      "WorkspaceDiff",
+      serde_json::json!({
+        "committed_files": [],
+        "hunks_by_file": [],
+        "uncommitted_files": [],
+        "conflicted_files": [],
+        "too_large_to_render": false,
+      }),
+    );
+    (Remote::new(repository(), transport.clone()), transport)
+  }
+
+  fn kinds(transport: &FakeTransport) -> Vec<&'static str> {
+    let mut kinds: Vec<_> = transport.sent().iter().map(|r| r.kind_name()).collect();
+    kinds.sort_unstable();
+    kinds
+  }
+
+  #[test]
+  fn checks_label_spells_out_failing_and_passed_checks() {
+    assert_eq!(checks_label(Some("failed"), 2, 4), "2 of 4 checks failing");
+    assert_eq!(checks_label(Some("passed"), 3, 3), "3/3 checks passed");
+    assert_eq!(checks_label(Some("running"), 1, 3), "1/3 checks passed");
+    assert_eq!(checks_label(None, 0, 3), "0/3 checks passed");
+  }
+
+  #[test]
+  fn a_workspace_header_reads_everything_side_by_side() {
+    let (remote, transport) = answered(Duration::from_millis(40));
+    let header = read_remote_header(&remote, &route(Some(3)));
+    assert_eq!(header.workspace.map(|w| w.id), Some(3));
+    assert_eq!(
+      kinds(&transport),
+      [
+        "GitRemoteInfo",
+        "InspectWorkspace",
+        "ListCommits",
+        "ListWorkspaces",
+        "WorkspaceDiff"
+      ]
+    );
+    // Counts overlapping reads rather than timing them: a loaded CI runner
+    // took 167 ms for reads that do run side by side.
+    let most = transport
+      .most_reading
+      .load(std::sync::atomic::Ordering::SeqCst);
+    assert!(most > 1, "reads ran one at a time");
+  }
+
+  #[test]
+  fn a_workspace_on_the_default_branch_counts_changed_files_instead() {
+    let (remote, transport) = answered(Duration::ZERO);
+    transport.answer(
+      "ListWorkspaces",
+      serde_json::json!([workspace_json(3, "main", "main")]),
+    );
+    transport.answer("ListChanges", serde_json::json!([]));
+    read_remote_header(&remote, &route(Some(3)));
+    assert!(kinds(&transport).contains(&"ListChanges"));
+  }
+
+  #[test]
+  fn the_home_header_reads_the_changed_files_with_the_rest() {
+    let (remote, transport) = answered(Duration::ZERO);
+    transport.answer("ListChanges", serde_json::json!([]));
+    read_remote_header(&remote, &route(None));
+    assert_eq!(
+      kinds(&transport),
+      ["GitRemoteInfo", "ListChanges", "RepositoryStatus"]
+    );
+  }
 }

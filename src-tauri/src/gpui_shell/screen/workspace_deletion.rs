@@ -1,9 +1,10 @@
-//! `WorkspaceDeletion`: the command palette's "Delete Workspace" search. It
+//! `WorkspaceDeletion`: the command palette's "Delete workspace" search. It
 //! picks the workspace; React asks for confirmation and deletes it, as it
 //! does from the workspace header.
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::input::{Escape, InputEvent, InputState, MoveDown, MoveUp};
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
@@ -201,7 +202,7 @@ impl WorkspaceDeletion {
       return input.clone();
     }
     let input =
-      cx.new(|cx| InputState::new(window, cx).placeholder("Search workspaces to delete..."));
+      cx.new(|cx| InputState::new(window, cx).placeholder("Search workspaces to delete…"));
     input.update(cx, |input, cx| input.focus(window, cx));
     self._subscription = Some(cx.subscribe(
       &input,
@@ -237,12 +238,12 @@ impl Render for WorkspaceDeletion {
     let highlighted = self.highlighted(&rows);
     let no_deletable = self.route.deletable().next().is_none();
     let list = if rows.is_empty() {
-      ui::text(div(), TextSize::Sm)
-        .px_4()
-        .py_8()
-        .text_center()
-        .text_color(p.muted_foreground)
-        .child("No deletable workspaces found")
+      ui::EmptyState::new("workspace-deletion-empty", "No deletable workspaces", &p)
+        .message(if no_deletable {
+          "This repository has no workspaces to delete."
+        } else {
+          "No workspace matches this search."
+        })
         .into_any_element()
     } else {
       div()
@@ -252,7 +253,10 @@ impl Render for WorkspaceDeletion {
           let value = row.value.clone();
           div()
             .id(id)
+            .role(tauri_plugin_gpui::gpui::Role::ListBoxOption)
+            .aria_label(row.workspace.branch_name.clone())
             .debug_selector(move || selector)
+            .test_support()
             .px_3()
             .py_1p5()
             .mx_2()
@@ -265,7 +269,7 @@ impl Render for WorkspaceDeletion {
               this.bg(p.menu_accent.opacity(0.5))
             })
             .when(Some(i) != highlighted, |this| {
-              this.hover(move |s| s.bg(p.menu_accent.opacity(0.3)))
+              this.hover(move |s| s.bg(p.hover()))
             })
             .child(ui::icon(theme::ICON_BRANCH, 16., p.muted_foreground))
             .child(
@@ -279,6 +283,8 @@ impl Render for WorkspaceDeletion {
                     .child(row.workspace.branch_name.clone())
                     .when(row.current, |this| {
                       this.child(
+                        // Short label (['tag']): 11px is fine.
+                        // ast-grep-ignore: gpui-text-xs-short-label-only
                         ui::text(div(), TextSize::Xs)
                           .ml_2()
                           .font_weight(FontWeight::NORMAL)
@@ -304,12 +310,9 @@ impl Render for WorkspaceDeletion {
       .id("workspace-deletion")
       .debug_selector(|| "workspace-deletion".into())
       .w(viewport.width * 0.4)
-      .rounded(radius::LG)
-      .border_1()
-      .border_color(p.border)
+      .map(|el| ui::floating(el, &p))
       .bg(p.background)
       .text_color(p.foreground)
-      .shadow_2xl()
       .overflow_hidden()
       .occlude()
       .capture_action(cx.listener(|view, _: &MoveDown, _, cx| {
@@ -340,7 +343,7 @@ impl Render for WorkspaceDeletion {
             ui::text(div(), TextSize::Sm)
               .font_weight(FontWeight::MEDIUM)
               .text_color(p.destructive)
-              .child("Delete Workspace"),
+              .child("Delete workspace"),
           ),
       )
       .child(
@@ -396,7 +399,11 @@ impl Render for WorkspaceDeletion {
       .when(no_deletable, |this| {
         this.child(
           ui::text(div(), TextSize::Sm)
+            .id("workspace-deletion-home")
             .debug_selector(|| "workspace-deletion-home".into())
+            .role(tauri_plugin_gpui::gpui::Role::Status)
+            .aria_label("Home repository cannot be deleted")
+            .test_support()
             .px_4()
             .py_3()
             .border_t_1()
@@ -414,6 +421,8 @@ impl Render for WorkspaceDeletion {
       anchored().position(point(px(0.), px(0.))).child(
         div()
           .id("workspace-deletion-backdrop")
+          // A dismiss target, not a control.
+          .cursor_default()
           .w(viewport.width)
           .h(viewport.height)
           .bg(p.scrim())

@@ -1,0 +1,68 @@
+-- Fresh-install schema as of 953771de (2026-05-17), replayed from that commit's local_db.rs.
+CREATE TABLE changed_files (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            workspace_id INTEGER,
+            file_path TEXT NOT NULL,
+            workspace_status TEXT,
+            is_untracked INTEGER NOT NULL DEFAULT 0,
+            hunks_json TEXT,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+            UNIQUE(workspace_id, file_path)
+        );
+CREATE TABLE commit_diff_stats (
+            commit_id TEXT NOT NULL PRIMARY KEY,
+            insertions INTEGER NOT NULL,
+            deletions INTEGER NOT NULL,
+            updated_at TEXT NOT NULL,
+            change_id TEXT,
+            description TEXT,
+            author_name TEXT,
+            timestamp TEXT
+        );
+CREATE TABLE "pending_reviews" (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    workspace_id INTEGER NOT NULL UNIQUE,
+                    comments TEXT NOT NULL,
+                    viewed_files TEXT,
+                    summary_text TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+                );
+CREATE TABLE "sessions" (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    workspace_id INTEGER,
+                    name TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    last_accessed TEXT NOT NULL,
+                    model TEXT,
+                    FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+                );
+CREATE TABLE workspace_files (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            workspace_id INTEGER,
+            file_path TEXT NOT NULL,
+            relative_path TEXT NOT NULL,
+            is_directory INTEGER NOT NULL DEFAULT 0,
+            parent_path TEXT,
+            cached_at TEXT NOT NULL,
+            mtime INTEGER,
+            FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+            UNIQUE(workspace_id, file_path)
+        );
+CREATE TABLE workspaces (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            workspace_name TEXT NOT NULL,
+            workspace_path TEXT NOT NULL UNIQUE,
+            branch_name TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            metadata TEXT,
+            target_branch TEXT
+        , has_conflicts BOOLEAN DEFAULT 0, archived BOOLEAN DEFAULT 0, not_on_remote BOOLEAN DEFAULT 0, intent TEXT, moved_files TEXT, refreshed_at TEXT);
+CREATE INDEX idx_changed_files_workspace ON changed_files(workspace_id);
+CREATE INDEX idx_pending_reviews_workspace ON pending_reviews(workspace_id);
+CREATE INDEX idx_sessions_workspace ON sessions(workspace_id);
+CREATE INDEX idx_workspace_files_parent ON workspace_files(workspace_id, parent_path);
+CREATE INDEX idx_workspace_files_workspace ON workspace_files(workspace_id);
+CREATE INDEX idx_workspaces_branch ON workspaces(branch_name);

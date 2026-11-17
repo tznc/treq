@@ -3,6 +3,11 @@ const {spawnSync} = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
+/**
+ * @param {string} src
+ * @param {string} dest
+ * @returns {number}
+ */
 function copyPngTree(src, dest) {
   if (!fs.existsSync(src)) return 0;
   fs.mkdirSync(dest, {recursive: true});
@@ -21,7 +26,10 @@ function copyPngTree(src, dest) {
   return copied;
 }
 
-/** @type {import('@docusaurus/types').PluginModule} */
+/**
+ * @param {import('@docusaurus/types').LoadContext} context
+ * @returns {import('@docusaurus/types').Plugin<void>}
+ */
 function landingScreenshotsPlugin(context) {
   return {
     name: 'landing-screenshots-plugin',

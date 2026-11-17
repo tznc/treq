@@ -125,8 +125,9 @@ fn returns_false_when_workspace_is_descendant_of_target() {
     None,
   )
   .expect("Failed to create workspace");
-  treq_lib::local_db::update_workspace_target_branch(&repo.repo_path, ws.id, "feat/descendant")
-    .expect("set self target");
+  // Fresh off the default branch, the workspace already descends from it.
+  treq_lib::local_db::update_workspace_target_branch(&repo.repo_path, ws.id, default_branch)
+    .expect("set target");
 
   let rebased = treq_lib::core::ensure_workspace_rebased(&repo.repo_path, ws.id, "diff")
     .expect("ensure should succeed");
@@ -182,9 +183,10 @@ fn returns_false_when_target_branch_missing() {
 #[test]
 fn returns_false_for_self_target_workspace() {
   let repo = TestRepo::new().expect("Failed to create test repo");
+  let default_branch = repo.default_branch().to_string();
   let ws = treq_lib::core::create_workspace(
     &repo.repo_path,
-    "feat/self-target",
+    &default_branch,
     Some("self target".to_string()),
     None,
     None,
@@ -192,7 +194,7 @@ fn returns_false_for_self_target_workspace() {
     None,
   )
   .expect("Failed to create workspace");
-  treq_lib::local_db::update_workspace_target_branch(&repo.repo_path, ws.id, "feat/self-target")
+  treq_lib::local_db::update_workspace_target_branch(&repo.repo_path, ws.id, &default_branch)
     .expect("set self target");
 
   let rebased = treq_lib::core::ensure_workspace_rebased(&repo.repo_path, ws.id, "diff")
@@ -228,9 +230,9 @@ fn init_checks_all_workspaces_and_rebases_only_diverged_ones() {
   treq_lib::local_db::update_workspace_target_branch(
     &repo.repo_path,
     ws_descendant.id,
-    "feat/init-descendant",
+    default_branch,
   )
-  .expect("set descendant self target");
+  .expect("set descendant target");
   let ws_missing_target = treq_lib::core::create_workspace(
     &repo.repo_path,
     "feat/init-missing-target",
@@ -466,5 +468,50 @@ fn init_rejects_folder_that_is_not_a_git_repository() {
   assert!(
     !dir.path().join(".gitignore").exists(),
     ".gitignore must not be touched"
+  );
+}
+
+#[test]
+fn launch_pass_sees_default_branch_moved_only_in_git() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  let default_branch = repo.default_branch();
+  let ws = treq_lib::core::create_workspace(
+    &repo.repo_path,
+    "feat/behind-in-git",
+    Some("behind-in-git".to_string()),
+    None,
+    Some(default_branch),
+    None,
+    None,
+  )
+  .expect("Failed to create workspace");
+  // A first pass records the op head, so a skip keyed on it would hide the move.
+  treq_lib::core::init(&repo.repo_path).expect("first init");
+  let pairs = [("feat/behind-in-git", default_branch)];
+  let before = treq_lib::jj::rebase_snapshot(&repo.repo_path, &pairs).expect("snapshot");
+  assert!(
+    before.is_in_sync(0),
+    "workspace starts at the default branch"
+  );
+
+  // Advance the default branch with git alone, as a fetch or push outside jj does.
+  repo
+    .commit_file("git-only.txt", "moved\n", "Advance main in git")
+    .expect("advance main");
+
+  // The pass imports git refs first; only then does the classification see the move.
+  treq_lib::jj::import_git_refs(&repo.repo_path).expect("import");
+  let after = treq_lib::jj::rebase_snapshot(&repo.repo_path, &pairs).expect("snapshot");
+  assert!(
+    !after.is_in_sync(0),
+    "a workspace behind a git-only move must not be classified in sync"
+  );
+  assert_ne!(before.operation_id(), after.operation_id());
+
+  // And the launch pass itself still rebases it.
+  treq_lib::core::init(&repo.repo_path).expect("second init");
+  assert!(
+    treq_lib::core::ensure_workspace_rebased(&repo.repo_path, ws.id, "diff").is_ok(),
+    "workspace stays usable"
   );
 }

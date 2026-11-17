@@ -2,8 +2,10 @@
 //! comments, drawn in the Changes tab's diff (`GithubCommentCard`,
 //! `GithubThreadsInlineList`, `AgentReviewCommentCard`).
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use gpui_kit::base::TestSupportExt as _;
 use std::time::Duration;
 
 use gpui::{AnyElement, StrikethroughStyle, StyledText, Task};
@@ -12,7 +14,7 @@ use super::*;
 use crate::{
   github::{GhReviewComment, GhReviewThread},
   gpui_shell::screen::{
-    changes_review::{count_label, line_at, Pending, Quote, Side},
+    changes_review::{count_label, number_and_side, Pending, Quote, Side},
     changes_threads::{
       agent_by_line, comment_date, original_text, place_threads, preview, suggestion_diff, Placed,
       RowKind,
@@ -38,7 +40,12 @@ pub(in crate::gpui_shell::screen) struct Threads {
   /// Agent comments with an action running.
   busy: HashSet<String>,
   placed: Placed,
-  agent_lines: HashMap<(String, u32, Side), Vec<AgentReviewComment>>,
+  /// Indices into `agent`.
+  agent_lines: HashMap<(String, u32, Side), Vec<usize>>,
+  /// Bumped when `github` or `agent` reads back changed.
+  pub(in crate::gpui_shell::screen) revision: u64,
+  /// The rows' and the threads' revisions `placed` was derived from.
+  placed_for: Option<(u64, u64)>,
   poll: Option<Task<()>>,
   /// The review comment whose reaction picker is open.
   reaction_picker: Option<String>,
@@ -48,6 +55,12 @@ impl ChangesView {
   /// Reads the threads and agent comments now and on a timer.
   pub(super) fn watch_threads(&mut self, cx: &mut Context<Self>) {
     self.threads = Threads::default();
+    self.poll_threads(cx);
+  }
+
+  /// Reads the threads and agent comments now and on a timer, keeping
+  /// what was read.
+  pub(super) fn poll_threads(&mut self, cx: &mut Context<Self>) {
     if self.parent.workspace.is_none() {
       return;
     }
@@ -67,6 +80,10 @@ impl ChangesView {
     }));
   }
 
+  pub(super) fn stop_threads(&mut self) {
+    self.threads.poll = None;
+  }
+
   fn read_threads(&mut self, github: bool, cx: &mut Context<Self>) {
     self.read_agent(cx);
     if !github {
@@ -78,11 +95,19 @@ impl ChangesView {
       .as_ref()
       .map(|w| w.branch_name.clone())
       .unwrap_or_default();
-    self.run(
+    // Each poll redraws only when it read something new.
+    self.run_changed(
       move |host, parent| host.review_threads(&parent.repo_path, &branch),
       |view, result, _| match result {
-        Ok(threads) => view.set_github_threads(threads),
-        Err(err) => log::warn!("Failed to read review threads: {err}"),
+        Ok(threads) if threads == view.threads.github => false,
+        Ok(threads) => {
+          view.set_github_threads(threads);
+          true
+        }
+        Err(err) => {
+          log::warn!("Failed to read review threads: {err}");
+          false
+        }
       },
       cx,
     );
@@ -96,17 +121,26 @@ impl ChangesView {
       }
     }
     self.threads.github = threads;
+    self.threads.revision += 1;
   }
 
   fn read_agent(&mut self, cx: &mut Context<Self>) {
     let Some(id) = self.parent.workspace_id() else {
       return;
     };
-    self.run(
+    self.run_changed(
       move |host, parent| host.agent_comments(&parent.repo_path, id),
       |view, result, _| match result {
-        Ok(comments) => view.threads.agent = comments,
-        Err(err) => log::warn!("Failed to read agent review comments: {err}"),
+        Ok(comments) if comments == view.threads.agent => false,
+        Ok(comments) => {
+          view.threads.agent = comments;
+          view.threads.revision += 1;
+          true
+        }
+        Err(err) => {
+          log::warn!("Failed to read agent review comments: {err}");
+          false
+        }
       },
       cx,
     );
@@ -114,7 +148,13 @@ impl ChangesView {
 
   /// Anchors the threads and comments on the diff as it is now.
   pub(super) fn place_threads(&mut self) {
-    // Runs every frame: only the files a thread is on are looked at.
+    // The rows' revision follows the hunks and the snapshot.
+    let key = (self.diff.revision, self.threads.revision);
+    if self.threads.placed_for == Some(key) {
+      return;
+    }
+    self.threads.placed_for = Some(key);
+    // Only the files a thread is on are looked at.
     let paths: HashSet<&str> = self
       .threads
       .github
@@ -131,7 +171,11 @@ impl ChangesView {
         .map(|(p, d)| (p.clone(), &d.hunks[..]))
         .collect()
     }
-    let working = on(&self.hunks, &paths);
+    let mut working = on(&self.hunks, &paths);
+    // Files shown as their branch diff anchor on it alone.
+    if let Some(s) = &self.snapshot {
+      working.retain(|p, _| !s.shows_branch_diff(p));
+    }
     let committed = self
       .snapshot
       .as_ref()
@@ -163,7 +207,12 @@ impl ChangesView {
                 view.load(cx);
               }
             }
-            Err(err) => view.toast(ToastTone::Error, "Review comment action failed", err),
+            Err(err) => super::tell(
+              view.host.as_ref(),
+              Toast::error("Review comment action failed")
+                .description(err)
+                .into(),
+            ),
           }
           view.read_agent(cx);
         }
@@ -224,6 +273,20 @@ impl ChangesView {
 
   // Drawing.
 
+  /// How many review threads and PR drafts each file has.
+  pub(in crate::gpui_shell::screen) fn comment_counts(&self) -> HashMap<String, usize> {
+    let drafts = self
+      .pr_mode()
+      .map(|pr| pr.drafts.iter().map(|d| d.row.file_path.as_str()));
+    let mut counts = HashMap::new();
+    for path in
+      (self.threads.github.iter().map(|t| t.path.as_str())).chain(drafts.into_iter().flatten())
+    {
+      *counts.entry(path.to_string()).or_default() += 1;
+    }
+    counts
+  }
+
   /// What a diff line carries from others: agent comments, then threads.
   /// `ReviewActionBar`'s count of the open local agent comments.
   pub(super) fn agent_count(&self, p: &Palette) -> Option<Div> {
@@ -234,6 +297,8 @@ impl ChangesView {
       .filter(|c| c.status != "resolved")
       .count();
     (open > 0).then(|| {
+      // Short label (['count']): 11px is fine.
+      // ast-grep-ignore: gpui-text-xs-short-label-only
       ui::text(div(), TextSize::Xs)
         .debug_selector(|| "agent-review-comment-count".into())
         .text_color(Tone::GitMerged.color(p))
@@ -241,17 +306,22 @@ impl ChangesView {
     })
   }
 
+  #[expect(
+    clippy::too_many_arguments,
+    reason = "flat argument list kept to match callers"
+  )]
   pub(super) fn line_threads(
     &self,
     path: &str,
     hunks: &[JjDiffHunk],
     h: usize,
     l: usize,
+    numbers: (Option<u32>, Option<u32>),
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> Vec<AnyElement> {
     let hunk = &hunks[h];
-    let (number, side) = line_at(hunk, l);
+    let (number, side) = number_and_side(numbers, l);
     let mut out = Vec::new();
     if let Some(comments) = self
       .threads
@@ -269,7 +339,7 @@ impl ChangesView {
         .flex_col()
         .gap_2()
         .font_family(theme::SANS_FONT);
-      for c in comments {
+      for c in comments.iter().filter_map(|&i| self.threads.agent.get(i)) {
         list = list.child(self.agent_card(c, original_text(c, hunk), p, cx));
       }
       out.push(list.into_any_element());
@@ -284,7 +354,7 @@ impl ChangesView {
         .flex()
         .flex_col()
         .gap_2();
-      for t in threads {
+      for t in threads.iter().filter_map(|&i| self.threads.github.get(i)) {
         let anchor = Some((hunk.id.clone(), (h, l)));
         list = list.child(self.thread_card(t, path, anchor, number, side, p, cx));
       }
@@ -311,7 +381,7 @@ impl ChangesView {
       .flex()
       .flex_col()
       .gap_3();
-    for t in threads {
+    for t in threads.iter().filter_map(|&i| self.threads.github.get(i)) {
       let line = t.line.and_then(|n| u32::try_from(n).ok()).unwrap_or(0);
       section = section.child(self.thread_card(t, path, None, line, Side::New, p, cx));
     }
@@ -327,7 +397,10 @@ impl ChangesView {
   }
 
   /// `GithubCommentCard`.
-  #[allow(clippy::too_many_arguments)]
+  #[expect(
+    clippy::too_many_arguments,
+    reason = "flat argument list kept to match callers"
+  )]
   fn thread_card(
     &self,
     thread: &GhReviewThread,
@@ -342,10 +415,16 @@ impl ChangesView {
     let first = thread.comments.first();
     let muted = p.muted_foreground;
     let id = thread.id.clone();
-    let toggle_hover = sky(p, 0.1);
     let mut toggle = div()
       .id(SharedString::from(format!("github-thread-{}", thread.id)))
       .debug_selector(|| "github-thread-toggle".into())
+      .role(gpui::Role::Button)
+      .aria_label(if collapsed {
+        "Show review thread"
+      } else {
+        "Hide review thread"
+      })
+      .aria_expanded(!collapsed)
       .w_full()
       .min_w_0()
       .flex()
@@ -354,7 +433,7 @@ impl ChangesView {
       .px_3()
       .py_1p5()
       .cursor_pointer()
-      .hover(move |s| s.bg(toggle_hover))
+      .hover(move |s| s.bg(p.hover()))
       .on_click(cx.listener(move |view, _, _, cx| view.toggle_thread(&id, cx)))
       .child(ui::icon(
         if collapsed {
@@ -372,6 +451,8 @@ impl ChangesView {
     }
     if thread.is_resolved {
       toggle = toggle.child(
+        // Short label (['status pill']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .flex_none()
           .flex()
@@ -389,7 +470,7 @@ impl ChangesView {
     }
     if let (true, Some(first)) = (collapsed, first) {
       toggle = toggle.child(
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
           .debug_selector(|| "github-thread-collapsed-preview".into())
           .min_w_0()
           .truncate()
@@ -400,19 +481,22 @@ impl ChangesView {
     if !collapsed {
       let n = thread.comments.len();
       toggle = toggle.child(
+        // Short label (['count']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .text_color(muted)
           .child(format!("{n} comment{}", if n == 1 { "" } else { "s" })),
       );
     }
     let mut card = div()
+      .min_w_0()
       .rounded(radius::MD)
       .border_1()
       .border_color(sky(p, 0.3))
       .bg(sky(p, 0.05))
       .overflow_hidden()
       .font_family(theme::SANS_FONT)
-      .child(toggle);
+      .child(toggle.test_support());
     if !collapsed {
       let mut body = div().px_3().pb_3().flex().flex_col().gap_2();
       for comment in &thread.comments {
@@ -424,7 +508,10 @@ impl ChangesView {
   }
 
   /// `GithubCommentBody`: author, date and text, with a Quote button.
-  #[allow(clippy::too_many_arguments)]
+  #[expect(
+    clippy::too_many_arguments,
+    reason = "flat argument list kept to match callers"
+  )]
   fn thread_comment(
     &self,
     comment: &GhReviewComment,
@@ -437,7 +524,6 @@ impl ChangesView {
   ) -> impl IntoElement {
     use chrono::Datelike;
     let this_year = chrono::Local::now().year();
-    let accent = p.accent;
     let fg = p.foreground;
     let quoted = comment.clone();
     let file = path.to_string();
@@ -445,6 +531,7 @@ impl ChangesView {
       .debug_selector(|| "github-comment-card".into())
       .group("github-comment")
       .relative()
+      .min_w_0()
       .bg(p.background)
       .rounded(radius::MD)
       .p_2p5()
@@ -460,6 +547,8 @@ impl ChangesView {
           .child(avatar(&comment.author.login, 32., p))
           .child(profile_link(&comment.author.login, p, cx))
           .child(
+            // Short label (['timestamp']): 11px is fine.
+            // ast-grep-ignore: gpui-text-xs-short-label-only
             ui::text(div(), TextSize::Xs)
               .text_color(p.muted_foreground)
               .child(comment_date(&comment.created_at, this_year)),
@@ -470,7 +559,7 @@ impl ChangesView {
         super::super::code::markdown(
           format!("github-comment-{}", comment.id),
           &comment.body,
-          13.,
+          TextSize::Code.metrics().0,
           self.dark,
         ),
       ))
@@ -488,6 +577,8 @@ impl ChangesView {
           "Quote this comment",
           div()
             .id(SharedString::from(format!("quote-{}", comment.id)))
+            .role(gpui::Role::Button)
+            .aria_label("Quote")
             .debug_selector(|| "github-comment-quote".into())
             .absolute()
             .top_2()
@@ -497,7 +588,7 @@ impl ChangesView {
             .cursor_pointer()
             .opacity(0.)
             .group_hover("github-comment", |s| s.opacity(1.))
-            .hover(move |s| s.bg(accent).text_color(fg))
+            .hover(move |s| s.bg(p.hover()).text_color(fg))
             .child(ui::icon(theme::ICON_QUOTE, 14., p.muted_foreground))
             .on_click(cx.listener(move |view, _, _, cx| {
               view.quote(&quoted, &file, anchor.clone(), line, side, cx)
@@ -540,13 +631,15 @@ impl ChangesView {
           .gap_2()
           .child(ui::icon(theme::ICON_BOT, 14., Tone::GitMerged.color(p)))
           .child(
+            // Short label (['tag']): 11px is fine.
+            // ast-grep-ignore: gpui-text-xs-short-label-only
             ui::text(div(), TextSize::Xs)
               .font_weight(FontWeight::MEDIUM)
               .text_color(Tone::GitMerged.color(p))
               .child("Local"),
           )
           .child(
-            ui::text(div(), TextSize::Xs)
+            ui::text(div(), TextSize::Sm)
               .text_color(muted)
               .child(format!("{}:{range}", comment.file_path)),
           ),
@@ -634,6 +727,8 @@ fn violet(p: &Palette, alpha: f32) -> Hsla {
 
 /// `AuthorAvatar`'s fallback: the login's initial in a circle.
 fn avatar(login: &str, size: f32, p: &Palette) -> impl IntoElement {
+  // Short label (['avatar initial']): 11px is fine.
+  // ast-grep-ignore: gpui-text-xs-short-label-only
   ui::text(div(), TextSize::Xs)
     .size(zpx(size))
     .flex_none()
@@ -656,8 +751,12 @@ fn avatar(login: &str, size: f32, p: &Palette) -> impl IntoElement {
 /// `AuthorProfileLink`: "@login", opening the GitHub profile.
 fn profile_link(login: &str, p: &Palette, cx: &mut Context<ChangesView>) -> impl IntoElement {
   let url = format!("https://github.com/{login}");
+  // Short label (['username']): 11px is fine.
+  // ast-grep-ignore: gpui-text-xs-short-label-only
   ui::text(div(), TextSize::Xs)
     .id(SharedString::from(format!("profile-{login}")))
+    .role(gpui::Role::Link)
+    .aria_label(format!("@{login}"))
     .flex_none()
     .font_weight(FontWeight::MEDIUM)
     .text_color(p.foreground)
@@ -683,24 +782,30 @@ pub(in crate::gpui_shell::screen) fn suggestion_box(
   suggested: &str,
   p: &Palette,
 ) -> impl IntoElement {
+  // Short label (['section heading']): 11px is fine.
+  // ast-grep-ignore: gpui-text-xs-short-label-only
   let header = ui::text(div(), TextSize::Xs)
+    .id("suggested-change")
+    .role(gpui::Role::Heading)
+    .aria_label("Suggested change")
     .px_2()
     .py_1()
     .text_color(p.muted_foreground)
     .bg(p.muted.opacity(0.6))
     .border_b_1()
     .border_color(p.border.opacity(0.6))
-    .child("Suggested change");
+    .child("Suggested change")
+    .test_support();
   let body = match suggestion_diff(original, suggested) {
     Some(rows) => {
-      let mut el = ui::text(div(), TextSize::Xs)
+      let mut el = ui::text(div(), TextSize::Sm)
         .debug_selector(|| "agent-review-suggestion".into())
         .font_family(theme::MONO_FONT);
       for row in rows {
         let (marker, bg, mark) = match row.kind {
-          RowKind::Removed => ("-", Some(Tone::GitClosed.tint(p)), Tone::GitClosed),
-          RowKind::Added => ("+", Some(Tone::GitOpen.tint(p)), Tone::GitOpen),
-          RowKind::Unchanged => (" ", None, Tone::GitOpen),
+          RowKind::Removed => ("-", Some(Tone::DiffRemoved.tint(p)), Tone::DiffRemoved),
+          RowKind::Added => ("+", Some(Tone::DiffAdded.tint(p)), Tone::DiffAdded),
+          RowKind::Unchanged => (" ", None, Tone::DiffAdded),
         };
         let mut text = String::new();
         let mut highlights = Vec::new();
@@ -745,12 +850,12 @@ pub(in crate::gpui_shell::screen) fn suggestion_box(
       }
       el.into_any_element()
     }
-    None => ui::text(div(), TextSize::Xs)
+    None => ui::text(div(), TextSize::Sm)
       .debug_selector(|| "agent-review-suggestion".into())
       .font_family(theme::MONO_FONT)
       .px_2()
       .py_1p5()
-      .bg(Tone::GitOpen.tint(p))
+      .bg(Tone::DiffAdded.tint(p))
       .child(suggested.to_string())
       .into_any_element(),
   };
@@ -797,7 +902,10 @@ impl Reacts for ChangesView {
           if let Some(comment) = view.review_comment_mut(&id) {
             reactions::toggle(&mut comment.reactions, content);
           }
-          view.toast(ToastTone::Error, "Failed to react", err);
+          super::tell(
+            view.host.as_ref(),
+            Toast::error("Failed to react").description(err).into(),
+          );
         }
       },
       cx,

@@ -8,10 +8,10 @@ This document defines how Treq sells Pro and Team, how the service decides who i
 
 ## Goals
 
-- A signed-in user can start a Pro trial or buy Team from the web dashboard, and manage or cancel it without contacting anyone.
+- A signed-in user can buy Pro or Team from the web dashboard, and manage or cancel it without contacting anyone.
 - The service decides entitlement from records keyed by user or organization ID. An email address never decides it.
 - Every cloud feature checks entitlement on the server. A modified build of the open-source app cannot turn a cloud feature on.
-- An organization owns its GitHub App installation, its merge queue configuration, and its Team subscription.
+- An organization owns its GitHub App installation and its Team subscription.
 
 ## Non-goals
 
@@ -25,12 +25,12 @@ This document defines how Treq sells Pro and Team, how the service decides who i
 | Plan | Price | Entitlement |
 | --- | --- | --- |
 | Free | US$0 | No cloud features. |
-| Pro | US$15 per user per month, 14-day trial with a card | `pro` for the subscribing user. |
+| Pro | US$15 per user per month | `pro` for the subscribing user. |
 | Team | US$199 per month for 5 members, plus US$8 per month for each member beyond 5 | `pro` for every member of the organization. |
 
-The trial applies to Pro only. A user gets one Pro trial per Stripe customer, recorded when the first trial starts.
+Neither plan has a trial. The `trialing` status is still honoured for subscriptions that started a trial before it was removed.
 
-The cloud features are the GitHub App and its merge queue, managed cloud workspaces, mobile access, and Linear OAuth. GitHub through the local `gh` CLI and Linear through a personal API key stay free.
+The cloud features are the GitHub App, managed cloud workspaces, mobile access, and Linear OAuth. GitHub through the local `gh` CLI and Linear through a personal API key stay free.
 
 ## Entitlement
 
@@ -56,7 +56,7 @@ Stripe stays the source of truth for payment state. The webhook copies the field
 | `organization_members` | User, organization, and role (`owner` or `member`). | Organization function |
 | `organization_invites` | Email, hashed token, inviter, expiry, accepted time. | Organization function |
 
-`github_app_installations` gains a nullable `organization_id`. Row-level security lets a user read an installation when they linked it or when they belong to its organization. The same rule extends to repositories and merge queue configuration.
+`github_app_installations` gains a nullable `organization_id`. Row-level security lets a user read an installation when they linked it or when they belong to its organization. The same rule extends to repositories.
 
 `public.subscriptions` keeps its current columns (`plan`, `status`, `current_period_end`), so the desktop app needs no change to read it. Its source moves from the Stripe foreign data wrapper to `billing_subscriptions` and `has_pro`. A later migration removes the foreign data wrapper and its vault secret.
 
@@ -64,7 +64,7 @@ Stripe stays the source of truth for payment state. The webhook copies the field
 
 | Function | Auth | Behavior |
 | --- | --- | --- |
-| `billing-checkout` | User JWT | Creates or reuses the owner's Stripe customer, then creates an embedded Checkout session in subscription mode. Prices come from the lookup keys `treq_pro_monthly` and `treq_team_monthly`. Team buys one unit per member. Pro sets `trial_period_days: 14` unless `trial_used_at` is set, and always collects a card. Team requires the caller to own the organization. Returns the session's client secret. |
+| `billing-checkout` | User JWT | Creates or reuses the owner's Stripe customer, then creates an embedded Checkout session in subscription mode. Prices come from the lookup keys `treq_pro_monthly` and `treq_team_monthly`. Team buys one unit per member. Neither plan sets a trial. Checkout always collects a card. Team requires the caller to own the organization. Returns the session's client secret. |
 | `billing-portal` | User JWT | Returns a Stripe customer portal URL for the caller's customer, or for an organization they own. |
 | `stripe-webhook` | Stripe signature | Verifies `Stripe-Signature` with `STRIPE_WEBHOOK_SECRET`, skips events already in `billing_events`, and upserts `billing_subscriptions` on `customer.subscription.created`, `updated`, and `deleted`. `checkout.session.completed` confirms the customer mapping and sets `trial_used_at`. |
 | `organizations` | User JWT | Creates an organization, invites by email, accepts an invite by token, promotes and demotes owners, removes a member, deletes the organization, and attaches a GitHub App installation the caller linked. After a join, leave or removal it sets the Team subscription's quantity to the member count. |
@@ -79,15 +79,14 @@ Each check calls `has_pro` on the server. The desktop and web gates stay for dis
 
 | Feature | Where it is checked | When entitlement ends |
 | --- | --- | --- |
-| GitHub App install | `create-github-install-intent` and `complete-github-installation`. The App requests user authorization during installation, and the function confirms the installation appears in GitHub's `/user/installations` for that user before linking. | Existing installations stay linked. The merge queue stops. |
-| Merge queue | `set_merge_queue_enabled` and the merge queue worker | The worker pauses the queue and comments once on each queued pull request. |
-| Linear OAuth | `create-linear-oauth-intent` and `linear-proxy` | The proxy returns 402 and the app falls back to the personal API key. |
-| Managed cloud workspace | `remote-instance` actions `ensure`, `wake`, and `reprovision`, plus the SSH relay and key install that would wake it | The instance stops. Its disk is kept for 7 days, then deleted. `status` and `delete` always work. |
+| GitHub App install | `create-github-install-intent` and `complete-github-installation`. The App requests user authorization during installation, and the function confirms the installation appears in GitHub's `/user/installations` for that user before linking. | Existing installations stay linked. |
+| Linear OAuth | `create-linear-oauth-intent` and `integration-proxy` (`/linear/graphql`) | The proxy returns 402 and the app falls back to the personal API key. |
+| Managed cloud workspace | `remote-instance` actions `ensure`, `wake`, and `reprovision`, plus the SSH relay and key install that would wake it | The instance stops. Its disk is kept for 30 days, then deleted. `status` and `delete` always work. |
 | Mobile access | The same checks as cloud workspaces, since mobile reaches them through Remote Development | As above. |
 
-For an organization's installation, the merge queue checks the organization's Team subscription. For a personal installation, it checks the linking user.
+For an organization's installation, `installation_has_pro` checks the organization's Team subscription. For a personal installation, it checks the linking user.
 
-Sprites have no stop call. A Sprite pauses on its own about 30 seconds after its last activity, so the service stops it by refusing every action that would wake it. Its disk is still billed by the provider for those 7 days. An hourly scheduled job runs the lapse sweep, because the project has no in-database scheduler.
+The lapse sweep stops the machine through its provider (Boat or Daytona), and the service refuses every action that would wake it. Its disk is still billed by the provider for those 30 days. An hourly scheduled job runs the lapse sweep, because the project has no in-database scheduler.
 
 ## Organizations and seats
 
@@ -107,7 +106,7 @@ When an account is deleted and it was the last owner, the longest-standing membe
 
 Web dashboard:
 
-- The Subscription tab opens embedded Checkout for Pro, shows trial and renewal dates, and links to the customer portal.
+- The Subscription tab opens embedded Checkout for Pro, shows renewal dates, and links to the customer portal.
 - A Team tab creates an organization, buys Team, lists members and pending invites, and shows members against the 5 included seats and any extra seats billed.
 - The pricing page links its Pro and Team buttons to the matching Checkout.
 
@@ -122,10 +121,10 @@ Desktop app:
 Each step ships on its own and leaves the product working.
 
 1. Migration, `has_pro`, the rewritten `subscriptions` view, and `stripe-webhook`. Nobody can buy yet, so nothing changes for users.
-2. `billing-checkout`, `billing-portal`, and the dashboard. The owner turns on `stripePayments` once the Stripe products, portal, webhook and secrets exist.
+2. `billing-checkout`, `billing-portal`, and the dashboard.
 3. Server-side enforcement. This step waits for step 2, so no user loses a feature they cannot buy.
 4. Organizations, Team checkout, and installation ownership.
-5. Pricing page copy for Pro as the cloud bundle, the trial, and Team.
+5. Pricing page copy for Pro as the cloud bundle, and Team.
 
 Stripe currently has no paying subscribers, because checkout never shipped. No backfill is needed.
 
@@ -133,7 +132,7 @@ Stripe currently has no paying subscribers, because checkout never shipped. No b
 
 - pgTAP covers `has_pro` for every status, row-level security on the new tables, and organization access to installations.
 - Webhook tests post signed fixture events and check idempotency and status transitions.
-- `service-qa` runs Checkout in Stripe test mode against the local Supabase stack, from trial start through cancellation.
+- `service-qa` runs Checkout in Stripe test mode against the local Supabase stack, from purchase through cancellation.
 - A takeover spec checks that a forged installation ID is refused and the real owner keeps the installation.
 - pgTAP covers owner promotion and demotion, last-owner protection, refused deletion while Team is active, and account deletion.
 
@@ -141,8 +140,8 @@ Stripe currently has no paying subscribers, because checkout never shipped. No b
 
 | ID | Decision | Default in this document |
 | --- | --- | --- |
-| B01 | Does Team get a trial? | No. Only Pro has a trial. |
-| B02 | How long is a lapsed cloud workspace kept? | 7 days, stopped, then deleted (decided 2026-10-14). Remote audit events are kept 7 days for Team members and 1 day for everyone else. |
+| B01 | Does Team get a trial? | No. No plan has a trial. |
+| B02 | How long is a lapsed cloud workspace kept? | 30 days, stopped, then deleted (decided 2026-10-14 as 7 days, extended to 30 on 2026-10-31). Remote audit events are kept 7 days for Team members and 1 day for everyone else. |
 | B03 | Should a member who leaves a Team keep `pro` until the period ends? | No. Entitlement ends at once. |
 | B04 | Should deleting an account or organization cancel its Stripe subscription? | No. The subscription keeps billing until canceled in the portal. |
 | B05 | Can an owner delete an organization whose Team is set to cancel at the period end? | No. Deletion waits until the period ends. |

@@ -1,0 +1,71 @@
+id: gpui-field-text-min-size
+snapshots:
+  ? |
+    fn input_hint(p: &Palette) -> Div {
+      ui::text(div(), TextSize::Xs).text_color(p.muted_foreground)
+    }
+  : labels:
+    - source: TextSize::Xs
+      style: primary
+      start: 54
+      end: 66
+    - source: input_hint
+      style: secondary
+      start: 3
+      end: 13
+    - source: |-
+        fn input_hint(p: &Palette) -> Div {
+          ui::text(div(), TextSize::Xs).text_color(p.muted_foreground)
+        }
+      style: secondary
+      start: 0
+      end: 100
+  ? |
+    fn render() -> Div {
+      div().child(label_xs("Workspaces"))
+    }
+  : labels:
+    - source: label_xs("Workspaces")
+      style: primary
+      start: 35
+      end: 57
+    - source: label_xs
+      style: secondary
+      start: 35
+      end: 43
+  ? |
+    pub fn field_label(text: impl Into<SharedString>) -> Div {
+      ui::text(div(), TextSize::Xs).child(text.into())
+    }
+  : labels:
+    - source: TextSize::Xs
+      style: primary
+      start: 77
+      end: 89
+    - source: field_label
+      style: secondary
+      start: 7
+      end: 18
+    - source: |-
+        pub fn field_label(text: impl Into<SharedString>) -> Div {
+          ui::text(div(), TextSize::Xs).child(text.into())
+        }
+      style: secondary
+      start: 0
+      end: 111
+  ? |
+    pub fn label_xs(text: impl Into<SharedString>) -> Div {
+      ui::text(div(), TextSize::Sm).child(text.into())
+    }
+  : labels:
+    - source: |-
+        pub fn label_xs(text: impl Into<SharedString>) -> Div {
+          ui::text(div(), TextSize::Sm).child(text.into())
+        }
+      style: primary
+      start: 0
+      end: 108
+    - source: label_xs
+      style: secondary
+      start: 7
+      end: 15

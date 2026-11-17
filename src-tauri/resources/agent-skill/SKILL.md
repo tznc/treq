@@ -4,11 +4,12 @@ description: >-
   Work inside a Treq agent terminal: use the treq CLI to create and inspect
   workspaces, keep the workspace description current with treq set -d (it
   becomes the pull request body), send files or text to the user in the Treq
-  UI, notify the user with treq notify, and create commits with treq commit.
-  Use this skill for every Treq agent session, whenever you need another
-  workspace, change what the workspace does, should show the user a file or
-  preview, finish a task or need the user's input, need to record a commit,
-  or are finishing inplace conflict resolution.
+  UI, notify the user with treq notify, and create commits with treq commit
+  only when the user explicitly asks. Use this skill for every Treq agent
+  session, whenever you need another workspace, change what the workspace
+  does, should show the user a file or preview, finish a task or need the
+  user's input, are asked to record a commit, or are finishing inplace
+  conflict resolution.
 ---
 
 # Treq
@@ -19,8 +20,9 @@ direct file reads and writes. Use the `treq` CLI when you need to create or
 manage other workspaces. Those commands may write under `.treq/workspaces/`
 outside the current working directory.
 
-Run `treq --help` if a flag is unclear. Prefer `treq` over raw `git` or `jj`
-for workspace, description, commit, send, notify, and resolve operations.
+Run `treq --help` if a flag is unclear. Use `treq` for workspace,
+description, commit, send, notify, and resolve operations, and `jj` for
+anything treq lacks. Never run `git` in a workspace (see Git and jj).
 
 ## Workspaces
 
@@ -55,6 +57,29 @@ branch. When stacking more work on an existing workspace, pass its branch to
 `treq add` with `-s`. After creation, run `treq st` from the home repository and
 confirm the new workspace appears below its target. If it does not, correct the
 metadata with `treq set <workspace_name> -t <target_branch>` before continuing.
+
+## Git and jj
+
+Workspaces are jj workspaces under the home repo's `.treq/workspaces/`, which
+the home repo ignores, so `git` there silently reads and writes the home repo.
+It shows the home repo's state, and write commands such as `stash`,
+`checkout`, and `reset` damage the home repo's working tree.
+
+| Instead of | Use |
+| --- | --- |
+| `git status` | `treq st` or `jj st` |
+| `git diff` | `treq changes workspace-diff --repo . --workspace <id>` (commits and working copy) or `jj diff` (working copy only) |
+| `git log` | `jj log` |
+| `git show <rev>` | `jj show <rev>` |
+| `git show HEAD~1:<path>` | `jj file show -r @- <path>` |
+| `git blame <path>` | `jj file annotate <path>` |
+| `git check-ignore` | `jj file list` (tracked files) or `jj st` |
+| `git checkout -- <path>` | `jj restore <path>` |
+| `git commit` | `treq commit` |
+
+To check a test fails on old code, do not stash. Edit the file back
+temporarily, run the test, then return to your version, or use
+`jj restore <path>` to drop the experiment.
 
 ## Workspace description
 
@@ -94,18 +119,72 @@ workspace in that repository:
 
 ```bash
 treq add -r <repo> <branch_name> [-d <description>]
-treq agent -r <repo> <branch_name> "<prompt>"
+treq agent start -r <repo> <branch_name> "<prompt>" [-a <agent>]
 treq st -r <repo> [<workspace_name>]
 treq diff -r <repo> <workspace_name>
 ```
 
 - `<repo>` is the supporting repository's path or directory name.
-- `-r` works on `add`, `set`, `st`, `diff`, `agent`, and `commit`.
+- `-r` works on `add`, `set`, `st`, `diff`, `agent start`, and `commit`.
   `mv` takes `--repo` because `-r` is its range flag.
-- `treq agent` needs a workspace branch. It cannot start an agent in a home
+- `treq agent start` needs a workspace branch. It cannot start an agent in a home
   repository.
-- `treq agent` returns once the agent is started. Poll `treq st -r` to follow
+- `treq agent start` returns once the agent is started. Poll `treq st -r` to follow
   its progress.
+
+## Projects
+
+A project is the set of repositories a Treq window shows. When the system
+prompt says the work is part of a Treq project, every repository in it is
+yours to read, and the project may add instructions and context files: follow
+the instructions and read the context paths it names (never edit them).
+
+```bash
+treq project status [--format json]   # every repository and its workspaces
+treq project add-repo <owner/name|url|path>   # add one; Treq clones it once
+treq project list                      # saved projects on this machine
+```
+
+- Run `treq project status` first to see what is there; do not search the
+  disk for sibling repositories.
+- Need a repository the project does not have yet? `treq project add-repo`
+  clones it under `~/.treq/repos/<host>/<owner>/<name>` and adds it. Never run
+  `git clone` yourself. If the project already has it, it prints
+  `Already in <project>: <path>` (JSON `status`: `added` or `already_present`).
+- A repository on an SSH machine shows in `status` and `list` as
+  `<path> on <host>`; it cannot be read from this machine.
+- Work in another project repository the same way as a supporting one:
+  `treq add -r <repo> <branch>` then `treq agent start -r <repo> <branch> "<prompt>"`.
+  `<repo>` can be the folder name or the `owner/name` tail of its path.
+- One branch name across repositories keeps related work easy to find
+  (for example `treq/checkout-quotes` in both the API and the web repo).
+
+## Message other agents
+
+Agents treq started can message each other, in this window, in another
+Treq window, or on a remote machine. Each agent has a handle such as
+`claude-2`.
+
+```bash
+treq agent msg --list                         # agents in this project
+treq agent msg <handle> "<text>"              # send
+treq agent msg <handle> "<question>" --ask    # send, then wait for the reply
+treq agent msg --all [--repo <repo>] "<text>" # every other agent in the project
+treq agent msg --inbox [--wait]               # read what waits for you
+treq agent msg --ack <id>                     # done with a message
+treq agent msg --reply <id> "<text>"          # answer an --ask
+treq agent msg --status <working|blocked|done> [--note "<text>"]
+```
+
+- When a line starting with `[treq]` appears in your prompt, run
+  `treq agent msg --inbox`, then ack or reply to each message.
+- A message waits one minute (`--timeout`, at most `1m`). `--ask` exits 3
+  when no reply comes in time.
+- `--list` and `--all` cover the agents in this project, in any of its
+  repositories. Add `--everywhere` to reach agents outside it. A message to
+  a named handle reaches it in any project.
+- `--status` goes to the agent that last messaged you unless you name one.
+- Add `--json` for output you parse.
 
 ## Send files to the user
 
@@ -145,7 +224,8 @@ treq notify "Need input: keep the v1 endpoint or remove it?"
 
 ## Commits
 
-When the task needs a commit, use Treq. Do not use `git commit` or `jj commit`
+Never commit on the user's behalf unless they explicitly ask you to. When
+they do, use Treq. Do not use `git commit` or `jj commit`
 for this flow.
 
 ```bash
@@ -160,9 +240,10 @@ treq commit <workspace_name> -m <message> [--push]
 - This records the pending working-copy changes in that workspace. It does
   not merge the workspace into its target.
 
-Create a commit when the user asked for one, when the work is a complete
-reviewable slice, or when leaving uncommitted changes would block a rebase or
-sync. Do not create empty or placeholder commits.
+Commit only when the user explicitly asked for one. A finished task, a
+reviewable slice, or a pending rebase or sync is not permission: leave the
+changes uncommitted and ask the user. Do not create empty or placeholder
+commits.
 
 ## Conflict resolution
 
@@ -179,7 +260,8 @@ record a new commit on the branch.
 2. Edit each conflicted file in the workspace working copy.
 3. Remove conflict markers and keep the intended result.
 4. Run `treq st` until it reports no conflicts.
-5. Run `treq commit <workspace_name> -m "<message>"` with a message that
+5. Ask the user before committing. Once they say yes, run
+   `treq commit <workspace_name> -m "<message>"` with a message that
    describes the resolution.
 
 Do not use `git commit` or `jj commit` for this step.

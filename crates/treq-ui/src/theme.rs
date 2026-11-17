@@ -25,6 +25,8 @@ icons! {
   ICON_AGENT_CODEX => "agent-codex",
   ICON_AGENT_COPILOT => "agent-copilot",
   ICON_AGENT_CURSOR => "agent-cursor",
+  ICON_AGENT_DEVIN => "agent-devin",
+  ICON_AGENT_GEMINI => "agent-gemini",
   ICON_ARCHIVE => "archive",
   ICON_ARROW_DOWN => "arrow-down",
   ICON_ARROW_LEFT => "arrow-left",
@@ -58,6 +60,7 @@ icons! {
   ICON_EXTERNAL_LINK => "external-link",
   ICON_FILE => "file",
   ICON_FILE_DIFF => "file-diff",
+  ICON_FILE_MARKDOWN => "file-markdown",
   ICON_FILE_TEXT => "file-text",
   ICON_FLASK => "flask-conical",
   ICON_FILTER => "funnel",
@@ -67,12 +70,13 @@ icons! {
   ICON_FOLDER_PLUS => "folder-plus",
   ICON_FOLDER_SEARCH => "folder-search",
   ICON_GITHUB => "github",
+  ICON_GOOGLE => "google",
   ICON_HISTORY => "history",
   ICON_HOUSE => "house",
   ICON_INFO => "info",
   ICON_LAPTOP => "laptop",
   ICON_LAYERS => "layers-2",
-  ICON_LINEAR => "list-todo",
+  ICON_LINEAR => "linear",
   ICON_LINK => "link",
   ICON_MERGE => "git-merge",
   ICON_MORE => "ellipsis-vertical",
@@ -82,6 +86,7 @@ icons! {
   ICON_PLUG => "plug",
   ICON_PLUS => "plus",
   ICON_PR => "git-pull-request",
+  ICON_PR_CREATE => "git-pull-request-create",
   ICON_PR_CLOSED => "git-pull-request-closed",
   ICON_PR_DRAFT => "git-pull-request-draft",
   ICON_REFRESH => "refresh-cw",
@@ -134,11 +139,10 @@ icons! {
   ICON_ROCKET => "rocket",
 }
 
-// Inter, as in the React app. The TTFs are shared with mobile-gpui.
-const INTER_REGULAR: &[u8] = include_bytes!("../../../mobile-gpui/assets/fonts/Inter-Regular.ttf");
-const INTER_MEDIUM: &[u8] = include_bytes!("../../../mobile-gpui/assets/fonts/Inter-Medium.ttf");
-const INTER_SEMIBOLD: &[u8] =
-  include_bytes!("../../../mobile-gpui/assets/fonts/Inter-SemiBold.ttf");
+// Inter, as in the React app. The TTFs are shared with the mobile app.
+const INTER_REGULAR: &[u8] = include_bytes!("../../../src-tauri/assets/fonts/Inter-Regular.ttf");
+const INTER_MEDIUM: &[u8] = include_bytes!("../../../src-tauri/assets/fonts/Inter-Medium.ttf");
+const INTER_SEMIBOLD: &[u8] = include_bytes!("../../../src-tauri/assets/fonts/Inter-SemiBold.ttf");
 
 /// The React app's mono face, converted from its web font
 /// (`src/public/fonts/jetbrains-mono-400-latin.woff2`) with the same subset.
@@ -194,6 +198,13 @@ pub fn init(cx: &mut App) {
     log::error!("failed to load bundled fonts: {err:#}");
   }
   gpui_kit::init(cx);
+  // gpui-kit's input takes ⌘/Ctrl+Enter itself and, when multi-line, inserts
+  // a newline, so the key never reaches the submit handlers in the screens.
+  cx.bind_keys([gpui::KeyBinding::new(
+    "secondary-enter",
+    gpui::NoAction,
+    Some("Input"),
+  )]);
   // Each blink repaints the window; at gpui-kit's 500ms that cost was
   // noticeable while idling in a focused input.
   gpui_kit::base::input::CursorBlinkDefaults::new()
@@ -227,7 +238,7 @@ fn init_kit_theme(cx: &mut App) {
   set_kit_metrics(cx);
 }
 
-/// How big gpui-kit's widgets draw text: 13 on the desktop, 15 on a phone,
+/// How big gpui-kit's widgets and treq's badges draw text: 13 on the desktop, 15 on a phone,
 /// which is read at arm's length and tapped rather than clicked.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Density {
@@ -243,7 +254,16 @@ impl Density {
   pub fn font_sizes(self) -> (f32, f32) {
     match self {
       Density::Desktop => (13., 13.),
-      Density::Touch => (15., 12.),
+      Density::Touch => (15., 13.),
+    }
+  }
+
+  /// Captions, badges and counts: 11 on the desktop, 13 on a phone, the
+  /// smallest text read at arm's length.
+  pub fn caption(self) -> f32 {
+    match self {
+      Density::Desktop => 11.,
+      Density::Touch => 13.,
     }
   }
 }
@@ -327,6 +347,90 @@ pub const CONTROL_SM: f32 = 24.;
 pub const CONTROL_MD: f32 = 28.;
 pub const CONTROL_LG: f32 = 32.;
 
+/// The 4px spacing scale for gaps and padding (Bootstrap's spacers, MUI's
+/// 4px grid). Lay out with these rather than raw pixel values.
+pub mod space {
+  pub const XS: f32 = 4.;
+  pub const SM: f32 = 8.;
+  pub const MD: f32 = 12.;
+  pub const LG: f32 = 16.;
+  pub const XL: f32 = 24.;
+  pub const XXL: f32 = 32.;
+}
+
+/// Between the fields of a form.
+pub const FIELD_GAP: f32 = space::LG;
+/// Between a field's label, its control and its hint.
+pub const LABEL_GAP: f32 = 6.;
+/// The widest a detail page's reading column grows.
+pub const CONTENT_MAX_WIDTH: f32 = 820.;
+/// The label column of a horizontal form.
+pub const LABEL_WIDTH: f32 = 140.;
+/// Below this window width, a horizontal form stacks its labels on top.
+pub const STACK_BREAKPOINT: f32 = 480.;
+/// The smallest box a finger can hit reliably (Apple's 44pt).
+pub const TOUCH_TARGET: f32 = 44.;
+/// A full-width call to action in a phone's bottom bar.
+pub const CTA_HEIGHT: f32 = 52.;
+
+impl Density {
+  /// The installed density, Desktop when none is set.
+  pub fn current(cx: &App) -> Self {
+    cx.try_global::<Density>().copied().unwrap_or_default()
+  }
+
+  /// How tall a field's control is: a toolbar control, or a finger's target.
+  pub fn control_height(self) -> f32 {
+    match self {
+      Density::Desktop => CONTROL_MD,
+      Density::Touch => TOUCH_TARGET,
+    }
+  }
+
+  /// The padding of a card's header, body and footer.
+  pub fn card_padding(self) -> f32 {
+    match self {
+      Density::Desktop => space::LG,
+      Density::Touch => 20.,
+    }
+  }
+}
+
+/// How far a surface sits above the page: a card, a popover, the palette,
+/// a dialog (MUI's `elevation`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Elevation {
+  #[default]
+  Flat,
+  Raised,
+  Overlay,
+  Modal,
+}
+
+impl Elevation {
+  /// The surface's shadows; none when flat.
+  pub fn shadows(self) -> Vec<gpui::BoxShadow> {
+    let shadow = |y: f32, blur: f32, alpha: f32| gpui::BoxShadow {
+      color: hsla(0., 0., 0., alpha),
+      offset: gpui::point(gpui::px(0.), gpui::px(y)),
+      blur_radius: gpui::px(blur),
+      spread_radius: gpui::px(0.),
+      inset: false,
+    };
+    match self {
+      Elevation::Flat => Vec::new(),
+      Elevation::Raised => vec![shadow(1., 2., 0.06), shadow(4., 12., 0.06)],
+      Elevation::Overlay => vec![shadow(4., 8., 0.08), shadow(12., 24., 0.10)],
+      Elevation::Modal => vec![shadow(8., 16., 0.12), shadow(24., 48., 0.18)],
+    }
+  }
+}
+
+/// List row heights ([`crate::RowDensity`]): compact for the sidebar, file
+/// trees and menus; the default for lists in screens, dialogs and settings.
+pub const ROW_HEIGHT_COMPACT: f32 = 28.;
+pub const ROW_HEIGHT: f32 = 32.;
+
 /// gpui-bootstrap's theme in treq's tokens, at `zoom` (1.0 at 100%).
 ///
 /// Every gpui-bootstrap component the `ui` facade builds on reads it: its
@@ -373,6 +477,8 @@ pub fn bootstrap(dark: bool, zoom: f32) -> gpui_bootstrap::Theme {
     pill: z(9999.),
   };
   let (body, body_line) = ui::TextSize::Sm.metrics();
+  // Short label (['caption token for badges and tags']): 11px is fine.
+  // ast-grep-ignore: gpui-text-xs-short-label-only
   let (caption, _) = ui::TextSize::Xs.metrics();
   let (title, _) = ui::TextSize::Lg.metrics();
   theme.typography = Typography {
@@ -437,6 +543,8 @@ pub struct Palette {
   pub destructive: Hsla,
   /// Tailwind yellow-500, the uncommitted-changes dot.
   pub warning: Hsla,
+  /// Text on a `warning` fill: dark in both themes, as amber is light.
+  pub warning_foreground: Hsla,
   pub pr_open: Hsla,
   pub pr_merged: Hsla,
   pub pr_closed: Hsla,
@@ -445,6 +553,9 @@ pub struct Palette {
   /// Toast icons: `text-green-500`, and `text-yellow-600 dark:text-yellow-400`.
   pub toast_success: Hsla,
   pub toast_warning: Hsla,
+  /// A shade darker than `background`, for recessed rows such as diff
+  /// lines an expander read in.
+  pub inset: Hsla,
   pub card: Hsla,
   pub card_foreground: Hsla,
   pub primary_foreground: Hsla,
@@ -463,6 +574,16 @@ pub struct Palette {
 
 /// A CSS `hsl(h s% l%)` token.
 impl Palette {
+  /// A raised surface's fill: the card, a shade lighter in the dark theme,
+  /// where a shadow barely shows (MUI's dark overlay).
+  pub fn raised(&self) -> Hsla {
+    if self.dark {
+      hsla(0., 0., 0.23, 1.)
+    } else {
+      self.card
+    }
+  }
+
   /// The one hover fill: rows, ghost buttons and menu items.
   pub fn hover(&self) -> Hsla {
     self.accent
@@ -471,6 +592,51 @@ impl Palette {
   /// The one selected fill: rows, toggles and open triggers.
   pub fn selected(&self) -> Hsla {
     self.primary.opacity(if self.dark { 0.22 } else { 0.12 })
+  }
+
+  /// Hover on a segment of a muted track (segmented tabs), where
+  /// [`Palette::hover`] can equal the track's own fill.
+  pub fn segment_hover(&self) -> Hsla {
+    self.foreground.opacity(if self.dark { 0.1 } else { 0.07 })
+  }
+
+  /// The elbow linking a stacked workspace row to its parent: at least 3:1
+  /// against the sidebar and the selected fill, so it shows on both.
+  pub fn stack_connector(&self) -> Hsla {
+    self.muted_foreground
+  }
+
+  /// Hover on something already filled with [`Palette::selected`].
+  pub fn selected_hover(&self) -> Hsla {
+    self.primary.opacity(if self.dark { 0.32 } else { 0.2 })
+  }
+
+  /// Hover on a solid `primary` control.
+  pub fn primary_hover(&self) -> Hsla {
+    self.primary.opacity(0.85)
+  }
+
+  /// Hover on a drag handle: dividers, resize edges and scrollbar thumbs.
+  pub fn handle_hover(&self) -> Hsla {
+    self.primary.opacity(0.5)
+  }
+
+  /// Hover on chrome that is dark in both themes, such as the terminal
+  /// and the lightbox controls over media.
+  pub fn hover_on_dark(&self) -> Hsla {
+    palette(true).foreground.opacity(0.15)
+  }
+
+  /// Lines with a review comment, and the comments under them: one amber,
+  /// so a comment reads as part of the lines it is on.
+  /// Dark uses GitHub's dark attention tint (`#bb8009` at 15%), which sits
+  /// lighter on the code than yellow-500.
+  pub fn commented(&self) -> Hsla {
+    if self.dark {
+      Hsla::from(rgb(0xbb8009)).opacity(0.15)
+    } else {
+      self.warning.opacity(0.1)
+    }
   }
 
   /// Behind every modal dialog, and behind controls laid over an image.
@@ -487,9 +653,26 @@ impl Palette {
     }
   }
 
-  /// The GitHub button's fill, GitHub's own near-black in both themes.
+  /// Added lines, letters and `+N` counts in a diff: green-600 in light
+  /// and green-400 in dark, legible as text. Separate from `success`, which
+  /// means a passed or done state.
+  pub fn diff_added(&self) -> Hsla {
+    rgb(if self.dark { 0x4ade80 } else { 0x16a34a }).into()
+  }
+
+  /// Removed lines, letters and `-N` counts in a diff: red-600 or red-400.
+  pub fn diff_removed(&self) -> Hsla {
+    rgb(if self.dark { 0xf87171 } else { 0xdc2626 }).into()
+  }
+
+  /// The GitHub button's fill: GitHub's own near-black in light, and its
+  /// dark-theme button grey in dark, where near-black meets the background.
   pub fn github(&self) -> Hsla {
-    tw::color(tw::GITHUB)
+    tw::color(if self.dark {
+      tw::GITHUB_DARK
+    } else {
+      tw::GITHUB
+    })
   }
 }
 
@@ -520,12 +703,14 @@ pub fn palette(dark: bool) -> Palette {
       primary: token(211., 100., 55.),
       destructive: token(0., 85., 58.),
       warning: rgb(0xeab308).into(),
+      warning_foreground: token(0., 0., 9.),
       pr_open: rgb(0x4ade80).into(),
       pr_merged: rgb(0xc084fc).into(),
       pr_closed: rgb(0xf87171).into(),
       stack_guide: rgb(0x93c5fd).into(),
       toast_success: rgb(0x22c55e).into(),
       toast_warning: rgb(0xfacc15).into(),
+      inset: token(0., 0., 11.),
       card: token(0., 0., 20.),
       card_foreground: token(0., 0., 95.),
       primary_foreground: token(0., 0., 100.),
@@ -553,12 +738,14 @@ pub fn palette(dark: bool) -> Palette {
       primary: token(211., 100., 50.),
       destructive: token(0., 85., 60.),
       warning: rgb(0xeab308).into(),
+      warning_foreground: token(0., 0., 9.),
       pr_open: rgb(0x16a34a).into(),
       pr_merged: rgb(0x9333ea).into(),
       pr_closed: rgb(0xdc2626).into(),
       stack_guide: rgb(0x1e3a8a).into(),
       toast_success: rgb(0x22c55e).into(),
       toast_warning: rgb(0xca8a04).into(),
+      inset: token(0., 0., 95.),
       card: token(0., 0., 100.),
       card_foreground: token(0., 0., 13.),
       primary_foreground: token(0., 0., 100.),
@@ -576,6 +763,100 @@ pub fn palette(dark: bool) -> Palette {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// The desktop keeps its sizes; a phone reads nothing under 13px.
+  #[test]
+  fn touch_raises_small_text_and_desktop_keeps_its_sizes() {
+    assert_eq!(Density::Desktop.font_sizes(), (13., 13.));
+    assert_eq!(Density::Desktop.caption(), 11.);
+    let (body, mono) = Density::Touch.font_sizes();
+    assert_eq!(body, 15.);
+    assert!(mono >= 13.);
+    assert!(Density::Touch.caption() >= 13.);
+  }
+
+  /// Diff colours are their own tokens, so state green can change alone.
+  #[test]
+  fn diff_tokens_are_separate_from_state_colours() {
+    let differs = [false, true].iter().any(|&dark| {
+      let p = palette(dark);
+      p.diff_added() != p.success && p.diff_removed() != p.destructive
+    });
+    assert!(differs);
+    for dark in [false, true] {
+      let p = palette(dark);
+      assert_ne!(p.diff_added(), p.diff_removed());
+    }
+  }
+
+  #[test]
+  fn hover_tokens_differ_from_their_resting_fill() {
+    for dark in [false, true] {
+      let p = palette(dark);
+      assert_eq!(p.hover(), p.accent);
+      assert_ne!(p.selected_hover(), p.selected());
+      assert_eq!(p.selected_hover().h, p.primary.h);
+      assert!(p.selected_hover().a > p.selected().a);
+      assert_ne!(p.primary_hover(), p.primary);
+      assert!(p.handle_hover().a < 1.);
+    }
+  }
+
+  fn linear(c: Hsla) -> [f32; 3] {
+    let c = c.to_rgb();
+    [c.r, c.g, c.b].map(|v| {
+      if v <= 0.04045 {
+        v / 12.92
+      } else {
+        ((v + 0.055) / 1.055).powf(2.4)
+      }
+    })
+  }
+
+  fn over(fg: Hsla, bg: Hsla) -> Hsla {
+    let (f, b) = (fg.to_rgb(), bg.to_rgb());
+    let mix = |x: f32, y: f32| x * f.a + y * (1. - f.a);
+    gpui::Rgba {
+      r: mix(f.r, b.r),
+      g: mix(f.g, b.g),
+      b: mix(f.b, b.b),
+      a: 1.,
+    }
+    .into()
+  }
+
+  fn contrast(a: Hsla, b: Hsla) -> f32 {
+    let lum = |c| {
+      let [r, g, b] = linear(c);
+      0.2126 * r + 0.7152 * g + 0.0722 * b
+    };
+    let (x, y) = (lum(a), lum(b));
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+  }
+
+  /// WCAG 1.4.11: a UI line needs 3:1 against what it sits on.
+  #[test]
+  fn stack_connector_shows_on_sidebar_and_selected_row() {
+    for dark in [false, true] {
+      let p = palette(dark);
+      let line = p.stack_connector();
+      let row = contrast(line, p.sidebar);
+      let selected = contrast(line, over(p.selected(), p.sidebar));
+      assert!(row >= 3., "dark={dark}: {row:.2} on the sidebar");
+      assert!(
+        selected >= 3.,
+        "dark={dark}: {selected:.2} on a selected row"
+      );
+    }
+  }
+
+  #[test]
+  fn hover_on_dark_is_one_light_tint_in_both_themes() {
+    let (light, dark) = (palette(false), palette(true));
+    assert_eq!(light.hover_on_dark(), dark.hover_on_dark());
+    assert_eq!(dark.hover_on_dark().l, dark.foreground.l);
+    assert!(dark.hover_on_dark().a < 0.5);
+  }
 
   #[test]
   fn serves_every_bundled_icon() {
@@ -604,6 +885,20 @@ mod tests {
       assert_eq!(
         theme.button(gpui_bootstrap::Variant::Primary).color,
         theme.colors.white
+      );
+    }
+  }
+
+  #[test]
+  fn the_segment_hover_shows_on_the_muted_strip_in_both_themes() {
+    for dark in [false, true] {
+      let p = palette(dark);
+      let on_strip = p.muted.blend(p.segment_hover());
+      assert!(
+        (on_strip.l - p.muted.l).abs() > 0.03,
+        "dark={dark}: {:?} on {:?}",
+        on_strip,
+        p.muted
       );
     }
   }
@@ -659,6 +954,7 @@ pub mod tw {
   }
 
   pub const GITHUB: u32 = 0x24292f;
+  pub const GITHUB_DARK: u32 = 0x3d444d;
   pub const BLUE_500: u32 = 0x3b82f6;
   pub const BLUE_600: u32 = 0x2563eb;
   pub const EMERALD_500: u32 = 0x10b981;
@@ -706,4 +1002,17 @@ pub mod tw {
   pub const YELLOW_400: u32 = 0xfacc15;
   pub const YELLOW_700: u32 = 0xa16207;
   pub const YELLOW_600: u32 = 0xca8a04;
+}
+
+#[cfg(test)]
+mod touch_tests {
+  use super::*;
+
+  #[test]
+  fn touch_controls_meet_the_44_target() {
+    assert_eq!(Density::Desktop.control_height(), CONTROL_MD);
+    assert_eq!(Density::Touch.control_height(), TOUCH_TARGET);
+    assert_eq!(TOUCH_TARGET, 44.);
+    assert_eq!(CTA_HEIGHT, 52.);
+  }
 }

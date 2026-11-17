@@ -1,5 +1,5 @@
-//! The workspace Code tab (`ShowWorkspace`'s Overview): the task input, the
-//! workspace's description and stack, its files and README, and its commit
+//! The workspace Code tab (`ShowWorkspace`'s Overview): the workspace's
+//! title, its action row (Agent, alerts, Go to file), description and stack, its files (and, on home, the README), and its commit
 //! history in a column on the right.
 //!
 //! Drawn from the backend directly ([`code_data`]). What stays React's goes
@@ -9,42 +9,51 @@
 //!
 //! [`code_data`]: super::code_data
 
+use crate::gpui_shell::actions;
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
+use crate::result_ext::ResultExt;
 use std::{
+  cell::{Cell, RefCell},
+  collections::HashMap,
+  ops::Range,
+  rc::Rc,
   sync::{Arc, LazyLock},
   time::Duration,
 };
 
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::{
-  input::{Enter, Escape, IndentInline, InputEvent, MoveDown, MoveUp, Textarea, TextareaState},
+  input::{Escape, Textarea, TextareaState},
   text::{TextView, TextViewStyle},
-  Sizable,
 };
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
-  self, anchored, deferred, div, prelude::*, px, relative, rems, Animation, AnimationExt as _, App,
-  Context, Div, Entity, FontWeight, Hsla, Role, SharedString, Stateful, Subscription, Task, Window,
+  self, anchored, deferred, div, prelude::*, px, relative, rems, Animation, AnimationExt as _,
+  AnyElement, App, Context, Div, Entity, FontWeight, Hsla, KeyDownEvent, Pixels, Role,
+  ScrollHandle, SharedString, Stateful, Subscription, Window,
 };
 
 use super::{
   code_data::{
-    self, conflict_count, description, diff_stats, display_title, group_by_day, headline,
-    history_commits, insert_at, looks_like_markdown, mention_at, session_name, task_branch_name,
-    task_settings, workspace_stack, Agent, CodeHost, Overview, TaskSettings, ENVIRONMENT_SETTING,
-    NEW_WORKSPACE_SETTING, REMOTE_FILE_TREE_REASON,
+    self, description, diff_stats, display_title, group_by_day, headline, history_commits,
+    looks_like_markdown, task_settings, workspace_stack, Agent, AlertState, CodeAlert, CodeHost,
+    Overview, TaskSettings, REMOTE_FILE_TREE_REASON,
   },
-  environment,
-  file_picker::{FilePicker, FilePickerEvent, Scope},
   merge::full_path,
-  ActionSink, ScreenAction,
+  prefetch, ActionSink, ScreenAction,
 };
 use crate::{
-  core::WorkspaceEntry,
+  core::{
+    pr_sync::{self, SyncState},
+    rebase_guard::RebaseHold,
+    running_checks::{CheckRun, ChecksTarget},
+    WorkspaceEntry,
+  },
   gpui_shell::{
-    form,
-    native::{NativeEvent, ToastTone},
+    checks_run,
+    native::NativeEvent,
     popup::{PopupSink, Side, TooltipContent},
     theme::{self, Palette},
     time,
@@ -52,14 +61,18 @@ use crate::{
     ui::{self, Button, Size, TextSize, Variant},
   },
   jj::{JjLogCommit, JjLogResult},
-  local_db::Workspace,
+  local_db::{PrSyncRecord, Workspace},
 };
 
-/// `useDebounce(mentionQuery, 150)`.
-const MENTION_DEBOUNCE: Duration = Duration::from_millis(150);
 /// `LinearCommitHistory`'s page size.
 const HISTORY_PAGE: usize = 14;
 const STACK_DOCS_PATH: &str = "/docs/concepts/workspaces#stacks-and-rebasing";
+/// A root of at most this many entries draws every row.
+const ENTRIES_ALL: usize = 200;
+/// How often a pending or running setup script's status is read again.
+const SETUP_POLL: Duration = Duration::from_millis(1500);
+/// Rows drawn past each edge of the viewport.
+const ENTRIES_OVERSCAN: usize = 20;
 
 /// What the workspace header already read, which the tab draws from too.
 #[derive(Debug, Clone)]
@@ -79,13 +92,12 @@ pub struct Parent {
 
 impl PartialEq for Parent {
   fn eq(&self, other: &Self) -> bool {
-    let json = |w: &Option<Workspace>| serde_json::to_value(w).ok();
     self.repo_path == other.repo_path
       && self.remote == other.remote
       && self.conflicted_files == other.conflicted_files
       && self.default_branch == other.default_branch
       && self.revision == other.revision
-      && json(&self.workspace) == json(&other.workspace)
+      && self.workspace == other.workspace
   }
 }
 
@@ -116,7 +128,24 @@ impl Parent {
 }
 
 /// A stack row with its lines changed.
-#[derive(Debug, Clone)]
+/// What the stack card shows from the workspace header.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct StackCard {
+  pub branch: String,
+  pub target: Option<super::workspace::Target>,
+  /// Stack on this…'s tooltip; `None` hides the button.
+  pub stack_tooltip: Option<String>,
+}
+
+/// The header's part of the Code tab: the stack card's data, and where the
+/// header's popovers anchor.
+#[derive(Clone, Default)]
+pub struct CodeChrome {
+  pub card: Rc<RefCell<StackCard>>,
+  pub bounds: Rc<RefCell<HashMap<SharedString, gpui::Bounds<Pixels>>>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct StackRow {
   pub workspace: Workspace,
   pub current: bool,
@@ -126,9 +155,66 @@ pub struct StackRow {
 /// What [`CodeView::load`] reads, all at once.
 struct Read {
   overview: Overview,
+  setup: Option<crate::core::SetupScriptStatus>,
+  /// The Logs preview is on, so the setup alert can open its logs.
+  logs: bool,
   history: Result<JjLogResult, String>,
   stack: Option<Vec<StackRow>>,
   settings: TaskSettings,
+  pr_sync: PrSyncRead,
+  rebase_hold: Option<RebaseHold>,
+  branch_deleted: bool,
+}
+
+/// The workspace's PR sync record, and when its read started: reads land out
+/// of order, and only one that started later may replace what shows.
+type PrSyncRead = (u64, Option<PrSyncRecord>);
+
+fn read_pr_sync(host: &dyn CodeHost, parent: &Parent) -> PrSyncRead {
+  static STARTED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+  let started = STARTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+  let record = parent
+    .workspace_id()
+    .and_then(|id| host.pr_sync(&parent.repo_path, id));
+  (started, record)
+}
+
+impl Read {
+  /// Reads everything the tab shows for `parent`, `limit` commits of the
+  /// home repository's history. Blocks.
+  fn of(host: &dyn CodeHost, parent: &Parent, limit: usize) -> Self {
+    // Independent reads: run them side by side.
+    std::thread::scope(|scope| {
+      let overview = scope.spawn(|| host.overview(&parent.repo_path, parent.workspace_id()));
+      let history = scope.spawn(|| read_history(host, parent, limit));
+      let stack = scope.spawn(|| read_stack(host, parent));
+      let setup = scope.spawn(|| {
+        parent
+          .workspace_id()
+          .and_then(|id| host.setup(&parent.repo_path, id))
+      });
+      let settings = task_settings(host, &parent.repo_path);
+      let pr_sync = read_pr_sync(host, parent);
+      let rebase_hold = parent
+        .workspace_id()
+        .and_then(|id| host.rebase_hold(&parent.repo_path, id));
+      let branch_deleted = parent
+        .workspace_id()
+        .is_some_and(|id| host.branch_deleted(&parent.repo_path, id));
+      let logs = host.logs_enabled();
+      Read {
+        overview: Overview::or_unavailable(super::joined(overview)),
+        logs,
+        setup: super::joined(setup),
+        history: super::joined(history),
+        stack: super::joined(stack),
+        settings,
+        pr_sync,
+        rebase_hold,
+        branch_deleted,
+      }
+    })
+  }
 }
 
 /// The commit history column: `limit` commits of the home repository, a
@@ -146,41 +232,54 @@ fn read_history(host: &dyn CodeHost, parent: &Parent, limit: usize) -> Result<Jj
 /// The workspace's stack with each row's diff stats; `None` at home.
 fn read_stack(host: &dyn CodeHost, parent: &Parent) -> Option<Vec<StackRow>> {
   let current = parent.workspace.as_ref()?;
-  let workspaces = host.workspaces(&parent.repo_path).ok()?;
-  let stack = workspace_stack(&workspaces, current.id, &parent.default_branch)?;
-  Some(
-    stack
+  let workspaces = host.workspaces(&parent.repo_path).unwrap_or_default();
+  // A workspace outside any stack is a stack of one.
+  let stack = workspace_stack(&workspaces, current.id, &parent.default_branch)
+    .unwrap_or_else(|| vec![(current.clone(), true)]);
+  // Each row's commits are an independent read: read them all at once.
+  Some(std::thread::scope(|scope| {
+    #[expect(
+      clippy::needless_collect,
+      reason = "every read starts before the first is joined"
+    )]
+    let reads: Vec<_> = stack
       .into_iter()
       .map(|(workspace, current)| {
-        let stats = host
-          .commits(&parent.repo_path, Some(workspace.id), false, None)
-          .map(|log| diff_stats(&log.commits))
-          .unwrap_or_default();
-        StackRow {
-          workspace,
-          current,
-          stats,
-        }
+        let id = workspace.id;
+        let stats = scope.spawn(move || {
+          host
+            .commits(&parent.repo_path, Some(id), false, None)
+            .map(|log| diff_stats(&log.commits))
+            .unwrap_or_default()
+        });
+        (workspace, current, stats)
       })
-      .collect(),
-  )
+      .collect();
+    reads
+      .into_iter()
+      .map(|(workspace, current, stats)| StackRow {
+        workspace,
+        current,
+        stats: super::joined(stats),
+      })
+      .collect()
+  }))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Menu {
-  Add,
-  Plan,
-  Agent,
-  Environment,
+  /// The description editor's Save options.
+  SaveDescription,
+  /// The description's Sync options: keep the local text or GitHub's.
+  SyncDescription,
 }
 
-/// `mentionQuery` and its results.
-#[derive(Debug, Clone, Default)]
-pub struct Mention {
-  pub anchor: usize,
-  pub query: String,
-  pub results: Vec<String>,
-  pub index: usize,
+/// Which side of a local draft the title and description card shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AboutTab {
+  #[default]
+  Draft,
+  GitHub,
 }
 
 pub struct CodeView {
@@ -189,10 +288,13 @@ pub struct CodeView {
   pub(super) parent: Parent,
   /// The workspace the tab moves to once [`CodeView::load`] reads it.
   next: Option<Parent>,
+  /// Other workspaces read ahead of a switch to them (`prefetch`).
+  prefetched: prefetch::Lru<(String, Option<i64>), (Parent, Read)>,
   dark: bool,
   tips: Tooltips,
   pub(super) overview: Option<Overview>,
-  pub(super) history: Option<JjLogResult>,
+  /// Shared, so a frame takes it without copying every commit.
+  pub(super) history: Option<Rc<JjLogResult>>,
   pub(super) history_limit: usize,
   history_loading: bool,
   /// Why the last commit read failed, while there is no history to show.
@@ -201,30 +303,74 @@ pub struct CodeView {
   history_error_text: Option<Entity<TextareaState>>,
   /// Whether "Show error" has the error's popover open.
   history_error_open: bool,
+  /// The failed file read's message, read-only so it can be copied.
+  files_error_text: Option<Entity<TextareaState>>,
+  /// Whether the files panel's "Show error" has its popover open.
+  files_error_open: bool,
+  /// Whether the alerts button has its popover open.
+  status_open: bool,
   pub(super) stack: Option<Vec<StackRow>>,
   pub(super) settings: Option<TaskSettings>,
-  task: Option<Entity<TextareaState>>,
-  pub(super) task_text: String,
-  pub(super) focused: bool,
-  pub(super) mention: Option<Mention>,
-  pub(super) agent_override: Option<Agent>,
-  pub(super) save_default: bool,
-  show_save_default: bool,
-  pub(super) submitting: bool,
   pub(super) menu: Option<Menu>,
   /// The title being edited, and its editor.
-  pub(super) title_draft: Option<Entity<TextareaState>>,
-  saving_title: bool,
+  chrome: CodeChrome,
   /// The description being edited, and its editor.
   pub(super) description_draft: Option<Entity<TextareaState>>,
   saving_description: bool,
+  /// The PR text last copied into the workspace, as the latest-started
+  /// read found it; [`Self::pr_sync`] checks the shown workspace against it.
+  pr_sync: PrSyncRead,
+  /// Why the workspace's last rebase was held back (`core::rebase_guard`).
+  rebase_hold: Option<RebaseHold>,
+  /// The workspace's branch is gone, as after its PR merged.
+  branch_deleted: bool,
+  resyncing: bool,
+  /// The card's tab while a local draft differs from the pull request, and
+  /// the PR's title and body as the GitHub tab last read them.
+  about_tab: AboutTab,
+  pr_text: Option<(String, String)>,
   syncing_submodule: bool,
-  starting_devcontainer: bool,
-  pub(super) picker: Option<Entity<FilePicker>>,
-  /// Text to put in the task input at its cursor on the next render.
-  insert: Option<String>,
-  _mention_search: Option<Task<()>>,
+  /// The workspace setup script's status, and whether the Logs tab is
+  /// there to show its output.
+  setup: Option<crate::core::SetupScriptStatus>,
+  logs_enabled: bool,
+  /// The file list shows its untouched entries.
+  show_untouched: bool,
+  /// The tab's scroll, and where the root's entry rows sit in it.
+  scroll: ScrollHandle,
+  entry_rows: Rc<EntryRows>,
   _subscriptions: Vec<Subscription>,
+}
+
+/// Where the root's entry rows sit, measured as they draw, so a root of
+/// thousands of entries draws only the rows near the viewport: drawing all
+/// of 5,000 took most of a second a frame (debug).
+#[derive(Default)]
+struct EntryRows {
+  /// A row's height with its top border (every row but the first).
+  pitch: Cell<Option<Pixels>>,
+  /// The first row's top in the scrolled content.
+  top: Cell<Option<Pixels>>,
+}
+
+impl EntryRows {
+  /// The rows of `count` to draw while `scroll` shows what it does.
+  fn shown(&self, count: usize, scroll: &ScrollHandle) -> Range<usize> {
+    if count <= ENTRIES_ALL {
+      return 0..count;
+    }
+    let (Some(pitch), Some(top)) = (self.pitch.get(), self.top.get()) else {
+      return 0..ENTRIES_ALL;
+    };
+    let pitch = f32::from(pitch).max(1.);
+    // A scroll past the end draws where layout clamps it, not a frame later.
+    let offset = (-scroll.offset().y).min(scroll.max_offset().y);
+    let from = f32::from(offset - top);
+    let to = from + f32::from(scroll.bounds().size.height);
+    let first = ((from / pitch).floor().max(0.) as usize).saturating_sub(ENTRIES_OVERSCAN);
+    let last = ((to / pitch).ceil().max(0.) as usize + ENTRIES_OVERSCAN).min(count);
+    first.min(last)..last
+  }
 }
 
 impl HasTooltips for CodeView {
@@ -239,6 +385,7 @@ impl CodeView {
     host: Arc<dyn CodeHost>,
     react: ActionSink,
     popups: PopupSink,
+    chrome: CodeChrome,
     dark: bool,
     cx: &mut Context<Self>,
   ) -> Self {
@@ -247,6 +394,7 @@ impl CodeView {
       react,
       parent,
       next: None,
+      prefetched: prefetch::Lru::new(2),
       dark,
       tips: Tooltips::new(popups, dark),
       overview: None,
@@ -256,26 +404,27 @@ impl CodeView {
       history_error: None,
       history_error_text: None,
       history_error_open: false,
+      files_error_text: None,
+      files_error_open: false,
+      status_open: false,
       stack: None,
       settings: None,
-      task: None,
-      task_text: String::new(),
-      focused: false,
-      mention: None,
-      agent_override: None,
-      save_default: false,
-      show_save_default: false,
-      submitting: false,
       menu: None,
-      title_draft: None,
-      saving_title: false,
+      chrome,
       description_draft: None,
       saving_description: false,
+      pr_sync: (0, None),
+      rebase_hold: None,
+      branch_deleted: false,
+      resyncing: false,
+      about_tab: AboutTab::Draft,
+      pr_text: None,
       syncing_submodule: false,
-      starting_devcontainer: false,
-      picker: None,
-      insert: None,
-      _mention_search: None,
+      setup: None,
+      logs_enabled: false,
+      show_untouched: false,
+      scroll: ScrollHandle::new(),
+      entry_rows: Rc::default(),
       _subscriptions: Vec::new(),
     };
     this.load(cx);
@@ -288,19 +437,48 @@ impl CodeView {
       self.tips.dark = dark;
       cx.notify();
     }
-    if self.next.as_ref().unwrap_or(&self.parent) == &parent {
+    let current = self.next.as_ref().unwrap_or(&self.parent);
+    if current == &parent {
       return;
     }
+    // The conflicted files or the workspace's record changing alone (the
+    // header's read landing after the window's listing) don't read again.
+    let reread = current.key() != parent.key()
+      || current.revision != parent.revision
+      || current.default_branch != parent.default_branch;
+    // A new title or description (an edit, or the PR's text synced in)
+    // can start or stop following the pull request.
+    let text = |p: &Parent| {
+      p.workspace
+        .as_ref()
+        .map(|w| (w.title.clone(), w.description.clone()))
+    };
+    let resync = !reread && text(current) != text(&parent);
     if parent.key() != self.parent.key() {
       // Another workspace: keep drawing this one until the new one is read,
       // then swap them in one frame (`apply`), so the tab never draws empty.
+      // Read ahead, it swaps now, and reads again behind.
+      let now = cx.background_executor().now();
+      let ahead = self
+        .prefetched
+        .take_fresh(&parent.key(), now)
+        .filter(|(read, _)| {
+          read.revision == parent.revision && read.default_branch == parent.default_branch
+        });
       self.next = Some(parent);
+      if let Some((read_for, read)) = ahead {
+        self.apply(read_for, read, cx);
+      }
     } else {
       self.next = None;
       self.parent = parent;
       cx.notify();
     }
-    self.load(cx);
+    if reread {
+      self.load(cx);
+    } else if resync {
+      self.read(read_pr_sync, |view, read, _| view.take_pr_sync(read), cx);
+    }
   }
 
   /// Reads everything the tab shows off the main thread and applies it in
@@ -317,21 +495,46 @@ impl CodeView {
     cx.spawn(async move |this, cx| {
       let read = cx
         .background_spawn(async move {
-          let host = host.as_ref();
-          let read = Read {
-            overview: Overview::or_unavailable(
-              host.overview(&parent.repo_path, parent.workspace_id()),
-            ),
-            history: read_history(host, &parent, limit),
-            stack: read_stack(host, &parent),
-            settings: task_settings(host, &parent.repo_path),
-          };
+          let read = Read::of(host.as_ref(), &parent, limit);
           (parent, read)
         })
         .await;
-      let _ = this.update(cx, |view, cx| view.apply(read.0, read.1, cx));
+      this
+        .update(cx, |view, cx| view.apply(read.0, read.1, cx))
+        .ignore_closed();
     })
     .detach();
+  }
+
+  /// Reads workspace `parent` ahead of a switch to it, which then draws at
+  /// once (`set_parent`). Nothing on screen changes.
+  pub(super) fn prefetch(&mut self, parent: Parent, cx: &mut Context<Self>) {
+    let now = cx.background_executor().now();
+    let current = self.next.as_ref().unwrap_or(&self.parent);
+    if parent.key() == current.key() || self.prefetched.has_fresh(&parent.key(), now) {
+      return;
+    }
+    let host = self.host.clone();
+    cx.spawn(async move |this, cx| {
+      let read = cx
+        .background_spawn(async move {
+          let read = Read::of(host.as_ref(), &parent, HISTORY_PAGE);
+          (parent, read)
+        })
+        .await;
+      this
+        .update(cx, |view, cx| {
+          let now = cx.background_executor().now();
+          view.prefetched.insert(read.0.key(), now, read);
+        })
+        .ignore_closed();
+    })
+    .detach();
+  }
+
+  /// It shows its workspace's read, with no other workspace's on the way.
+  pub(super) fn ready(&self) -> bool {
+    self.next.is_none() && self.overview.is_some()
   }
 
   /// Reads the tab again, drawing what it has meanwhile.
@@ -342,28 +545,50 @@ impl CodeView {
   /// Shows what [`Self::load`] read for `parent`, unless the tab moved on to
   /// another workspace meanwhile.
   fn apply(&mut self, parent: Parent, read: Read, cx: &mut Context<Self>) {
-    match &self.next {
+    let moved = match &self.next {
       Some(next) if next.key() == parent.key() => {
         self.parent = self.next.take().unwrap_or(parent);
         self.history_limit = HISTORY_PAGE;
-        self.agent_override = None;
-        self.save_default = false;
-        self.show_save_default = false;
-        self.title_draft = None;
         self.description_draft = None;
+        self.about_tab = AboutTab::Draft;
+        self.pr_text = None;
         self.menu = None;
         self.history = None;
         self.history_error = None;
         self.history_error_open = false;
+        self.files_error_open = false;
+        self.show_untouched = false;
+        true
       }
-      None if self.parent.key() == parent.key() => {}
+      None if self.parent.key() == parent.key() => false,
       _ => return,
-    }
+    };
+    // A read again that found what shows already (a revalidation) draws
+    // nothing new.
+    let unchanged = !moved
+      && !(self.history_loading && self.history_limit > HISTORY_PAGE)
+      && self.overview.as_ref() == Some(&read.overview)
+      && self.history.as_deref() == read.history.as_ref().ok()
+      && self.history_error.is_none()
+      && self.stack == read.stack
+      && self.settings.as_ref() == Some(&read.settings)
+      && self.pr_sync.1 == read.pr_sync.1
+      && self.rebase_hold == read.rebase_hold
+      && self.branch_deleted == read.branch_deleted
+      && self.setup == read.setup
+      && self.logs_enabled == read.logs;
     self.overview = Some(read.overview);
+    self.logs_enabled = read.logs;
+    self.set_setup(read.setup, cx);
     self.set_history(read.history);
     self.stack = read.stack;
     self.settings = Some(read.settings);
-    cx.notify();
+    self.take_pr_sync(read.pr_sync);
+    self.rebase_hold = read.rebase_hold;
+    self.branch_deleted = read.branch_deleted;
+    if !unchanged {
+      cx.notify();
+    }
   }
 
   /// Runs `read` off the main thread, then `apply`s it unless the tab moved
@@ -380,14 +605,83 @@ impl CodeView {
       let value = cx
         .background_spawn(async move { read(host.as_ref(), &parent) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if view.parent.key() == key {
-          apply(view, value, cx);
-          cx.notify();
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.parent.key() == key {
+            apply(view, value, cx);
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     })
     .detach();
+  }
+
+  /// Shows the setup script's status; reads it again while it has not
+  /// finished.
+  fn set_setup(&mut self, setup: Option<crate::core::SetupScriptStatus>, cx: &mut Context<Self>) {
+    let unfinished = setup
+      .as_ref()
+      .is_some_and(|s| s.configured && matches!(s.status.as_str(), "pending" | "running"));
+    self.setup = setup;
+    if unfinished {
+      let key = self.parent.key();
+      cx.spawn(async move |this, cx| {
+        cx.background_executor().timer(SETUP_POLL).await;
+        this
+          .update(cx, |view, cx| {
+            if view.parent.key() == key {
+              view.load_setup(cx);
+            }
+          })
+          .ignore_closed();
+      })
+      .detach();
+    }
+  }
+
+  fn load_setup(&mut self, cx: &mut Context<Self>) {
+    self.read(
+      |host, parent| {
+        parent
+          .workspace_id()
+          .and_then(|id| host.setup(&parent.repo_path, id))
+      },
+      |view, setup, cx| view.set_setup(setup, cx),
+      cx,
+    );
+  }
+
+  /// Runs the setup script again, then reads its status.
+  fn rerun_setup(&mut self, cx: &mut Context<Self>) {
+    let Some(workspace) = self.parent.workspace.clone() else {
+      return;
+    };
+    let target = ChecksTarget {
+      repo_path: self.parent.repo_path.clone(),
+      workspace_id: workspace.id,
+      workspace_path: full_path(&workspace),
+    };
+    let (host, view) = (self.host.clone(), cx.weak_entity());
+    let repo_path = target.repo_path.clone();
+    checks_run::start(
+      cx,
+      target,
+      CheckRun::Setup,
+      move |target, _| host.run_setup(target),
+      move |_, cx| {
+        view
+          .update(cx, |view, cx| {
+            tell(
+              view.host.as_ref(),
+              NativeEvent::WorkspaceChanged { repo_path },
+            );
+            view.load_setup(cx);
+          })
+          .ignore_closed();
+      },
+    );
+    cx.notify();
   }
 
   fn load_overview(&mut self, cx: &mut Context<Self>) {
@@ -415,7 +709,7 @@ impl CodeView {
     self.history_loading = false;
     match history {
       Ok(history) => {
-        self.history = Some(history);
+        self.history = Some(Rc::new(history));
         self.history_error = None;
         self.history_error_open = false;
       }
@@ -427,18 +721,6 @@ impl CodeView {
         }
       }
     }
-  }
-
-  fn toast(&self, tone: ToastTone, title: &str, description: impl Into<String>) {
-    tell(
-      self.host.as_ref(),
-      NativeEvent::Toast {
-        title: title.into(),
-        description: description.into(),
-        tone,
-        action: None,
-      },
-    );
   }
 
   fn send_react(&self, action: ScreenAction, cx: &mut App) {
@@ -457,434 +739,214 @@ impl CodeView {
     );
   }
 
-  /// `configuredDefaultAgent` and `selectedAgent`.
-  pub(super) fn agents(&self) -> (Agent, Agent) {
-    let configured = self.settings.as_ref().map(|s| s.agent).unwrap_or_default();
-    (configured, self.agent_override.unwrap_or(configured))
-  }
-
-  /// The home view's "Run in a new workspace", when offered and on.
-  pub(super) fn run_in_new_workspace(&self) -> bool {
-    self.parent.workspace.is_none() && self.settings.as_ref().is_some_and(|s| s.new_workspace)
-  }
-
-  fn task_input(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Entity<TextareaState> {
-    if let Some(task) = &self.task {
-      return task.clone();
-    }
-    let task = cx.new(|cx| {
-      TextareaState::new(window, cx)
-        .placeholder("Describe a task...")
-        .auto_grow(1, 9)
-    });
-    self._subscriptions.push(cx.subscribe(
-      &task,
-      |view, task, event: &InputEvent, cx| match event {
-        InputEvent::Change => {
-          let state = task.read(cx);
-          let (text, cursor) = (state.value().to_string(), state.cursor());
-          view.text_changed(text, cursor, cx);
-        }
-        InputEvent::Focus => {
-          view.focused = true;
-          cx.notify();
-        }
-        InputEvent::Blur => {
-          view.focused = false;
-          view.mention = None;
-          cx.notify();
-        }
-        InputEvent::PressEnter { .. } => {}
-      },
-    ));
-    task.update(cx, |task, cx| task.focus(window, cx));
-    self.focused = true;
-    self.task = Some(task.clone());
-    task
-  }
-
-  /// `handleTextChange`: follows an `@` being typed.
-  pub(super) fn text_changed(&mut self, text: String, cursor: usize, cx: &mut Context<Self>) {
-    self.task_text = text;
-    match mention_at(&self.task_text, cursor) {
-      Some((anchor, query)) => {
-        let results = self.mention.take().map(|m| m.results).unwrap_or_default();
-        self.mention = Some(Mention {
-          anchor,
-          query: query.clone(),
-          results,
-          index: 0,
-        });
-        self.search_mentions(query, cx);
-      }
-      None => self.mention = None,
-    }
-    cx.notify();
-  }
-
-  fn search_mentions(&mut self, query: String, cx: &mut Context<Self>) {
-    let (host, parent) = (self.host.clone(), self.parent.clone());
-    let path = parent.working_directory();
-    self._mention_search = Some(cx.spawn(async move |this, cx| {
-      cx.background_executor().timer(MENTION_DEBOUNCE).await;
-      let search = query.clone();
-      let results = cx
-        .background_spawn(async move {
-          host.search_files(&parent.repo_path, parent.workspace_id(), &path, &search, 4)
-        })
-        .await
-        .unwrap_or_default();
-      let _ = this.update(cx, |view, cx| {
-        if let Some(mention) = view.mention.as_mut().filter(|m| m.query == query) {
-          mention.results = results;
-          mention.index = 0;
-          cx.notify();
-        }
-      });
-    }));
-  }
-
-  fn mention_open(&self) -> bool {
-    self.mention.as_ref().is_some_and(|m| !m.results.is_empty())
-  }
-
-  fn step_mention(&mut self, delta: isize, cx: &mut Context<Self>) {
-    if let Some(m) = self.mention.as_mut().filter(|m| !m.results.is_empty()) {
-      let len = m.results.len() as isize;
-      m.index = (m.index as isize + delta).rem_euclid(len) as usize;
-      cx.notify();
-    }
-  }
-
-  /// `handleMentionSelect`: replaces `@query` with `@path `.
-  pub(super) fn select_mention(
-    &mut self,
-    index: usize,
-    window: &mut Window,
-    cx: &mut Context<Self>,
-  ) {
-    let Some(mention) = self.mention.take() else {
-      return;
-    };
-    let Some(path) = mention.results.get(index) else {
-      return;
-    };
-    let cursor = self
-      .task
-      .as_ref()
-      .map_or(self.task_text.len(), |t| t.read(cx).cursor());
-    let inserted = format!("@{path} ");
-    let text = format!(
-      "{}{inserted}{}",
-      &self.task_text[..mention.anchor.min(self.task_text.len())],
-      &self.task_text[cursor.min(self.task_text.len())..]
-    );
-    self.set_task_text(text, mention.anchor + inserted.len(), window, cx);
-  }
-
-  fn set_task_text(
-    &mut self,
-    text: String,
-    cursor: usize,
-    window: &mut Window,
-    cx: &mut Context<Self>,
-  ) {
-    self.task_text = text.clone();
-    if let Some(task) = &self.task {
-      task.update(cx, |task, cx| {
-        task.set_value(text, window, cx);
-        task.set_selected_range(cursor..cursor, cx);
-        task.focus(window, cx);
-      });
-    }
-    cx.notify();
-  }
-
-  /// `insertAtCursor`.
-  fn insert_text(&mut self, insertion: &str, window: &mut Window, cx: &mut Context<Self>) {
-    let cursor = self
-      .task
-      .as_ref()
-      .map_or(self.task_text.len(), |t| t.read(cx).cursor());
-    let (text, cursor) = insert_at(&self.task_text, cursor, insertion);
-    self.set_task_text(text, cursor, window, cx);
-  }
-
-  fn open_picker(&mut self, cx: &mut Context<Self>) {
-    self.menu = None;
-    let scope = Scope {
-      repo_path: self.parent.repo_path.clone(),
-      workspace_id: self.parent.workspace_id(),
-      workspace_path: self.parent.working_directory(),
-    };
-    let picker = cx.new(|cx| FilePicker::new(self.host.clone(), scope, self.dark, cx));
-    self._subscriptions.push(
-      cx.subscribe(&picker, |view, _, event: &FilePickerEvent, cx| {
-        if let FilePickerEvent::Selected(path) = event {
-          view.insert = Some(format!("@{path} "));
-        }
-        view.picker = None;
-        cx.notify();
-      }),
-    );
-    self.picker = Some(picker);
-    cx.notify();
-  }
-
-  fn attach(&mut self, cx: &mut Context<Self>) {
-    self.menu = None;
-    let host = self.host.clone();
-    cx.spawn(async move |this, cx| {
-      let files = cx.background_spawn(async move { host.pick_files() }).await;
-      let Some(files) = files.filter(|f| !f.is_empty()) else {
-        return;
-      };
-      let insertion = format!(
-        "{} ",
-        files
-          .iter()
-          .map(|p| format!("'{p}'"))
-          .collect::<Vec<_>>()
-          .join(" ")
-      );
-      let _ = this.update(cx, |view, cx| {
-        view.insert = Some(insertion);
-        cx.notify();
-      });
-    })
-    .detach();
-  }
-
-  fn choose_agent(&mut self, agent: Agent, cx: &mut Context<Self>) {
-    let (configured, _) = self.agents();
-    self.agent_override = Some(agent);
-    self.save_default = false;
-    self.show_save_default = agent != configured;
-    self.menu = None;
-    cx.notify();
-  }
-
-  fn set_new_workspace(&mut self, on: bool, cx: &mut Context<Self>) {
-    let previous = self.settings.as_ref().map(|s| s.new_workspace);
-    if let Some(settings) = self.settings.as_mut() {
-      settings.new_workspace = on;
-    }
-    cx.notify();
-    self.read(
-      move |host, parent| {
-        host.set_repo_settings(
-          &parent.repo_path,
-          &[(NEW_WORKSPACE_SETTING.into(), on.to_string())],
-        )
-      },
-      move |view, result, _| match result {
-        Ok(()) => tell(
-          view.host.as_ref(),
-          NativeEvent::RepoSettingsChanged {
-            repo_path: view.parent.repo_path.clone(),
-          },
-        ),
-        Err(err) => {
-          if let (Some(settings), Some(previous)) = (view.settings.as_mut(), previous) {
-            settings.new_workspace = previous;
-          }
-          view.toast(ToastTone::Error, "Failed to save setting", err);
-        }
-      },
-      cx,
-    );
-  }
-
-  fn set_environment(&mut self, devcontainer: bool, cx: &mut Context<Self>) {
-    self.menu = None;
-    let value = if devcontainer {
-      "devcontainer"
-    } else {
-      "local"
-    };
-    self.read(
-      move |host, parent| {
-        host.set_repo_settings(
-          &parent.repo_path,
-          &[(ENVIRONMENT_SETTING.into(), value.into())],
-        )
-      },
-      move |view, result, cx| {
-        if let Err(err) = result {
-          view.toast(ToastTone::Error, "Failed to save setting", err);
-          return;
-        }
+  /// Reports a save: `Ok(Some(err))` saved it here but not to the PR, so it
+  /// stays a local draft. Returns whether the edit landed.
+  fn saved(&self, what: &str, result: Result<Option<String>, String>) -> bool {
+    match result {
+      Ok(pr_error) => {
         tell(
-          view.host.as_ref(),
-          NativeEvent::RepoSettingsChanged {
-            repo_path: view.parent.repo_path.clone(),
+          self.host.as_ref(),
+          NativeEvent::WorkspaceChanged {
+            repo_path: self.parent.repo_path.clone(),
           },
         );
-        let Some(env) = view.settings.as_mut().and_then(|s| s.environment.as_mut()) else {
-          return;
-        };
-        env.devcontainer = devcontainer;
-        let stopped = env.status.as_ref().is_some_and(|s| !s.running);
-        if devcontainer && stopped && !view.starting_devcontainer {
-          view.start_devcontainer(cx);
+        if let Some(err) = pr_error {
+          tell(
+            self.host.as_ref(),
+            Toast::error("Saved as a local draft")
+              .description(format!("The pull request wasn't updated: {err}"))
+              .into(),
+          );
         }
-      },
-      cx,
-    );
-  }
-
-  fn start_devcontainer(&mut self, cx: &mut Context<Self>) {
-    self.menu = None;
-    self.starting_devcontainer = true;
-    cx.notify();
-    self.read(
-      |host, parent| host.devcontainer_up(&parent.repo_path),
-      |view, result, _| {
-        view.starting_devcontainer = false;
-        match result {
-          Ok(status) => {
-            if let Some(env) = view.settings.as_mut().and_then(|s| s.environment.as_mut()) {
-              env.status = Some(status);
-            }
-          }
-          Err(err) => view.toast(ToastTone::Error, "Devcontainer did not start", err),
-        }
-      },
-      cx,
-    );
-  }
-
-  /// `submitTask`: starts an agent session on the task, in a new workspace
-  /// when the home view asks for one.
-  pub(super) fn submit(&mut self, plan: bool, cx: &mut Context<Self>) {
-    let prompt = self.task_text.trim().to_string();
-    if prompt.is_empty() || self.submitting {
-      return;
+        true
+      }
+      Err(err) => {
+        tell(
+          self.host.as_ref(),
+          Toast::error(format!("Failed to save {what}"))
+            .description(err)
+            .into(),
+        );
+        false
+      }
     }
-    self.submitting = true;
-    self.menu = None;
-    cx.notify();
-    let (configured, agent) = self.agents();
-    let save_default = self.save_default && agent != configured;
-    let new_workspace = self.run_in_new_workspace();
-    let mode = if plan { "plan" } else { "acceptEdits" };
-    let (host, parent) = (self.host.clone(), self.parent.clone());
-    let key = parent.key();
-    cx.spawn(async move |this, cx| {
-      let result = cx
-        .background_spawn(async move {
-          let repo = parent.repo_path.as_str();
-          if save_default {
-            host.set_repo_settings(repo, &[("default_agent".into(), agent.id().into())])?;
-            tell(
-              host.as_ref(),
-              NativeEvent::RepoSettingsChanged {
-                repo_path: repo.into(),
-              },
-            );
-          }
-          let name = session_name(&prompt);
-          let mut workspace_id = parent.workspace_id();
-          if new_workspace {
-            let taken = host.branch_names(repo)?;
-            let pattern = host
-              .repo_settings(repo, &["branch_name_pattern".into()])
-              .ok()
-              .and_then(|v| v.get("branch_name_pattern").cloned().flatten())
-              .filter(|p| !p.is_empty())
-              .unwrap_or_else(|| "treq/{name}".into());
-            let branch = task_branch_name(&prompt, &taken, &pattern);
-            workspace_id = Some(host.create_workspace(repo, &branch, &name)?);
-            tell(
-              host.as_ref(),
-              NativeEvent::WorkspaceChanged {
-                repo_path: repo.into(),
-              },
-            );
-          }
-          let session_id = host.create_session(repo, workspace_id, &name)?;
-          Ok::<_, String>(super::launch_data::started(host.as_ref(), json!({
-            "sessionId": session_id,
-            "sessionName": name,
-            "workspaceId": workspace_id,
-            "workspacePath": null,
-            "repoPath": if repo.is_empty() { parent.working_directory() } else { repo.to_string() },
-            "pendingPrompt": prompt,
-            "permissionMode": mode,
-            "agent": agent.id(),
-          })))
-        })
-        .await;
-      let _ = this.update_in(cx, |view, window, cx| {
-        view.submitting = false;
-        match result {
-          Ok(session) => {
-            if save_default {
-              view.save_default = false;
-              if let Some(settings) = view.settings.as_mut() {
-                settings.agent = agent;
-                settings.from_repo = true;
-              }
-            }
-            let _ = session;
-            if view.parent.key() == key {
-              view.show_save_default = false;
-              view.set_task_text(String::new(), 0, window, cx);
-            }
-          }
-          Err(err) => view.toast(ToastTone::Error, "Failed to create task", err),
-        }
-        cx.notify();
-      });
-    })
-    .detach();
   }
 
-  fn edit_title(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
-    let draft = cx.new(|cx| {
-      TextareaState::new(window, cx)
-        .auto_grow(1, 5)
-        .placeholder("Workspace title")
-        .default_value(text)
-    });
-    draft.update(cx, |d, cx| d.focus(window, cx));
-    // Save is disabled while the title is blank.
-    self
-      ._subscriptions
-      .push(cx.subscribe(&draft, |_, _, event: &InputEvent, cx| {
-        if matches!(event, InputEvent::Change) {
-          cx.notify();
-        }
-      }));
-    self.title_draft = Some(draft);
-    cx.notify();
-  }
-
-  fn save_title(&mut self, cx: &mut Context<Self>) {
-    let (Some(draft), Some(ws)) = (&self.title_draft, &self.parent.workspace) else {
+  fn resync_from_pr(&mut self, cx: &mut Context<Self>) {
+    let Some(ws) = &self.parent.workspace else {
       return;
     };
-    let text = draft.read(cx).value().trim().to_string();
-    if text.is_empty() || self.saving_title {
+    if self.resyncing {
       return;
     }
     let id = ws.id;
-    self.saving_title = true;
+    self.resyncing = true;
     self.read(
-      move |host, parent| host.set_title(&parent.repo_path, id, &text),
+      move |host, parent| host.resync_from_pr(&parent.repo_path, id),
       |view, result, _| {
-        view.saving_title = false;
+        view.resyncing = false;
         match result {
-          Ok(()) => {
-            view.title_draft = None;
-            tell(
-              view.host.as_ref(),
-              NativeEvent::WorkspaceChanged {
-                repo_path: view.parent.repo_path.clone(),
-              },
-            );
-          }
-          Err(err) => view.toast(ToastTone::Error, "Failed to save title", err),
+          Ok(()) => tell(
+            view.host.as_ref(),
+            NativeEvent::WorkspaceChanged {
+              repo_path: view.parent.repo_path.clone(),
+            },
+          ),
+          Err(err) => tell(
+            view.host.as_ref(),
+            Toast::error("Failed to resync from the pull request")
+              .description(err)
+              .into(),
+          ),
+        }
+      },
+      cx,
+    );
+  }
+
+  /// Keeps `read` unless a read that started later already landed.
+  fn take_pr_sync(&mut self, read: PrSyncRead) {
+    if read.0 >= self.pr_sync.0 {
+      self.pr_sync = read;
+    }
+  }
+
+  /// Which of the shown workspace's fields still follow its pull request.
+  fn pr_sync(&self) -> Option<SyncState> {
+    let workspace = self.parent.workspace.as_ref()?;
+    Some(pr_sync::state(workspace, self.pr_sync.1.as_ref()?))
+  }
+
+  /// The card's footer on a workspace opened from a pull request: a check
+  /// while title and description match the PR, else that a local draft
+  /// waits for the next push.
+  fn pr_footer(&self, p: &Palette) -> Option<AnyElement> {
+    let sync = self.pr_sync()?;
+    let note = |id: &'static str, text: String| {
+      ui::text(div(), TextSize::Sm)
+        .id(id)
+        .debug_selector(move || id.into())
+        .role(Role::Label)
+        .aria_label(SharedString::from(text.clone()))
+        .test_support()
+        .text_color(p.muted_foreground)
+        .child(text)
+    };
+    let footer = div()
+      .flex()
+      .flex_wrap()
+      .items_center()
+      .justify_between()
+      .gap_2()
+      .pt_3()
+      .border_t_1()
+      .border_color(p.border);
+    if sync.title && sync.description {
+      return Some(
+        footer
+          .child(
+            div()
+              .flex()
+              .items_center()
+              .gap_1p5()
+              .child(ui::icon(theme::ICON_CHECK, 14., p.success))
+              .child(note(
+                "workspace-description-synced",
+                format!("Synced with PR #{}", sync.pr_number),
+              )),
+          )
+          .into_any_element(),
+      );
+    }
+    Some(
+      footer
+        .child(note(
+          "workspace-pr-draft",
+          format!(
+            "Local draft, sent to PR #{} on your next push",
+            sync.pr_number
+          ),
+        ))
+        .into_any_element(),
+    )
+  }
+
+  /// Sync, while the text differs from the PR: a menu that saves the local
+  /// version to the PR or takes GitHub's.
+  fn sync_button(&self, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
+    let sync = self.pr_sync()?;
+    if sync.title && sync.description {
+      return None;
+    }
+    let open = self.menu == Some(Menu::SyncDescription);
+    let panel = menu_panel("workspace-description-sync-menu", p)
+      .top(zpx(24.))
+      .right_0()
+      .w(zpx(240.))
+      .child(
+        ui::MenuItem::new("workspace-description-sync-local", "Save local version", p)
+          .description("Update the pull request with the text here")
+          .on_click(cx.listener(|view, _, _, cx| view.push_to_pr(cx))),
+      )
+      .child(
+        ui::MenuItem::new(
+          "workspace-description-sync-github",
+          "Save GitHub version",
+          p,
+        )
+        .description("Replace the text here with the pull request's")
+        .on_click(cx.listener(|view, _, _, cx| {
+          view.menu = None;
+          view.resync_from_pr(cx)
+        })),
+      );
+    Some(
+      div()
+        .relative()
+        .child(
+          Button::new("workspace-description-sync", p)
+            .variant(Variant::Warning)
+            .size(Size::Sm)
+            .h(zpx(20.))
+            .disabled(self.resyncing)
+            .label("Sync")
+            .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::SyncDescription, cx))),
+        )
+        .when(open, |this| {
+          this.child(deferred(self.close_menu_on_outside(panel, cx)).with_priority(1))
+        })
+        .into_any_element(),
+    )
+  }
+
+  /// Sends the local title and description to the PR.
+  fn push_to_pr(&mut self, cx: &mut Context<Self>) {
+    let Some(ws) = &self.parent.workspace else {
+      return;
+    };
+    if self.resyncing {
+      return;
+    }
+    let id = ws.id;
+    self.resyncing = true;
+    self.menu = None;
+    self.read(
+      move |host, parent| host.push_to_pr(&parent.repo_path, id),
+      |view, result, _| {
+        view.resyncing = false;
+        match result {
+          Ok(()) => tell(
+            view.host.as_ref(),
+            NativeEvent::WorkspaceChanged {
+              repo_path: view.parent.repo_path.clone(),
+            },
+          ),
+          Err(err) => tell(
+            view.host.as_ref(),
+            Toast::error("Failed to update the pull request")
+              .description(err)
+              .into(),
+          ),
         }
       },
       cx,
@@ -902,32 +964,78 @@ impl CodeView {
     cx.notify();
   }
 
-  fn save_description(&mut self, cx: &mut Context<Self>) {
-    let (Some(draft), Some(ws)) = (&self.description_draft, &self.parent.workspace) else {
+  /// Saves the description being edited, as [`Self::save_title`] does.
+  fn save_description(&mut self, draft: bool, cx: &mut Context<Self>) {
+    let (Some(editor), Some(ws)) = (&self.description_draft, &self.parent.workspace) else {
       return;
     };
-    let text = draft.read(cx).value().to_string();
-    let id = ws.id;
+    let text = editor.read(cx).value().to_string();
+    let (id, to_pr) = (ws.id, !draft);
     self.saving_description = true;
+    self.menu = None;
     self.read(
-      move |host, parent| host.set_description(&parent.repo_path, id, &text),
+      move |host, parent| {
+        host.set_description(&parent.repo_path, id, &text)?;
+        Ok(
+          to_pr
+            .then(|| host.push_to_pr(&parent.repo_path, id).err())
+            .flatten(),
+        )
+      },
       |view, result, _| {
         view.saving_description = false;
-        match result {
-          Ok(()) => {
-            view.description_draft = None;
-            tell(
-              view.host.as_ref(),
-              NativeEvent::WorkspaceChanged {
-                repo_path: view.parent.repo_path.clone(),
-              },
-            );
-          }
-          Err(err) => view.toast(ToastTone::Error, "Failed to save description", err),
+        if view.saved("description", result) {
+          view.description_draft = None;
         }
       },
       cx,
     );
+  }
+
+  /// An editor's Save: on a workspace that follows its pull request, a split
+  /// button whose menu saves a local draft instead.
+  fn save_button(
+    &self,
+    id: &'static str,
+    menu: Menu,
+    disabled: bool,
+    p: &Palette,
+    save: fn(&mut Self, bool, &mut Context<Self>),
+    cx: &mut Context<Self>,
+  ) -> AnyElement {
+    if self.pr_sync.1.is_none() {
+      return Button::new(id, p)
+        .size(Size::Sm)
+        .disabled(disabled)
+        .label("Save")
+        .on_click(cx.listener(move |view, _, _, cx| save(view, false, cx)))
+        .into_any_element();
+    }
+    let open = self.menu == Some(menu) && !disabled;
+    let draft_id = SharedString::from(format!("{id}-draft"));
+    let panel = menu_panel("workspace-save-menu", p)
+      .top(zpx(32.))
+      .right_0()
+      .w(zpx(240.))
+      .child(
+        ui::MenuItem::new(draft_id, "Save as local draft", p)
+          .description("Keep it here; it goes to the pull request on your next push")
+          .on_click(cx.listener(move |view, _, _, cx| save(view, true, cx))),
+      );
+    div()
+      .relative()
+      .child(
+        ui::SplitButton::new(id, "Save", p)
+          .menu_label("More save options")
+          .disabled(disabled)
+          .open(open)
+          .on_click(cx.listener(move |view, _, _, cx| save(view, false, cx)))
+          .on_menu(cx.listener(move |view, _, _, cx| view.toggle_menu(menu, cx))),
+      )
+      .when(open, |this| {
+        this.child(deferred(self.close_menu_on_outside(panel, cx)).with_priority(1))
+      })
+      .into_any_element()
   }
 
   fn sync_submodule(&mut self, path: String, enabled: bool, cx: &mut Context<Self>) {
@@ -953,6 +1061,16 @@ impl CodeView {
     );
   }
 
+  fn close_menu_on_outside(&self, panel: Stateful<Div>, cx: &mut Context<Self>) -> Stateful<Div> {
+    panel.dismiss_with("code-menu", cx, |view, cx| {
+      let open = view.menu.take().is_some();
+      if open {
+        cx.notify();
+      }
+      open
+    })
+  }
+
   fn toggle_menu(&mut self, menu: Menu, cx: &mut Context<Self>) {
     self.menu = if self.menu == Some(menu) {
       None
@@ -967,7 +1085,9 @@ impl CodeView {
 fn pulse(el: Div, id: &'static str) -> impl IntoElement {
   el.with_animation(
     id,
-    Animation::new(Duration::from_secs(2)).repeat(),
+    Animation::new(Duration::from_secs(2))
+      .repeat()
+      .with_max_fps(ui::PULSE_FPS),
     |el, delta| el.opacity(1. - 0.5 * (1. - (2. * delta - 1.).abs())),
   )
 }
@@ -999,24 +1119,49 @@ pub(super) fn agent_icon(agent: Agent) -> &'static str {
     Agent::Codex => theme::ICON_AGENT_CODEX,
     Agent::Cursor => theme::ICON_AGENT_CURSOR,
     Agent::Copilot => theme::ICON_AGENT_COPILOT,
+    Agent::Devin => theme::ICON_AGENT_DEVIN,
+    Agent::Gemini => theme::ICON_AGENT_GEMINI,
   }
 }
 
 /// `MarkdownContent`'s prose, at the type scale step nearest `size` (`Lg`
 /// for `prose`, `Sm` for `prose-sm`); the step sets the line height.
-pub(super) fn markdown(
+pub(super) fn markdown(id: impl Into<SharedString>, text: &str, size: f32, dark: bool) -> Div {
+  markdown_view(id, text, size, dark, false)
+}
+
+/// [`markdown`] that fills its parent and scrolls itself, drawing only the
+/// blocks on screen: for a whole document.
+pub(super) fn scrolling_markdown(
   id: impl Into<SharedString>,
   text: &str,
   size: f32,
   dark: bool,
-) -> impl IntoElement {
-  let id: SharedString = id.into();
-  let text_size = match size {
-    s if s <= 12. => TextSize::Xs,
+) -> Div {
+  markdown_view(id, text, size, dark, true).size_full()
+}
+
+fn markdown_text_size(size: f32) -> TextSize {
+  match size {
+    // Short label (["maps the user's font-size setting onto the scale"]): 11px is fine.
+    // ast-grep-ignore: gpui-text-xs-short-label-only
+    s if s <= 11. => TextSize::Xs,
+    s if s <= 12. => TextSize::Code,
     s if s <= 14. => TextSize::Sm,
     s if s <= 17. => TextSize::Lg,
     _ => TextSize::Xl,
-  };
+  }
+}
+
+fn markdown_view(
+  id: impl Into<SharedString>,
+  text: &str,
+  size: f32,
+  dark: bool,
+  scrollable: bool,
+) -> Div {
+  let id: SharedString = id.into();
+  let text_size = markdown_text_size(size);
   let size = text_size.metrics().0;
   let style = TextViewStyle {
     is_dark: dark,
@@ -1029,24 +1174,73 @@ pub(super) fn markdown(
     3 => px(17.),
     _ => base,
   });
-  // HTML comments never show, as in `MarkdownContent`; shortcodes show as
-  // emoji, as on GitHub.
+  ui::text(div(), text_size).child(
+    TextView::markdown(id, prepared_markdown(text))
+      .style(style)
+      .selectable(true)
+      .scrollable(scrollable)
+      .on_link_click(|url, event, _, cx| {
+        let opens = match event {
+          gpui::ClickEvent::Mouse(click) => matches!(
+            click.up.button,
+            gpui::MouseButton::Left | gpui::MouseButton::Middle
+          ),
+          gpui::ClickEvent::Keyboard(_) => true,
+          gpui::ClickEvent::Touch(click) => !click.long_press,
+        };
+        if let Some(opener) = opens.then(|| cx.try_global::<UrlOpener>()).flatten() {
+          (opener.0)(url);
+        }
+      }),
+  )
+}
+
+/// Opens a link in the system browser: `App::open_url`, `TextView`'s
+/// default, does nothing under tauri-plugin-gpui. Set by [`super::Screen`].
+pub(super) struct UrlOpener(pub(super) Rc<dyn Fn(&str)>);
+
+impl gpui::Global for UrlOpener {}
+
+/// The texts [`prepared_markdown`] keeps; a page shows only a few.
+const PREPARED_MAX: usize = 64;
+
+thread_local! {
+  /// Markdown texts as drawn, by their source.
+  static PREPARED: RefCell<HashMap<String, SharedString>> = RefCell::default();
+}
+
+/// `text` as `MarkdownContent` draws it: HTML comments never show, and
+/// shortcodes show as emoji, as on GitHub. Kept by source, since every frame
+/// draws it again: a long README cost a regex pass, `emojify` and a copy per
+/// frame, and the same string lets `TextView` skip comparing the text.
+fn prepared_markdown(text: &str) -> SharedString {
+  if let Some(hit) = PREPARED.with(|p| p.borrow().get(text).cloned()) {
+    return hit;
+  }
+  #[expect(clippy::expect_used, reason = "constant pattern")]
   static HTML_COMMENT: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"(?s)<!--.*?-->").expect("regex"));
-  let text = HTML_COMMENT.replace_all(text, "");
-  let text = super::code_data::emojify(&text);
-  ui::text(div(), text_size).child(TextView::markdown(id, text).style(style).selectable(true))
+  let prepared: SharedString = super::code_data::emojify(&super::code_data::embed_media(
+    &HTML_COMMENT.replace_all(text, ""),
+  ))
+  .into();
+  PREPARED.with(|p| {
+    let mut p = p.borrow_mut();
+    if p.len() >= PREPARED_MAX {
+      p.clear();
+    }
+    p.insert(text.to_string(), prepared.clone());
+  });
+  prepared
 }
 
 impl Render for CodeView {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     self.tips.sync(cx);
     let p = theme::palette(self.dark);
-    if let Some(insertion) = self.insert.take() {
-      self.insert_text(&insertion, window, cx);
-    }
     let left = div()
       .id("code-scroll")
+      .track_scroll(&self.scroll)
       .flex_1()
       .min_w_0()
       .h_full()
@@ -1060,14 +1254,11 @@ impl Render for CodeView {
           .flex_col()
           .gap_4()
           .when(self.overview.is_none(), |this| this.child(skeleton(&p)))
-          .children(self.conflicts(&p))
-          .child(self.task_card(&p, window, cx))
-          .children(self.title(&p, cx))
-          .children(self.description(&p, window, cx))
+          .children(self.about(&p, window, cx))
+          .child(self.action_row(&p, cx))
           .children(self.stack_panel(&p, cx))
-          .child(self.go_to_file(&p))
-          .child(self.files(&p, cx))
-          .child(self.readme(&p)),
+          .child(self.files(&p, window, cx))
+          .children(self.readme(&p)),
       );
     div()
       .debug_selector(|| "workspace-code".into())
@@ -1084,7 +1275,46 @@ impl Render for CodeView {
           .bg(p.muted.opacity(0.2))
           .child(self.history(&p, window, cx)),
       )
-      .children(self.picker.clone())
+  }
+}
+
+/// The icon and colour an alert of `level` shows, as [`ui::Alert`] draws it.
+fn severity_icon(level: ui::Severity, p: &Palette) -> (&'static str, gpui::Hsla) {
+  match level {
+    ui::Severity::Info => (theme::ICON_INFO, p.primary),
+    ui::Severity::Warning => (theme::ICON_TRIANGLE_ALERT, p.warning),
+    ui::Severity::Danger => (theme::ICON_CIRCLE_ALERT, p.destructive),
+  }
+}
+
+/// Why the last rebase skipped this workspace, or ran onto a target it
+/// could not fetch. Clears once a rebase passes its checks.
+fn rebase_alert(hold: &RebaseHold, p: &Palette) -> ui::Alert {
+  match hold {
+    RebaseHold::ParentDirty { branch } => ui::Alert::new(
+      "code-rebase-held-parent-dirty",
+      format!("Rebase skipped: {branch} has uncommitted changes"),
+      p,
+    )
+    .severity(ui::Severity::Warning)
+    .message(format!(
+      "Commit or discard the changes in {branch}; the next rebase picks this workspace up."
+    )),
+    RebaseHold::TargetDiverged { bookmark } => ui::Alert::new(
+      "code-rebase-held-diverged",
+      format!("Rebase skipped: {bookmark} diverged from origin"),
+      p,
+    )
+    .severity(ui::Severity::Warning)
+    .message(format!(
+      "Local {bookmark} and origin/{bookmark} each have commits the other lacks. \
+       Push {bookmark}, or reset it to origin/{bookmark}, then rebase."
+    )),
+    RebaseHold::StaleTarget { .. } => {
+      ui::Alert::new("code-rebase-stale-target", "Rebased without fetching", p)
+        .severity(ui::Severity::Info)
+        .message("Fetching origin failed, so the rebase used the last-fetched target.")
+    }
   }
 }
 
@@ -1130,538 +1360,364 @@ fn skeleton(p: &Palette) -> impl IntoElement {
 }
 
 impl CodeView {
-  fn conflicts(&self, p: &Palette) -> Option<impl IntoElement> {
-    let count = conflict_count(&self.parent.conflicted_files);
-    if count == 0 {
+  /// The tab's alerts, as [`code_data::code_alerts`] gathers them.
+  pub(super) fn alerts(&self, cx: &App) -> Vec<CodeAlert> {
+    let workspace_id = self.parent.workspace_id();
+    let setup_rerunning = workspace_id.is_some_and(|id| {
+      checks_run::keys(cx, &self.parent.repo_path).contains(&CheckRun::Setup.key(id))
+    });
+    code_data::code_alerts(&AlertState {
+      conflicted_files: &self.parent.conflicted_files,
+      rebase_hold: self.rebase_hold.as_ref(),
+      setup: self.setup.as_ref(),
+      in_workspace: workspace_id.is_some(),
+      setup_rerunning,
+      branch_deleted: self
+        .branch_deleted
+        .then(|| {
+          self
+            .parent
+            .workspace
+            .as_ref()
+            .map(|w| w.branch_name.as_str())
+        })
+        .flatten(),
+    })
+  }
+
+  /// One row under the title card: Start an agent on the left; the alerts button
+  /// and Go to file on the right.
+  fn action_row(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    div()
+      .debug_selector(|| "code-action-row".into())
+      .flex()
+      .items_center()
+      .gap_2()
+      .child(self.start_agent(p))
+      .child(div().flex_1())
+      .children(self.status_button(p, cx))
+      .child(self.go_to_file(p))
+  }
+
+  /// Every alert behind one button that counts them by severity; it opens
+  /// a popover with each alert and its actions. Hidden with no alerts.
+  fn status_button(&mut self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    let alerts = self.alerts(cx);
+    if alerts.is_empty() {
+      self.status_open = false;
       return None;
     }
+    let counts = code_data::severity_counts(&alerts);
+    let name = counts
+      .iter()
+      .map(|(level, n)| {
+        let what = match level {
+          ui::Severity::Danger => "error",
+          ui::Severity::Warning => "warning",
+          ui::Severity::Info => "info",
+        };
+        format!("{n} {what}")
+      })
+      .collect::<Vec<_>>()
+      .join(", ");
+    let mut button = Button::new("code-status", p)
+      .variant(Variant::Outline)
+      .size(Size::Sm)
+      .gap_2()
+      .aria_label(format!("Alerts: {name}"));
+    for (level, n) in counts {
+      let (icon, color) = severity_icon(level, p);
+      button = button.child(
+        div()
+          .flex()
+          .items_center()
+          .gap_1()
+          .child(ui::icon(icon, 14., color))
+          .child(n.to_string()),
+      );
+    }
+    // A press outside the open popover closes it, so this only opens.
+    let button = button.on_click(cx.listener(|view, _, _, cx| {
+      view.status_open = true;
+      cx.notify();
+    }));
+    let popover = self.status_open.then(|| {
+      let items: Vec<AnyElement> = alerts.iter().map(|a| self.alert(a, p, cx)).collect();
+      ui::Popover::new("code-status-popover", p)
+        .w(zpx(420.))
+        .gap_2()
+        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .dismiss_with("code-status", cx, |view, cx| {
+          let open = std::mem::take(&mut view.status_open);
+          if open {
+            cx.notify();
+          }
+          open
+        })
+        .children(items)
+    });
+    Some(div().relative().child(button).children(popover))
+  }
+
+  fn alert(&self, alert: &CodeAlert, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+    match alert {
+      CodeAlert::Conflicts { count } => self.conflicts(*count, p).into_any_element(),
+      CodeAlert::BranchDeleted { branch } => {
+        self.branch_deleted_alert(branch, p).into_any_element()
+      }
+      CodeAlert::Rebase(hold) => rebase_alert(hold, p).into_any_element(),
+      CodeAlert::Setup {
+        status,
+        running,
+        run_id,
+      } => self
+        .setup_alert(status, *running, *run_id, alert.severity(), p, cx)
+        .into_any_element(),
+    }
+  }
+
+  fn conflicts(&self, count: usize, p: &Palette) -> impl IntoElement {
     let react = self.react.clone();
-    Some(
-      ui::Alert::new(
-        "code-conflicts",
-        format!(
-          "{count} {} {} conflicts",
-          if count == 1 { "file" } else { "files" },
-          if count == 1 { "has" } else { "have" }
-        ),
-        p,
-      )
-      .severity(ui::Severity::Danger)
-      .message("Resolve them before you push or merge.")
+    ui::Alert::new(
+      "code-conflicts",
+      format!(
+        "{count} {} {} conflicts",
+        if count == 1 { "file" } else { "files" },
+        if count == 1 { "has" } else { "have" }
+      ),
+      p,
+    )
+    .severity(ui::Severity::Danger)
+    .message("Resolve them before you push or merge.")
+    .action(
+      Button::new("code-view-conflicts", p)
+        .variant(Variant::Outline)
+        .size(Size::Sm)
+        .label("Resolve…")
+        .on_click(move |_, _, cx| {
+          let react = react.clone();
+          cx.defer(move |cx| {
+            react(
+              ScreenAction::Field {
+                field: "workspace.tab".into(),
+                value: "changes".into(),
+              },
+              cx,
+            )
+          });
+        }),
+    )
+  }
+
+  /// The workspace's branch was deleted, usually by a fetch after its pull
+  /// request merged: the work has landed, so offer to archive it.
+  fn branch_deleted_alert(&self, branch: &str, p: &Palette) -> impl IntoElement {
+    let react = self.react.clone();
+    ui::Alert::new("code-branch-deleted", "Branch deleted on remote", p)
+      .severity(ui::Severity::Warning)
+      .message(format!(
+        "{branch} no longer exists, usually because its pull request merged. \
+           Archive the workspace once you no longer need it."
+      ))
       .action(
-        Button::new("code-view-conflicts", p)
+        Button::new("code-branch-deleted-archive", p)
           .variant(Variant::Outline)
           .size(Size::Sm)
-          .label("Resolve…")
+          .label("Archive")
+          // Apart from the header's Archive, which a merged PR shows.
+          .aria_label("Archive workspace")
           .on_click(move |_, _, cx| {
             let react = react.clone();
             cx.defer(move |cx| {
               react(
-                ScreenAction::Field {
-                  field: "workspace.tab".into(),
-                  value: "changes".into(),
+                ScreenAction::Press {
+                  id: "workspace.archive".into(),
                 },
                 cx,
               )
             });
           }),
+      )
+  }
+
+  /// The workspace setup script: its state, re-run, and a link to its
+  /// output in the Logs tab once it has run.
+  fn setup_alert(
+    &self,
+    status: &str,
+    running: bool,
+    run_id: Option<i64>,
+    severity: ui::Severity,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
+    let (title, message) = match status {
+      _ if running && status != "pending" => (
+        "Running the workspace setup script",
+        "Checks run once it finishes.",
       ),
-    )
-  }
-
-  fn task_card(
-    &mut self,
-    p: &Palette,
-    window: &mut Window,
-    cx: &mut Context<Self>,
-  ) -> impl IntoElement {
-    let task = self.task_input(window, cx);
-    let border = if self.focused { p.primary } else { p.border };
-    let mention = self.mention.clone().filter(|m| !m.results.is_empty());
-    div()
-      .debug_selector(|| "agent-task-input".into())
-      .w_full()
-      .max_w(zpx(672.))
-      .mx_auto()
-      .child(
-        div()
-          .id("task-card")
-          .min_h(zpx(112.))
-          .rounded(radius::LG)
-          .border_1()
-          .border_color(border)
-          .bg(p.background)
-          .relative()
-          .flex()
-          .flex_col()
-          .capture_action(cx.listener(|view, _: &MoveDown, _, cx| {
-            if view.mention_open() {
-              view.step_mention(1, cx);
-              cx.stop_propagation();
-            }
-          }))
-          .capture_action(cx.listener(|view, _: &MoveUp, _, cx| {
-            if view.mention_open() {
-              view.step_mention(-1, cx);
-              cx.stop_propagation();
-            }
-          }))
-          .capture_action(cx.listener(|view, action: &Enter, window, cx| {
-            if view.mention_open() && !action.secondary {
-              let index = view.mention.as_ref().map_or(0, |m| m.index);
-              view.select_mention(index, window, cx);
-              cx.stop_propagation();
-            } else if action.secondary && !action.shift {
-              view.submit(false, cx);
-              cx.stop_propagation();
-            }
-          }))
-          .capture_action(cx.listener(|view, _: &Escape, _, cx| {
-            if view.mention.take().is_some() {
-              cx.notify();
-            }
-          }))
-          .capture_action(cx.listener(|view, _: &IndentInline, _, cx| {
-            if view.mention.take().is_some() {
-              cx.notify();
-            }
-          }))
-          .child(
-            ui::text(div(), TextSize::Sm)
-              .debug_selector(|| "task-input".into())
-              // The textarea's own 4px inset makes up React's `px-4`.
-              .px_3()
-              .pt_3()
-              .pb_1()
-              .min_h(zpx(44.))
-              .max_h(zpx(200.))
-              .child(ui::text(
-                Textarea::new(&task)
-                  .appearance(false)
-                  .bordered(false)
-                  .xsmall(),
-                TextSize::Sm,
-              )),
-          )
-          .children(mention.map(|m| self.mention_dropdown(&m, p, cx)))
-          .child(div().mt_auto().child(self.toolbar(p, cx))),
-      )
-  }
-
-  fn mention_dropdown(
-    &self,
-    mention: &Mention,
-    p: &Palette,
-    cx: &mut Context<Self>,
-  ) -> impl IntoElement {
-    let accent = p.accent;
-    div()
-      .debug_selector(|| "task-mentions".into())
-      .mx_2()
-      .mb_1()
-      .rounded(radius::LG)
-      .border_1()
-      .border_color(p.border)
-      .bg(p.muted.opacity(0.5))
-      .overflow_hidden()
-      .child(
-        ui::text(div(), TextSize::Xs)
-          .px_3()
-          .py_1()
-          .font_weight(FontWeight::MEDIUM)
-          .text_color(p.muted_foreground)
-          .border_b_1()
-          .border_color(p.border)
-          .child("FILES"),
-      )
-      .children(mention.results.iter().enumerate().map(|(i, path)| {
-        let id = SharedString::from(format!("task-mention-{i}"));
-        let selector = id.to_string();
-        let selected = i == mention.index;
-        div()
-          .id(id)
-          .debug_selector(move || selector)
-          .w_full()
-          .px_3()
-          .py_1p5()
-          .flex()
-          .items_center()
-          .gap_2()
-          .cursor_pointer()
-          .when(selected, |this| this.bg(accent.opacity(0.5)))
-          .when(!selected, |this| {
-            this.hover(move |s| s.bg(accent.opacity(0.3)))
-          })
-          .child(ui::icon(theme::ICON_FILE_TEXT, 16., p.muted_foreground))
-          .child(
-            ui::text(div(), TextSize::Xs)
-              .font_family(theme::MONO_FONT)
-              .min_w_0()
-              .truncate()
-              .child(path.clone()),
-          )
-          .on_mouse_down(
-            gpui::MouseButton::Left,
-            cx.listener(move |view, _, window, cx| {
-              cx.stop_propagation();
-              window.prevent_default();
-              view.select_mention(i, window, cx);
-            }),
-          )
-      }))
-  }
-
-  fn toolbar(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
-    let (configured, agent) = self.agents();
-    let empty = self.task_text.trim().is_empty();
-    let plan = agent.has_plan_mode();
-    let new_workspace = (self.parent.workspace.is_none())
-      .then(|| self.settings.as_ref().map(|s| s.new_workspace))
-      .flatten();
-    let small = |b: Button| b.size(Size::Sm).h(zpx(28.));
-
-    let add = div()
-      .relative()
-      .child(
-        small(Button::new("task-add", p).variant(Variant::Ghost))
-          .aria_label("Add")
-          .px_2()
-          .gap_1()
-          .child(
-            ui::text(div(), TextSize::Xs)
-              .flex()
-              .items_center()
-              .gap_1()
-              .child(ui::icon(theme::ICON_PLUS, 16., p.foreground))
-              .child("Add"),
-          )
-          .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Add, cx))),
-      )
-      .when(self.menu == Some(Menu::Add), |this| {
-        this.child(self.add_menu(p, cx))
-      });
-
-    let mut left = div().flex().items_center().gap_1().child(add);
-    if let Some(on) = new_workspace {
-      left = left.child(
-        div()
-          .ml_1()
-          .flex()
-          .items_center()
-          .gap_1p5()
-          .child(form::switch_sized(
-            "task-new-workspace",
-            "Run in a new workspace",
-            on,
-            false,
-            p,
-            (28., 16., 12.),
-            cx.listener(move |view, checked: &bool, _, cx| view.set_new_workspace(*checked, cx)),
-          ))
-          .child(
-            ui::text(div(), TextSize::Xs)
-              .id("task-new-workspace-label")
-              .cursor_pointer()
-              .text_color(p.muted_foreground)
-              .child("Run in a new workspace")
-              .on_click(cx.listener(move |view, _, _, cx| view.set_new_workspace(!on, cx))),
-          ),
-      );
-    }
-
-    let mut right = div()
-      .flex()
-      .min_w_0()
-      .flex_wrap()
-      .items_center()
-      .justify_end()
-      .gap_2();
-    if self.show_save_default && agent != configured {
-      let checked = self.save_default;
-      right = right.child(
-        ui::text(div(), TextSize::Xs)
-          .id("task-save-default")
-          .flex()
-          .items_center()
-          .gap_1p5()
-          .cursor_pointer()
-          .text_color(p.muted_foreground)
-          .child(ui::Checkbox::new("task-save-default-box", p).checked(checked))
-          .child("Set as default for this repo")
-          .on_click(cx.listener(move |view, _, _, cx| {
-            view.save_default = !checked;
-            cx.notify();
-          })),
-      );
-    }
-    if let Some(env) = self.settings.as_ref().and_then(|s| s.environment.clone()) {
-      right = right.child(self.environment(&env, p, cx));
-    }
-    right = right.child(
-      div()
-        .relative()
-        .flex()
-        .items_center()
-        .child(
-          ui::Picker::new("task-agent", p)
-            .placement(ui::PickerPlacement::Toolbar)
-            .icon(agent_icon(agent))
-            .value(agent.label())
-            .open(self.menu == Some(Menu::Agent))
-            .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Agent, cx))),
-        )
-        .when(self.menu == Some(Menu::Agent), |this| {
-          this.child(self.agent_menu(agent, p, cx))
-        }),
-    );
-
-    let disabled = empty || self.submitting;
-    let label = if self.submitting {
-      "Starting…"
-    } else if agent == Agent::Claude {
-      "Edit"
-    } else {
-      "Run"
+      "pending" => (
+        "The workspace setup script has not run yet",
+        "Checks run once it finishes.",
+      ),
+      "failed" => ("Workspace setup script failed", "Checks can still run."),
+      _ => ("Workspace setup script passed", "Checks can run."),
     };
-    let submit = small(Button::new("task-submit", p))
-      .px_3()
-      .disabled(disabled)
-      .when(plan, |b| b.rounded_r_none())
-      .when(self.submitting, |b| {
-        b.child(ui::spinner("task-starting", 14., p.primary_foreground))
-      })
-      .aria_label(label)
-      .child(ui::text(div(), TextSize::Xs).child(label))
-      .on_click(cx.listener(|view, _, _, cx| view.submit(false, cx)));
-    let submit = self.tips.wrap(
-      "task-submit",
-      Side::Top,
-      Some(TooltipContent::Text(
-        crate::gpui_shell::keys::hint("⌘ + Enter").into(),
-      )),
-      submit,
-      cx,
-    );
-    let mut buttons = div().relative().flex().items_center().child(submit);
-    if plan {
-      buttons = buttons
-        .child(
-          small(Button::new("task-submit-menu", p))
-            .aria_label("More submit options")
-            .disabled(disabled)
-            .rounded_l_none()
-            .border_l_1()
-            .border_color(p.primary_foreground.opacity(0.2))
-            .px_1p5()
-            .icon(theme::ICON_CHEVRON_DOWN, 14.)
-            .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Plan, cx))),
-        )
-        .when(self.menu == Some(Menu::Plan) && !disabled, |this| {
-          this.child(self.plan_menu(p, cx))
-        });
-    }
-    right = right.child(buttons);
-
-    div()
-      .px_2()
-      .pb_2()
-      .pt_1()
-      .flex()
-      .min_w_0()
-      .flex_wrap()
-      .items_center()
-      .justify_between()
-      .gap_1()
-      .child(left)
-      .child(right)
-  }
-
-  fn close_menu_on_outside(&self, panel: Stateful<Div>, cx: &mut Context<Self>) -> Stateful<Div> {
-    panel.dismiss_with("code-menu", cx, |view, cx| {
-      let open = view.menu.take().is_some();
-      if open {
-        cx.notify();
-      }
-      open
-    })
-  }
-
-  fn add_menu(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
-    let panel = menu_panel("task-add-menu", p)
-      .top(zpx(32.))
-      .left_0()
-      .min_w(zpx(128.))
-      .child(
-        ui::MenuItem::new("task-add-file", "File", p)
-          .icon(theme::ICON_PLUS)
-          .on_click(cx.listener(|view, _, _, cx| view.open_picker(cx))),
+    let logs = (self.logs_enabled && run_id.is_some()).then(|| {
+      let react = self.react.clone();
+      Button::new("code-setup-logs", p)
+        .variant(Variant::Ghost)
+        .size(Size::Sm)
+        .label("View logs")
+        .on_click(move |_, _, cx| {
+          let react = react.clone();
+          cx.defer(move |cx| {
+            react(
+              ScreenAction::Field {
+                field: "workspace.openLogs".into(),
+                value: "setup-script".into(),
+              },
+              cx,
+            )
+          });
+        })
+    });
+    ui::Alert::new("code-setup", title, p)
+      .severity(severity)
+      .message(message)
+      .actions(logs)
+      .action(
+        Button::new("code-setup-rerun", p)
+          .variant(Variant::Outline)
+          .size(Size::Sm)
+          .disabled(running)
+          .label("Re-run setup script")
+          .on_click(cx.listener(|view, _, _, cx| view.rerun_setup(cx))),
       )
-      .child(
-        ui::MenuItem::new("task-add-attach", "Attach", p)
-          .icon(theme::ICON_PAPERCLIP)
-          .on_click(cx.listener(|view, _, _, cx| view.attach(cx))),
-      );
-    deferred(self.close_menu_on_outside(panel, cx)).with_priority(1)
-  }
-
-  fn plan_menu(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
-    let panel = menu_panel("task-plan-menu", p)
-      .top(zpx(32.))
-      .right_0()
-      .w(zpx(224.))
-      .child(
-        ui::MenuItem::new("task-plan", "Plan", p)
-          .description("Plan the change first, without editing files")
-          .on_click(cx.listener(|view, _, _, cx| view.submit(true, cx))),
-      );
-    deferred(self.close_menu_on_outside(panel, cx)).with_priority(1)
-  }
-
-  fn agent_menu(&self, selected: Agent, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
-    let panel = menu_panel("task-agent-menu", p)
-      .top(zpx(32.))
-      .right_0()
-      .min_w(zpx(128.))
-      .child(ui::MenuLabel::new("Agent", p))
-      .children(Agent::ALL.into_iter().map(|agent| {
-        ui::MenuItem::new(format!("task-agent-{}", agent.id()), agent.label(), p)
-          .icon(agent_icon(agent))
-          .checked(agent == selected)
-          .on_click(cx.listener(move |view, _, _, cx| view.choose_agent(agent, cx)))
-      }));
-    deferred(self.close_menu_on_outside(panel, cx)).with_priority(1)
-  }
-
-  fn environment(
-    &self,
-    env: &code_data::Environment,
-    p: &Palette,
-    cx: &mut Context<Self>,
-  ) -> impl IntoElement {
-    let button = environment::picker("task-environment", env, p)
-      .open(self.menu == Some(Menu::Environment))
-      .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Environment, cx)));
-    div()
-      .relative()
-      .child(button)
-      .when(self.menu == Some(Menu::Environment), |this| {
-        this.child(self.environment_menu(env, p, cx))
-      })
-  }
-
-  fn environment_menu(
-    &self,
-    env: &code_data::Environment,
-    p: &Palette,
-    cx: &mut Context<Self>,
-  ) -> impl IntoElement {
-    let panel = environment::menu(
-      "task-environment-menu",
-      env,
-      self.starting_devcontainer,
-      p,
-      Self::set_environment,
-      Self::start_devcontainer,
-      cx,
-    )
-    .top(zpx(32.))
-    .right_0();
-    deferred(self.close_menu_on_outside(panel, cx)).with_priority(1)
   }
 
   /// The workspace's full title, wrapped rather than truncated, with an
   /// inline editor behind its pencil.
-  fn title(&mut self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
-    let title = display_title(self.parent.workspace.as_ref()?);
-    let heading = |el: Div| {
-      ui::text(el, TextSize::Xl)
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(p.foreground)
-    };
-    let panel = div().debug_selector(|| "workspace-title".into());
-    let Some(draft) = self.title_draft.clone() else {
-      return Some(
-        panel
-          .flex()
-          .items_start()
-          .gap_2()
-          .child(
-            heading(div())
-              .flex_1()
-              .min_w_0()
-              .whitespace_normal()
-              .debug_selector(|| "workspace-title-text".into())
-              .child(title.clone()),
-          )
-          .child(
-            Button::new("workspace-title-edit", p)
-              .aria_label("Edit workspace title")
-              .variant(Variant::Ghost)
-              .size(Size::Icon)
-              .flex_none()
-              .w(zpx(20.))
-              .h(zpx(20.))
-              .child(ui::icon(theme::ICON_PENCIL, 16., p.muted_foreground))
-              .on_click(
-                cx.listener(move |view, _, window, cx| view.edit_title(title.clone(), window, cx)),
-              ),
+  /// The workspace's title and description in one card, with the pull
+  /// request's sync state in its footer. While a local draft differs from
+  /// the PR, tabs switch between the draft and what GitHub has.
+  fn about(
+    &mut self,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> Option<impl IntoElement> {
+    let draft = self
+      .pr_sync()
+      .is_some_and(|sync| !(sync.title && sync.description));
+    if !draft {
+      // The next draft opens on itself.
+      self.about_tab = AboutTab::Draft;
+    }
+    self.parent.workspace.as_ref()?;
+    let github = draft && self.about_tab == AboutTab::GitHub;
+    let body = if github {
+      Some(
+        div()
+          .relative()
+          .child(self.github_text(p))
+          .children(
+            self
+              .sync_button(p, cx)
+              .map(|sync| div().absolute().top_0().right_0().child(sync)),
           )
           .into_any_element(),
+      )
+    } else {
+      self
+        .description(p, window, cx)
+        .map(IntoElement::into_any_element)
+    };
+    let footer = self.pr_footer(p).map(IntoElement::into_any_element);
+    if !draft && body.is_none() && footer.is_none() {
+      return None;
+    }
+    let card = section(p)
+      .debug_selector(|| "workspace-about".into())
+      .px_4()
+      .py_3()
+      .flex()
+      .flex_col()
+      .gap_3()
+      .when(draft, |card| card.child(self.about_tabs(p, cx)));
+    Some(card.children(body).children(footer))
+  }
+
+  fn about_tabs(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    let view = cx.weak_entity();
+    ui::Tabs::new("workspace-about-tabs", p)
+      .style(ui::TabsStyle::Underline)
+      .tab(ui::Tab::new("workspace-about-tab-draft", "Local draft"))
+      .tab(ui::Tab::new("workspace-about-tab-github", "GitHub"))
+      .selected(match self.about_tab {
+        AboutTab::Draft => 0,
+        AboutTab::GitHub => 1,
+      })
+      .on_select(move |ix, _, cx| {
+        let tab = [AboutTab::Draft, AboutTab::GitHub][ix];
+        view
+          .update(cx, |view, cx| view.select_about_tab(tab, cx))
+          .ignore_closed();
+      })
+  }
+
+  /// Shows `tab`; the GitHub tab reads the PR's text again on the way.
+  fn select_about_tab(&mut self, tab: AboutTab, cx: &mut Context<Self>) {
+    self.about_tab = tab;
+    cx.notify();
+    if tab == AboutTab::GitHub {
+      self.read(
+        |host, parent| {
+          parent
+            .workspace
+            .as_ref()
+            .and_then(|ws| host.pr_text(&parent.repo_path, ws))
+        },
+        |view, text, _| view.pr_text = text,
+        cx,
+      );
+    }
+  }
+
+  /// The pull request's title and body as GitHub has them, read-only.
+  fn github_text(&self, p: &Palette) -> impl IntoElement {
+    let panel = div()
+      .debug_selector(|| "workspace-about-github".into())
+      .flex()
+      .flex_col()
+      .gap_3();
+    let Some((title, body)) = self.pr_text.clone() else {
+      return panel.child(
+        ui::text(div(), TextSize::Sm)
+          .text_color(p.muted_foreground)
+          .child("Reading the pull request…"),
       );
     };
-    let saving = self.saving_title;
-    let empty = draft.read(cx).value().trim().is_empty();
-    Some(
-      panel
-        .child(
-          div()
-            .id("workspace-title-editor")
-            .flex()
-            .flex_col()
-            .gap_2()
-            .capture_action(cx.listener(|view, action: &Enter, _, cx| {
-              if action.secondary {
-                view.save_title(cx);
-                cx.stop_propagation();
-              }
-            }))
-            .capture_action(cx.listener(|view, _: &Escape, _, cx| {
-              view.title_draft = None;
-              cx.notify();
-              cx.stop_propagation();
-            }))
-            .child(
-              heading(div())
-                .debug_selector(|| "workspace-title-input".into())
-                .child(Textarea::new(&draft)),
-            )
-            .child(
-              div()
-                .flex()
-                .justify_end()
-                .gap_2()
-                .child(
-                  Button::new("workspace-title-cancel", p)
-                    .variant(Variant::Ghost)
-                    .size(Size::Sm)
-                    .disabled(saving)
-                    .label("Cancel")
-                    .on_click(cx.listener(|view, _, _, cx| {
-                      view.title_draft = None;
-                      cx.notify();
-                    })),
-                )
-                .child(
-                  Button::new("workspace-title-save", p)
-                    .size(Size::Sm)
-                    .disabled(saving || empty)
-                    .label("Save")
-                    .on_click(cx.listener(|view, _, _, cx| view.save_title(cx))),
-                ),
-            ),
-        )
-        .into_any_element(),
-    )
+    panel
+      .child(
+        ui::text(div(), TextSize::Xl)
+          .font_weight(FontWeight::SEMIBOLD)
+          .text_color(p.foreground)
+          .whitespace_normal()
+          .child(title),
+      )
+      .child(if body.is_empty() {
+        ui::EmptyState::new("workspace-about-no-description", "No description", p)
+          .message("The pull request has no description.")
+          .into_any_element()
+      } else if looks_like_markdown(&body) {
+        markdown("workspace-about-github-md", &body, 14., self.dark).into_any_element()
+      } else {
+        ui::text(div(), TextSize::Sm)
+          .whitespace_normal()
+          .child(body)
+          .into_any_element()
+      })
   }
 
   fn description(
@@ -1671,11 +1727,9 @@ impl CodeView {
     cx: &mut Context<Self>,
   ) -> Option<impl IntoElement> {
     let text = self.parent.workspace.as_ref().and_then(description)?;
-    let card = section(p)
+    let card = div()
       .debug_selector(|| "workspace-description".into())
-      .relative()
-      .px_4()
-      .py_3();
+      .relative();
     let Some(draft) = self.description_draft.clone() else {
       let shown = if looks_like_markdown(&text) {
         div()
@@ -1692,18 +1746,26 @@ impl CodeView {
       return Some(
         card
           .child(
-            div().absolute().top_2().right_2().child(
-              Button::new("workspace-description-edit", p)
-                .aria_label("Edit description")
-                .variant(Variant::Ghost)
-                .size(Size::Icon)
-                .w(zpx(28.))
-                .h(zpx(28.))
-                .child(ui::icon(theme::ICON_PENCIL, 16., p.muted_foreground))
-                .on_click(cx.listener(move |view, _, window, cx| {
-                  view.edit_description(text.clone(), window, cx)
-                })),
-            ),
+            div()
+              .absolute()
+              .top_0()
+              .right_0()
+              .flex()
+              .items_center()
+              .gap_2()
+              .children(self.sync_button(p, cx))
+              .child(
+                Button::new("workspace-description-edit", p)
+                  .aria_label("Edit description")
+                  .variant(Variant::Ghost)
+                  .size(Size::Icon)
+                  .w(zpx(20.))
+                  .h(zpx(20.))
+                  .child(ui::icon(theme::ICON_PENCIL, 16., p.muted_foreground))
+                  .on_click(cx.listener(move |view, _, window, cx| {
+                    view.edit_description(text.clone(), window, cx)
+                  })),
+              ),
           )
           .child(shown)
           .into_any_element(),
@@ -1719,9 +1781,12 @@ impl CodeView {
             .flex()
             .flex_col()
             .gap_2()
-            .capture_action(cx.listener(|view, action: &Enter, _, cx| {
-              if action.secondary {
-                view.save_description(cx);
+            // ⌘/Ctrl+Enter is unbound in inputs (`treq_ui::theme`), so
+            // read the key itself.
+            .capture_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
+              let k = &e.keystroke;
+              if k.key == "enter" && k.modifiers.secondary() {
+                view.save_description(false, cx);
                 cx.stop_propagation();
               }
             }))
@@ -1751,13 +1816,14 @@ impl CodeView {
                       cx.notify();
                     })),
                 )
-                .child(
-                  Button::new("workspace-description-save", p)
-                    .size(Size::Sm)
-                    .disabled(saving)
-                    .label("Save")
-                    .on_click(cx.listener(|view, _, _, cx| view.save_description(cx))),
-                ),
+                .child(self.save_button(
+                  "workspace-description-save",
+                  Menu::SaveDescription,
+                  saving,
+                  p,
+                  Self::save_description,
+                  cx,
+                )),
             ),
         )
         .into_any_element(),
@@ -1785,6 +1851,8 @@ impl CodeView {
       )),
       div()
         .id("stack-help")
+        .role(gpui::Role::Button)
+        .aria_label("Learn about stacks")
         .cursor_pointer()
         .child(ui::icon(
           theme::ICON_CIRCLE_HELP,
@@ -1807,7 +1875,10 @@ impl CodeView {
       .child(ui::icon(theme::ICON_LAYERS, 16., p.muted_foreground))
       .child("Stack")
       .child(help)
+      .children(self.stack_button(p, cx))
       .child(
+        // Short label (['position count']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .ml_auto()
           .font_weight(FontWeight::NORMAL)
@@ -1848,6 +1919,7 @@ impl CodeView {
       section(p)
         .debug_selector(|| "workspace-stack-panel".into())
         .p_4()
+        .child(self.branch_row(p))
         .child(header)
         .child(
           div()
@@ -1867,6 +1939,120 @@ impl CodeView {
     )
   }
 
+  /// The card's top row: the branch and its target picker.
+  fn branch_row(&self, p: &Palette) -> impl IntoElement {
+    let card = self.chrome.card.borrow().clone();
+    let press = |id: &'static str, react: ActionSink| {
+      move |_: &gpui::ClickEvent, _: &mut Window, cx: &mut App| {
+        let react = react.clone();
+        cx.defer(move |cx| react(ScreenAction::Press { id: id.into() }, cx));
+      }
+    };
+    let mut row = div()
+      .flex()
+      .items_center()
+      .gap_2()
+      .min_w_0()
+      .mb_4()
+      .child(ui::icon(theme::ICON_BRANCH_BOLD, 16., p.muted_foreground))
+      .child(
+        ui::text(div(), TextSize::Sm)
+          .font_family(theme::MONO_FONT)
+          .font_weight(FontWeight::SEMIBOLD)
+          .min_w_0()
+          .max_w(zpx(220.))
+          .truncate()
+          .debug_selector(|| "workspace-branch".into())
+          .child(card.branch.clone()),
+      );
+    if let Some(target) = &card.target {
+      let label = target.branch.clone().unwrap_or_else(|| "Select…".into());
+      let button = Button::new("workspace-target", p)
+        .aria_label("Workspace target")
+        .variant(Variant::Outline)
+        .size(Size::Sm)
+        .disabled(target.disabled)
+        .max_w(zpx(220.))
+        .map(|b| {
+          let fg = b.foreground();
+          if target.loading {
+            b.child(ui::spinner("workspace-target-spin", 16., fg))
+          } else {
+            b.icon(theme::ICON_BRANCH_BOLD, 16.)
+          }
+        })
+        .child(
+          div()
+            .font_family(theme::MONO_FONT)
+            .min_w_0()
+            .truncate()
+            .child(label),
+        )
+        .child(ui::icon(
+          theme::ICON_CHEVRON_DOWN,
+          16.,
+          p.foreground.opacity(0.5),
+        ))
+        .on_click(press("workspace.target", self.react.clone()));
+      let bounds = self.chrome.bounds.clone();
+      row = row
+        .child(ui::icon(theme::ICON_ARROW_RIGHT, 16., p.muted_foreground))
+        .child(
+          div().relative().flex_none().child(button).child(
+            gpui::canvas(
+              move |b, _, _| {
+                bounds.borrow_mut().insert("workspace-target".into(), b);
+              },
+              |_, _, _, _| {},
+            )
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full(),
+          ),
+        );
+    }
+    row
+  }
+
+  /// Stacks a new workspace on this one; `None` without a tooltip.
+  fn stack_button(&mut self, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
+    let tooltip = self.chrome.card.borrow().stack_tooltip.clone()?;
+    let react = self.react.clone();
+    let button = Button::new("workspace-stack", p)
+      .variant(Variant::Outline)
+      .size(Size::Sm)
+      .gap_1()
+      .px_2()
+      .ml_2()
+      .font_weight(FontWeight::NORMAL)
+      .icon(theme::ICON_PR_CREATE, 16.)
+      .label("Stack new workspace")
+      .on_click(move |_, _, cx| {
+        let react = react.clone();
+        cx.defer(move |cx| {
+          react(
+            ScreenAction::Press {
+              id: "workspace.stack".into(),
+            },
+            cx,
+          )
+        });
+      });
+    Some(
+      self
+        .tips
+        .wrap(
+          "workspace-stack",
+          Side::Top,
+          Some(TooltipContent::Text(tooltip.into())),
+          button,
+          cx,
+        )
+        .into_any_element(),
+    )
+  }
+
   fn stack_row(
     &mut self,
     row: StackRow,
@@ -1876,13 +2062,14 @@ impl CodeView {
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
     let id = SharedString::from(format!("workspace-stack-item-{}", row.workspace.id));
-    let selector = id.to_string();
     let title = display_title(&row.workspace);
     let created = row.workspace.created_at.clone();
     let time = self.tips.wrap(
       format!("stack-time-{}", row.workspace.id),
       Side::Top,
       Some(TooltipContent::Text(time::full(&created).into())),
+      // Short label (['timestamp']): 11px is fine.
+      // ast-grep-ignore: gpui-text-xs-short-label-only
       ui::text(div(), TextSize::Xs)
         .text_color(p.muted_foreground)
         .child(time::relative(&created)),
@@ -1890,30 +2077,19 @@ impl CodeView {
     );
     let (ins, del) = row.stats;
     let workspace = row.workspace.clone();
-    let muted = p.muted;
-    div()
-      .id(id)
-      .debug_selector(move || selector)
+    // A stack entry: the sidebar row is the button that opens it.
+    ui::Row::new(id, p)
+      .role(Role::ListItem)
+      .label(title.clone())
+      .selected(row.current)
       .relative()
-      .flex()
       .w_full()
       .items_start()
       .gap_3()
       .py_2()
-      .px_2()
       .mx_neg_2()
       .rounded(radius::MD)
-      .cursor_pointer()
-      .when(row.current, |this| {
-        this
-          // Opaque, or the shadow below shows through.
-          .bg(p.background.blend(p.primary.opacity(0.1)))
-          .border_1()
-          .border_color(p.primary.opacity(0.4))
-          .shadow_sm()
-      })
-      .when(!row.current, |this| this.hover(move |s| s.bg(muted)))
-      .child(stack_dot(row.current, p))
+      .leading(stack_dot(row.current, p))
       .child(
         div()
           .flex_1()
@@ -1945,62 +2121,131 @@ impl CodeView {
   }
 
   fn go_to_file(&self, p: &Palette) -> impl IntoElement {
-    let react = self.react.clone();
-    let hover = p.muted.opacity(0.3);
-    div().flex().justify_end().child(
-      div()
-        .id("code-go-to-file")
-        .debug_selector(|| "code-go-to-file".into())
-        .flex()
-        .items_center()
-        .gap_3()
-        .px_4()
-        .py_2()
-        .border_1()
-        .border_color(p.border)
-        .rounded(radius::LG)
-        .bg(p.background)
-        .hover(move |s| s.bg(hover))
-        .cursor_pointer()
-        .w_full()
-        .max_w(zpx(320.))
-        .child(ui::icon(theme::ICON_SEARCH, 16., p.muted_foreground))
-        .child(
-          ui::text(div(), TextSize::Sm)
-            .flex_1()
-            .text_color(p.muted_foreground)
-            .child("Go to file"),
-        )
-        .child(ui::Kbd::new("secondary-p", p))
-        .on_click(move |_, _, cx| {
-          let react = react.clone();
-          cx.defer(move |cx| {
-            react(
-              ScreenAction::Press {
-                id: "code.filePicker".into(),
-              },
-              cx,
-            )
-          });
-        }),
+    let button = self.command_button(
+      "code-go-to-file",
+      theme::ICON_SEARCH,
+      actions::GO_TO_FILE,
+      "Go to file",
+      "code.filePicker",
+      p,
+    );
+    div().flex_none().w(zpx(280.)).child(button.w_full())
+  }
+
+  /// Opens the "Start a new agent session" modal.
+  fn start_agent(&self, p: &Palette) -> Button {
+    self.command_button(
+      "code-agent",
+      theme::ICON_BOT,
+      actions::NEW_AGENT_WITH_PROMPT,
+      "Start an agent",
+      "code.agentPrompt",
+      p,
     )
   }
 
-  fn files(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
-    let entries = self
+  /// A [`Variant::Command`] button: icon, `label` and `action`'s shortcut.
+  fn command_button(
+    &self,
+    id: &'static str,
+    icon: &'static str,
+    action: actions::Action,
+    label: &'static str,
+    press: &'static str,
+    p: &Palette,
+  ) -> Button {
+    let react = self.react.clone();
+    Button::new(id, p)
+      .variant(Variant::Command)
+      .icon(icon, 16.)
+      .label(label)
+      .shortcut(ui::Kbd::from_label(action.keys.join(" + "), p))
+      .on_click(move |_, _, cx| {
+        let react = react.clone();
+        cx.defer(move |cx| react(ScreenAction::Press { id: press.into() }, cx));
+      })
+  }
+
+  /// Records row `i`'s pitch (any row but the first) and, from the first row drawn (`first`),
+  /// where row 0 sits in the scrolled content. A new measure draws the view again, which
+  /// nothing else would while the screen is cached.
+  fn measure_entry_row(&self, i: usize, first: usize, cx: &Context<Self>) -> impl IntoElement {
+    let (rows, scroll) = (self.entry_rows.clone(), self.scroll.clone());
+    let view = cx.weak_entity();
+    gpui::canvas(
+      move |b, _, cx| {
+        let before = (rows.pitch.get(), rows.top.get());
+        if i > 0 {
+          rows.pitch.set(Some(b.size.height));
+        }
+        if i == first {
+          let above = match (first, rows.pitch.get()) {
+            (0, _) | (_, None) => px(0.),
+            (n, Some(pitch)) => pitch * n as f32 - px(1.),
+          };
+          let top = b.top() - above - scroll.bounds().top() - scroll.offset().y;
+          rows.top.set(Some(top));
+        }
+        if (rows.pitch.get(), rows.top.get()) != before {
+          if let Some(view) = view.upgrade() {
+            cx.defer(move |cx| view.update(cx, |_, cx| cx.notify()));
+          }
+        }
+      },
+      |_, _, _, _| {},
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .size_full()
+  }
+
+  fn files(
+    &mut self,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
+    let all = self
       .overview
       .as_ref()
-      .map(|o| o.entries.clone())
-      .unwrap_or_default();
+      .map_or(&[][..], |o| o.entries.as_slice());
+    // Untouched entries fold behind a toggle, below the changed ones;
+    // submodule rows carry their own controls, and an entry without a status
+    // may have changed, so both stay up top.
+    let untouched =
+      |e: &WorkspaceEntry| e.submodule_pin.is_none() && e.status.as_deref() == Some("untouched");
+    let (rest, mut entries): (Vec<&WorkspaceEntry>, Vec<&WorkspaceEntry>) =
+      all.iter().partition(|e| untouched(e));
+    let changed = entries.len();
+    let untouched_count = rest.len();
+    let show_untouched = self.show_untouched;
+    if show_untouched {
+      entries.extend(rest);
+    }
     let font = self.settings.as_ref().map_or(14., |s| s.font_size);
     let home = self.parent.workspace.is_none();
-    let hover = p.muted.opacity(0.6);
     let muted_fg = p.muted_foreground;
     let mut list = section(p).flex().flex_col();
     let loaded = self.overview.is_some();
-    let empty = entries.is_empty();
+    let empty = all.is_empty();
     let unavailable = self.overview.as_ref().is_some_and(|o| o.unavailable);
-    for (i, entry) in entries.into_iter().enumerate() {
+    let count = entries.len();
+    let shown = self.entry_rows.shown(count, &self.scroll);
+    let pitch = self.entry_rows.pitch.get().unwrap_or_default();
+    // Rows not drawn keep their room: the first is a border shorter.
+    if shown.start > 0 {
+      list = list.child(div().h(pitch * shown.start as f32 - px(1.)));
+    }
+    let mut toggle = (untouched_count > 0).then(|| {
+      self
+        .unchanged_toggle(untouched_count, changed > 0, p, cx)
+        .into_any_element()
+    });
+    for (i, entry) in entries.iter().enumerate().take(shown.end).skip(shown.start) {
+      if i == changed {
+        list = list.children(toggle.take());
+      }
       let pin = entry.submodule_pin.clone();
       let submodule = pin.is_some();
       let icon = match (&pin, entry.is_directory) {
@@ -2009,158 +2254,253 @@ impl CodeView {
         (None, false) => (theme::ICON_FILE, p.muted_foreground),
       };
       let pip = match entry.status.as_deref() {
-        Some("conflict") => Some(ui::Tone::Danger.color(p)),
-        Some("committed") => Some(ui::Tone::Primary.color(p)),
-        Some("workingCopy") => Some(ui::Tone::Warning.color(p)),
+        Some("conflict") => Some((ui::Tone::Danger.color(p), "Conflicted")),
+        Some("committed") => Some((ui::Tone::Primary.color(p), "Committed")),
+        Some("workingCopy") => Some((ui::Tone::Warning.color(p), "Working copy change")),
         _ => None,
       };
-      let name_color = if entry.status.is_some() {
-        p.foreground
-      } else {
-        p.muted_foreground.opacity(0.7)
+      // The pip after the name carries the status; the name stays neutral.
+      let name_color = match pip {
+        Some(_) => p.foreground,
+        None => p.muted_foreground.opacity(0.7),
       };
+      let pip_id = SharedString::from(format!("code-entry-status-{}", entry.name));
+      // A row has something above it: an earlier row, or the toggle.
+      let divided = i > 0 || (i >= changed && untouched_count > 0);
       let id = SharedString::from(format!("code-entry-{}", entry.name));
       let selector = if submodule {
         format!("submodule-row-{}", entry.name)
       } else {
         id.to_string()
       };
-      let open = entry.clone();
+      let open = (*entry).clone();
       let synced = entry.submodule_synced.unwrap_or(false);
       let path = entry.name.clone();
       let syncing = self.syncing_submodule;
-      list =
-        list.child(
-          div()
-            .debug_selector(move || selector)
-            .when(i > 0, |this| this.border_t_1().border_color(p.border))
-            .flex()
-            .items_center()
-            .hover(move |s| s.bg(hover))
-            .child(
-              ui::text(div(), TextSize::Sm)
-                .id(id)
-                .role(Role::Button)
-                .aria_label(entry.name.clone())
-                .test_support()
-                .flex()
-                .items_center()
-                .gap_3()
-                .px_4()
-                .py_1()
-                .flex_1()
-                .min_w_0()
-                .cursor_pointer()
-                .child(ui::icon(icon.0, 16., icon.1))
-                .child(
-                  div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .font_family(theme::MONO_FONT)
-                    .text_size(zpx(font))
-                    .line_height(zpx((font * 1.5).round()))
-                    .child(
-                      div()
-                        .min_w_0()
-                        .truncate()
-                        .text_color(name_color)
-                        .child(entry.name.clone()),
-                    )
-                    .when_some(pin, |this, pin| {
-                      this.child(
-                        div()
-                          .flex_none()
-                          .text_color(muted_fg)
-                          .child(format!("\u{a0}@ {}", &pin[..pin.len().min(7)])),
-                      )
-                    }),
-                )
-                .children(pip.map(|c| div().size_2().flex_none().rounded_full().bg(c)))
-                .on_click(cx.listener(move |view, _, _, cx| view.open_entry(&open, cx))),
-            )
-            .when(home && submodule, |this| {
-              this.child(
-                ui::text(div(), TextSize::Xs)
-                  .id(SharedString::from(format!("submodule-sync-{path}")))
+      list = list.child(
+        div()
+          .debug_selector(move || selector)
+          .when(divided, |this| this.border_t_1().border_color(p.border))
+          .when(
+            count > ENTRIES_ALL && (i == shown.start || i == 1),
+            |this| {
+              this
+                .relative()
+                .child(self.measure_entry_row(i, shown.start, cx))
+            },
+          )
+          .flex()
+          .items_center()
+          .hover(move |s| s.bg(p.hover()))
+          .child(
+            ui::text(div(), TextSize::Sm)
+              .id(id)
+              .role(Role::Button)
+              .aria_label(entry.name.clone())
+              .test_support()
+              .flex()
+              .items_center()
+              .gap_3()
+              .px_4()
+              .py_1()
+              .flex_1()
+              .min_w_0()
+              .cursor_pointer()
+              .child(ui::icon(icon.0, 16., icon.1))
+              .child(
+                div()
+                  .flex_1()
+                  .min_w_0()
                   .flex()
-                  .items_center()
-                  .gap_1p5()
-                  .flex_none()
-                  .pr_4()
-                  .pl_2()
-                  .text_color(p.muted_foreground)
-                  .cursor_pointer()
-                  .when(syncing, |this| this.opacity(0.5))
-                  .child(ui::Checkbox::new(format!("submodule-sync-box-{path}"), p).checked(synced))
-                  .child("Sync")
-                  .when(!syncing, |this| {
-                    let path = path.clone();
-                    this.on_click(cx.listener(move |view, _, _, cx| {
-                      view.sync_submodule(path.clone(), !synced, cx)
-                    }))
+                  .font_family(theme::MONO_FONT)
+                  .text_size(zpx(font))
+                  .line_height(zpx((font * 1.5).round()))
+                  .child(
+                    div()
+                      .min_w_0()
+                      .truncate()
+                      .text_color(name_color)
+                      .child(entry.name.clone()),
+                  )
+                  .when_some(pin, |this, pin| {
+                    this.child(div().flex_none().text_color(muted_fg).child(format!(
+                      "\u{a0}@ {}",
+                      pin.chars().take(7).collect::<String>()
+                    )))
                   }),
               )
-            }),
-        );
-    }
-    if loaded && empty {
-      list = list.child(
-        ui::text(div(), TextSize::Sm)
-          .debug_selector(move || {
-            if unavailable {
-              "code-files-unavailable"
-            } else {
-              "code-files-empty"
-            }
-            .into()
-          })
-          .px_4()
-          .py_8()
-          .text_center()
-          .text_color(p.muted_foreground)
-          .child(if unavailable {
-            REMOTE_FILE_TREE_REASON
-          } else {
-            "No files found"
+              .children(pip.map(|(color, label)| {
+                div()
+                  .id(pip_id.clone())
+                  .role(Role::Image)
+                  .aria_label(label)
+                  .test_support()
+                  .size_2()
+                  .flex_none()
+                  .rounded_full()
+                  .bg(color)
+              }))
+              .on_click(cx.listener(move |view, _, _, cx| view.open_entry(&open, cx))),
+          )
+          .when(home && submodule, |this| {
+            this.child(
+              ui::text(
+                ui::Checkbox::new(format!("submodule-sync-{path}"), p),
+                // Short label (['checkbox label']): 11px is fine.
+                // ast-grep-ignore: gpui-text-xs-short-label-only
+                TextSize::Xs,
+              )
+              .checked(synced)
+              .disabled(syncing)
+              .label("Sync")
+              .gap_1p5()
+              .pr_4()
+              .pl_2()
+              .text_color(p.muted_foreground)
+              .when(!syncing, |this| {
+                let path = path.clone();
+                this.on_click(
+                  cx.listener(move |view, _, _, cx| view.sync_submodule(path.clone(), !synced, cx)),
+                )
+              }),
+            )
           }),
       );
+    }
+    // The toggle closes the list when nothing drawn follows it; one scrolled
+    // above the drawn rows stays undrawn with them.
+    if changed >= shown.end {
+      list = list.children(toggle);
+    }
+    if shown.end < count {
+      list = list.child(div().h(pitch * (count - shown.end) as f32));
+    }
+    let error = self.overview.as_ref().and_then(|o| o.error.clone());
+    if let Some(err) = error {
+      list = list.child(
+        ui::EmptyState::new("code-files-error", "Can't show this workspace's files", p)
+          .error(true)
+          .icon(theme::ICON_CIRCLE_ALERT)
+          .message("Its folder is missing or can't be read.")
+          .action(self.show_error(ErrorPanel::Files, &err, p, window, cx)),
+      );
+    } else if loaded && empty {
+      list = list.child(if unavailable {
+        ui::EmptyState::new("code-files-unavailable", "No file tree", p)
+          .message(REMOTE_FILE_TREE_REASON)
+      } else {
+        ui::EmptyState::new("code-files-empty", "No files", p)
+          .message("This workspace's checkout has no files yet.")
+      });
     }
     list
   }
 
-  fn readme(&self, p: &Palette) -> impl IntoElement {
-    let readme = self.overview.as_ref().and_then(|o| o.readme.clone());
-    section(p)
-      .debug_selector(|| "code-readme".into())
-      .p_6()
-      .child(match readme {
-        Some(text) => div()
-          .child(
-            ui::text(div(), TextSize::Lg)
-              .font_weight(FontWeight::SEMIBOLD)
-              .mb_4()
-              .child("README.md"),
-          )
-          .child(markdown("code-readme-md", &text, 16., self.dark))
-          .into_any_element(),
-        None => ui::text(div(), TextSize::Sm)
-          .text_color(p.muted_foreground)
-          .text_center()
-          .py_4()
-          .child("No README.md found")
-          .into_any_element(),
-      })
+  /// The row that shows or hides the file list's `count` untouched entries.
+  fn unchanged_toggle(
+    &self,
+    count: usize,
+    divided: bool,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
+    let show = self.show_untouched;
+    let muted_fg = p.muted_foreground;
+    let label = if show {
+      "Hide unchanged files".to_string()
+    } else if count == 1 {
+      "Show 1 unchanged file".to_string()
+    } else {
+      format!("Show {count} unchanged files")
+    };
+    // Short label (['toggle label']): 11px is fine.
+    // ast-grep-ignore: gpui-text-xs-short-label-only
+    ui::text(div(), TextSize::Xs)
+      .id("code-unchanged-toggle")
+      .debug_selector(|| "code-unchanged-toggle".into())
+      .role(Role::Button)
+      .aria_label(label.clone())
+      .aria_expanded(show)
+      .test_support()
+      .when(divided, |this| this.border_t_1().border_color(p.border))
+      .flex()
+      .items_center()
+      .gap_2()
+      .px_4()
+      .py_1p5()
+      .text_color(muted_fg)
+      .cursor_pointer()
+      .hover(move |s| s.bg(p.hover()))
+      .child(ui::icon(
+        if show {
+          theme::ICON_CHEVRON_DOWN
+        } else {
+          theme::ICON_CHEVRON_RIGHT
+        },
+        12.,
+        muted_fg,
+      ))
+      .child(label)
+      .on_click(cx.listener(|view, _, _, cx| {
+        view.show_untouched = !view.show_untouched;
+        cx.notify();
+      }))
   }
 
-  /// The read-only, wrapping text area that shows a failed commit read.
-  fn history_error_text(
+  fn readme(&self, p: &Palette) -> Option<impl IntoElement> {
+    // Only the home (main tree) Code view shows the README; a workspace's does not.
+    if self.parent.workspace.is_some() {
+      return None;
+    }
+    let overview = self.overview.as_ref()?;
+    // A failed read says so above; it is not a missing README.
+    if overview.error.is_some() {
+      return None;
+    }
+    let readme = overview.readme.clone();
+    Some(
+      section(p)
+        .id("code-readme")
+        .debug_selector(|| "code-readme".into())
+        .role(gpui::Role::Group)
+        .aria_label("README")
+        .test_support()
+        .p_6()
+        .child(match readme {
+          Some(text) => div()
+            .child(
+              ui::text(div(), TextSize::Lg)
+                .id("code-readme-title")
+                .role(gpui::Role::Heading)
+                .aria_label("README.md")
+                .font_weight(FontWeight::SEMIBOLD)
+                .mb_4()
+                .child("README.md")
+                .test_support(),
+            )
+            .child(markdown("code-readme-md", &text, 16., self.dark))
+            .into_any_element(),
+          None => ui::EmptyState::new("code-readme-none", "No README.md", p)
+            .icon(theme::ICON_FILE_MARKDOWN)
+            .message("Add a README.md at the root to describe this repository.")
+            .into_any_element(),
+        }),
+    )
+  }
+
+  /// The read-only, wrapping text area that shows a panel's failed read.
+  fn error_text(
     &mut self,
+    panel: ErrorPanel,
     err: &str,
     window: &mut Window,
     cx: &mut Context<Self>,
   ) -> Entity<TextareaState> {
-    if let Some(text) = self.history_error_text.clone() {
+    let slot = match panel {
+      ErrorPanel::History => &self.history_error_text,
+      ErrorPanel::Files => &self.files_error_text,
+    };
+    if let Some(text) = slot.clone() {
       if text.read(cx).value() != err {
         text.update(cx, |s, cx| s.set_value(err.to_string(), window, cx));
       }
@@ -2173,29 +2513,77 @@ impl CodeView {
       state.set_readonly(true, cx);
       state
     });
-    self.history_error_text = Some(text.clone());
+    match panel {
+      ErrorPanel::History => self.history_error_text = Some(text.clone()),
+      ErrorPanel::Files => self.files_error_text = Some(text.clone()),
+    }
     text
   }
 
-  /// The failed read's message in a popover under "Show error", selectable
-  /// so it can be copied into a bug report.
-  fn history_error_popover(
+  fn set_error_open(&mut self, panel: ErrorPanel, open: bool) {
+    match panel {
+      ErrorPanel::History => self.history_error_open = open,
+      ErrorPanel::Files => self.files_error_open = open,
+    }
+  }
+
+  /// A panel's "Show error" button, with the raw error in a popover under
+  /// it once pressed.
+  fn show_error(
     &mut self,
+    panel: ErrorPanel,
     err: &str,
     p: &Palette,
     window: &mut Window,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
-    let text = self.history_error_text(err, window, cx);
-    let close = |view: &mut Self, cx: &mut Context<Self>| {
-      view.history_error_open = false;
+    let (id, open) = match panel {
+      ErrorPanel::History => ("code-history-show-error", self.history_error_open),
+      ErrorPanel::Files => ("code-files-show-error", self.files_error_open),
+    };
+    div().flex().gap_2().child(
+      div()
+        .child(
+          Button::new(id, p)
+            .variant(Variant::Outline)
+            .size(Size::Sm)
+            .label("Show error")
+            // A press outside the open popover closes it, so this only opens.
+            .on_click(cx.listener(move |view, _, _, cx| {
+              view.set_error_open(panel, true);
+              cx.notify();
+            })),
+        )
+        .when(open, |el| {
+          el.child(self.error_popover(panel, err, p, window, cx))
+        }),
+    )
+  }
+
+  /// The failed read's message in a popover under "Show error", selectable
+  /// so it can be copied into a bug report.
+  fn error_popover(
+    &mut self,
+    panel: ErrorPanel,
+    err: &str,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
+    let text = self.error_text(panel, err, window, cx);
+    let (id, label) = match panel {
+      ErrorPanel::History => ("code-history-error-popover", "Commit read error"),
+      ErrorPanel::Files => ("code-files-error-popover", "File read error"),
+    };
+    let close = move |view: &mut Self, cx: &mut Context<Self>| {
+      view.set_error_open(panel, false);
       cx.notify();
     };
     deferred(
       anchored().snap_to_window_with_margin(px(8.)).child(
         div()
-          .id("code-history-error-popover")
-          .debug_selector(|| "code-history-error-popover".into())
+          .id(id)
+          .debug_selector(move || id.into())
           .mt_1()
           .w(zpx(360.))
           .p_2()
@@ -2216,7 +2604,7 @@ impl CodeView {
             ui::text(
               Textarea::new(&text)
                 .readonly(true)
-                .aria_label("Commit read error")
+                .aria_label(label)
                 .px_3()
                 .py_2(),
               TextSize::Code,
@@ -2236,44 +2624,17 @@ impl CodeView {
   ) -> impl IntoElement {
     let Some(log) = self.history.clone() else {
       let status = match self.history_error.clone() {
-        Some(err) => div()
-          .id("code-history-error")
-          .debug_selector(|| "code-history-error".into())
-          .role(gpui::Role::Status)
-          .aria_label("Couldn't load commits")
-          .test_support()
-          .w_full()
-          .flex()
-          .flex_col()
-          .items_center()
-          .gap_1()
-          .child(
-            ui::text(div(), TextSize::Sm)
-              .text_color(p.muted_foreground)
-              .child("Couldn't load commits"),
-          )
-          .child(
-            div()
-              .child(
-                Button::new("code-history-show-error", p)
-                  .variant(Variant::Outline)
-                  .size(Size::Sm)
-                  .label("Show error")
-                  // A press outside the open popover closes it, so this only opens.
-                  .on_click(cx.listener(|view, _, _, cx| {
-                    view.history_error_open = true;
-                    cx.notify();
-                  })),
-              )
-              .when(self.history_error_open, |el| {
-                el.child(self.history_error_popover(&err, p, window, cx))
-              }),
-          )
+        Some(err) => ui::EmptyState::new("code-history-error", "Couldn't load commits", p)
+          .error(true)
+          .icon(theme::ICON_CIRCLE_ALERT)
+          .action(self.show_error(ErrorPanel::History, &err, p, window, cx))
           .into_any_element(),
-        None => ui::text(div(), TextSize::Sm)
-          .text_color(p.muted_foreground)
-          .child("Loading commits...")
-          .into_any_element(),
+        None => ui::delayed(
+          "code-history-loading",
+          div()
+            .child(ui::Loading::new("code-history-loading-spinner", p).label("Loading commits…")),
+        )
+        .into_any_element(),
       };
       return div()
         .size_full()
@@ -2301,16 +2662,9 @@ impl CodeView {
         .p_4()
         .child(heading)
         .child(
-          ui::text(div(), TextSize::Sm)
-            .text_color(p.muted_foreground)
-            .text_center()
-            .child("No commits yet."),
-        )
-        .child(
-          ui::text(div(), TextSize::Sm)
-            .text_color(p.muted_foreground)
-            .text_center()
-            .child("Changes you commit will appear here."),
+          ui::EmptyState::new("code-history-empty", "No commits yet", p)
+            .icon(theme::ICON_COMMIT)
+            .message("Changes you commit will appear here."),
         )
         .into_any_element();
     }
@@ -2334,7 +2688,7 @@ impl CodeView {
       )));
     }
     let mut first = true;
-    for (label, commits) in group_by_day(&own) {
+    for (label, commits) in group_by_day(own.iter().copied()) {
       // `first:mt-0` never applies (the track line is the first child);
       // block layout collapses the margin as Chromium does.
       let mut group = div().mt_5();
@@ -2348,30 +2702,17 @@ impl CodeView {
     if home && own.len() + 1 >= self.history_limit {
       let loading = self.history_loading && self.history_limit > HISTORY_PAGE;
       track = track.child(
-        ui::text(div(), TextSize::Xs)
-          .id("history-load-more")
-          .debug_selector(|| "history-load-more".into())
-          .mt_3()
-          .pl_7()
-          .text_color(p.muted_foreground)
-          .cursor_pointer()
-          .when(loading, |this| {
-            this
-              .flex()
-              .items_center()
-              .gap_1p5()
-              .child(ui::spinner("history-loading", 12., p.muted_foreground))
-              .child("Loading...")
-          })
-          .when(!loading, |this| {
-            this
-              .child("Load more commits")
-              .on_click(cx.listener(|view, _, _, cx| {
+        div().mt_3().pl_7().child(
+          ui::Row::load_more("history-load-more", loading, p)
+            .title("Load more commits")
+            .when(!loading, |row| {
+              row.on_click(cx.listener(|view, _, _, cx| {
                 view.history_limit += HISTORY_PAGE;
                 view.load_history(cx);
                 cx.notify();
               }))
-          }),
+            }),
+        ),
       );
     }
     if diverged || target_section {
@@ -2403,10 +2744,20 @@ impl CodeView {
             )
           })
       } else {
-        div().child(format!("Recent on {}", log.target_branch))
+        {
+          let text = format!("On {} (read-only)", log.target_branch);
+          div().child(
+            div()
+              .id("history-divider")
+              .role(Role::Heading)
+              .aria_label(text.clone())
+              .child(text)
+              .test_support(),
+          )
+        }
       };
       track = track.child(separator(label, p));
-      for (label, commits) in group_by_day(&target) {
+      for (label, commits) in group_by_day(target.iter().copied()) {
         let mut group = div().mt_5().child(day_label(&label, p));
         for commit in &commits {
           group = group.child(self.commit_item(commit, Kind::Target, false, p, cx));
@@ -2434,7 +2785,7 @@ impl CodeView {
     let target = matches!(kind, Kind::Target);
     let title = headline(commit, tentative);
     let warning = ui::Tone::Warning;
-    let (yellow_bg, yellow_hover) = (warning.tint(p), warning.tint(p).opacity(1.5));
+    let yellow_bg = warning.tint(p);
     let yellow_border = warning.border(p);
     let dot = if tentative {
       warning.color(p)
@@ -2450,23 +2801,22 @@ impl CodeView {
       format!("commit-time-{}", commit.commit_id),
       Side::Top,
       Some(TooltipContent::Text(time::full(&ts).into())),
+      // Short label (['timestamp']): 11px is fine.
+      // ast-grep-ignore: gpui-text-xs-short-label-only
       ui::text(div(), TextSize::Xs)
         .text_color(p.muted_foreground)
         .child(time::relative(&ts)),
       cx,
     );
-    let (green, red) = (ui::Tone::GitOpen.text(p), ui::Tone::GitClosed.text(p));
+    let (green, red) = (ui::Tone::DiffAdded.text(p), ui::Tone::DiffRemoved.text(p));
     let change = commit.change_id.clone();
     let id = SharedString::from(format!("commit-item-{}", commit.commit_id));
     let selector = id.to_string();
     let column = p.background.blend(p.muted.opacity(0.2));
-    // The row's hover fill, and the card's `hover:bg-muted/40` over it. GPUI
-    // paints a shadow under the whole box, so a translucent card shows the
-    // shadow through: blend both down to opaque.
-    let row_hover = if tentative { yellow_hover } else { p.muted };
-    let card_hover = column.blend(row_hover).blend(p.muted.opacity(0.4));
     let body = div()
       .id(id)
+      .role(gpui::Role::Button)
+      .aria_label(title.clone())
       .debug_selector(move || selector)
       .flex_1()
       .min_w_0()
@@ -2487,7 +2837,7 @@ impl CodeView {
         this.bg(column.blend(yellow_bg)).p_2().m_neg_2().shadow_sm()
       })
       .when(target, |this| this.bg(p.muted.opacity(0.3)).p_2().m_neg_2())
-      .hover(move |s| s.bg(card_hover))
+      .hover(move |s| s.bg(p.hover()))
       .child(ui::text(div(), TextSize::Sm).truncate().child(title))
       .when_some(
         match &kind {
@@ -2512,23 +2862,11 @@ impl CodeView {
           .gap_2()
           .mt_0p5()
           .flex_wrap()
-          .when(commit.is_immutable, |this| {
-            this.child(
-              ui::text(div(), TextSize::Xs)
-                .px_1p5()
-                .py_0p5()
-                .rounded_full()
-                .bg(p.muted)
-                .text_color(p.muted_foreground)
-                .border_1()
-                .border_color(p.border)
-                .font_weight(FontWeight::MEDIUM)
-                .child("Immutable"),
-            )
-          })
           .child(time)
           .when(commit.insertions > 0 || commit.deletions > 0, |this| {
             this.child(
+              // Short label (['timestamp and diff counts']): 11px is fine.
+              // ast-grep-ignore: gpui-text-xs-short-label-only
               ui::text(div(), TextSize::Xs)
                 .ml_auto()
                 .flex()
@@ -2558,23 +2896,26 @@ impl CodeView {
       .px_2()
       .mx_neg_2()
       .rounded(radius::MD)
-      .hover(move |s| s.bg(row_hover))
+      .hover(move |s| s.bg(p.hover()))
       .when(tentative, |this| {
         this.bg(yellow_bg).border_1().border_color(yellow_border)
       })
       .when(target, |this| this.opacity(0.6))
-      .child(
-        div().relative().flex_none().child(
-          div()
-            .size(zpx(14.))
-            .rounded_full()
-            .border_2()
-            .border_color(p.background)
-            .bg(dot),
-        ),
-      )
+      .child(history_dot(dot, p))
       .child(body)
   }
+}
+
+/// A commit's dot on the history track.
+pub(super) fn history_dot(color: gpui::Hsla, p: &Palette) -> impl IntoElement {
+  div().relative().flex_none().child(
+    div()
+      .size(zpx(14.))
+      .rounded_full()
+      .border_2()
+      .border_color(p.background)
+      .bg(color),
+  )
 }
 
 #[derive(Debug, Clone)]
@@ -2586,6 +2927,8 @@ enum Kind {
 }
 
 fn day_label(label: &str, p: &Palette) -> impl IntoElement {
+  // Short label (['section heading']): 11px is fine.
+  // ast-grep-ignore: gpui-text-xs-short-label-only
   ui::text(div(), TextSize::Xs)
     .mb_1()
     .pl_7()
@@ -2593,7 +2936,7 @@ fn day_label(label: &str, p: &Palette) -> impl IntoElement {
     .child(label.to_string())
 }
 
-/// The dashed `Diverged from` / `Recent on` rule.
+/// The dashed `Diverged from` / `On main (read-only)` rule.
 fn separator(label: Div, p: &Palette) -> impl IntoElement {
   // `border-t border-dashed`, as Chromium dashes a 1px border.
   let dashes = || {
@@ -2612,6 +2955,8 @@ fn separator(label: Div, p: &Palette) -> impl IntoElement {
       .gap_2()
       .child(dashes())
       .child(
+        // Short label (['divider label']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(label, TextSize::Xs)
           .whitespace_nowrap()
           .px_2()
@@ -2656,9 +3001,11 @@ fn loc_indicator(
       ((n as f32 / max as f32) * HALF).round().max(1.)
     }
   };
-  let (added, removed) = (ui::Tone::GitOpen, ui::Tone::GitClosed);
+  let (added, removed) = (ui::Tone::DiffAdded, ui::Tone::DiffRemoved);
   let (green, red) = (added.color(p), removed.color(p));
   let count = |text: String, color: Hsla, ch: usize| {
+    // Short label (['diff count']): 11px is fine.
+    // ast-grep-ignore: gpui-text-xs-short-label-only
     ui::text(div(), TextSize::Xs)
       .flex_none()
       .whitespace_nowrap()
@@ -2701,4 +3048,12 @@ fn loc_indicator(
         ),
     )
     .child(count(format!("-{deletions}"), removed.text(p), minus_ch))
+}
+
+/// Reads the whole tab again after a failed read.
+/// A panel whose failed read can show its raw error.
+#[derive(Clone, Copy)]
+enum ErrorPanel {
+  History,
+  Files,
 }

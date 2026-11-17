@@ -1,0 +1,44 @@
+id: mobile-icon-button-needs-name
+snapshots:
+  ? |
+    fn back() -> Press {
+      Button::new("back").ghost().large().icon(IconName::ArrowLeft).on_click(pop).touch()
+    }
+  : labels:
+    - source: Button::new("back")
+      style: primary
+      start: 23
+      end: 42
+    - source: icon
+      style: secondary
+      start: 59
+      end: 63
+    - source: Button::new("back").ghost().large().icon
+      style: secondary
+      start: 23
+      end: 63
+    - source: Button::new("back").ghost().large().icon(IconName::ArrowLeft)
+      style: secondary
+      start: 23
+      end: 84
+  ? |
+    fn more() -> Button {
+      Button::new("page-more").icon(IconName::Ellipsis)
+    }
+  : labels:
+    - source: Button::new("page-more")
+      style: primary
+      start: 24
+      end: 48
+    - source: icon
+      style: secondary
+      start: 49
+      end: 53
+    - source: Button::new("page-more").icon
+      style: secondary
+      start: 24
+      end: 53
+    - source: Button::new("page-more").icon(IconName::Ellipsis)
+      style: secondary
+      start: 24
+      end: 73

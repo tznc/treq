@@ -4,8 +4,9 @@ import Link from '@docusaurus/Link';
 import Head from '@docusaurus/Head';
 import Layout from '@theme/Layout';
 import Heading from '@theme/Heading';
+import {trackEvent} from '@site/src/lib/analytics';
 import {DOWNLOAD_HREF} from '@site/src/lib/downloads';
-import {FAQ_ITEMS, PRICING_SCHEMA} from '@site/src/lib/pricing';
+import {FAQ_ITEMS, FAQ_SCHEMA, PRICING_SCHEMA} from '@site/src/lib/pricing';
 
 import styles from './pricing.module.css';
 
@@ -24,21 +25,21 @@ const FREE_FEATURES: PlanFeature[] = [
       </>
     ),
   },
-  {key: 'linear', text: 'Linear through your personal API key'},
 ];
 
 const PRO_FEATURES: PlanFeature[] = [
   {key: 'free', text: 'Everything in Free'},
   {key: 'github-app', text: 'Treq GitHub App'},
-  {key: 'merge-queue', text: 'Merge queue (private alpha)'},
-  {key: 'cloud', text: 'Managed cloud workspace'},
-  {key: 'linear-oauth', text: 'Linear OAuth'},
+  {key: 'cloud', text: 'Cloud workspaces, pay-as-you-go from US$0.20 per hour'},
+  {key: 'byos', text: 'Your own provider account, from US$0.0085 per hour'},
+  {key: 'linear', text: 'Linear integration'},
 ];
 
 const TEAM_FEATURES: PlanFeature[] = [
   {key: 'pro', text: 'Everything in Pro for every member'},
-  {key: 'installation', text: 'Shared GitHub App installation'},
-  {key: 'merge-queue', text: 'Shared merge queue (private alpha)'},
+  {key: 'installation', text: 'Manage team-wide integrations'},
+  {key: 'sandbox-usage', text: 'Sandbox usage management'},
+  {key: 'shared-projects', text: 'Projects shared with every member'},
   {key: 'one-bill', text: 'One bill for the whole team'},
 ];
 
@@ -68,34 +69,28 @@ const COMPARISON_ROWS: ComparisonRow[] = [
     team: {included: true, detail: 'Shared GitHub App installation'},
   },
   {
-    feature: 'Merge queue',
-    free: {included: false},
-    pro: {included: true, detail: 'Private alpha'},
-    team: {included: true, detail: 'Shared, private alpha'},
-  },
-  {
     feature: 'Managed cloud workspace',
     free: {included: false},
-    pro: {included: true, detail: 'One per user'},
+    pro: {included: true, detail: 'Pay-as-you-go, one price per size, billed by the second'},
     team: {included: true, detail: 'One for each member'},
   },
   {
     feature: 'Linear',
-    free: {included: true, detail: 'Personal API key'},
+    free: {included: false},
     pro: {included: true, detail: 'API key or OAuth'},
     team: {included: true, detail: 'API key or OAuth'},
+  },
+  {
+    feature: 'Projects',
+    free: {included: true, detail: 'Personal'},
+    pro: {included: true, detail: 'Personal'},
+    team: {included: true, detail: 'Shared with every member'},
   },
   {
     feature: 'Price',
     free: {included: true, detail: 'US$0'},
     pro: {included: true, detail: 'US$15 per user per month'},
     team: {included: true, detail: 'US$199 per month for 5 members, US$8 per extra member'},
-  },
-  {
-    feature: 'Free trial',
-    free: {included: false},
-    pro: {included: true, detail: '14 days, card required'},
-    team: {included: false},
   },
 ];
 
@@ -134,6 +129,7 @@ function PlansSection(): ReactNode {
         <Link
           className={clsx('button', styles.planButton, styles.planButtonSecondary)}
           href={DOWNLOAD_HREF}
+          onClick={() => trackEvent('download_click', {location: 'pricing', platform: 'release-page'})}
         >
           Download Treq
         </Link>
@@ -146,7 +142,7 @@ function PlansSection(): ReactNode {
         <Heading as="h2" id="plan-pro" className={styles.planName}>
           Pro
         </Heading>
-        <p className={styles.planSeats}>14-day free trial, card required</p>
+        <p className={styles.planSeats}>Billed monthly</p>
         <p className={styles.planPrice}>
           <span className={styles.priceAmount}>$15</span>
           <span className={styles.priceUnit}>/user/month</span>
@@ -154,9 +150,9 @@ function PlansSection(): ReactNode {
         <FeatureList features={PRO_FEATURES} />
         <Link
           className={clsx('button', styles.planButton, styles.planButtonPrimary)}
-          to="/dashboard?tab=subscription"
+          to="/dashboard?tab=account"
         >
-          Start 14-day free trial
+          Get Pro
         </Link>
       </article>
 
@@ -172,7 +168,7 @@ function PlansSection(): ReactNode {
         <FeatureList features={TEAM_FEATURES} />
         <Link
           className={clsx('button', styles.planButton, styles.planButtonSecondary)}
-          to="/dashboard?tab=team"
+          to="/dashboard?tab=account"
         >
           Set up Team
         </Link>
@@ -212,6 +208,7 @@ function ComparisonSection(): ReactNode {
     <section className={styles.comparison} aria-label="Feature comparison">
       <Heading
         as="h2"
+        id="feature-comparison"
         className={clsx(styles.sectionHeading, styles.comparisonHeading)}
       >
         Feature comparison
@@ -300,12 +297,13 @@ export default function PricingPage(): ReactNode {
   return (
     <Layout
       title="Pricing"
-      description="Treq pricing. The desktop app is free. Pro is $15 per user per month with a 14-day trial. Team is $199 per month for 5 members, then $8 per extra member."
+      description="Treq pricing. The desktop app is free. Pro is $15 per user per month. Team is $199 per month for 5 members, then $8 per extra member."
     >
       <Head>
         <script type="application/ld+json">
           {JSON.stringify(PRICING_SCHEMA)}
         </script>
+        <script type="application/ld+json">{JSON.stringify(FAQ_SCHEMA)}</script>
       </Head>
       <main className={styles.page}>
         <header className={styles.header}>

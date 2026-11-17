@@ -1,5 +1,6 @@
 ---
 sidebar_position: 4
+description: Create a Treq-managed cloud workspace, open or clone repositories on it, and see what happens when it suspends or your subscription lapses.
 ---
 
 # Cloud Workspaces
@@ -25,14 +26,14 @@ On the Free plan, **Create cloud workspace** returns a **PRO** badge, the server
 
 ## Create the workspace
 
-1. Open Settings and choose **Account**.
+1. Open Settings and choose **Machines**.
 2. In the **Cloud workspace** card, select **Create cloud workspace**.
 3. Wait while the card reports each stage: **Creating cloud workspace...**, **Installing Treq, JJ, Git, and agents...**, **Configuring access...**, and **Verifying readiness...**.
 4. When the card shows **Ready**, the workspace accepts connections.
 
 You can also start from **Open cloud workspace** on the start screen or **File → Open via SSH...**. Both open the cloud workspace setup directly. With the Remote SSH preview turned on, the start screen button reads **Open via SSH** and the **Connect a remote repository** dialog lets you choose **Treq-managed cloud workspace** or **Your own VM**.
 
-If creation fails before a machine exists, the button reads **Retry cloud workspace creation**.
+If creation fails before a machine exists, the button reads **Retry cloud workspace creation**. A retry keeps the size the workspace was created with; to start over at another size, delete it with the trash icon and create it again.
 
 ## Open or clone a repository
 
@@ -54,7 +55,43 @@ The card also shows disk use against your quota and the number of workspaces and
 
 When the card shows **Degraded** or **Failed**, a **Repair** button appears. It reruns Treq setup on the machine and keeps your files and repositories.
 
-The trash icon (**Delete cloud workspace**) removes the machine. The confirmation dialog warns that cloned repositories, uncommitted changes, and agent sessions are lost, and that you cannot undo it.
+The trash icon (**Delete cloud workspace**) removes the machine. The confirmation dialog warns that cloned repositories, uncommitted changes, and agent sessions are lost, and that you cannot undo it. Deleting your Treq account deletes the cloud workspace and its disk too.
+
+## Pricing
+
+Cloud workspaces cost the same per size on every provider:
+
+| Size | vCPU / RAM | Treq-managed | Your own account |
+|---|---|---|---|
+| Small | 2 / 4 GiB | US$0.20/h | US$0.0085/h |
+| Medium | 4 / 8 GiB | US$0.40/h | US$0.017/h |
+| Large | 8 / 16 GiB | US$0.80/h | US$0.034/h |
+| Extra large | 16 / 32 GiB | US$1.60/h | US$0.068/h |
+
+A stopped workspace's disk bills US$0.10 per GB per month when Treq runs it, or US$0.004 on your own account. A provider that discards the disk when the workspace stops (Cloudflare) bills nothing while stopped.
+
+## Bring your own sandbox
+
+With Pro, you can run the cloud workspace on your own Boat, Daytona, E2B, or Cloudflare account instead of Treq's. The provider bills you for the machine. Treq charges a fixed fee per size (see [Pricing](#pricing)), whatever provider you bring and whatever rate your account pays.
+
+1. Open Settings and choose **Account**.
+2. Under **Provider keys**, select **Add Boat key**, **Add Daytona key**, **Add E2B key**, or **Add Cloudflare key**.
+3. Paste the key into **API key** and save it. Treq checks the key with the provider before it saves it.
+4. Pick a size in the **Cloud workspace** card under **Machines**, then select **Create workspace on this account** on the saved key's row.
+
+### Cloudflare
+
+Cloudflare Sandboxes run inside a Worker, so Treq deploys a small bridge Worker named `treq-sandbox` to your Cloudflare account when you save the key.
+
+1. In the Cloudflare dashboard, create an API token with **Workers Scripts: Edit**, **Workers KV Storage: Edit**, and **Containers: Edit** for your account. The account needs the Workers Paid plan and a workers.dev subdomain.
+2. Paste `<account id>:<api token>` as the key. Saving deploys or updates the bridge, which takes up to a minute.
+
+- Only **Small** and **Medium** sizes exist. Cloudflare's largest instance has 4 vCPUs.
+- A Cloudflare workspace that stops restarts on a fresh disk. Push your work before it goes idle.
+
+The **Create cloud workspace** button on the card always makes a Treq-managed workspace.
+
+If the provider later rejects the key, the key row reads **Rejected by** the provider, and the workspace does not start until you replace the key. Treq never falls back to its own provider account. You cannot remove a key while a workspace runs on it.
 
 ## If your subscription lapses
 

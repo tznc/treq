@@ -1,6 +1,6 @@
 use crate::common::{JjVerifier, TestRepo};
 use std::path::Path;
-use treq_lib::core::{commit_repo, MergeCommit};
+use treq_lib::core::{commit_repo, LocalMergeOptions, MergeCommit};
 use treq_lib::local_db::Workspace;
 
 // TODO: rolling merge for stacked workspaces
@@ -453,5 +453,213 @@ fn merge_returns_clear_error_when_target_branch_missing() {
       .contains("Target branch 'definitely-missing-target-branch' could not be resolved"),
     "Error should clearly mention unresolved target branch, got: {}",
     err
+  );
+}
+
+#[test]
+fn test_merge_removing_directory_later_moves_home_after_returning() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  let workspace: Workspace = treq_lib::core::create_workspace(
+    &repo.repo_path,
+    "feat/deferred-home",
+    None,
+    None,
+    None,
+    None,
+    None,
+  )
+  .expect("Failed to create workspace");
+  let workspace_path = repo.workspaces_dir().join(&workspace.workspace_path);
+  TestRepo::write_workspace_file(
+    workspace_path.to_str().unwrap(),
+    "deferred.txt",
+    "deferred content",
+  )
+  .expect("Failed to write feature file");
+  treq_lib::core::commit_workspace(&repo.repo_path, workspace.id, "Add deferred")
+    .expect("Failed to commit");
+
+  treq_lib::core::merge_workspace_removing_directory_later(
+    &repo.repo_path,
+    workspace.id,
+    "Merge feat/deferred-home",
+    MergeCommit::SquashAndMerge,
+  )
+  .expect("Failed to merge workspace");
+
+  // The sidebar poll takes the repo's commit lock, so it waits for the home
+  // checkout to move: once it returns, the merged file is there.
+  treq_lib::core::list_workspace_statuses(&repo.repo_path).expect("poll after merge");
+  assert!(
+    Path::new(&repo.repo_path).join("deferred.txt").exists(),
+    "home repo should be on the target branch once the poll returns"
+  );
+}
+
+/// Non-empty descriptions in `revset`; a stacked child keeps its parent's
+/// undescribed working-copy commit, which is not what these tests check.
+fn commit_descriptions(workspace_path: &str, revset: &str) -> Vec<String> {
+  TestRepo::jj_log_descriptions(workspace_path, revset, None)
+    .expect("jj log")
+    .into_iter()
+    .map(|(description, _)| description)
+    .filter(|description| !description.is_empty())
+    .collect()
+}
+
+#[test]
+fn local_merge_retargets_child_workspaces_onto_target() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  let parent = repo
+    .create_workspace_with_commit("feat-parent", "parent.txt", "parent", None)
+    .expect("parent workspace");
+  let child = repo
+    .create_workspace_with_commit("feat-child", "child.txt", "child", Some("feat-parent"))
+    .expect("child workspace");
+
+  treq_lib::core::merge_workspace(
+    &repo.repo_path,
+    parent.id,
+    "Squash feat-parent",
+    MergeCommit::SquashAndMerge,
+  )
+  .expect("merge parent");
+
+  let child = treq_lib::local_db::get_workspace_by_id(&repo.repo_path, child.id)
+    .expect("db")
+    .expect("child still exists");
+  assert_eq!(child.target_branch.as_deref(), Some(repo.default_branch()));
+  let child_path = repo.workspace_full_path(&child);
+  let ahead = commit_descriptions(
+    &child_path,
+    &format!("{}..feat-child", repo.default_branch()),
+  );
+  assert_eq!(ahead, vec!["Add child.txt".to_string()]);
+}
+
+#[test]
+fn rollup_merge_lands_whole_stack_and_removes_stacked_workspaces() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  let a = repo
+    .create_workspace_with_commit("feat-a", "a.txt", "a", None)
+    .expect("workspace a");
+  let b = repo
+    .create_workspace_with_commit("feat-b", "b.txt", "b", Some("feat-a"))
+    .expect("workspace b");
+
+  treq_lib::core::merge_workspace_with_options(
+    &repo.repo_path,
+    b.id,
+    "Roll up feat-a and feat-b",
+    MergeCommit::Merge,
+    LocalMergeOptions {
+      rollup: true,
+      push: false,
+    },
+  )
+  .expect("rollup merge");
+
+  assert!(Path::new(&repo.repo_path).join("a.txt").exists());
+  assert!(Path::new(&repo.repo_path).join("b.txt").exists());
+  let remaining = treq_lib::core::list_workspaces(&repo.repo_path).expect("list workspaces");
+  assert!(
+    !remaining.iter().any(|w| w.id == a.id || w.id == b.id),
+    "rolled-up workspaces should be removed"
+  );
+}
+
+#[test]
+fn sync_after_remote_merge_moves_target_and_retargets_children() {
+  let repo = TestRepo::with_remote().expect("Failed to create test repo");
+  let main = repo.default_branch().to_string();
+  let parent = repo
+    .setup_workspace_with_pushed_commit("feat-gh", "gh.txt", "gh")
+    .expect("parent workspace");
+  let child = repo
+    .create_workspace_with_commit("feat-gh-child", "child.txt", "child", Some("feat-gh"))
+    .expect("child workspace");
+
+  // GitHub squash-merges the PR: a new commit on the remote default branch.
+  repo
+    .remote_commit_file("gh.txt", "gh", "Squashed feat-gh (#1)")
+    .expect("remote squash commit");
+
+  let plan = treq_lib::core::sync_after_remote_merge(&repo.repo_path, parent.id)
+    .expect("sync after remote merge");
+
+  assert_eq!(plan.target_branch, main);
+  let remaining = treq_lib::core::list_workspaces(&repo.repo_path).expect("list workspaces");
+  assert!(!remaining.iter().any(|w| w.id == parent.id));
+
+  let child = treq_lib::local_db::get_workspace_by_id(&repo.repo_path, child.id)
+    .expect("db")
+    .expect("child still exists");
+  assert_eq!(child.target_branch.as_deref(), Some(main.as_str()));
+  let child_path = repo.workspace_full_path(&child);
+  assert_eq!(
+    commit_descriptions(&child_path, &format!("{main}..feat-gh-child")),
+    vec!["Add child.txt".to_string()]
+  );
+  assert_eq!(
+    commit_descriptions(&child_path, &format!("{main}@origin")),
+    commit_descriptions(&child_path, &main),
+    "local target should match the remote after sync"
+  );
+}
+
+#[test]
+fn local_merge_with_push_updates_the_remote_target() {
+  let repo = TestRepo::with_remote().expect("Failed to create test repo");
+  let main = repo.default_branch().to_string();
+  let ws = repo
+    .create_workspace_with_commit("feat-push", "push.txt", "push", None)
+    .expect("workspace");
+
+  treq_lib::core::merge_workspace_with_options(
+    &repo.repo_path,
+    ws.id,
+    "Merge feat-push",
+    MergeCommit::Merge,
+    LocalMergeOptions {
+      rollup: false,
+      push: true,
+    },
+  )
+  .expect("merge and push");
+
+  let remote_subject = TestRepo::run_git(
+    &repo.remote_path().to_string_lossy(),
+    &["log", "-1", "--format=%s", &main],
+  )
+  .expect("remote log");
+  assert_eq!(remote_subject.trim(), "Merge feat-push");
+}
+
+#[test]
+fn merge_preview_diff_with_rollup_covers_the_whole_stack() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  repo
+    .create_workspace_with_commit("feat-diff-a", "diff-a.txt", "a", None)
+    .expect("workspace a");
+  let b = repo
+    .create_workspace_with_commit("feat-diff-b", "diff-b.txt", "b", Some("feat-diff-a"))
+    .expect("workspace b");
+
+  let single = treq_lib::core::merge_preview_diff(&repo.repo_path, b.id, false).expect("diff");
+  let rolled_up = treq_lib::core::merge_preview_diff(&repo.repo_path, b.id, true).expect("diff");
+
+  let paths = |diff: &treq_lib::jj::JjRevisionDiff| {
+    let mut paths: Vec<String> = diff
+      .committed_files
+      .iter()
+      .map(|f| f.path.clone())
+      .collect();
+    paths.sort();
+    paths
+  };
+  assert_eq!(paths(&single), vec!["diff-b.txt".to_string()]);
+  assert_eq!(
+    paths(&rolled_up),
+    vec!["diff-a.txt".to_string(), "diff-b.txt".to_string()]
   );
 }

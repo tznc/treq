@@ -194,3 +194,109 @@ mod tests {
     assert_eq!(shifted, 1_705_764_600_000);
   }
 }
+
+#[cfg(test)]
+mod proptests {
+  use super::*;
+  use crate::test_repo::proptest_config;
+  use chrono::{Datelike, Timelike};
+  use proptest::prelude::*;
+
+  /// Millis between 1970 and ~2100, far from i64 saturation.
+  const MAX_MS: i64 = 4_102_444_800_000;
+
+  proptest! {
+    #![proptest_config(proptest_config(256))]
+
+    #[test]
+    fn lineage_plan_is_strictly_increasing_and_starts_at_target(
+      original in prop::collection::vec(0..MAX_MS, 1..8),
+      target in 0..MAX_MS,
+    ) {
+      let planned = plan_lineage_timestamps(&original, target, None);
+      prop_assert_eq!(planned.len(), original.len());
+      prop_assert_eq!(planned[0], target);
+      for i in 1..planned.len() {
+        prop_assert!(planned[i] > planned[i - 1], "{:?}", planned);
+        if original[i] > planned[i - 1] {
+          prop_assert_eq!(planned[i], original[i]);
+        }
+      }
+    }
+
+    #[test]
+    fn uniform_shift_preserves_every_gap(
+      original in prop::collection::vec(0..MAX_MS, 0..8),
+      delta in -MAX_MS..MAX_MS,
+    ) {
+      let planned = plan_uniform_lineage_shift(&original, delta);
+      prop_assert_eq!(planned.len(), original.len());
+      for (p, o) in planned.iter().zip(&original) {
+        prop_assert_eq!(p - o, delta);
+      }
+    }
+
+    #[test]
+    fn offset_to_millis_matches_wide_arithmetic(days: i64, hours: i64, minutes: i64) {
+      let wide = i128::from(days) * 86_400_000 + i128::from(hours) * 3_600_000 + i128::from(minutes) * 60_000;
+      match offset_to_millis(days, hours, minutes) {
+        Some(v) => prop_assert_eq!(i128::from(v), wide),
+        None => prop_assert!(
+          i64::try_from(wide).is_err()
+            || days.checked_mul(86_400_000).is_none()
+            || hours.checked_mul(3_600_000).is_none()
+            || minutes.checked_mul(60_000).is_none()
+            || days.checked_mul(86_400_000).and_then(|d| d.checked_add(hours * 3_600_000)).is_none()
+        ),
+      }
+    }
+
+    #[test]
+    fn to_day_lands_on_the_day_and_keeps_clock_time(
+      original in 0..MAX_MS,
+      tz in -14 * 60..=14 * 60i32,
+      date in (1971i32..2099, 1u32..=12, 1u32..=28),
+    ) {
+      let (year, month, day) = date;
+      let shifted = apply_shift_to_millis(original, tz, &TimestampShift::ToDay { year, month, day });
+      let offset = chrono::FixedOffset::east_opt(tz * 60).expect("in range");
+      let before = chrono::Utc.timestamp_millis_opt(original).single().expect("in range").with_timezone(&offset);
+      let shifted = shifted.map_err(TestCaseError::fail)?;
+      let after = chrono::Utc.timestamp_millis_opt(shifted).single().expect("in range").with_timezone(&offset);
+      prop_assert_eq!((after.year(), after.month(), after.day()), (year, month, day));
+      prop_assert_eq!(after.time().num_seconds_from_midnight(), before.time().num_seconds_from_midnight());
+      prop_assert_eq!(after.timestamp_subsec_millis(), before.timestamp_subsec_millis());
+    }
+
+    #[test]
+    fn newest_real_commit_is_last_non_empty_or_last(flags in prop::collection::vec(any::<bool>(), 0..8)) {
+      match newest_real_commit_index(&flags) {
+        None => prop_assert!(flags.is_empty()),
+        Some(i) => {
+          prop_assert!(i < flags.len());
+          if flags.iter().any(|e| !*e) {
+            prop_assert!(!flags[i]);
+            prop_assert!(flags[i + 1..].iter().all(|e| *e));
+          } else {
+            prop_assert_eq!(i, flags.len() - 1);
+          }
+        }
+      }
+    }
+
+    #[test]
+    fn parse_day_round_trips_valid_dates(date in (1i32..=9999, 1u32..=12, 1u32..=31)) {
+      let (y, m, d) = date;
+      let text = format!(" {y:04}-{m:02}-{d:02}\n");
+      let valid = NaiveDate::from_ymd_opt(y, m, d).is_some();
+      prop_assert_eq!(parse_day(&text).ok(), valid.then_some((y, m, d)));
+    }
+
+    #[test]
+    fn parse_day_only_accepts_real_dates(text in "\\PC{0,16}|[-+0-9 ]{0,14}") {
+      if let Ok((y, m, d)) = parse_day(&text) {
+        prop_assert!(NaiveDate::from_ymd_opt(y, m, d).is_some());
+      }
+    }
+  }
+}

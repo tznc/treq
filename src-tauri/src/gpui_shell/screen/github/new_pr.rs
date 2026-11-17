@@ -1,11 +1,12 @@
 //! `NewPrDialog`: a pull request from a workspace (`CreatePrFromWorkspaceForm`)
 //! or from any branch (`CreatePrForm`).
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
+use gpui_kit::base::TestSupportExt as _;
 use tauri_plugin_gpui::gpui::{
-  anchored, deferred, div, point, prelude::*, px, Context, Div, FontWeight, MouseButton,
-  SharedString, Window,
+  deferred, div, prelude::*, AnyElement, Context, Div, FontWeight, SharedString, Window,
 };
 
 use super::{
@@ -15,13 +16,9 @@ use super::{
 use crate::{
   gpui_shell::{
     form,
-    native::ToastTone,
-    screen::{
-      github_data as data,
-      workspace_modal::{dialog_panel, dialog_title},
-    },
+    screen::github_data as data,
     theme::{self, Palette},
-    ui::{self, Button, EscapeExt as _, Size, TextSize, Variant},
+    ui::{self, Button, Size, TextSize},
   },
   local_db::Workspace,
 };
@@ -30,13 +27,13 @@ use crate::{
 const PR_TYPES: [(bool, &str, &str, &str); 2] = [
   (
     false,
-    "Create Pull Request",
+    "Create pull request",
     "Create pull request",
     "Open a pull request that is ready for review",
   ),
   (
     true,
-    "Draft Pull Request",
+    "Draft pull request",
     "Create draft pull request",
     "Cannot be merged until marked ready for review",
   ),
@@ -222,7 +219,8 @@ impl GithubView {
       move |host| {
         // gh needs the branch on the remote; an in-sync push does nothing.
         host.push_workspace(&repo_path, ws.id)?;
-        let number = host.create_pr(&repo, &title, &body, &base, &branch, draft)?;
+        let head = crate::core::github_cli::pr_head(&repo_path, &branch);
+        let number = host.create_pr(&repo, &title, &body, &base, &head, draft)?;
         // Pending until the PR is cached, or a second click makes another.
         host.refresh_pr_status(&repo_path, &branch);
         Ok((repo, number))
@@ -242,7 +240,9 @@ impl GithubView {
             view.reload_list(false, cx);
             view.press(format!("github.created:{number}"), cx);
           }
-          Err(err) => view.toast(ToastTone::Error, "Failed to create PR", err),
+          Err(err) => view
+            .host
+            .notify(Toast::error("Failed to create PR").description(err).into()),
         }
       },
     );
@@ -301,7 +301,6 @@ impl GithubView {
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
     let tab = self.new_pr.as_ref().map_or(NewPrTab::Workspace, |n| n.tab);
-    let (backdrop, panel) = dialog_panel("github-new-pr-dialog", 576., window.viewport_size(), p);
     let view = cx.weak_entity();
     let tabs = ui::Tabs::new("github-new-pr-tabs", p)
       .tab(ui::Tab::new(
@@ -324,61 +323,57 @@ impl GithubView {
           })
           .ok();
       });
-    let content = match tab {
-      NewPrTab::Workspace => self.workspace_form(p, window, cx).into_any_element(),
-      NewPrTab::Branch => self.branch_form(p, window, cx).into_any_element(),
+    let workspace = tab == NewPrTab::Workspace;
+    let (content, submit) = match tab {
+      NewPrTab::Workspace => self.workspace_form(p, window, cx),
+      NewPrTab::Branch => self.branch_form(p, window, cx),
     };
-    let panel = panel
-      .flex()
-      .flex_col()
-      .gap_4()
-      .child(dialog_title("New Pull Request"))
+    let can_create = submit.is_some_and(|(_, pending, disabled)| !pending && !disabled);
+    let footer = match submit {
+      Some((draft, pending, disabled)) => vec![self
+        .split_button(draft, pending, disabled, workspace, p, cx)
+        .into_any_element()],
+      None => Vec::new(),
+    };
+    ui::Dialog::new("github-new-pr-dialog", p)
+      .overlay(window.viewport_size())
+      .width(576.)
+      .title("New pull request")
+      .focus(self.dialog_focus())
+      // Escape closes the open menu first.
+      .on_close(ui::handler(cx, |view, _, cx| {
+        if view.popover.take().is_some() {
+          cx.notify();
+        } else {
+          view.cancel_new_pr(cx);
+        }
+      }))
+      .on_primary(ui::handler(cx, move |view, _, cx| {
+        if workspace {
+          view.create_workspace_pr(cx)
+        } else {
+          view.create_branch_pr(cx)
+        }
+      }))
+      .primary_disabled(!can_create)
       .child(
         div()
           .child(div().flex().child(tabs))
           .child(div().pt_4().child(content)),
-      );
-    deferred(
-      anchored().position(point(px(0.), px(0.))).child(
-        backdrop
-          .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|view, _, _, cx| view.cancel_new_pr(cx)),
-          )
-          .child(
-            panel
-              .id("github-new-pr-panel")
-              .track_focus(self.dialog_focus())
-              .on_escape(cx.listener(|view, _, _, cx| {
-                if view.popover.take().is_some() {
-                  cx.notify();
-                } else {
-                  view.cancel_new_pr(cx);
-                }
-              }))
-              .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()),
-          ),
-      ),
-    )
-    .with_priority(2)
+      )
+      .footer(footer)
   }
 
-  fn cancel_button(&self, p: &Palette, cx: &mut Context<Self>) -> Button {
-    Button::new("github-new-pr-cancel", p)
-      .variant(Variant::Ghost)
-      .size(Size::Sm)
-      .label("Cancel")
-      .on_click(cx.listener(|view, _, _, cx| view.cancel_new_pr(cx)))
-  }
-
+  /// The form, and the create button's draft, pending and disabled states
+  /// once there is something to create.
   fn workspace_form(
     &mut self,
     p: &Palette,
     window: &mut Window,
     cx: &mut Context<Self>,
-  ) -> impl IntoElement {
+  ) -> (AnyElement, Option<(bool, bool, bool)>) {
     let Some(new_pr) = self.new_pr.as_ref() else {
-      return div();
+      return (div().into_any_element(), None);
     };
     let default = new_pr.default_base();
     let selected = new_pr.selected;
@@ -387,67 +382,68 @@ impl GithubView {
       Some(list) if list.is_empty() => {
         muted_line("Every workspace already has an open pull request.", p).into_any_element()
       }
-      Some(list) => {
-        let muted = p.muted;
-        div()
-          .id("github-new-pr-workspaces")
-          .max_h(zpx(240.))
-          .overflow_y_scroll()
-          .rounded(radius::MD)
-          .border_1()
-          .border_color(p.border)
-          .children(list.iter().enumerate().map(|(i, ws)| {
-            let id = ws.id;
-            let picked = selected == Some(id);
-            named(div(), format!("github-new-pr-ws-{id}"))
-              .w_full()
-              .px_3()
-              .py_2()
-              .when(i + 1 < list.len(), |d| {
-                d.border_b_1().border_color(p.border)
-              })
-              .cursor_pointer()
-              .when(picked, |d| d.bg(p.selected()))
-              .when(!picked, |d| d.hover(move |s| s.bg(muted.opacity(0.5))))
-              .on_click(cx.listener(move |view, _, _, cx| view.pick_workspace(id, cx)))
-              .child(
-                ui::text(div(), TextSize::Sm)
-                  .font_weight(FontWeight::MEDIUM)
-                  .truncate()
-                  .child(if ws.title.is_empty() {
-                    ws.branch_name.clone()
-                  } else {
-                    ws.title.clone()
-                  }),
-              )
-              .child(
-                ui::text(div(), TextSize::Sm)
-                  .flex()
-                  .items_center()
-                  .gap_1()
-                  .min_w_0()
-                  .text_color(p.muted_foreground)
-                  .font_family(theme::MONO_FONT)
-                  .child(ui::icon(theme::ICON_BRANCH_BOLD, 12., p.muted_foreground))
-                  .child(div().truncate().child(ws.branch_name.clone()))
-                  .child(div().flex_none().child("→"))
-                  .child(
-                    div()
-                      .truncate()
-                      .child(ws.target_branch.clone().unwrap_or_else(|| default.clone())),
-                  ),
-              )
-          }))
-          .into_any_element()
-      }
+      Some(list) => div()
+        .id("github-new-pr-workspaces")
+        .max_h(zpx(240.))
+        .overflow_y_scroll()
+        .rounded(radius::MD)
+        .border_1()
+        .border_color(p.border)
+        .children(list.iter().enumerate().map(|(i, ws)| {
+          let id = ws.id;
+          let picked = selected == Some(id);
+          named(div(), format!("github-new-pr-ws-{id}"))
+            .role(tauri_plugin_gpui::gpui::Role::ListBoxOption)
+            .aria_label(ws.branch_name.clone())
+            .w_full()
+            .px_3()
+            .py_2()
+            .when(i + 1 < list.len(), |d| {
+              d.border_b_1().border_color(p.border)
+            })
+            .cursor_pointer()
+            .when(picked, |d| d.bg(p.selected()))
+            .when(!picked, |d| d.hover(move |s| s.bg(p.hover())))
+            .on_click(cx.listener(move |view, _, _, cx| view.pick_workspace(id, cx)))
+            .child(
+              ui::text(div(), TextSize::Sm)
+                .font_weight(FontWeight::MEDIUM)
+                .truncate()
+                .child(if ws.title.is_empty() {
+                  ws.branch_name.clone()
+                } else {
+                  ws.title.clone()
+                }),
+            )
+            .child(
+              ui::text(div(), TextSize::Sm)
+                .flex()
+                .items_center()
+                .gap_1()
+                .min_w_0()
+                .text_color(p.muted_foreground)
+                .font_family(theme::MONO_FONT)
+                .child(ui::icon(theme::ICON_BRANCH_BOLD, 12., p.muted_foreground))
+                .child(div().truncate().child(ws.branch_name.clone()))
+                .child(div().flex_none().child("→"))
+                .child(
+                  div()
+                    .truncate()
+                    .child(ws.target_branch.clone().unwrap_or_else(|| default.clone())),
+                ),
+            )
+            .test_support()
+        }))
+        .into_any_element(),
     };
     let fields = new_pr.picked().is_some().then(|| {
       let f = new_pr.fields.clone();
       let base = new_pr.workspace_base();
       (f, base, new_pr.draft, new_pr.pending)
     });
+    let mut submit = None;
     let rest = match fields {
-      None => div().child(self.cancel_button(p, cx)).into_any_element(),
+      None => div().into_any_element(),
       Some((f, base, draft, pending)) => {
         let title = self.input("github.newPr.title", &f.title, "Title", window, cx);
         let base_state = self.input("github.newPr.base", &base, "Base branch", window, cx);
@@ -460,6 +456,7 @@ impl GithubView {
           cx,
         );
         let disabled = f.title.trim().is_empty() || base.trim().is_empty();
+        submit = Some((draft, pending, disabled));
         div()
           .flex()
           .flex_col()
@@ -477,17 +474,19 @@ impl GithubView {
             false,
           )))
           .child(field(form::textarea_field(&body, false, false)))
-          .child(
-            div()
-              .flex()
-              .gap_2()
-              .child(self.split_button(draft, pending, disabled, true, p, cx))
-              .child(self.cancel_button(p, cx)),
-          )
           .into_any_element()
       }
     };
-    div().flex().flex_col().gap_3().child(list).child(rest)
+    (
+      div()
+        .flex()
+        .flex_col()
+        .gap_3()
+        .child(list)
+        .child(rest)
+        .into_any_element(),
+      submit,
+    )
   }
 
   fn branch_form(
@@ -495,9 +494,9 @@ impl GithubView {
     p: &Palette,
     window: &mut Window,
     cx: &mut Context<Self>,
-  ) -> impl IntoElement {
+  ) -> (AnyElement, Option<(bool, bool, bool)>) {
     let Some(new_pr) = self.new_pr.as_ref() else {
-      return div();
+      return (div().into_any_element(), None);
     };
     let (f, base, draft, pending, error) = (
       new_pr.branch.clone(),
@@ -524,7 +523,7 @@ impl GithubView {
       cx,
     );
     let disabled = f.title.trim().is_empty() || f.head.trim().is_empty() || base.trim().is_empty();
-    div()
+    let content = div()
       .flex()
       .flex_col()
       .gap_3()
@@ -559,18 +558,12 @@ impl GithubView {
           )))),
       )
       .child(field(form::textarea_field(&body, false, false)))
-      .child(
-        div()
-          .flex()
-          .gap_2()
-          .child(self.split_button(draft, pending, disabled, false, p, cx))
-          .child(self.cancel_button(p, cx)),
-      )
       .children(error.map(|err| {
         ui::text(div(), TextSize::Sm)
           .text_color(p.destructive)
           .child(err)
-      }))
+      }));
+    (content.into_any_element(), Some((draft, pending, disabled)))
   }
 
   /// `PrTypeSplitButton`: the main part creates; the menu picks draft or ready.
@@ -612,7 +605,6 @@ impl GithubView {
       .disabled(pending)
       .icon(theme::ICON_CHEVRON_DOWN, 16.)
       .on_click(cx.listener(|view, _, _, cx| view.toggle_popover(Popover::PrType, cx)));
-    let accent = p.menu_accent;
     let menu = (self.popover == Some(Popover::PrType) && !pending).then(|| {
       deferred(
         parts::menu_panel("github-new-pr-type-menu", p)
@@ -635,6 +627,8 @@ impl GithubView {
               ),
               TextSize::Sm,
             )
+            .role(tauri_plugin_gpui::gpui::Role::MenuItemRadio)
+            .aria_label(item)
             .relative()
             .flex()
             .flex_col()
@@ -644,7 +638,7 @@ impl GithubView {
             .pr_2()
             .rounded(radius::SM)
             .cursor_pointer()
-            .hover(move |s| s.bg(accent))
+            .hover(move |s| s.bg(p.hover()))
             .child(
               div()
                 .absolute()
@@ -660,7 +654,7 @@ impl GithubView {
             )
             .child(div().font_weight(FontWeight::MEDIUM).child(item))
             .child(
-              ui::text(div(), TextSize::Xs)
+              ui::text(div(), TextSize::Sm)
                 .text_color(p.muted_foreground)
                 .child(description),
             )

@@ -98,7 +98,7 @@ is drift in the component itself.
    cargo visual-test check "$QA_OUT/09-delete-workspace-confirm-light.png" \
      -e "At most one filled button is visible in the dialog" \
      -e "The buttons are verbs, not Yes/No/OK" \
-     --should "The dialog has no X, because it has an action pair" \
+     --should "The confirmation has Cancel beside its verb and no X" \
      --diff 0.001
    ```
 
@@ -131,9 +131,11 @@ names.
   small dot after the name, never the name's colour.
 - **One selected style**: a selected row or toggle uses the light accent
   tint, with no shadow and no coloured text.
-- **Dialogs**: a dialog with Cancel and a verb has no X. One without an
-  action pair has an X top-right. The title is a question or a name, and the
-  buttons are verbs, never Yes/No/OK.
+- **Dialogs**: every dialog closes from an X top-right, and its footer holds
+  only the verb, with no Cancel. A yes/no confirmation (`ConfirmDialog`,
+  `Dialog::confirm`) is the exception: an outline Cancel beside the verb and
+  no X. Inline editors keep their ghost Cancel; they aren't dialogs. The
+  title is a question or a name, and the buttons are verbs, never Yes/No/OK.
 - **Alerts**: the icon and tint carry the severity, the title is in body
   colour, and there is at most one outline action.
 - **Empty states** say why the area is empty and offer at most one action.

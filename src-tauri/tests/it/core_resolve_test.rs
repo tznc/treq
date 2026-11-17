@@ -76,14 +76,11 @@ fn start_resolve_creates_edit_mode_workspace_without_touching_product_wc() {
 
   let log = core::list_commits(&repo.repo_path, Some(workspace.id), false, None, None)
     .expect("list commits");
-  let conflicted: Vec<_> = log
-    .commits
-    .iter()
-    .filter(|c| c.has_conflicts && !c.on_target_only)
-    .cloned()
-    .collect();
   assert!(
-    !conflicted.is_empty(),
+    log
+      .commits
+      .iter()
+      .any(|c| c.has_conflicts && !c.on_target_only),
     "expected at least one conflicted commit in log, got {:?}",
     log
       .commits
@@ -182,7 +179,7 @@ fn treq_resolve_side_two_clears_conflict_and_cleans_up_without_extra_commit() {
   let session = core::start_resolve_conflicts(
     &repo.repo_path,
     Some(workspace.id),
-    Some(vec![conflicted.change_id.clone()]),
+    Some(vec![conflicted.change_id]),
   )
   .expect("start resolve");
   let target = session.targets.first().expect("target");
@@ -207,6 +204,9 @@ fn treq_resolve_side_two_clears_conflict_and_cleans_up_without_extra_commit() {
     !Path::new(&session.agent_cwd).exists(),
     "slug resolve root should be removed once no change-id dirs remain"
   );
+  let leaked =
+    treq_lib::jj::list_resolve_workspace_names(&repo.repo_path).expect("list resolve workspaces");
+  assert!(leaked.is_empty(), "resolve jj workspace leaked: {leaked:?}");
 
   let after =
     core::list_commits(&repo.repo_path, Some(workspace.id), false, None, None).expect("list after");
@@ -258,4 +258,115 @@ fn resolve_commit_with_stdin_replacements_rewrites_tree() {
 
   let status = core::workspace_status(&repo.repo_path, Some(workspace.id)).expect("status");
   assert!(!status.partial.has_conflicts);
+}
+
+#[test]
+fn start_resolve_handles_divergent_change_id() {
+  let repo = TestRepo::new().expect("test repo");
+  let workspace = setup_rebase_conflict(&repo);
+  let log = core::list_commits(&repo.repo_path, Some(workspace.id), false, None, None)
+    .expect("list commits");
+  let conflicted = log
+    .commits
+    .iter()
+    .find(|c| c.has_conflicts && !c.on_target_only)
+    .expect("conflicted commit");
+
+  // Rewrite the commit from a stale operation so its change id becomes divergent.
+  let op = TestRepo::run_jj_cli(
+    &repo.repo_path,
+    &["op", "log", "--no-graph", "-n1", "-T", "id.short()"],
+  )
+  .expect("op id");
+  TestRepo::run_jj_cli(
+    &repo.repo_path,
+    &[
+      "--at-op",
+      op.trim(),
+      "--ignore-working-copy",
+      "describe",
+      "-r",
+      &conflicted.commit_id,
+      "-m",
+      "concurrent a",
+    ],
+  )
+  .expect("describe a");
+  TestRepo::run_jj_cli(
+    &repo.repo_path,
+    &[
+      "--at-op",
+      op.trim(),
+      "--ignore-working-copy",
+      "describe",
+      "-r",
+      &conflicted.commit_id,
+      "-m",
+      "concurrent b",
+    ],
+  )
+  .expect("describe b");
+  TestRepo::run_jj_cli(
+    &repo.repo_path,
+    &["--ignore-working-copy", "log", "-r", "@"],
+  )
+  .expect("merge concurrent ops");
+
+  let session = core::start_resolve_conflicts(&repo.repo_path, Some(workspace.id), None)
+    .expect("start_resolve_conflicts must not fail on a divergent change id");
+  assert!(!session.targets.is_empty(), "expected resolve targets");
+
+  let divergent = TestRepo::jj_commit_ids_in_revset(
+    &repo.repo_path,
+    &format!("change_id({})", conflicted.change_id),
+  )
+  .expect("divergent commits");
+  assert_eq!(
+    divergent.len(),
+    2,
+    "change id should be divergent: {divergent:?}"
+  );
+  let same_commit = |a: &str, b: &str| a.starts_with(b) || b.starts_with(a);
+
+  for target in &session.targets {
+    assert!(
+      divergent
+        .iter()
+        .any(|id| same_commit(id, &target.commit_id)),
+      "target {} should be one of the divergent commits {divergent:?}",
+      target.commit_id
+    );
+    // Edit mode: the resolve workspace's @ is the exact divergent commit chosen.
+    let at = TestRepo::jj_commit_ids_in_revset(&target.resolve_path, "@").expect("resolve @");
+    assert_eq!(at.len(), 1);
+    assert!(
+      same_commit(&at[0], &target.commit_id),
+      "resolve workspace @ {} should be target {}",
+      at[0],
+      target.commit_id
+    );
+    assert!(
+      Path::new(&target.resolve_path)
+        .join("conflict.txt")
+        .exists(),
+      "conflict.txt should be materialized in resolve workspace"
+    );
+    assert!(
+      target.conflicted_files.iter().any(|f| f == "conflict.txt"),
+      "expected conflict.txt, got {:?}",
+      target.conflicted_files
+    );
+  }
+
+  // Product workspace keeps its conflict; resolve workspaces stay hidden.
+  let status = core::workspace_status(&repo.repo_path, Some(workspace.id)).expect("status");
+  assert!(
+    status.partial.has_conflicts,
+    "product workspace should stay conflicted"
+  );
+  let listed = core::list_workspaces(&repo.repo_path).expect("list workspaces");
+  assert!(
+    listed.iter().all(|w| !core::is_resolve_workspace(w)),
+    "list_workspaces must hide resolve workspaces"
+  );
 }

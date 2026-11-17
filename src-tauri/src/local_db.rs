@@ -1,9 +1,10 @@
 use crate::lock_ext::LockExt;
+use crate::result_ext::ResultExt;
 use chrono::Utc;
-use rusqlite::{params, Connection, OptionalExtension, Row};
+use rusqlite::{params, Connection, OptionalExtension, Row, Transaction, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -11,7 +12,13 @@ use std::sync::{Mutex, OnceLock};
 use crate::agent_dispatch::{InstanceWindowSnapshot, RegisteredInstance};
 use crate::jj::DiscoveredWorkspace;
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+mod agent_messages;
+mod migrations;
+mod pool;
+pub use agent_messages::*;
+use pool::{ConnectionPool, PooledConnection};
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct Workspace {
   pub id: i64,
   pub repo_path: String,
@@ -32,6 +39,15 @@ pub struct Workspace {
   pub archived: bool,
 }
 
+/// The PR values last copied into a workspace (`core::pr_sync`). A field is
+/// `None` when it does not follow the PR.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrSyncRecord {
+  pub pr_number: u64,
+  pub title: Option<String>,
+  pub description: Option<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Session {
   pub id: i64,
@@ -43,6 +59,10 @@ pub struct Session {
 }
 
 static INITIALIZED_DBS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+
+/// Held for a whole `init_local_db`: its migrations check for a column, then
+/// add it, so two threads migrating one file both add it and the second fails.
+static INIT_LOCK: Mutex<()> = Mutex::new(());
 
 fn workspace_from_row(repo_path: &str, row: &Row<'_>) -> rusqlite::Result<Workspace> {
   let moved_files_json: Option<String> = row.get(10)?;
@@ -99,7 +119,7 @@ pub struct PendingReview {
 /// A local-only review comment anchored to a line range of some reviewed
 /// target. These are never pushed to GitHub and are structurally distinct from
 /// the read-only `GhReviewThread`/`GhReviewComment` types on the frontend.
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct AgentReviewComment {
   pub id: String,
   pub repo_path: String,
@@ -124,7 +144,8 @@ pub struct AgentReviewComment {
   pub created_at: String,
   pub resolved_at: Option<String>,
   /// The exact text of `start_line..=end_line` when the comment was written.
-  /// Set for Linear targets, whose suggestions are applied by text match.
+  /// Set for Linear targets, whose suggestions are applied by text match, and
+  /// for workspace diffs, whose suggestions are refused once those lines move.
   #[serde(default)]
   pub quoted_text: Option<String>,
   /// Hash of the commented diff lines when the comment was anchored; a PR
@@ -243,6 +264,7 @@ fn resolve_db_path(repo_arg: &str) -> Result<PathBuf, String> {
 /// # Returns
 /// The path to the created/opened database file.
 pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
+  let _init = INIT_LOCK.lock_or_recover();
   let db_path = resolve_db_path(repo_path)?;
   if let Some(parent) = db_path.parent() {
     fs::create_dir_all(parent).map_err(|e| format!("Failed to create .treq directory: {}", e))?;
@@ -250,665 +272,28 @@ pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
 
   let conn = Connection::open(&db_path).map_err(|e| format!("Failed to open local db: {}", e))?;
 
-  conn
-    .execute(
-      "CREATE TABLE IF NOT EXISTS workspaces (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            workspace_name TEXT NOT NULL,
-            workspace_path TEXT NOT NULL UNIQUE,
-            branch_name TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            metadata TEXT,
-            target_branch TEXT
-        )",
-      [],
-    )
-    .map_err(|e| format!("Failed to create workspaces table: {}", e))?;
-
-  conn
-    .execute(
-      "CREATE INDEX IF NOT EXISTS idx_workspaces_branch ON workspaces(branch_name)",
-      [],
-    )
-    .map_err(|e| format!("Failed to create workspaces branch index: {}", e))?;
-
-  let _ = conn.execute("ALTER TABLE workspaces ADD COLUMN target_branch TEXT", []);
-  let _ = conn.execute(
-    "ALTER TABLE workspaces ADD COLUMN has_conflicts BOOLEAN DEFAULT 0",
-    [],
-  );
-  let _ = conn.execute(
-    "ALTER TABLE workspaces ADD COLUMN archived BOOLEAN DEFAULT 0",
-    [],
-  );
-  let _ = conn.execute(
-    "ALTER TABLE workspaces ADD COLUMN not_on_remote BOOLEAN DEFAULT 0",
-    [],
-  );
-  let _ = conn.execute("ALTER TABLE workspaces ADD COLUMN title TEXT", []);
-  let _ = conn.execute("ALTER TABLE workspaces ADD COLUMN description TEXT", []);
-  let _ = conn.execute("ALTER TABLE workspaces ADD COLUMN moved_files TEXT", []);
-  let _ = conn.execute("ALTER TABLE workspaces ADD COLUMN refreshed_at TEXT", []);
-  let _ = conn.execute("ALTER TABLE workspaces ADD COLUMN sparse_patterns TEXT", []);
-
-  conn
-    .execute(
-      "CREATE TABLE IF NOT EXISTS sessions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            workspace_id INTEGER,
-            name TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            last_accessed TEXT NOT NULL,
-            model TEXT,
-            FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
-        )",
-      [],
-    )
-    .map_err(|e| format!("Failed to create sessions table: {}", e))?;
-
-  let has_worktree_col: Result<i64, _> = conn.query_row(
-    "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='worktree_id'",
-    [],
-    |row| row.get(0),
-  );
-
-  if let Ok(count) = has_worktree_col {
-    if count > 0 {
-      // Table rebuilds run in a transaction so a failure cannot strand `*_new`.
-      let tx = conn
-        .unchecked_transaction()
-        .map_err(|e| format!("Failed to start sessions migration: {}", e))?;
-      tx.execute(
-        "CREATE TABLE sessions_new (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    workspace_id INTEGER,
-                    name TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    last_accessed TEXT NOT NULL,
-                    model TEXT,
-                    FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
-                )",
-        [],
-      )
-      .map_err(|e| format!("Failed to create sessions_new table: {}", e))?;
-
-      tx.execute(
-                "INSERT INTO sessions_new SELECT id, worktree_id, name, created_at, last_accessed, model FROM sessions",
-                [],
-            )
-            .map_err(|e| format!("Failed to migrate sessions data: {}", e))?;
-
-      tx.execute("DROP TABLE sessions", [])
-        .map_err(|e| format!("Failed to drop old sessions table: {}", e))?;
-
-      tx.execute("ALTER TABLE sessions_new RENAME TO sessions", [])
-        .map_err(|e| format!("Failed to rename sessions_new to sessions: {}", e))?;
-      tx.commit()
-        .map_err(|e| format!("Failed to commit sessions migration: {}", e))?;
-    }
+  // Every remote request cold-starts `treq` and lands here, so the common
+  // case (schema already current) must cost one pragma read, not ~70 statements.
+  if migrations::is_current(&conn, migrations::MIGRATIONS)? {
+    return Ok(db_path);
   }
 
-  let _ = conn.execute("ALTER TABLE sessions ADD COLUMN model TEXT", []);
-
-  conn
-    .execute(
-      "CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_id)",
-      [],
-    )
-    .map_err(|e| format!("Failed to create sessions workspace index: {}", e))?;
-
-  let _ = conn.execute("DROP TABLE IF EXISTS git_file_hunks", []);
-  let _ = conn.execute("DROP TABLE IF EXISTS git_changed_files", []);
-  let _ = conn.execute("DROP INDEX IF EXISTS idx_git_file_hunks_workspace", []);
-  let _ = conn.execute("DROP INDEX IF EXISTS idx_git_changed_files_workspace", []);
-
-  conn
-    .execute(
-      "CREATE TABLE IF NOT EXISTS changed_files (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            workspace_id INTEGER,
-            file_path TEXT NOT NULL,
-            workspace_status TEXT,
-            is_untracked INTEGER NOT NULL DEFAULT 0,
-            hunks_json TEXT,
-            updated_at TEXT NOT NULL,
-            FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
-            UNIQUE(workspace_id, file_path)
-        )",
-      [],
-    )
-    .map_err(|e| format!("Failed to create changed_files table: {}", e))?;
-
-  conn
-    .execute(
-      "CREATE INDEX IF NOT EXISTS idx_changed_files_workspace ON changed_files(workspace_id)",
-      [],
-    )
-    .map_err(|e| format!("Failed to create changed_files workspace index: {}", e))?;
-
-  conn
-    .execute(
-      "CREATE TABLE IF NOT EXISTS workspace_files (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            workspace_id INTEGER,
-            file_path TEXT NOT NULL,
-            relative_path TEXT NOT NULL,
-            is_directory INTEGER NOT NULL DEFAULT 0,
-            parent_path TEXT,
-            cached_at TEXT NOT NULL,
-            mtime INTEGER,
-            FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
-            UNIQUE(workspace_id, file_path)
-        )",
-      [],
-    )
-    .map_err(|e| format!("Failed to create workspace_files table: {}", e))?;
-
-  let _ = conn.execute("ALTER TABLE workspace_files ADD COLUMN mtime INTEGER", []);
-
-  conn
-    .execute(
-      "CREATE INDEX IF NOT EXISTS idx_workspace_files_workspace ON workspace_files(workspace_id)",
-      [],
-    )
-    .map_err(|e| format!("Failed to create workspace_files workspace index: {}", e))?;
-
-  conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_workspace_files_parent ON workspace_files(workspace_id, parent_path)",
-        [],
-    )
-    .map_err(|e| format!("Failed to create workspace_files parent index: {}", e))?;
-
-  conn
-    .execute(
-      "CREATE TABLE IF NOT EXISTS pending_reviews (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            workspace_id INTEGER NOT NULL UNIQUE,
-            comments TEXT NOT NULL,
-            viewed_files TEXT,
-            summary_text TEXT,
-            conflict_comments TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
-        )",
-      [],
-    )
-    .map_err(|e| format!("Failed to create pending_reviews table: {}", e))?;
-
-  // Migration: add conflict_comments column to pending_reviews if missing
-  // (covers DBs created before conflict comments were persisted).
-  let has_conflict_comments_column: Result<i64, _> = conn.query_row(
-    "SELECT COUNT(*) FROM pragma_table_info('pending_reviews') WHERE name = 'conflict_comments'",
-    [],
-    |row| row.get(0),
-  );
-  if matches!(has_conflict_comments_column, Ok(0)) {
-    conn
-      .execute(
-        "ALTER TABLE pending_reviews ADD COLUMN conflict_comments TEXT",
-        [],
-      )
-      .map_err(|e| format!("Failed to add conflict_comments column: {}", e))?;
-  }
-
-  // Drop any prior schema of commit_diff_stats — keyed cache, safe to recreate.
-  let needs_rebuild: bool = conn
-        .query_row(
-            "SELECT COUNT(*) FROM pragma_table_info('commit_diff_stats') WHERE name IN ('tree_key', 'parent_ids')",
-            [],
-            |row| row.get::<_, i64>(0),
-        )
-        .map(|n| n > 0)
-        .unwrap_or(false);
-  if needs_rebuild {
-    let _ = conn.execute("DROP TABLE IF EXISTS commit_diff_stats", []);
-  }
-
-  conn
-    .execute(
-      "CREATE TABLE IF NOT EXISTS commit_diff_stats (
-            commit_id TEXT NOT NULL PRIMARY KEY,
-            insertions INTEGER NOT NULL,
-            deletions INTEGER NOT NULL,
-            updated_at TEXT NOT NULL,
-            change_id TEXT,
-            description TEXT,
-            author_name TEXT,
-            timestamp TEXT
-        )",
-      [],
-    )
-    .map_err(|e| format!("Failed to create commit_diff_stats table: {}", e))?;
-
-  conn
-    .execute(
-      "CREATE INDEX IF NOT EXISTS idx_pending_reviews_workspace ON pending_reviews(workspace_id)",
-      [],
-    )
-    .map_err(|e| format!("Failed to create pending_reviews workspace index: {}", e))?;
-
-  // Separate pending-review session for the FileBrowser's "review any file" flow —
-  // intentionally not shared with pending_reviews (the Review/Changes-tab session).
-  conn
-    .execute(
-      "CREATE TABLE IF NOT EXISTS file_browser_reviews (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            workspace_id INTEGER NOT NULL UNIQUE,
-            comments TEXT NOT NULL,
-            summary_text TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
-        )",
-      [],
-    )
-    .map_err(|e| format!("Failed to create file_browser_reviews table: {}", e))?;
-
-  conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_file_browser_reviews_workspace ON file_browser_reviews(workspace_id)",
-        [],
-    )
-    .map_err(|e| format!("Failed to create file_browser_reviews workspace index: {}", e))?;
-
-  // Local-only review comments left by a review agent. Deliberately never
-  // synced to GitHub — `source` records where a row came from so other local
-  // producers can be added later, and `target_type`/`target_id` keep the table
-  // generic over what was reviewed (a workspace diff, a FileBrowser file, and
-  // later other content types).
-  conn
-    .execute(
-      "CREATE TABLE IF NOT EXISTS agent_review_comments (
-            id TEXT PRIMARY KEY,
-            repo_path TEXT NOT NULL,
-            target_type TEXT NOT NULL,
-            target_id TEXT NOT NULL,
-            file_path TEXT NOT NULL,
-            hunk_id TEXT,
-            start_line INTEGER NOT NULL,
-            end_line INTEGER NOT NULL,
-            side TEXT,
-            comment_text TEXT NOT NULL,
-            suggested_replacement TEXT,
-            status TEXT NOT NULL,
-            source TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            resolved_at TEXT
-        )",
-      [],
-    )
-    .map_err(|e| format!("Failed to create agent_review_comments table: {}", e))?;
-
-  // Migration: add `source` to agent_review_comments if missing (covers DBs
-  // created before other local comment producers were anticipated).
-  let has_agent_review_source_column: Result<i64, _> = conn.query_row(
-    "SELECT COUNT(*) FROM pragma_table_info('agent_review_comments') WHERE name = 'source'",
-    [],
-    |row| row.get(0),
-  );
-  if matches!(has_agent_review_source_column, Ok(0)) {
-    conn
-      .execute(
-        "ALTER TABLE agent_review_comments ADD COLUMN source TEXT NOT NULL DEFAULT 'local-agent'",
-        [],
-      )
-      .map_err(|e| format!("Failed to add agent_review_comments source column: {}", e))?;
-  }
-
-  // Migration: add `quoted_text` (the exact reviewed text a comment covers).
-  // Linear targets apply a suggestion by finding this text in the live
-  // Linear content, since their line numbers only hold for one snapshot.
-  let has_agent_review_quoted_text_column: Result<i64, _> = conn.query_row(
-    "SELECT COUNT(*) FROM pragma_table_info('agent_review_comments') WHERE name = 'quoted_text'",
-    [],
-    |row| row.get(0),
-  );
-  if matches!(has_agent_review_quoted_text_column, Ok(0)) {
-    conn
-      .execute(
-        "ALTER TABLE agent_review_comments ADD COLUMN quoted_text TEXT",
-        [],
-      )
-      .map_err(|e| {
-        format!(
-          "Failed to add agent_review_comments quoted_text column: {}",
-          e
-        )
-      })?;
-  }
-
-  let has_agent_review_line_hash_column: Result<i64, _> = conn.query_row(
-    "SELECT COUNT(*) FROM pragma_table_info('agent_review_comments') WHERE name = 'line_hash'",
-    [],
-    |row| row.get(0),
-  );
-  if matches!(has_agent_review_line_hash_column, Ok(0)) {
-    conn
-      .execute(
-        "ALTER TABLE agent_review_comments ADD COLUMN line_hash TEXT",
-        [],
-      )
-      .map_err(|e| format!("Failed to add agent_review_comments line_hash column: {e}"))?;
-  }
-
-  conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_agent_review_comments_target ON agent_review_comments(repo_path, target_type, target_id)",
-        [],
-    )
-    .map_err(|e| format!("Failed to create agent_review_comments target index: {}", e))?;
-
-  conn
-    .execute(
-      "CREATE TABLE IF NOT EXISTS instance_registry (
-            instance_id TEXT NOT NULL PRIMARY KEY,
-            pid INTEGER NOT NULL,
-            started_at INTEGER NOT NULL,
-            last_heartbeat_at INTEGER NOT NULL,
-            endpoint TEXT NOT NULL,
-            windows_json TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        )",
-      [],
-    )
-    .map_err(|e| format!("Failed to create instance_registry table: {}", e))?;
-
-  conn
-    .execute(
-      "CREATE INDEX IF NOT EXISTS idx_instance_registry_last_heartbeat_at
-         ON instance_registry(last_heartbeat_at)",
-      [],
-    )
-    .map_err(|e| format!("Failed to create instance_registry heartbeat index: {}", e))?;
-
-  conn
-    .execute(
-      "CREATE TABLE IF NOT EXISTS prompt_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            workspace_id INTEGER,
-            session_id INTEGER,
-            prompt_text TEXT NOT NULL,
-            agent TEXT,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
-            FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-        )",
-      [],
-    )
-    .map_err(|e| format!("Failed to create prompt_history table: {}", e))?;
-
-  let prompt_history_foreign_keys_without_cascade: i64 = conn
-    .query_row(
-      "SELECT COUNT(*) FROM pragma_foreign_key_list('prompt_history') WHERE on_delete != 'CASCADE'",
-      [],
-      |row| row.get(0),
-    )
-    .map_err(|e| format!("Failed to inspect prompt_history foreign keys: {}", e))?;
-  if prompt_history_foreign_keys_without_cascade > 0 {
-    conn
-      .execute_batch(
-        "BEGIN;
-          CREATE TABLE prompt_history_new (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              workspace_id INTEGER,
-              session_id INTEGER,
-              prompt_text TEXT NOT NULL,
-              agent TEXT,
-              created_at TEXT NOT NULL,
-              FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
-              FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-          );
-          INSERT INTO prompt_history_new
-            (id, workspace_id, session_id, prompt_text, agent, created_at)
-            SELECT id, workspace_id, session_id, prompt_text, agent, created_at
-            FROM prompt_history;
-          DROP TABLE prompt_history;
-          ALTER TABLE prompt_history_new RENAME TO prompt_history;
-          COMMIT;",
-      )
-      .map_err(|e| {
-        let _ = conn.execute_batch("ROLLBACK");
-        format!("Failed to migrate prompt_history cascade deletes: {}", e)
-      })?;
-  }
-
-  conn
-    .execute(
-      "CREATE INDEX IF NOT EXISTS idx_prompt_history_workspace ON prompt_history(workspace_id)",
-      [],
-    )
-    .map_err(|e| format!("Failed to create prompt_history workspace index: {}", e))?;
-
-  conn
-    .execute(
-      "CREATE INDEX IF NOT EXISTS idx_prompt_history_created_at ON prompt_history(created_at)",
-      [],
-    )
-    .map_err(|e| format!("Failed to create prompt_history created_at index: {}", e))?;
-
-  conn
-    .execute(
-      "CREATE TABLE IF NOT EXISTS stashes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            workspace_id INTEGER,
-            workspace_label TEXT NOT NULL,
-            commit_id TEXT NOT NULL,
-            change_id TEXT NOT NULL,
-            short_commit_id TEXT NOT NULL,
-            bookmark_name TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            additions INTEGER NOT NULL DEFAULT 0,
-            deletions INTEGER NOT NULL DEFAULT 0,
-            files_changed TEXT NOT NULL DEFAULT '[]',
-            FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE SET NULL
-        )",
-      [],
-    )
-    .map_err(|e| format!("Failed to create stashes table: {}", e))?;
-
-  let stash_foreign_keys_without_set_null: i64 = conn
-    .query_row(
-      "SELECT COUNT(*) FROM pragma_foreign_key_list('stashes')
-       WHERE \"from\" = 'workspace_id' AND on_delete != 'SET NULL'",
-      [],
-      |row| row.get(0),
-    )
-    .map_err(|e| format!("Failed to inspect stashes foreign keys: {}", e))?;
-  if stash_foreign_keys_without_set_null > 0 {
-    conn
-      .execute_batch(
-        "BEGIN;
-         CREATE TABLE stashes_new (
-           id INTEGER PRIMARY KEY AUTOINCREMENT,
-           workspace_id INTEGER,
-           workspace_label TEXT NOT NULL,
-           commit_id TEXT NOT NULL,
-           change_id TEXT NOT NULL,
-           short_commit_id TEXT NOT NULL,
-           bookmark_name TEXT NOT NULL,
-           created_at TEXT NOT NULL,
-           additions INTEGER NOT NULL DEFAULT 0,
-           deletions INTEGER NOT NULL DEFAULT 0,
-           files_changed TEXT NOT NULL DEFAULT '[]',
-           FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE SET NULL
-         );
-         INSERT INTO stashes_new
-           (id, workspace_id, workspace_label, commit_id, change_id, short_commit_id,
-            bookmark_name, created_at, additions, deletions, files_changed)
-           SELECT id, workspace_id, workspace_label, commit_id, change_id, short_commit_id,
-                  bookmark_name, created_at, additions, deletions, files_changed
-           FROM stashes;
-         DROP TABLE stashes;
-         ALTER TABLE stashes_new RENAME TO stashes;
-         COMMIT;",
-      )
-      .map_err(|e| {
-        let _ = conn.execute_batch("ROLLBACK");
-        format!("Failed to migrate stashes delete behavior: {}", e)
-      })?;
-  }
-
-  conn
-    .execute(
-      "CREATE INDEX IF NOT EXISTS idx_stashes_created_at ON stashes(created_at)",
-      [],
-    )
-    .map_err(|e| format!("Failed to create stashes created_at index: {}", e))?;
-
-  // Migration: replace the old per-job workflow_runs shape with per-invocation.
-  let has_legacy_workflow_runs: i64 = conn
-    .query_row(
-      "SELECT COUNT(*) FROM pragma_table_info('workflow_runs') WHERE name = 'job_id'",
-      [],
-      |row| row.get(0),
-    )
-    .unwrap_or(0);
-  if has_legacy_workflow_runs > 0 {
-    conn
-      .execute("DROP TABLE workflow_runs", [])
-      .map_err(|e| format!("Failed to drop legacy workflow_runs table: {}", e))?;
-  }
-
-  conn
-    .execute(
-      "CREATE TABLE IF NOT EXISTS workflow_runs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            workspace_id INTEGER,
-            filename TEXT NOT NULL,
-            status TEXT NOT NULL,
-            started_at TEXT NOT NULL,
-            completed_at TEXT
-        )",
-      [],
-    )
-    .map_err(|e| format!("Failed to create workflow_runs table: {}", e))?;
-
-  conn
-    .execute(
-      "CREATE INDEX IF NOT EXISTS idx_workflow_runs_lookup
-         ON workflow_runs(workspace_id, filename, id DESC)",
-      [],
-    )
-    .map_err(|e| format!("Failed to create workflow_runs index: {}", e))?;
-
-  conn
-    .execute(
-      "CREATE TABLE IF NOT EXISTS workflow_job_results (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            run_id INTEGER NOT NULL,
-            job_id TEXT NOT NULL,
-            position INTEGER NOT NULL,
-            status TEXT NOT NULL,
-            started_at TEXT,
-            completed_at TEXT,
-            steps_json TEXT NOT NULL,
-            log_path TEXT
-        )",
-      [],
-    )
-    .map_err(|e| format!("Failed to create workflow_job_results table: {}", e))?;
-
-  conn
-    .execute(
-      "CREATE INDEX IF NOT EXISTS idx_workflow_job_results_run
-         ON workflow_job_results(run_id, position)",
-      [],
-    )
-    .map_err(|e| format!("Failed to create workflow_job_results index: {}", e))?;
-
-  conn
-    .execute(
-      "CREATE TABLE IF NOT EXISTS repo_trust (
-            id INTEGER PRIMARY KEY,
-            trusted_at TEXT NOT NULL
-        )",
-      [],
-    )
-    .map_err(|e| format!("Failed to create repo_trust table: {}", e))?;
-
-  conn
-    .execute(
-      "CREATE TABLE IF NOT EXISTS supporting_repos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            repo_path TEXT NOT NULL UNIQUE,
-            added_at TEXT NOT NULL
-        )",
-      [],
-    )
-    .map_err(|e| format!("Failed to create supporting_repos table: {}", e))?;
-
-  // Migration: rename pending_reviews columns from old schema to new schema.
-  let has_old_columns: Result<i64, _> = conn.query_row(
-        "SELECT COUNT(*) FROM pragma_table_info('pending_reviews') WHERE name IN ('comments_json', 'overall_comment', 'viewed_files_json')",
-        [],
-        |row| row.get(0),
-    );
-
-  if let Ok(count) = has_old_columns {
-    if count > 0 {
-      let tx = conn
-        .unchecked_transaction()
-        .map_err(|e| format!("Failed to start pending_reviews migration: {}", e))?;
-      // Create new table with correct schema
-      tx.execute(
-        "CREATE TABLE pending_reviews_new (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    workspace_id INTEGER NOT NULL UNIQUE,
-                    comments TEXT NOT NULL,
-                    viewed_files TEXT,
-                    summary_text TEXT,
-                    conflict_comments TEXT,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
-                )",
-        [],
-      )
-      .map_err(|e| format!("Failed to create pending_reviews_new table: {}", e))?;
-
-      // Migrate old pending_reviews column names to new names.
-      tx.execute(
-                "INSERT INTO pending_reviews_new (id, workspace_id, comments, viewed_files, summary_text, created_at, updated_at)
-                 SELECT id, workspace_id, comments_json, viewed_files_json, overall_comment, created_at, updated_at
-                 FROM pending_reviews",
-                [],
-            )
-            .map_err(|e| format!("Failed to migrate pending_reviews data: {}", e))?;
-
-      // Drop old table
-      tx.execute("DROP TABLE pending_reviews", [])
-        .map_err(|e| format!("Failed to drop old pending_reviews table: {}", e))?;
-
-      // Rename new table to original name
-      tx.execute(
-        "ALTER TABLE pending_reviews_new RENAME TO pending_reviews",
-        [],
-      )
-      .map_err(|e| {
-        format!(
-          "Failed to rename pending_reviews_new to pending_reviews: {}",
-          e
-        )
-      })?;
-
-      // Recreate the index (was dropped with old table)
-      tx.execute(
-        "CREATE INDEX IF NOT EXISTS idx_pending_reviews_workspace ON pending_reviews(workspace_id)",
-        [],
-      )
-      .map_err(|e| format!("Failed to recreate pending_reviews workspace index: {}", e))?;
-      tx.commit()
-        .map_err(|e| format!("Failed to commit pending_reviews migration: {}", e))?;
-    }
-  }
+  migrations::run(&conn, migrations::MIGRATIONS)?;
 
   Ok(db_path)
 }
+
+/// Idle connections kept open between `get_connection` calls (see `pool`).
+/// 16 covers the repos and remote scopes of a few open windows; each one
+/// holds two file handles.
+static CONNECTION_POOL: ConnectionPool = ConnectionPool::new(16, 4);
 
 /// Get a database connection for a repository.
 ///
 /// Ensures the database is initialized before returning the connection.
 /// Uses a cache to avoid re-initializing databases that have already been set up in this session.
-fn get_connection(repo_path: &str) -> Result<Connection, String> {
+/// The connection goes back to `CONNECTION_POOL` when dropped.
+fn get_connection(repo_path: &str) -> Result<PooledConnection<'static>, String> {
   let initialized = INITIALIZED_DBS.get_or_init(|| Mutex::new(HashSet::new()));
   let db_key = repo_path.to_string();
 
@@ -918,10 +303,16 @@ fn get_connection(repo_path: &str) -> Result<Connection, String> {
       drop(guard);
       init_local_db(repo_path)?;
       initialized.lock_or_recover().insert(db_key);
+      prune_review_history_now(repo_path);
+      start_review_history_pruner();
     }
   }
 
   let db_path = resolve_db_path(repo_path)?;
+  CONNECTION_POOL.check_out(&db_path, || open_connection(repo_path, &db_path))
+}
+
+fn open_connection(repo_path: &str, db_path: &Path) -> Result<Connection, String> {
   let conn = Connection::open(db_path).map_err(|e| format!("Failed to open local db: {}", e))?;
   let enforce_foreign_keys = RepoStateScope::parse(repo_path).enforces_foreign_keys();
   conn
@@ -935,10 +326,28 @@ fn get_connection(repo_path: &str) -> Result<Connection, String> {
   conn
     .pragma_update(None, "journal_mode", "WAL")
     .map_err(|e| format!("Failed to enable WAL mode: {}", e))?;
+  // NORMAL is crash-safe under WAL (it can lose the last commits on power
+  // loss, never corrupt) and avoids an fsync per commit.
+  conn
+    .pragma_update(None, "synchronous", "NORMAL")
+    .map_err(|e| format!("Failed to set synchronous mode: {}", e))?;
   conn
     .busy_timeout(std::time::Duration::from_secs(5))
     .map_err(|e| format!("Failed to set busy timeout: {}", e))?;
   Ok(conn)
+}
+
+/// Closes the idle connections to databases under `dir`, so the directory
+/// can be moved or deleted (Windows refuses while a file in it is open).
+pub fn release_connections_under(dir: &Path) {
+  CONNECTION_POOL.release_under(dir);
+}
+
+/// Closes every idle connection. The last connection to close a database
+/// checkpoints its WAL, so the next process to open it need not replay it.
+/// Call before the process exits.
+pub fn close_idle_connections() {
+  CONNECTION_POOL.release_all();
 }
 
 pub fn upsert_instance_registry(
@@ -946,6 +355,13 @@ pub fn upsert_instance_registry(
   instance: RegisteredInstance,
 ) -> Result<(), String> {
   let conn = get_connection(repo_path)?;
+  upsert_instance_registry_row(&conn, instance)
+}
+
+fn upsert_instance_registry_row(
+  conn: &Connection,
+  instance: RegisteredInstance,
+) -> Result<(), String> {
   let windows_json = serde_json::to_string(&instance.windows)
     .map_err(|e| format!("Failed to serialize instance windows: {}", e))?;
   let updated_at = Utc::now().to_rfc3339();
@@ -1028,6 +444,14 @@ pub fn prune_stale_instance_registry(
   timeout_ms: u64,
 ) -> Result<(), String> {
   let conn = get_connection(repo_path)?;
+  prune_stale_instance_registry_rows(&conn, now, timeout_ms)
+}
+
+fn prune_stale_instance_registry_rows(
+  conn: &Connection,
+  now: u64,
+  timeout_ms: u64,
+) -> Result<(), String> {
   let threshold = now.saturating_sub(timeout_ms) as i64;
   conn
     .execute(
@@ -1036,6 +460,24 @@ pub fn prune_stale_instance_registry(
     )
     .map_err(|e| format!("Failed to prune stale instance registry rows: {}", e))?;
   Ok(())
+}
+
+/// Prunes stale rows and upserts this instance's row in one transaction on
+/// one connection, so a heartbeat costs a single commit.
+pub fn heartbeat_instance_registry(
+  repo_path: &str,
+  now: u64,
+  timeout_ms: u64,
+  instance: RegisteredInstance,
+) -> Result<(), String> {
+  let conn = get_connection(repo_path)?;
+  let tx = conn
+    .unchecked_transaction()
+    .map_err(|e| format!("Failed to start heartbeat transaction: {}", e))?;
+  prune_stale_instance_registry_rows(&tx, now, timeout_ms)?;
+  upsert_instance_registry_row(&tx, instance)?;
+  tx.commit()
+    .map_err(|e| format!("Failed to commit heartbeat transaction: {}", e))
 }
 
 const WORKSPACE_SELECT_COLUMNS: &str = "id, workspace_name, workspace_path, branch_name, created_at, refreshed_at, metadata, target_branch, COALESCE(not_on_remote, 0), COALESCE(title, branch_name), moved_files, description, sparse_patterns, COALESCE(archived, 0)";
@@ -1057,18 +499,24 @@ pub fn get_workspaces(repo_path: &str) -> Result<Vec<Workspace>, String> {
 
 pub fn get_workspace_by_id(repo_path: &str, id: i64) -> Result<Option<Workspace>, String> {
   let conn = get_connection(repo_path)?;
+  workspace_by_id(&conn, repo_path, id)
+}
+
+fn workspace_by_id(
+  conn: &Connection,
+  repo_path: &str,
+  id: i64,
+) -> Result<Option<Workspace>, String> {
   let mut stmt = conn
     .prepare(&format!(
       "SELECT {WORKSPACE_SELECT_COLUMNS} FROM workspaces WHERE id = ?1"
     ))
     .map_err(|e| format!("Failed to prepare workspace query: {}", e))?;
 
-  let workspace = stmt
+  stmt
     .query_row([id], |row| workspace_from_row(repo_path, row))
     .optional()
-    .map_err(|e| format!("Failed to query workspace: {}", e))?;
-
-  Ok(workspace)
+    .map_err(|e| format!("Failed to query workspace: {}", e))
 }
 
 pub fn get_workspace_by_path(
@@ -1113,12 +561,13 @@ pub fn get_workspace_by_branch(
 /// row off `workspace_path` so a new workspace can take the same slot without
 /// hitting the UNIQUE constraint.
 fn release_archived_workspace_path(conn: &Connection, workspace_path: &str) -> Result<(), String> {
+  // Cached: discovery runs this for every workspace on every poll.
   conn
-    .execute(
+    .prepare_cached(
       "UPDATE workspaces SET workspace_path = workspace_path || '#archived-' || id
        WHERE workspace_path = ?1 AND COALESCE(archived, 0) = 1",
-      [workspace_path],
     )
+    .and_then(|mut statement| statement.execute([workspace_path]))
     .map_err(|e| format!("Failed to release archived workspace path: {}", e))?;
   Ok(())
 }
@@ -1133,6 +582,176 @@ pub fn add_workspace(
   sparse_patterns: Option<Vec<String>>,
 ) -> Result<i64, String> {
   let conn = get_connection(repo_path)?;
+  // Releasing the archived row's path and inserting must land together.
+  let tx = conn
+    .unchecked_transaction()
+    .map_err(|e| format!("Failed to start workspace insert: {}", e))?;
+  let id = insert_workspace(
+    &tx,
+    &workspace_name,
+    &workspace_path,
+    &branch_name,
+    description,
+    moved_files,
+    sparse_patterns,
+  )?;
+  tx.commit()
+    .map_err(|e| format!("Failed to commit workspace insert: {}", e))?;
+  Ok(id)
+}
+
+/// [`add_workspace`] that also sets what a creation knows (whether the branch
+/// is missing on the remote, the target branch) in the same transaction, and
+/// returns the row. Each separate write is a commit with its own fsyncs.
+#[expect(
+  clippy::too_many_arguments,
+  reason = "the columns of one insert, as add_workspace takes them"
+)]
+pub fn add_workspace_targeting(
+  repo_path: &str,
+  workspace_name: String,
+  workspace_path: String,
+  branch_name: String,
+  description: Option<String>,
+  moved_files: Option<Vec<String>>,
+  sparse_patterns: Option<Vec<String>>,
+  not_on_remote: bool,
+  target_branch: &str,
+) -> Result<Workspace, String> {
+  insert_workspace_targeting(
+    repo_path,
+    branch_name,
+    description,
+    moved_files,
+    sparse_patterns,
+    not_on_remote,
+    target_branch,
+    |_| (workspace_name, workspace_path),
+  )
+}
+
+/// [`add_workspace_targeting`] for a workspace whose directory is not made
+/// yet: the row is inserted first and `dir_name` turns its id into the
+/// directory (and jj workspace) name, stored in the same transaction.
+#[expect(
+  clippy::too_many_arguments,
+  reason = "the columns of one insert, as add_workspace takes them"
+)]
+pub fn reserve_workspace(
+  repo_path: &str,
+  branch_name: String,
+  description: Option<String>,
+  moved_files: Option<Vec<String>>,
+  sparse_patterns: Option<Vec<String>>,
+  not_on_remote: bool,
+  target_branch: &str,
+  dir_name: impl FnOnce(i64) -> String,
+) -> Result<Workspace, String> {
+  insert_workspace_targeting(
+    repo_path,
+    branch_name,
+    description,
+    moved_files,
+    sparse_patterns,
+    not_on_remote,
+    target_branch,
+    |id| {
+      let name = dir_name(id);
+      (name.clone(), name)
+    },
+  )
+}
+
+#[expect(
+  clippy::too_many_arguments,
+  reason = "the columns of one insert, as add_workspace takes them"
+)]
+fn insert_workspace_targeting(
+  repo_path: &str,
+  branch_name: String,
+  description: Option<String>,
+  moved_files: Option<Vec<String>>,
+  sparse_patterns: Option<Vec<String>>,
+  not_on_remote: bool,
+  target_branch: &str,
+  name_and_path: impl FnOnce(i64) -> (String, String),
+) -> Result<Workspace, String> {
+  crate::core::stack_cycle::ensure_no_stack_cycle(
+    &get_workspaces(repo_path)?,
+    &branch_name,
+    target_branch,
+    &crate::core::get_repo_default_branch(repo_path).unwrap_or_default(),
+  )?;
+  let conn = get_connection(repo_path)?;
+  let tx = conn
+    .unchecked_transaction()
+    .map_err(|e| format!("Failed to start workspace insert: {}", e))?;
+  // The path depends on the id: insert under a placeholder, then set it in this transaction.
+  let id = insert_workspace(
+    &tx,
+    "",
+    ".pending",
+    &branch_name,
+    description,
+    moved_files,
+    sparse_patterns,
+  )?;
+  let (workspace_name, workspace_path) = name_and_path(id);
+  release_archived_workspace_path(&tx, &workspace_path)?;
+  tx.execute(
+    "UPDATE workspaces SET workspace_name = ?1, workspace_path = ?2, not_on_remote = ?3, target_branch = ?4 WHERE id = ?5",
+    params![workspace_name, workspace_path, not_on_remote as i64, target_branch, id],
+  )
+  .map_err(|e| format!("Failed to set workspace path and target branch: {}", e))?;
+  let workspace = workspace_by_id(&tx, repo_path, id)?
+    .ok_or_else(|| format!("Workspace not found in database after creation: {id}"))?;
+  tx.commit()
+    .map_err(|e| format!("Failed to commit workspace insert: {}", e))?;
+  Ok(workspace)
+}
+
+/// A transaction that takes the write lock when it starts, for one that
+/// reads before it writes. A deferred one can't upgrade to a writer once
+/// another connection has committed since its read: SQLite fails it at once
+/// with "database is locked", without waiting out the busy timeout.
+fn write_transaction(conn: &Connection) -> rusqlite::Result<Transaction<'_>> {
+  Transaction::new_unchecked(conn, TransactionBehavior::Immediate)
+}
+
+/// Prepares a freshly created workspace to show: sets its `title` when given,
+/// and clears the last rebased target commit, which makes its first view
+/// rebase. One transaction, and the row back.
+pub fn init_new_workspace_state(
+  repo_path: &str,
+  id: i64,
+  title: Option<&str>,
+) -> Result<Option<Workspace>, String> {
+  let conn = get_connection(repo_path)?;
+  let tx =
+    write_transaction(&conn).map_err(|e| format!("Failed to start workspace update: {}", e))?;
+  if let Some(title) = title {
+    tx.execute(
+      "UPDATE workspaces SET title = ?1 WHERE id = ?2",
+      params![title, id],
+    )
+    .map_err(|e| format!("Failed to update workspace title: {}", e))?;
+  }
+  set_last_rebased_commit(&tx, id, "")?;
+  let workspace = workspace_by_id(&tx, repo_path, id)?;
+  tx.commit()
+    .map_err(|e| format!("Failed to commit workspace update: {}", e))?;
+  Ok(workspace)
+}
+
+fn insert_workspace(
+  conn: &Connection,
+  workspace_name: &str,
+  workspace_path: &str,
+  branch_name: &str,
+  description: Option<String>,
+  moved_files: Option<Vec<String>>,
+  sparse_patterns: Option<Vec<String>>,
+) -> Result<i64, String> {
   let created_at = Utc::now().to_rfc3339();
   let refreshed_at = created_at.clone();
 
@@ -1152,12 +771,8 @@ pub fn add_workspace(
     }
   });
 
-  // Releasing the archived row's path and inserting must land together.
-  let tx = conn
-    .unchecked_transaction()
-    .map_err(|e| format!("Failed to start workspace insert: {}", e))?;
-  release_archived_workspace_path(&tx, &workspace_path)?;
-  tx.execute(
+  release_archived_workspace_path(conn, workspace_path)?;
+  conn.execute(
         "INSERT INTO workspaces (workspace_name, workspace_path, branch_name, created_at, refreshed_at, description, moved_files, sparse_patterns)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
@@ -1172,10 +787,7 @@ pub fn add_workspace(
         ],
     )
     .map_err(|e| format!("Failed to insert workspace: {}", e))?;
-  let id = tx.last_insert_rowid();
-  tx.commit()
-    .map_err(|e| format!("Failed to commit workspace insert: {}", e))?;
-  Ok(id)
+  Ok(conn.last_insert_rowid())
 }
 
 pub fn delete_workspace(repo_path: &str, id: i64) -> Result<(), String> {
@@ -1240,11 +852,87 @@ pub fn clear_workspace_description(repo_path: &str, id: i64) -> Result<(), Strin
   Ok(())
 }
 
+fn pr_sync_record(row: &Row) -> rusqlite::Result<(i64, PrSyncRecord)> {
+  Ok((
+    row.get(0)?,
+    PrSyncRecord {
+      pr_number: row.get::<_, i64>(1)? as u64,
+      title: row.get(2)?,
+      description: row.get(3)?,
+    },
+  ))
+}
+
+pub fn get_workspace_pr_sync(
+  repo_path: &str,
+  workspace_id: i64,
+) -> Result<Option<PrSyncRecord>, String> {
+  let conn = get_connection(repo_path)?;
+  conn
+    .query_row(
+      "SELECT workspace_id, pr_number, title, description FROM workspace_pr_sync WHERE workspace_id = ?1",
+      [workspace_id],
+      pr_sync_record,
+    )
+    .optional()
+    .map(|row| row.map(|(_, record)| record))
+    .map_err(|e| format!("Failed to read workspace PR sync: {}", e))
+}
+
+pub fn list_workspace_pr_syncs(
+  repo_path: &str,
+) -> Result<std::collections::HashMap<i64, PrSyncRecord>, String> {
+  let conn = get_connection(repo_path)?;
+  let mut stmt = conn
+    .prepare("SELECT workspace_id, pr_number, title, description FROM workspace_pr_sync")
+    .map_err(|e| format!("Failed to list workspace PR syncs: {}", e))?;
+  let rows = stmt
+    .query_map([], pr_sync_record)
+    .map_err(|e| format!("Failed to list workspace PR syncs: {}", e))?;
+  rows
+    .collect::<rusqlite::Result<_>>()
+    .map_err(|e| format!("Failed to list workspace PR syncs: {}", e))
+}
+
+pub fn set_workspace_pr_sync(
+  repo_path: &str,
+  workspace_id: i64,
+  record: &PrSyncRecord,
+) -> Result<(), String> {
+  let conn = get_connection(repo_path)?;
+  conn
+    .execute(
+      "INSERT INTO workspace_pr_sync (workspace_id, pr_number, title, description)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(workspace_id) DO UPDATE SET
+           pr_number = excluded.pr_number,
+           title = excluded.title,
+           description = excluded.description",
+      params![
+        workspace_id,
+        record.pr_number as i64,
+        record.title,
+        record.description
+      ],
+    )
+    .map_err(|e| format!("Failed to save workspace PR sync: {}", e))?;
+  Ok(())
+}
+
 pub fn update_workspace_target_branch(
   repo_path: &str,
   id: i64,
   target_branch: &str,
 ) -> Result<(), String> {
+  let workspaces = get_workspaces(repo_path)?;
+  if let Some(workspace) = workspaces.iter().find(|ws| ws.id == id) {
+    crate::core::stack_cycle::ensure_no_stack_cycle(
+      &workspaces,
+      &workspace.branch_name,
+      target_branch,
+      &crate::core::get_repo_default_branch(repo_path).unwrap_or_default(),
+    )?;
+  }
   let conn = get_connection(repo_path)?;
   conn
     .execute(
@@ -1252,6 +940,32 @@ pub fn update_workspace_target_branch(
       params![target_branch, id],
     )
     .map_err(|e| format!("Failed to update workspace target branch: {}", e))?;
+  Ok(())
+}
+
+/// The base branch each workspace's pull request had when treq last polled
+/// it, by workspace id. Workspaces never seen with an open PR are absent.
+pub fn get_workspace_pr_bases(repo_path: &str) -> Result<HashMap<i64, String>, String> {
+  let conn = get_connection(repo_path)?;
+  let mut stmt = conn
+    .prepare("SELECT id, pr_base_branch FROM workspaces WHERE pr_base_branch IS NOT NULL")
+    .map_err(|e| format!("Failed to prepare PR base query: {}", e))?;
+  let rows = stmt
+    .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+    .map_err(|e| format!("Failed to query PR bases: {}", e))?;
+  rows
+    .collect::<Result<HashMap<_, _>, _>>()
+    .map_err(|e| e.to_string())
+}
+
+pub fn set_workspace_pr_base(repo_path: &str, id: i64, base_branch: &str) -> Result<(), String> {
+  let conn = get_connection(repo_path)?;
+  conn
+    .execute(
+      "UPDATE workspaces SET pr_base_branch = ?1 WHERE id = ?2",
+      params![base_branch, id],
+    )
+    .map_err(|e| format!("Failed to update workspace PR base: {}", e))?;
   Ok(())
 }
 
@@ -1318,45 +1032,62 @@ pub fn get_cached_commit_diff_stats_batch(
   Ok(out)
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn cache_commit_row(
-  repo_path: &str,
-  commit_id: &str,
-  insertions: u32,
-  deletions: u32,
-  change_id: &str,
-  description: &str,
-  author_name: &str,
-  timestamp: &str,
-) -> Result<(), String> {
-  let conn = get_connection(repo_path)?;
-  conn
-    .execute(
-      "INSERT INTO commit_diff_stats
-             (commit_id, insertions, deletions, updated_at,
-              change_id, description, author_name, timestamp)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-         ON CONFLICT(commit_id) DO UPDATE SET
-            insertions = excluded.insertions,
-            deletions = excluded.deletions,
-            updated_at = excluded.updated_at,
-            change_id = excluded.change_id,
-            description = excluded.description,
-            author_name = excluded.author_name,
-            timestamp = excluded.timestamp",
-      params![
-        commit_id,
-        insertions,
-        deletions,
-        Utc::now().to_rfc3339(),
-        change_id,
-        description,
-        author_name,
-        timestamp,
-      ],
-    )
-    .map_err(|e| format!("Failed to cache commit row: {}", e))?;
-  Ok(())
+/// A commit's diff stat and log fields, as the log caches them.
+#[derive(Debug, Clone)]
+pub struct CommitRow {
+  pub commit_id: String,
+  pub insertions: u32,
+  pub deletions: u32,
+  pub change_id: String,
+  pub description: String,
+  pub author_name: String,
+  pub timestamp: String,
+}
+
+/// Caches `rows` in one transaction.
+pub fn cache_commit_rows(repo_path: &str, rows: &[CommitRow]) -> Result<(), String> {
+  if rows.is_empty() {
+    return Ok(());
+  }
+  let mut conn = get_connection(repo_path)?;
+  let tx = conn
+    .transaction()
+    .map_err(|e| format!("Failed to start commit row transaction: {}", e))?;
+  {
+    let mut stmt = tx
+      .prepare(
+        "INSERT INTO commit_diff_stats
+               (commit_id, insertions, deletions, updated_at,
+                change_id, description, author_name, timestamp)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+           ON CONFLICT(commit_id) DO UPDATE SET
+              insertions = excluded.insertions,
+              deletions = excluded.deletions,
+              updated_at = excluded.updated_at,
+              change_id = excluded.change_id,
+              description = excluded.description,
+              author_name = excluded.author_name,
+              timestamp = excluded.timestamp",
+      )
+      .map_err(|e| format!("Failed to prepare commit row cache: {}", e))?;
+    let updated_at = Utc::now().to_rfc3339();
+    for row in rows {
+      stmt
+        .execute(params![
+          row.commit_id,
+          row.insertions,
+          row.deletions,
+          updated_at,
+          row.change_id,
+          row.description,
+          row.author_name,
+          row.timestamp,
+        ])
+        .map_err(|e| format!("Failed to cache commit row: {}", e))?;
+    }
+  }
+  tx.commit()
+    .map_err(|e| format!("Failed to commit commit row cache: {}", e))
 }
 
 /// Get all workspaces targeting a specific branch
@@ -1437,6 +1168,10 @@ pub fn upsert_workspace_discovery(
   Ok(id)
 }
 
+/// Upserts discovered workspaces and returns the persisted rows. A row is
+/// written only when discovery changed it (or it was never refreshed), so the
+/// periodic poll commits nothing in the steady state; `refreshed_at` is the
+/// time of the last such change.
 pub fn sync_discovered_workspaces(
   repo_path: &str,
   discovered: &[DiscoveredWorkspace],
@@ -1460,14 +1195,21 @@ pub fn sync_discovered_workspaces(
     let update_branch_name = discovered_has_canonical_bookmark;
     let update_workspace_name = !workspace.has_conflicts;
     release_archived_workspace_path(&tx, &workspace.workspace_path)?;
-    tx.execute(
+    // Prepared once per sync rather than once per workspace, which was
+    // half of a poll's cost.
+    tx.prepare_cached(
             "INSERT INTO workspaces (workspace_name, workspace_path, branch_name, created_at, refreshed_at)
              VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT(workspace_path) DO UPDATE SET
                  workspace_name = CASE WHEN ?6 THEN excluded.workspace_name ELSE workspaces.workspace_name END,
                  branch_name = CASE WHEN ?7 THEN excluded.branch_name ELSE workspaces.branch_name END,
-                 refreshed_at = excluded.refreshed_at",
-            params![
+                 refreshed_at = excluded.refreshed_at
+             WHERE workspaces.refreshed_at IS NULL
+                 OR (?6 AND workspaces.workspace_name IS NOT excluded.workspace_name)
+                 OR (?7 AND workspaces.branch_name IS NOT excluded.branch_name)",
+        )
+        .and_then(|mut statement| {
+            statement.execute(params![
                 workspace.workspace_name,
                 workspace.workspace_path,
                 workspace.branch_name,
@@ -1475,8 +1217,8 @@ pub fn sync_discovered_workspaces(
                 refreshed_at,
                 update_workspace_name,
                 update_branch_name,
-            ],
-        )
+            ])
+        })
         .map_err(|e| format!("Failed to upsert discovered workspace: {}", e))?;
   }
   tx.commit()
@@ -1508,27 +1250,76 @@ pub fn sync_discovered_workspaces(
     .map_err(|e| e.to_string())
 }
 
+/// Last rebased target commit recorded in an already-loaded workspace's metadata.
+pub fn last_rebased_commit_of(workspace: &Workspace) -> Option<String> {
+  let json = serde_json::from_str::<serde_json::Value>(workspace.metadata.as_deref()?).ok()?;
+  json
+    .get("last_rebased_target_commit")
+    .and_then(|v| v.as_str())
+    .map(|s| s.to_string())
+}
+
+/// Why the workspace's last rebase was held back (`core::rebase_guard`), as
+/// stored in its metadata.
+pub fn rebase_hold_of(workspace: &Workspace) -> Option<serde_json::Value> {
+  let json = serde_json::from_str::<serde_json::Value>(workspace.metadata.as_deref()?).ok()?;
+  json.get("rebase_hold").filter(|v| !v.is_null()).cloned()
+}
+
+/// Stores the workspace's rebase hold in its metadata; `None` clears it.
+pub fn set_workspace_rebase_hold(
+  repo_path: &str,
+  id: i64,
+  hold: Option<serde_json::Value>,
+) -> Result<(), String> {
+  let conn = get_connection(repo_path)?;
+  let current: Option<String> = conn
+    .query_row(
+      "SELECT metadata FROM workspaces WHERE id = ?1",
+      params![id],
+      |row| row.get(0),
+    )
+    .map_err(|e| format!("Failed to read metadata: {}", e))?;
+  let mut meta = current
+    .and_then(|m| serde_json::from_str::<serde_json::Value>(&m).ok())
+    .filter(|m| m.is_object())
+    .unwrap_or(serde_json::json!({}));
+  if meta.get("rebase_hold") == hold.as_ref()
+    || (hold.is_none() && meta.get("rebase_hold").is_none())
+  {
+    return Ok(());
+  }
+  match hold {
+    Some(hold) => meta["rebase_hold"] = hold,
+    None => {
+      if let Some(map) = meta.as_object_mut() {
+        map.remove("rebase_hold");
+      }
+    }
+  }
+  let new_metadata =
+    serde_json::to_string(&meta).map_err(|e| format!("Failed to serialize metadata: {}", e))?;
+  conn
+    .execute(
+      "UPDATE workspaces SET metadata = ?1 WHERE id = ?2",
+      params![new_metadata, id],
+    )
+    .map_err(|e| format!("Failed to update metadata: {}", e))?;
+  Ok(())
+}
+
 /// Get last rebased commit from workspace metadata
 pub fn get_workspace_last_rebased_commit(
   repo_path: &str,
   id: i64,
 ) -> Result<Option<String>, String> {
   let workspaces = get_workspaces(repo_path)?;
-  let workspace = workspaces.iter().find(|w| w.id == id);
-
-  if let Some(ws) = workspace {
-    if let Some(metadata) = &ws.metadata {
-      if let Ok(json) = serde_json::from_str::<serde_json::Value>(metadata) {
-        return Ok(
-          json
-            .get("last_rebased_target_commit")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string()),
-        );
-      }
-    }
-  }
-  Ok(None)
+  Ok(
+    workspaces
+      .iter()
+      .find(|w| w.id == id)
+      .and_then(last_rebased_commit_of),
+  )
 }
 
 /// Update last rebased commit in workspace metadata.
@@ -1541,7 +1332,30 @@ pub fn update_workspace_last_rebased_commit(
   commit_id: &str,
 ) -> Result<(), String> {
   let conn = get_connection(repo_path)?;
+  set_last_rebased_commit(&conn, id, commit_id)
+}
 
+/// Records the same rebased target commit for several workspaces in one
+/// transaction (one commit instead of one per workspace).
+pub fn update_workspaces_last_rebased_commit(
+  repo_path: &str,
+  ids: &[i64],
+  commit_id: &str,
+) -> Result<(), String> {
+  if ids.is_empty() {
+    return Ok(());
+  }
+  let conn = get_connection(repo_path)?;
+  let tx =
+    write_transaction(&conn).map_err(|e| format!("Failed to start rebase bookkeeping: {}", e))?;
+  for id in ids {
+    set_last_rebased_commit(&tx, *id, commit_id)?;
+  }
+  tx.commit()
+    .map_err(|e| format!("Failed to commit rebase bookkeeping: {}", e))
+}
+
+fn set_last_rebased_commit(conn: &Connection, id: i64, commit_id: &str) -> Result<(), String> {
   let current_metadata: Option<String> = conn
     .query_row(
       "SELECT metadata FROM workspaces WHERE id = ?1",
@@ -1836,22 +1650,27 @@ pub fn sync_workspace_files(
   )
   .map_err(|e| format!("Failed to delete existing files: {}", e))?;
 
-  for file in &files {
-    tx.execute(
-      "INSERT INTO workspace_files
+  {
+    let mut insert = tx
+      .prepare_cached(
+        "INSERT INTO workspace_files
              (workspace_id, file_path, relative_path, is_directory, parent_path, cached_at, mtime)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-      params![
-        workspace_id,
-        &file.file_path,
-        &file.relative_path,
-        if file.is_directory { 1 } else { 0 },
-        &file.parent_path,
-        &file.cached_at,
-        &file.mtime,
-      ],
-    )
-    .map_err(|e| format!("Failed to insert file: {}", e))?;
+      )
+      .map_err(|e| format!("Failed to prepare file insert: {}", e))?;
+    for file in &files {
+      insert
+        .execute(params![
+          workspace_id,
+          &file.file_path,
+          &file.relative_path,
+          if file.is_directory { 1 } else { 0 },
+          &file.parent_path,
+          &file.cached_at,
+          &file.mtime,
+        ])
+        .map_err(|e| format!("Failed to insert file: {}", e))?;
+    }
   }
 
   tx.commit()
@@ -1969,7 +1788,10 @@ fn agent_review_comment_from_row(row: &Row<'_>) -> rusqlite::Result<AgentReviewC
 }
 
 /// Insert one local review comment. Returns the stored row.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+  clippy::too_many_arguments,
+  reason = "flat argument list kept to match callers"
+)]
 pub fn create_agent_review_comment(
   repo_path: &str,
   target_type: &str,
@@ -2029,6 +1851,28 @@ pub fn create_agent_review_comment(
     )
     .map_err(|e| format!("Failed to insert agent review comment: {}", e))?;
 
+  if is_code_review_target(&comment.target_type) {
+    conn
+      .execute(
+        "INSERT INTO review_history (kind, comment_id, source, target_type, target_id, file_path, start_line, end_line, body, suggestion, quoted_text, outcome, created_at)
+         VALUES ('agent_comment', ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'open', ?11)",
+        params![
+          comment.id,
+          comment.source,
+          comment.target_type,
+          comment.target_id,
+          comment.file_path,
+          comment.start_line,
+          comment.end_line,
+          comment.comment_text,
+          comment.suggested_replacement,
+          comment.quoted_text,
+          comment.created_at,
+        ],
+      )
+      .map_err(|e| format!("Failed to record review history: {}", e))?;
+  }
+
   Ok(comment)
 }
 
@@ -2086,23 +1930,32 @@ pub fn resolve_agent_review_comment(repo_path: &str, id: &str) -> Result<(), Str
       params![id, now],
     )
     .map_err(|e| format!("Failed to resolve agent review comment: {}", e))?;
-  Ok(())
+  decide_review_history(&conn, id, "resolved", &["open"])
 }
 
-/// Edit a comment's text and/or record its line hash; `None` keeps the value.
+/// Records that the user applied comment `id`'s suggestion.
+pub fn mark_review_history_applied(repo_path: &str, id: &str) -> Result<(), String> {
+  let conn = get_connection(repo_path)?;
+  decide_review_history(&conn, id, "applied", &["open", "resolved"])
+}
+
+/// Edit a comment's text, or record the hash and text of the lines it
+/// covers (PR review drafts); `None` keeps the stored value.
 pub fn update_agent_review_comment(
   repo_path: &str,
   id: &str,
   comment_text: Option<&str>,
   line_hash: Option<&str>,
+  quoted_text: Option<&str>,
 ) -> Result<(), String> {
   let conn = get_connection(repo_path)?;
   conn
     .execute(
       "UPDATE agent_review_comments
-         SET comment_text = COALESCE(?2, comment_text), line_hash = COALESCE(?3, line_hash)
+         SET comment_text = COALESCE(?2, comment_text), line_hash = COALESCE(?3, line_hash),
+             quoted_text = COALESCE(?4, quoted_text)
        WHERE id = ?1",
-      params![id, comment_text, line_hash],
+      params![id, comment_text, line_hash, quoted_text],
     )
     .map_err(|e| format!("Failed to update agent review comment: {e}"))?;
   Ok(())
@@ -2114,7 +1967,166 @@ pub fn delete_agent_review_comment(repo_path: &str, id: &str) -> Result<(), Stri
   conn
     .execute("DELETE FROM agent_review_comments WHERE id = ?1", [id])
     .map_err(|e| format!("Failed to delete agent review comment: {}", e))?;
+  decide_review_history(&conn, id, "dismissed", &["open"])
+}
+
+// Review History Functions
+
+/// How long review history is kept.
+pub const REVIEW_HISTORY_MAX_AGE: chrono::Duration = chrono::Duration::days(30);
+/// How often every open repository's review history is pruned.
+const REVIEW_HISTORY_PRUNE_EVERY: std::time::Duration =
+  std::time::Duration::from_secs(12 * 60 * 60);
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct ReviewHistoryEntry {
+  pub id: i64,
+  /// `agent_comment` or `user_review`.
+  pub kind: String,
+  pub comment_id: Option<String>,
+  pub source: Option<String>,
+  pub workspace_id: Option<i64>,
+  pub target_type: String,
+  pub target_id: Option<String>,
+  pub file_path: Option<String>,
+  pub start_line: Option<i64>,
+  pub end_line: Option<i64>,
+  pub body: String,
+  pub suggestion: Option<String>,
+  pub quoted_text: Option<String>,
+  pub mode: Option<String>,
+  /// `open`, `resolved`, `applied` or `dismissed` for an agent comment;
+  /// `sent` for a user review.
+  pub outcome: String,
+  pub created_at: String,
+  pub decided_at: Option<String>,
+}
+
+/// Linear reviews have their own prompt and review prompt edits are not
+/// code review; history covers code review only.
+fn is_code_review_target(target_type: &str) -> bool {
+  !target_type.starts_with("linear") && target_type != "review_prompt"
+}
+
+fn decide_review_history(
+  conn: &Connection,
+  comment_id: &str,
+  outcome: &str,
+  from: &[&str],
+) -> Result<(), String> {
+  let from = from
+    .iter()
+    .map(|o| format!("'{o}'"))
+    .collect::<Vec<_>>()
+    .join(",");
+  conn
+    .execute(
+      &format!(
+        "UPDATE review_history SET outcome = ?2, decided_at = ?3
+         WHERE comment_id = ?1 AND outcome IN ({from})"
+      ),
+      params![comment_id, outcome, Utc::now().to_rfc3339()],
+    )
+    .map_err(|e| format!("Failed to record review outcome: {}", e))?;
   Ok(())
+}
+
+/// Records a review the user sent to an agent: `scope` is `changes` or
+/// `files`, `body` the markdown sent.
+pub fn add_user_review_history(
+  repo_path: &str,
+  workspace_id: Option<i64>,
+  scope: &str,
+  body: &str,
+  mode: &str,
+) -> Result<(), String> {
+  let conn = get_connection(repo_path)?;
+  conn
+    .execute(
+      "INSERT INTO review_history (kind, workspace_id, target_type, body, mode, outcome, created_at)
+       VALUES ('user_review', ?1, ?2, ?3, ?4, 'sent', ?5)",
+      params![workspace_id, scope, body, mode, Utc::now().to_rfc3339()],
+    )
+    .map_err(|e| format!("Failed to record review history: {}", e))?;
+  Ok(())
+}
+
+/// The newest `limit` review history rows, newest first.
+pub fn list_review_history(
+  repo_path: &str,
+  limit: usize,
+) -> Result<Vec<ReviewHistoryEntry>, String> {
+  let conn = get_connection(repo_path)?;
+  let mut stmt = conn
+    .prepare(
+      "SELECT id, kind, comment_id, source, workspace_id, target_type, target_id, file_path,
+              start_line, end_line, body, suggestion, quoted_text, mode, outcome, created_at, decided_at
+       FROM review_history ORDER BY created_at DESC, id DESC LIMIT ?1",
+    )
+    .map_err(|e| format!("Failed to prepare query: {}", e))?;
+  let rows = stmt
+    .query_map([limit as i64], |row| {
+      Ok(ReviewHistoryEntry {
+        id: row.get(0)?,
+        kind: row.get(1)?,
+        comment_id: row.get(2)?,
+        source: row.get(3)?,
+        workspace_id: row.get(4)?,
+        target_type: row.get(5)?,
+        target_id: row.get(6)?,
+        file_path: row.get(7)?,
+        start_line: row.get(8)?,
+        end_line: row.get(9)?,
+        body: row.get(10)?,
+        suggestion: row.get(11)?,
+        quoted_text: row.get(12)?,
+        mode: row.get(13)?,
+        outcome: row.get(14)?,
+        created_at: row.get(15)?,
+        decided_at: row.get(16)?,
+      })
+    })
+    .map_err(|e| format!("Failed to list review history: {}", e))?
+    .collect::<rusqlite::Result<Vec<_>>>()
+    .map_err(|e| format!("Failed to read review history: {}", e))?;
+  Ok(rows)
+}
+
+/// Deletes review history created before `cutoff`; returns how many rows.
+pub fn prune_review_history(
+  repo_path: &str,
+  cutoff: chrono::DateTime<Utc>,
+) -> Result<usize, String> {
+  let conn = get_connection(repo_path)?;
+  conn
+    .execute(
+      "DELETE FROM review_history WHERE created_at < ?1",
+      [cutoff.to_rfc3339()],
+    )
+    .map_err(|e| format!("Failed to prune review history: {}", e))
+}
+
+fn prune_review_history_now(repo_path: &str) {
+  if let Err(err) = prune_review_history(repo_path, Utc::now() - REVIEW_HISTORY_MAX_AGE) {
+    log::warn!("Failed to prune review history for {repo_path}: {err}");
+  }
+}
+
+/// Once per process: prunes every repository opened so far, every 12 hours.
+fn start_review_history_pruner() {
+  static STARTED: OnceLock<()> = OnceLock::new();
+  STARTED.get_or_init(|| {
+    std::thread::spawn(|| loop {
+      std::thread::sleep(REVIEW_HISTORY_PRUNE_EVERY);
+      let repos: Vec<String> = INITIALIZED_DBS
+        .get()
+        .map(|dbs| dbs.lock_or_recover().iter().cloned().collect())
+        .unwrap_or_default();
+      for repo in repos {
+        prune_review_history_now(&repo);
+      }
+    });
+  });
 }
 
 // Prompt History Functions
@@ -2159,9 +2171,19 @@ pub fn add_prompt_history(
 
 /// Get every prompt ever sent in this repository, most recent first.
 pub fn get_prompt_history(repo_path: &str) -> Result<Vec<PromptHistoryEntry>, String> {
+  get_prompt_history_page(repo_path, i64::MAX as usize, 0)
+}
+
+/// Up to `limit` prompts sent in this repository after the newest `offset`
+/// of them, most recent first.
+pub fn get_prompt_history_page(
+  repo_path: &str,
+  limit: usize,
+  offset: usize,
+) -> Result<Vec<PromptHistoryEntry>, String> {
   let conn = get_connection(repo_path)?;
   let sql = format!(
-    "{} ORDER BY ph.created_at DESC, ph.id DESC",
+    "{} ORDER BY ph.created_at DESC, ph.id DESC LIMIT ?1 OFFSET ?2",
     PROMPT_HISTORY_SELECT
   );
   let mut stmt = conn
@@ -2169,7 +2191,13 @@ pub fn get_prompt_history(repo_path: &str) -> Result<Vec<PromptHistoryEntry>, St
     .map_err(|e| format!("Failed to prepare prompt history query: {}", e))?;
 
   let entries = stmt
-    .query_map([], prompt_history_from_row)
+    .query_map(
+      params![
+        limit.min(i64::MAX as usize) as i64,
+        offset.min(i64::MAX as usize) as i64
+      ],
+      prompt_history_from_row,
+    )
     .map_err(|e| format!("Failed to query prompt history: {}", e))?;
 
   entries
@@ -2178,7 +2206,10 @@ pub fn get_prompt_history(repo_path: &str) -> Result<Vec<PromptHistoryEntry>, St
 }
 
 /// Persist a newly created stash entry.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+  clippy::too_many_arguments,
+  reason = "flat argument list kept to match callers"
+)]
 pub fn add_stash(
   repo_path: &str,
   workspace_id: Option<i64>,
@@ -2411,6 +2442,118 @@ mod tests {
     }
   }
 
+  fn agent_comment(repo: &str, target_type: &str) -> AgentReviewComment {
+    create_agent_review_comment(
+      repo,
+      target_type,
+      "7",
+      "a.rs",
+      None,
+      2,
+      3,
+      Some("new"),
+      "use ?",
+      Some("x?"),
+      "local-agent",
+      None,
+    )
+    .unwrap()
+  }
+
+  fn outcomes(repo: &str) -> Vec<(String, String)> {
+    list_review_history(repo, 100)
+      .unwrap()
+      .into_iter()
+      .map(|e| (e.kind, e.outcome))
+      .collect()
+  }
+
+  #[test]
+  fn review_history_records_each_agent_comment_and_its_outcome() {
+    let dir = TempDir::new().unwrap();
+    let repo = dir.path().to_str().unwrap();
+    let applied = agent_comment(repo, "workspace_diff");
+    let resolved = agent_comment(repo, "workspace_diff");
+    let dismissed = agent_comment(repo, "file");
+    agent_comment(repo, "linear_issue");
+    resolve_agent_review_comment(repo, &applied.id).unwrap();
+    mark_review_history_applied(repo, &applied.id).unwrap();
+    resolve_agent_review_comment(repo, &resolved.id).unwrap();
+    delete_agent_review_comment(repo, &dismissed.id).unwrap();
+
+    let entries = list_review_history(repo, 100).unwrap();
+    assert_eq!(entries.len(), 3, "linear targets are not code review");
+    let outcome = |id: &str| {
+      entries
+        .iter()
+        .find(|e| e.comment_id.as_deref() == Some(id))
+        .map(|e| e.outcome.clone())
+        .unwrap()
+    };
+    assert_eq!(outcome(&applied.id), "applied");
+    assert_eq!(outcome(&resolved.id), "resolved");
+    assert_eq!(outcome(&dismissed.id), "dismissed");
+    let first = entries
+      .iter()
+      .find(|e| e.comment_id.as_deref() == Some(&applied.id))
+      .unwrap();
+    assert_eq!(first.body, "use ?");
+    assert_eq!(first.suggestion.as_deref(), Some("x?"));
+    assert_eq!((first.start_line, first.end_line), (Some(2), Some(3)));
+    assert!(first.decided_at.is_some());
+  }
+
+  #[test]
+  fn review_history_records_one_row_per_sent_review() {
+    let dir = TempDir::new().unwrap();
+    let repo = dir.path().to_str().unwrap();
+    add_user_review_history(repo, Some(3), "changes", "## a.rs:4\nrename", "plan").unwrap();
+    add_user_review_history(repo, None, "files", "## b.rs:1\nwhy", "acceptEdits").unwrap();
+    let entries = list_review_history(repo, 100).unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].body, "## b.rs:1\nwhy", "newest first");
+    assert_eq!(entries[1].target_type, "changes");
+    assert_eq!(entries[1].mode.as_deref(), Some("plan"));
+    assert_eq!(outcomes(repo)[0], ("user_review".into(), "sent".into()));
+  }
+
+  #[test]
+  fn review_history_prunes_old_rows_when_the_repository_is_first_opened() {
+    let dir = TempDir::new().unwrap();
+    let repo = dir.path().to_str().unwrap();
+    let db_path = init_local_db(repo).unwrap();
+    Connection::open(&db_path)
+      .unwrap()
+      .execute(
+        "INSERT INTO review_history (kind, target_type, body, outcome, created_at)
+         VALUES ('user_review', 'changes', 'old', 'sent', ?1)",
+        [(Utc::now() - chrono::Duration::days(31)).to_rfc3339()],
+      )
+      .unwrap();
+    assert!(list_review_history(repo, 100).unwrap().is_empty());
+  }
+
+  #[test]
+  fn review_history_prunes_rows_older_than_the_cutoff() {
+    let dir = TempDir::new().unwrap();
+    let repo = dir.path().to_str().unwrap();
+    add_user_review_history(repo, None, "changes", "old", "plan").unwrap();
+    get_connection(repo)
+      .unwrap()
+      .execute(
+        "UPDATE review_history SET created_at = ?1",
+        [(Utc::now() - chrono::Duration::days(31)).to_rfc3339()],
+      )
+      .unwrap();
+    add_user_review_history(repo, None, "changes", "new", "plan").unwrap();
+
+    let removed = prune_review_history(repo, Utc::now() - REVIEW_HISTORY_MAX_AGE).unwrap();
+    assert_eq!(removed, 1);
+    let left = list_review_history(repo, 100).unwrap();
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0].body, "new");
+  }
+
   #[test]
   fn updates_review_comment_text_and_line_hash() {
     let dir = TempDir::new().unwrap();
@@ -2432,19 +2575,21 @@ mod tests {
     .unwrap();
     assert_eq!(comment.line_hash, None);
 
-    update_agent_review_comment(repo, &comment.id, None, Some("h1")).unwrap();
+    update_agent_review_comment(repo, &comment.id, None, Some("h1"), Some("+a\n+b")).unwrap();
     let stored = get_agent_review_comment(repo, &comment.id)
       .unwrap()
       .unwrap();
     assert_eq!(stored.comment_text, "first");
     assert_eq!(stored.line_hash.as_deref(), Some("h1"));
+    assert_eq!(stored.quoted_text.as_deref(), Some("+a\n+b"));
 
-    update_agent_review_comment(repo, &comment.id, Some("second"), None).unwrap();
+    update_agent_review_comment(repo, &comment.id, Some("second"), None, None).unwrap();
     let stored = get_agent_review_comment(repo, &comment.id)
       .unwrap()
       .unwrap();
     assert_eq!(stored.comment_text, "second");
     assert_eq!(stored.line_hash.as_deref(), Some("h1"));
+    assert_eq!(stored.quoted_text.as_deref(), Some("+a\n+b"));
     assert_eq!(stored.source, "local-human");
   }
 
@@ -2472,6 +2617,7 @@ mod tests {
       &draft.id,
       Some("Trim before matching."),
       Some("abc123"),
+      None,
     )
     .unwrap();
 
@@ -2569,6 +2715,187 @@ mod tests {
       .is_err());
   }
 
+  /// The schema as the app reads it: per table, its columns (sorted by name,
+  /// since `ALTER TABLE ADD COLUMN` appends), foreign keys and indexes.
+  fn schema_shape(conn: &Connection) -> String {
+    let names = |sql: &str| -> Vec<String> {
+      let mut stmt = conn.prepare(sql).expect("prepare");
+      stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .expect("query")
+        .map(|r| r.expect("row"))
+        .collect()
+    };
+    let rows = |sql: &str| -> Vec<String> {
+      let mut stmt = conn.prepare(sql).expect("prepare");
+      let n = stmt.column_count();
+      let mut out: Vec<String> = stmt
+        .query_map([], |row| {
+          Ok(
+            (0..n)
+              .map(|i| match row.get_ref(i).expect("cell") {
+                rusqlite::types::ValueRef::Null => "NULL".to_string(),
+                rusqlite::types::ValueRef::Integer(v) => v.to_string(),
+                rusqlite::types::ValueRef::Real(v) => v.to_string(),
+                rusqlite::types::ValueRef::Text(v) | rusqlite::types::ValueRef::Blob(v) => {
+                  String::from_utf8_lossy(v).into_owned()
+                }
+              })
+              .collect::<Vec<_>>()
+              .join("|"),
+          )
+        })
+        .expect("query")
+        .map(|r| r.expect("row"))
+        .collect();
+      out.sort();
+      out
+    };
+    let mut shape = Vec::new();
+    for table in names(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+    ) {
+      shape.push(format!("table {table}"));
+      for col in rows(&format!(
+        "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info('{table}')"
+      )) {
+        shape.push(format!("  column {col}"));
+      }
+      for fk in rows(&format!(
+        "SELECT \"table\", \"from\", \"to\", on_update, on_delete FROM pragma_foreign_key_list('{table}')"
+      )) {
+        shape.push(format!("  fk {fk}"));
+      }
+      for index in rows(&format!(
+        "SELECT l.name || '|' || l.\"unique\" || '|' || group_concat(i.name, ',')
+           FROM pragma_index_list('{table}') l, pragma_index_info(l.name) i
+          WHERE l.origin = 'c' GROUP BY l.name"
+      )) {
+        shape.push(format!("  index {index}"));
+      }
+    }
+    shape.join("\n") + "\n"
+  }
+
+  fn fresh_schema_shape() -> String {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let db_path = init_local_db(temp_dir.path().to_str().unwrap()).expect("fresh init");
+    schema_shape(&Connection::open(db_path).expect("open fresh database"))
+  }
+
+  /// An upgraded database must read and write as a fresh install does: every
+  /// fresh table, column, foreign key and index is present and identical.
+  /// Tables and columns the app no longer uses may stay behind, as long as no
+  /// insert can trip on them (nullable, or with a default).
+  fn assert_upgrade_matches_fresh(db_path: &Path, label: &str) {
+    let parse = |shape: String| {
+      let mut tables: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+      let mut current = String::new();
+      for line in shape.lines() {
+        if let Some(name) = line.strip_prefix("table ") {
+          current = name.to_string();
+          tables.entry(current.clone()).or_default();
+        } else {
+          tables
+            .get_mut(&current)
+            .expect("table")
+            .push(line.trim().to_string());
+        }
+      }
+      tables
+    };
+    let upgraded = parse(schema_shape(
+      &Connection::open(db_path).expect("open upgraded database"),
+    ));
+    let fresh = parse(fresh_schema_shape());
+    for (table, fresh_lines) in &fresh {
+      let Some(upgraded_lines) = upgraded.get(table) else {
+        panic!("{label}: table {table} missing after upgrade");
+      };
+      for line in fresh_lines {
+        assert!(
+          upgraded_lines.contains(line),
+          "{label}: {table} lacks `{line}` after upgrade; has {upgraded_lines:#?}"
+        );
+      }
+      for line in upgraded_lines {
+        if fresh_lines.contains(line) {
+          continue;
+        }
+        let blocks_inserts = line.strip_prefix("column ").is_some_and(|col| {
+          let parts: Vec<_> = col.split('|').collect();
+          parts[2] == "1" && parts[3] == "NULL"
+        });
+        let stale_constraint = !line.starts_with("column ");
+        assert!(
+          !blocks_inserts && !stale_constraint,
+          "{label}: {table} keeps legacy `{line}` after upgrade"
+        );
+      }
+    }
+  }
+
+  /// Every schema a past release created on a fresh install, replayed from
+  /// that commit's `local_db.rs` (see `local_db/upgrade_fixtures`).
+  #[test]
+  fn every_released_schema_upgrades_to_the_current_one() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/local_db/upgrade_fixtures");
+    let mut fixtures: Vec<_> = fs::read_dir(&dir)
+      .expect("fixtures dir")
+      .map(|e| e.expect("entry").path())
+      .collect();
+    fixtures.sort();
+    assert!(fixtures.len() > 30, "found {} fixtures", fixtures.len());
+    let failures: Vec<String> = fixtures
+      .iter()
+      .filter_map(|fixture| {
+        let label = fixture.file_name().unwrap().to_string_lossy().into_owned();
+        std::panic::catch_unwind(|| upgrade_fixture(fixture, &label))
+          .err()
+          .map(|e| {
+            e.downcast_ref::<String>()
+              .cloned()
+              .unwrap_or_else(|| label.clone())
+          })
+      })
+      .collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+  }
+
+  fn upgrade_fixture(fixture: &Path, label: &str) {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let sql = fs::read_to_string(fixture).expect("read fixture");
+    let (repo_path, db_path) = open_legacy_db(&temp_dir, &sql);
+    init_local_db(&repo_path).unwrap_or_else(|e| panic!("{label}: {e}"));
+    assert_upgrade_matches_fresh(&db_path, label);
+    // The app's own writes and reads work on the upgraded file.
+    let id = add_workspace(
+      &repo_path,
+      "ws".into(),
+      format!("{repo_path}/.treq/workspaces/ws"),
+      "feat/ws".into(),
+      None,
+      None,
+      None,
+    )
+    .unwrap_or_else(|e| panic!("{label}: add_workspace: {e}"));
+    let workspaces = get_workspaces(&repo_path).unwrap_or_else(|e| panic!("{label}: {e}"));
+    assert!(
+      workspaces.iter().any(|w| w.id == id),
+      "{label}: workspace not read back"
+    );
+  }
+
+  #[test]
+  fn fresh_schema_matches_the_snapshot() {
+    // A change here is a schema change: it needs a migration for existing
+    // databases. Update `local_db/schema.snapshot` alongside the migration.
+    assert_eq!(
+      fresh_schema_shape(),
+      include_str!("local_db/schema.snapshot")
+    );
+  }
+
   fn open_legacy_db(temp_dir: &TempDir, schema: &str) -> (String, PathBuf) {
     let repo_path = temp_dir.path().to_str().unwrap().to_string();
     let db_path = get_local_db_path(&repo_path);
@@ -2587,6 +2914,205 @@ mod tests {
       )
       .expect("sqlite_master")
       > 0
+  }
+
+  fn all_migrations_applied(db_path: &PathBuf) -> bool {
+    let conn = Connection::open(db_path).expect("open database");
+    migrations::is_current(&conn, migrations::MIGRATIONS).expect("read migrations")
+  }
+
+  fn user_version(db_path: &PathBuf) -> i64 {
+    Connection::open(db_path)
+      .expect("open database")
+      .query_row("PRAGMA user_version", [], |row| row.get(0))
+      .expect("user_version")
+  }
+
+  // Windows and background tasks open a repo's db at the same time; each
+  // migration checks for its column, then adds it.
+  #[test]
+  fn concurrent_inits_of_an_old_db_all_succeed() {
+    for _ in 0..200 {
+      let temp_dir = TempDir::new().expect("Failed to create temp dir");
+      // Old enough that every init adds the missing workspaces columns.
+      let (repo_path, _) = open_legacy_db(
+        &temp_dir,
+        "CREATE TABLE workspaces (
+           id INTEGER PRIMARY KEY AUTOINCREMENT,
+           workspace_name TEXT NOT NULL,
+           workspace_path TEXT NOT NULL UNIQUE,
+           branch_name TEXT NOT NULL,
+           created_at TEXT NOT NULL
+         );",
+      );
+      let start = std::sync::Arc::new(std::sync::Barrier::new(16));
+      let inits: Vec<_> = (0..16)
+        .map(|_| {
+          let (repo_path, start) = (repo_path.clone(), start.clone());
+          std::thread::spawn(move || {
+            start.wait();
+            init_local_db(&repo_path)
+          })
+        })
+        .collect();
+      for init in inits {
+        init.join().unwrap().expect("concurrent init");
+      }
+    }
+  }
+
+  #[test]
+  fn init_records_schema_version_and_second_init_is_a_noop() {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let repo_path = temp_dir.path().to_str().unwrap().to_string();
+    let db_path = init_local_db(&repo_path).expect("fresh init");
+    assert!(all_migrations_applied(&db_path));
+
+    // Drop a table the init would recreate: a skipped init leaves it missing.
+    let conn = Connection::open(&db_path).expect("open database");
+    conn.execute("DROP TABLE repo_trust", []).unwrap();
+    drop(conn);
+    init_local_db(&repo_path).expect("second init");
+    let conn = Connection::open(&db_path).expect("reopen database");
+    assert!(!table_exists(&conn, "repo_trust"));
+  }
+
+  #[test]
+  fn init_migrates_legacy_database_at_version_zero() {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let (repo_path, db_path) = open_legacy_db(
+      &temp_dir,
+      "CREATE TABLE workspaces (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         workspace_name TEXT NOT NULL,
+         workspace_path TEXT NOT NULL UNIQUE,
+         branch_name TEXT NOT NULL,
+         created_at TEXT NOT NULL,
+         metadata TEXT,
+         target_branch TEXT
+       );",
+    );
+    assert_eq!(user_version(&db_path), 0);
+
+    init_local_db(&repo_path).expect("migrate legacy database");
+
+    let conn = Connection::open(&db_path).expect("reopen database");
+    assert!(table_exists(&conn, "repo_trust"));
+    assert!(conn
+      .prepare("SELECT refreshed_at, archived FROM workspaces")
+      .is_ok());
+    assert!(all_migrations_applied(&db_path));
+  }
+
+  #[test]
+  fn heartbeat_prunes_stale_rows_and_upserts_in_one_call() {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let repo_path = temp_dir.path().to_str().unwrap().to_string();
+    let instance = |id: &str, beat: u64| RegisteredInstance {
+      instance_id: id.to_string(),
+      pid: 1,
+      started_at: 0,
+      last_heartbeat_at: beat,
+      endpoint: "127.0.0.1:1".to_string(),
+      windows: Vec::new(),
+    };
+    upsert_instance_registry(&repo_path, instance("stale", 1_000)).unwrap();
+    heartbeat_instance_registry(&repo_path, 100_000, 15_000, instance("me", 100_000)).unwrap();
+    let ids: Vec<String> = list_instance_registry(&repo_path)
+      .unwrap()
+      .into_iter()
+      .map(|i| i.instance_id)
+      .collect();
+    assert_eq!(ids, vec!["me".to_string()]);
+  }
+
+  fn cost_instance(heartbeat: u64) -> RegisteredInstance {
+    RegisteredInstance {
+      instance_id: "me".to_string(),
+      pid: 1,
+      started_at: 0,
+      last_heartbeat_at: heartbeat,
+      endpoint: "127.0.0.1:1".to_string(),
+      windows: Vec::new(),
+    }
+  }
+
+  /// 200 one-row writes through `get_connection`. Count the fsyncs with
+  /// `strace -f -e trace=fsync,fdatasync` on the test binary, e.g.
+  /// `strace -f -c -e trace=fdatasync <bin> local_db_write_cost --ignored`.
+  #[test]
+  #[ignore]
+  fn local_db_write_cost() {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let repo_path = temp_dir.path().to_str().unwrap().to_string();
+    upsert_instance_registry(&repo_path, cost_instance(0)).unwrap();
+    for heartbeat in 1..=200 {
+      upsert_instance_registry(&repo_path, cost_instance(heartbeat)).unwrap();
+    }
+  }
+
+  /// 200 one-row reads through `get_connection`, for callgrind:
+  /// `valgrind --tool=callgrind --toggle-collect='*local_db_read_cost*' <bin> local_db_read_cost --ignored`.
+  #[test]
+  #[ignore]
+  fn local_db_read_cost() {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let repo_path = temp_dir.path().to_str().unwrap().to_string();
+    upsert_instance_registry(&repo_path, cost_instance(0)).unwrap();
+    for _ in 0..200 {
+      assert_eq!(list_instance_registry(&repo_path).unwrap().len(), 1);
+    }
+  }
+
+  /// `cargo test --lib init_local_db_cost -- --ignored --nocapture`
+  #[test]
+  #[ignore]
+  fn init_local_db_cost() {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let repo_path = temp_dir.path().to_str().unwrap().to_string();
+    let first = std::time::Instant::now();
+    let db_path = init_local_db(&repo_path).unwrap();
+    println!("first init: {:?}", first.elapsed());
+    let n = 200;
+    let started = std::time::Instant::now();
+    for _ in 0..n {
+      init_local_db(&repo_path).unwrap();
+    }
+    println!("gated init avg: {:?}", started.elapsed() / n);
+    let forget_migrations = || {
+      Connection::open(&db_path)
+        .unwrap()
+        .execute_batch("DELETE FROM schema_migrations; PRAGMA user_version = 0;")
+        .unwrap();
+    };
+    forget_migrations();
+    let started = std::time::Instant::now();
+    for _ in 0..n {
+      forget_migrations();
+      init_local_db(&repo_path).unwrap();
+    }
+    println!("ungated init avg: {:?}", started.elapsed() / n);
+
+    let instance = || RegisteredInstance {
+      instance_id: "me".to_string(),
+      pid: 1,
+      started_at: 0,
+      last_heartbeat_at: 1,
+      endpoint: "127.0.0.1:1".to_string(),
+      windows: Vec::new(),
+    };
+    let started = std::time::Instant::now();
+    for _ in 0..n {
+      init_local_db(&repo_path).unwrap();
+      prune_stale_instance_registry(&repo_path, 1, 15_000).unwrap();
+      upsert_instance_registry(&repo_path, instance()).unwrap();
+    }
+    println!("old heartbeat tick avg: {:?}", started.elapsed() / n);
+    let started = std::time::Instant::now();
+    for _ in 0..n {
+      heartbeat_instance_registry(&repo_path, 1, 15_000, instance()).unwrap();
+    }
+    println!("new heartbeat tick avg: {:?}", started.elapsed() / n);
   }
 
   #[test]
@@ -2916,6 +3442,227 @@ mod tests {
     assert!(get_workspace_by_branch(repo_path, "fix/example")
       .expect("lookup")
       .is_none());
+  }
+
+  #[test]
+  fn add_workspace_targeting_sets_its_flags_with_the_row() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+    init_local_db(repo_path).expect("initialize database");
+
+    let workspace = add_workspace_targeting(
+      repo_path,
+      "feat-x".to_string(),
+      "feat-x".to_string(),
+      "feat/x".to_string(),
+      Some("about x".to_string()),
+      None,
+      None,
+      true,
+      "release",
+    )
+    .expect("register workspace");
+
+    assert!(workspace.not_on_remote);
+    assert_eq!(workspace.target_branch.as_deref(), Some("release"));
+    assert_eq!(workspace.description.as_deref(), Some("about x"));
+    let stored = get_workspace_by_id(repo_path, workspace.id)
+      .expect("lookup")
+      .expect("stored");
+    assert_eq!(stored.target_branch.as_deref(), Some("release"));
+    assert!(stored.not_on_remote);
+  }
+
+  fn add_stacked(repo_path: &str, branch: &str, target: &str) -> Workspace {
+    add_workspace_targeting(
+      repo_path,
+      branch.to_string(),
+      branch.to_string(),
+      branch.to_string(),
+      None,
+      None,
+      None,
+      false,
+      target,
+    )
+    .expect("register workspace")
+  }
+
+  #[test]
+  fn update_workspace_target_branch_refuses_a_stack_cycle() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+    init_local_db(repo_path).expect("initialize database");
+    let a = add_stacked(repo_path, "a", "main");
+    add_stacked(repo_path, "b", "a");
+
+    let err = update_workspace_target_branch(repo_path, a.id, "b").unwrap_err();
+    assert!(err.contains("would create a stack cycle"), "{err}");
+
+    let stored = get_workspace_by_id(repo_path, a.id)
+      .expect("lookup")
+      .expect("stored");
+    assert_eq!(stored.target_branch.as_deref(), Some("main"));
+  }
+
+  #[test]
+  fn add_workspace_targeting_refuses_a_stack_cycle() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+    init_local_db(repo_path).expect("initialize database");
+    // An existing workspace already stacks on the branch about to be created.
+    add_stacked(repo_path, "child", "new");
+
+    let err = add_workspace_targeting(
+      repo_path,
+      "new".to_string(),
+      "new".to_string(),
+      "new".to_string(),
+      None,
+      None,
+      None,
+      false,
+      "child",
+    )
+    .unwrap_err();
+    assert!(err.contains("would create a stack cycle"), "{err}");
+    assert!(get_workspace_by_branch(repo_path, "new")
+      .expect("lookup")
+      .is_none());
+  }
+
+  // A temp dir with no git repo resolves its default branch to "main".
+  #[test]
+  fn update_workspace_target_branch_refuses_a_self_target_off_the_default_branch() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+    init_local_db(repo_path).expect("initialize database");
+    let a = add_stacked(repo_path, "a", "main");
+
+    let err = update_workspace_target_branch(repo_path, a.id, "a").unwrap_err();
+    assert!(err.contains("would create a stack cycle"), "{err}");
+
+    let stored = get_workspace_by_id(repo_path, a.id)
+      .expect("lookup")
+      .expect("stored");
+    assert_eq!(stored.target_branch.as_deref(), Some("main"));
+  }
+
+  #[test]
+  fn update_workspace_target_branch_allows_a_self_target_on_the_default_branch() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+    init_local_db(repo_path).expect("initialize database");
+    let main = add_stacked(repo_path, "main", "main");
+
+    update_workspace_target_branch(repo_path, main.id, "main").expect("self-target main");
+  }
+
+  #[test]
+  fn add_workspace_targeting_refuses_a_self_target_off_the_default_branch() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+    init_local_db(repo_path).expect("initialize database");
+
+    let err = add_workspace_targeting(
+      repo_path,
+      "a".to_string(),
+      "a".to_string(),
+      "a".to_string(),
+      None,
+      None,
+      None,
+      false,
+      "a",
+    )
+    .unwrap_err();
+    assert!(err.contains("would create a stack cycle"), "{err}");
+    assert!(get_workspace_by_branch(repo_path, "a")
+      .expect("lookup")
+      .is_none());
+  }
+
+  #[test]
+  fn add_workspace_targeting_allows_a_self_target_on_the_default_branch() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+    init_local_db(repo_path).expect("initialize database");
+
+    let main = add_stacked(repo_path, "main", "main");
+    assert_eq!(main.target_branch.as_deref(), Some("main"));
+  }
+
+  #[test]
+  fn init_new_workspace_state_sets_the_title_and_clears_the_rebase_mark() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+    init_local_db(repo_path).expect("initialize database");
+    let id = add_workspace(
+      repo_path,
+      "feat-y".to_string(),
+      "feat-y".to_string(),
+      "feat/y".to_string(),
+      None,
+      None,
+      None,
+    )
+    .expect("register workspace");
+
+    let workspace = init_new_workspace_state(repo_path, id, Some("A title"))
+      .expect("init state")
+      .expect("row");
+
+    assert_eq!(workspace.title, "A title");
+    let metadata: serde_json::Value =
+      serde_json::from_str(workspace.metadata.as_deref().expect("metadata")).expect("json");
+    assert_eq!(metadata["last_rebased_target_commit"], "");
+    let untitled = init_new_workspace_state(repo_path, id, None)
+      .expect("init state")
+      .expect("row");
+    assert_eq!(untitled.title, "A title", "no title leaves the title alone");
+  }
+
+  /// Another writer commits between the read and the write of a new
+  /// workspace's state. A deferred transaction can't take the write lock on
+  /// a stale snapshot, so SQLite fails it at once with "database is locked"
+  /// instead of waiting out the busy timeout.
+  #[test]
+  fn init_new_workspace_state_waits_for_a_concurrent_writer() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path").to_string();
+    init_local_db(&repo_path).expect("initialize database");
+    let id = add_workspace(
+      &repo_path,
+      "feat-z".to_string(),
+      "feat-z".to_string(),
+      "feat/z".to_string(),
+      None,
+      None,
+      None,
+    )
+    .expect("register workspace");
+    let other = Connection::open(resolve_db_path(&repo_path).expect("db path")).expect("open");
+    other
+      .execute_batch("BEGIN IMMEDIATE")
+      .expect("hold the write lock");
+
+    let init = std::thread::spawn(move || init_new_workspace_state(&repo_path, id, None));
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    other
+      .execute("UPDATE workspaces SET title = 'other' WHERE id = ?1", [id])
+      .expect("other write");
+    other
+      .execute_batch("COMMIT")
+      .expect("release the write lock");
+
+    let workspace = init
+      .join()
+      .expect("init thread")
+      .expect("init state waits instead of failing")
+      .expect("row");
+    let metadata: serde_json::Value =
+      serde_json::from_str(workspace.metadata.as_deref().expect("metadata")).expect("json");
+    assert_eq!(metadata["last_rebased_target_commit"], "");
   }
 
   #[test]
@@ -3438,7 +4185,7 @@ mod tests {
     let original = get_workspace_by_id(repo_path, id)
       .expect("lookup should succeed")
       .expect("workspace should exist");
-    let original_created_at = original.created_at.clone();
+    let original_created_at = original.created_at;
 
     let refreshed_at = "2026-05-01T10:00:00Z";
     let upserted_id = upsert_workspace_discovery(
@@ -3686,7 +4433,7 @@ mod tests {
     let first_review = get_pending_review(repo_path, workspace_id)
       .expect("get should succeed")
       .expect("review should exist");
-    let first_created_at = first_review.created_at.clone();
+    let first_created_at = first_review.created_at;
 
     // Wait a moment
     std::thread::sleep(std::time::Duration::from_millis(10));
@@ -4380,7 +5127,10 @@ pub fn create_workflow_run(
   Ok(conn.last_insert_rowid())
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+  clippy::too_many_arguments,
+  reason = "flat argument list kept to match callers"
+)]
 pub fn add_workflow_job_result(
   repo_path: &str,
   run_id: i64,
@@ -4581,4 +5331,143 @@ pub fn trust_repo(repo_path: &str) -> Result<(), String> {
     )
     .map_err(|e| format!("Failed to trust repo: {}", e))?;
   Ok(())
+}
+
+#[cfg(test)]
+mod proptests {
+  use super::*;
+  use crate::test_repo::proptest_config;
+  use proptest::prelude::*;
+  use std::collections::BTreeMap;
+  use tempfile::TempDir;
+
+  /// What the workspaces table should hold, by id.
+  #[derive(Debug, Clone, PartialEq)]
+  struct Row {
+    name: String,
+    path: String,
+    branch: String,
+    title: Option<String>,
+    description: Option<String>,
+    moved_files: Option<Vec<String>>,
+    sparse_patterns: Option<Vec<String>>,
+    archived: bool,
+  }
+
+  #[derive(Debug, Clone)]
+  enum Op {
+    Add {
+      slot: u8,
+      description: Option<String>,
+      moved_files: Option<Vec<String>>,
+      sparse_patterns: Option<Vec<String>>,
+    },
+    Delete(usize),
+    Archive(usize),
+    SetTitle(usize, String),
+    ClearTitle(usize),
+    SetDescription(usize, String),
+  }
+
+  fn text() -> impl Strategy<Value = String> {
+    "\\PC{0,12}"
+  }
+
+  fn op() -> impl Strategy<Value = Op> {
+    let list = || proptest::option::of(prop::collection::vec(text(), 0..3));
+    prop_oneof![
+      3 => (0u8..4, proptest::option::of(text()), list(), list()).prop_map(
+        |(slot, description, moved_files, sparse_patterns)| Op::Add { slot, description, moved_files, sparse_patterns }
+      ),
+      1 => any::<usize>().prop_map(Op::Delete),
+      1 => any::<usize>().prop_map(Op::Archive),
+      1 => (any::<usize>(), text()).prop_map(|(i, t)| Op::SetTitle(i, t)),
+      1 => any::<usize>().prop_map(Op::ClearTitle),
+      1 => (any::<usize>(), text()).prop_map(|(i, t)| Op::SetDescription(i, t)),
+    ]
+  }
+
+  fn pick(model: &BTreeMap<i64, Row>, i: usize) -> Option<i64> {
+    (!model.is_empty()).then(|| *model.keys().nth(i % model.len()).expect("in range"))
+  }
+
+  proptest! {
+    #![proptest_config(proptest_config(32))]
+
+    /// Any sequence of workspace writes leaves the table equal to a simple
+    /// in-memory model: every field reads back as written.
+    #[test]
+    fn workspace_rows_follow_the_model(ops in prop::collection::vec(op(), 1..20)) {
+      let dir = TempDir::new().map_err(|e| TestCaseError::fail(e.to_string()))?;
+      let repo = dir.path().to_string_lossy().to_string();
+      let mut model: BTreeMap<i64, Row> = BTreeMap::new();
+      for op in ops {
+        match op {
+          Op::Add { slot, description, moved_files, sparse_patterns } => {
+            let path = format!("ws-{slot}");
+            // A live row already holds this path: the UNIQUE path refuses it.
+            let taken = model.values().any(|r| r.path == path && !r.archived);
+            let result = add_workspace(
+              &repo, format!("name-{slot}"), path.clone(), format!("b/{slot}"),
+              description.clone(), moved_files.clone(), sparse_patterns.clone(),
+            );
+            if taken {
+              prop_assert!(result.is_err());
+              continue;
+            }
+            let id = result.map_err(TestCaseError::fail)?;
+            for (old_id, r) in &mut model {
+              if r.archived && r.path == path {
+                r.path = format!("{path}#archived-{old_id}");
+              }
+            }
+            let non_empty = |v: Option<Vec<String>>| v.filter(|v| !v.is_empty());
+            model.insert(id, Row {
+              name: format!("name-{slot}"), path, branch: format!("b/{slot}"), title: None,
+              description, moved_files: non_empty(moved_files), sparse_patterns: non_empty(sparse_patterns),
+              archived: false,
+            });
+          }
+          Op::Delete(i) => if let Some(id) = pick(&model, i) {
+            delete_workspace(&repo, id).map_err(TestCaseError::fail)?;
+            model.remove(&id);
+          },
+          Op::Archive(i) => if let Some(id) = pick(&model, i) {
+            archive_workspace(&repo, id).map_err(TestCaseError::fail)?;
+            model.get_mut(&id).expect("picked").archived = true;
+          },
+          Op::SetTitle(i, title) => if let Some(id) = pick(&model, i) {
+            update_workspace_title(&repo, id, &title).map_err(TestCaseError::fail)?;
+            model.get_mut(&id).expect("picked").title = Some(title);
+          },
+          Op::ClearTitle(i) => if let Some(id) = pick(&model, i) {
+            clear_workspace_title(&repo, id).map_err(TestCaseError::fail)?;
+            model.get_mut(&id).expect("picked").title = None;
+          },
+          Op::SetDescription(i, d) => if let Some(id) = pick(&model, i) {
+            update_workspace_description(&repo, id, &d).map_err(TestCaseError::fail)?;
+            model.get_mut(&id).expect("picked").description = Some(d);
+          },
+        }
+      }
+      let mut actual = BTreeMap::new();
+      for id in model.keys() {
+        let w = get_workspace_by_id(&repo, *id).map_err(TestCaseError::fail)?
+          .ok_or_else(|| TestCaseError::fail(format!("row {id} missing")))?;
+        actual.insert(*id, Row {
+          name: w.workspace_name, path: w.workspace_path, branch: w.branch_name.clone(),
+          title: Some(w.title),
+          description: w.description, moved_files: w.moved_files, sparse_patterns: w.sparse_patterns,
+          archived: w.archived,
+        });
+      }
+      release_connections_under(dir.path());
+      // An unset title reads back as the branch name.
+      let expected: BTreeMap<i64, Row> = model.into_iter().map(|(id, mut r)| {
+        r.title = r.title.or_else(|| Some(r.branch.clone()));
+        (id, r)
+      }).collect();
+      prop_assert_eq!(actual, expected);
+    }
+  }
 }

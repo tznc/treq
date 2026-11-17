@@ -1,0 +1,213 @@
+id: gpui-success-means-success
+snapshots:
+  ? |
+    fn conflict_card(p: &Palette) -> Hsla {
+      Tone::Success.tint(p)
+    }
+  : labels:
+    - source: Tone::Success
+      style: primary
+      start: 42
+      end: 55
+    - source: conflict_card
+      style: secondary
+      start: 3
+      end: 16
+    - source: |-
+        fn conflict_card(p: &Palette) -> Hsla {
+          Tone::Success.tint(p)
+        }
+      style: secondary
+      start: 0
+      end: 65
+  ? |
+    fn diff_line(line: &str) -> Div {
+      div().text_color(theme.success)
+    }
+  : labels:
+    - source: theme.success
+      style: primary
+      start: 53
+      end: 66
+    - source: success
+      style: secondary
+      start: 59
+      end: 66
+    - source: diff_line
+      style: secondary
+      start: 3
+      end: 12
+    - source: |-
+        fn diff_line(line: &str) -> Div {
+          div().text_color(theme.success)
+        }
+      style: secondary
+      start: 0
+      end: 69
+  ? |
+    fn editor(p: &Palette) -> Div {
+      line("+", l, Tone::Success)
+    }
+  : labels:
+    - source: Tone::Success
+      style: primary
+      start: 47
+      end: 60
+    - source: '"+"'
+      style: secondary
+      start: 39
+      end: 42
+    - source: ("+", l, Tone::Success)
+      style: secondary
+      start: 38
+      end: 61
+  ? |
+    fn file_status(status: &str, p: &Palette) -> (&'static str, Hsla) {
+      match status { "added" => ("A", p.success), _ => ("?", p.muted_foreground) }
+    }
+  : labels:
+    - source: p.success
+      style: primary
+      start: 102
+      end: 111
+    - source: success
+      style: secondary
+      start: 104
+      end: 111
+    - source: file_status
+      style: secondary
+      start: 3
+      end: 14
+    - source: |-
+        fn file_status(status: &str, p: &Palette) -> (&'static str, Hsla) {
+          match status { "added" => ("A", p.success), _ => ("?", p.muted_foreground) }
+        }
+      style: secondary
+      start: 0
+      end: 148
+  ? |
+    fn hunk(p: &Palette) -> Hsla {
+      if line.starts_with('+') { p.success } else { p.foreground }
+    }
+  : labels:
+    - source: p.success
+      style: primary
+      start: 60
+      end: 69
+    - source: success
+      style: secondary
+      start: 62
+      end: 69
+    - source: hunk
+      style: secondary
+      start: 3
+      end: 7
+    - source: |-
+        fn hunk(p: &Palette) -> Hsla {
+          if line.starts_with('+') { p.success } else { p.foreground }
+        }
+      style: secondary
+      start: 0
+      end: 95
+  ? |
+    fn row(p: &Palette) -> Row {
+      let (icon, color, tag) = match group { 0 => (ICON_CHECK, p.success, Some("current".to_string())), _ => x };
+    }
+  : labels:
+    - source: p.success
+      style: primary
+      start: 88
+      end: 97
+    - source: success
+      style: secondary
+      start: 90
+      end: 97
+    - source: '"current"'
+      style: secondary
+      start: 104
+      end: 113
+    - source: (ICON_CHECK, p.success, Some("current".to_string()))
+      style: secondary
+      start: 75
+      end: 127
+  ? |
+    fn selected_row(p: &Palette) -> Hsla {
+      Tone::Success.color(p)
+    }
+  : labels:
+    - source: Tone::Success
+      style: primary
+      start: 41
+      end: 54
+    - source: selected_row
+      style: secondary
+      start: 3
+      end: 15
+    - source: |-
+        fn selected_row(p: &Palette) -> Hsla {
+          Tone::Success.color(p)
+        }
+      style: secondary
+      start: 0
+      end: 65
+  ? |
+    fn stats(p: &Palette) -> Div {
+      div().text_color(Tone::Success.text(p)).child(format!("+{n}"))
+    }
+  : labels:
+    - source: Tone::Success
+      style: primary
+      start: 50
+      end: 63
+    - source: (format!("+{n}"))
+      style: secondary
+      start: 78
+      end: 95
+    - source: div().text_color(Tone::Success.text(p)).child(format!("+{n}"))
+      style: secondary
+      start: 33
+      end: 95
+  ? |
+    fn status_dot(status: &str) -> Option<ui::Tone> {
+      match status { "??" | "A" => Some(ui::Tone::Success), _ => None }
+    }
+  : labels:
+    - source: ui::Tone::Success
+      style: primary
+      start: 86
+      end: 103
+    - source: status_dot
+      style: secondary
+      start: 3
+      end: 13
+    - source: |-
+        fn status_dot(status: &str) -> Option<ui::Tone> {
+          match status { "??" | "A" => Some(ui::Tone::Success), _ => None }
+        }
+      style: secondary
+      start: 0
+      end: 119
+  ? |
+    impl Render for DiffAsText {
+      fn render(&mut self) -> Div { let (add, del) = (theme.success, theme.danger); }
+    }
+  : labels:
+    - source: theme.success
+      style: primary
+      start: 79
+      end: 92
+    - source: success
+      style: secondary
+      start: 85
+      end: 92
+    - source: DiffAsText
+      style: secondary
+      start: 16
+      end: 26
+    - source: |-
+        impl Render for DiffAsText {
+          fn render(&mut self) -> Div { let (add, del) = (theme.success, theme.danger); }
+        }
+      style: secondary
+      start: 0
+      end: 112

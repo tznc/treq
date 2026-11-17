@@ -1,0 +1,54 @@
+id: no-gpui-direct-infra
+snapshots:
+  ? |
+    fn fetch(repo: &str) {
+      let _ = crate::jj::jj_git_fetch(repo);
+    }
+  : labels:
+    - source: crate::jj::jj_git_fetch(repo)
+      style: primary
+      start: 33
+      end: 62
+    - source: crate::jj::jj_git_fetch
+      style: secondary
+      start: 33
+      end: 56
+  ? |
+    fn remote(repo: &str) {
+      let _ = github::get_git_remote_url_impl(repo);
+    }
+  : labels:
+    - source: github::get_git_remote_url_impl(repo)
+      style: primary
+      start: 34
+      end: 71
+    - source: github::get_git_remote_url_impl
+      style: secondary
+      start: 34
+      end: 65
+  ? |
+    fn sessions(repo: &str) -> Vec<Session> {
+      crate::local_db::get_sessions(repo).unwrap_or_default()
+    }
+  : labels:
+    - source: crate::local_db::get_sessions(repo)
+      style: primary
+      start: 44
+      end: 79
+    - source: crate::local_db::get_sessions
+      style: secondary
+      start: 44
+      end: 73
+  ? |
+    fn trusted(repo: &str) -> bool {
+      local_db::is_repo_trusted(repo)
+    }
+  : labels:
+    - source: local_db::is_repo_trusted(repo)
+      style: primary
+      start: 35
+      end: 66
+    - source: local_db::is_repo_trusted
+      style: secondary
+      start: 35
+      end: 60

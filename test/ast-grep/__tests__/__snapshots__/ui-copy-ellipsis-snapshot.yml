@@ -1,0 +1,20 @@
+id: ui-copy-ellipsis
+snapshots:
+  ? |
+    fn dots() -> Button {
+      ui::Button::new("open", p).label("Open repository...")
+    }
+  : labels:
+    - source: '"Open repository..."'
+      style: primary
+      start: 57
+      end: 77
+  ? |
+    fn loading() -> &'static str {
+      "Loading..."
+    }
+  : labels:
+    - source: '"Loading..."'
+      style: primary
+      start: 33
+      end: 45

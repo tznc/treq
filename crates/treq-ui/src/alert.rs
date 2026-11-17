@@ -1,6 +1,7 @@
 //! Inline alerts: a fact and what to do about it, where it applies.
 
 use gpui::{div, prelude::*, AnyElement, App, SharedString, Window};
+use gpui_kit::base::TestSupportExt as _;
 
 use crate::{icon, text, theme, theme::Palette, zpx, TextSize};
 
@@ -87,6 +88,8 @@ impl RenderOnce for Alert {
       .id(self.id)
       .debug_selector(move || selector)
       .role(gpui::Role::Alert)
+      // Named by its title, so tests and assistive tech can tell alerts apart.
+      .aria_label(self.title.clone())
       .flex()
       .items_start()
       .gap_2()
@@ -128,6 +131,7 @@ impl RenderOnce for Alert {
             )
           }),
       )
+      .test_support()
   }
 }
 

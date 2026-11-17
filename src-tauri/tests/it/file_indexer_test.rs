@@ -53,3 +53,20 @@ fn test_get_jj_tracked_files_includes_unchanged_committed_files() {
     "Should include changed file"
   );
 }
+
+#[test]
+fn a_file_created_after_the_index_was_built_appears_when_the_index_is_built_again() {
+  let temp_dir = TempDir::new().expect("Failed to create temp dir");
+  let repo_path = setup_jj_repo(&temp_dir);
+  TestRepo::write_workspace_file(&repo_path, "lib.rs", "").unwrap();
+
+  let before = treq_lib::file_indexer::FileIndex::build(&repo_path).expect("index");
+  assert!(before.search("agent_made", 10).is_empty());
+
+  TestRepo::write_workspace_file(&repo_path, "src/agent_made.rs", "fn main() {}\n").unwrap();
+
+  let after = treq_lib::file_indexer::FileIndex::build(&repo_path).expect("index");
+  assert_eq!(after.search("agent_made", 10), vec!["src/agent_made.rs"]);
+  // The index built before keeps what it had.
+  assert!(before.search("agent_made", 10).is_empty());
+}

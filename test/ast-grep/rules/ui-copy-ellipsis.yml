@@ -1,0 +1,24 @@
+id: ui-copy-ellipsis
+language: rust
+severity: error
+message: >
+  Write the ellipsis character "…", not three dots "...", in UI copy:
+  "Open repository…", "Loading…".
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+ignores:
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+rule:
+  kind: string_literal
+  regex: \.\.\.
+  not:
+    any:
+      # A URL's "a...b" is a Git range, not copy.
+      - regex: ^"https?://
+      - inside:
+          kind: mod_item
+          has:
+            field: name
+            regex: ^tests$
+          stopBy: end

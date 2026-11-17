@@ -1,15 +1,18 @@
 name: Remote maintenance
 
-# Runs the remote-admin maintenance actions that have no in-database
-# scheduler (this project has no pg_cron). The sweep stops cloud workspaces
-# whose owner lost Pro and deletes them 30 days later
-# (prds/billing-and-teams.md, B02). The prune keeps remote audit events
-# within their retention window. Both no-op until the secrets exist.
+# Runs the remote-admin jobs that have no in-database scheduler (this project
+# has no pg_cron). See remote-admin/index.ts for what each action does. All
+# no-op until the secrets exist.
 
 on:
   schedule:
-    - cron: "17 * * * *" # hourly: sweep lapsed instances
-    - cron: "23 3 * * *" # daily: prune audit events
+    # Keep in sync with the case table below.
+    - cron: "7 * * * *" # hourly, after build_usage_reports' 5 min wait for late intervals
+    - cron: "17 * * * *"
+    - cron: "23 3 * * *"
+    - cron: "41 * * * *"
+    - cron: "*/5 * * * *" # GitHub's minimum
+    - cron: "2,32,47 * * * *" # with :17, spend caps every 15 min
   workflow_dispatch:
     inputs:
       action:
@@ -19,9 +22,17 @@ on:
         options:
           - sweep_lapsed_instances
           - prune_audit_events
+          - report_usage
+          - enforce_spend_caps
+          - advance_migrations
+          - destroy_retired_placements
+          - recompute_defaults
+          - enforce_idle
 
+# One group per schedule: a pending run in a group is replaced by the next
+# one, so the 5-minute idle run must not share a group with the hourly ones.
 concurrency:
-  group: remote-maintenance
+  group: remote-maintenance-${{ github.event.schedule || inputs.action }}
   cancel-in-progress: false
 
 permissions: {}
@@ -35,7 +46,6 @@ jobs:
         env:
           REMOTE_ADMIN_URL: ${{ secrets.REMOTE_ADMIN_URL }}
           REMOTE_ADMIN_API_KEY: ${{ secrets.REMOTE_ADMIN_API_KEY }}
-          EVENT_NAME: ${{ github.event_name }}
           SCHEDULE: ${{ github.event.schedule }}
           INPUT_ACTION: ${{ inputs.action }}
         run: |
@@ -43,17 +53,31 @@ jobs:
             echo "::notice::REMOTE_ADMIN_URL or REMOTE_ADMIN_API_KEY is not set; skipping."
             exit 0
           fi
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            action="$INPUT_ACTION"
-          elif [ "$SCHEDULE" = "23 3 * * *" ]; then
-            action="prune_audit_events"
-          else
-            action="sweep_lapsed_instances"
-          fi
-          echo "Running $action"
-          curl --fail-with-body --silent --show-error --max-time 300 \
-            -X POST "$REMOTE_ADMIN_URL" \
-            -H "x-admin-api-key: $REMOTE_ADMIN_API_KEY" \
-            -H "content-type: application/json" \
-            --data "{\"action\":\"$action\"}"
-          echo
+          case "$SCHEDULE" in
+            "")                actions="$INPUT_ACTION" ;;
+            "7 * * * *")       actions="report_usage" ;;
+            "17 * * * *")      actions="sweep_lapsed_instances enforce_spend_caps" ;;
+            "23 3 * * *")      actions="prune_audit_events" ;;
+            "41 * * * *")      actions="advance_migrations destroy_retired_placements" ;;
+            "*/5 * * * *")     actions="enforce_idle" ;;
+            "2,32,47 * * * *") actions="enforce_spend_caps" ;;
+            *) echo "::error::no actions for schedule '$SCHEDULE'"; exit 1 ;;
+          esac
+          for a in $actions; do
+            echo "Running $a"
+            out=$(curl --fail-with-body --silent --show-error --max-time 300 \
+              -X POST "$REMOTE_ADMIN_URL" \
+              -H "x-admin-api-key: $REMOTE_ADMIN_API_KEY" \
+              -H "content-type: application/json" \
+              --data "{\"action\":\"$a\"}")
+            echo "$out"
+            # These need a person: usage rows unsent an hour after their hour
+            # ended or given up on, and parked drains past their deadline
+            # (never forced automatically; see force_migration).
+            if printf '%s' "$out" | grep -qE '"(late|dead)":[1-9]'; then
+              echo "::warning::report_usage has late or dead usage reports; see the function logs"
+            fi
+            if printf '%s' "$out" | grep -q '"overdue":\[{'; then
+              echo "::warning::advance_migrations reports overdue parked migrations"
+            fi
+          done

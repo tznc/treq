@@ -1,6 +1,6 @@
 //! The Supabase account, which Rust owns ([`crate::core::cloud`]): what the
-//! Account and Integrations tabs, the Merge Queue tab and the remote setup
-//! dialog read of it, and what they ask of it.
+//! Account and Integrations tabs and the remote setup dialog read of it,
+//! and what they ask of it.
 //!
 //! The account reaches GPUI as the [`Account`] global, set on every change
 //! (`gpui_shell::account_changed`); views observe it. Calls go through
@@ -19,6 +19,7 @@ use crate::{
     account::{self, GithubRepository},
     cloud::{AccountSnapshot, Cloud, CloudWorkspace},
     supabase::ApiError,
+    teams::{self, TeamData},
   },
   gpui_shell::native::Backend,
 };
@@ -49,8 +50,35 @@ pub trait AccountHost: Send + Sync {
   fn github_repositories(&self) -> Result<Vec<GithubRepository>, String>;
   /// Linear's OAuth page for this account.
   fn linear_oauth_url(&self) -> Result<String, ApiError>;
+  /// Deletes the account on the server, then signs out here; `Err` is the
+  /// server's reason it was not deleted.
+  fn delete_account(&self) -> Result<(), ApiError>;
+  /// The user's organizations, their members, invites and Team.
+  fn team(&self) -> Result<TeamData, ApiError>;
+  /// One `organizations` action, as in `{"action": "leave", ...}`.
+  fn organization_action(&self, body: &serde_json::Value) -> Result<serde_json::Value, ApiError>;
   /// Starts a cloud workspace action; it reports through the account.
   fn cloud_action(&self, action: CloudAction);
+}
+
+/// Starts Create once: marks the cloud workspace submitting in the account
+/// before `start` runs, so a second click that lands before the backend's
+/// first update finds the button busy. Does nothing while one runs.
+pub fn provision_once(cx: &mut App, start: impl FnOnce()) {
+  let mut account = cx.try_global::<Account>().and_then(|a| a.0.clone());
+  if let Some(cloud) = account
+    .as_mut()
+    .map(|a| a.cloud.get_or_insert_with(Default::default))
+  {
+    if cloud.submitting || cloud.provisioning_stage.is_some() {
+      return;
+    }
+    cloud.submitting = true;
+  }
+  if let Some(account) = account {
+    cx.set_global(Account(Some(account)));
+  }
+  start();
 }
 
 pub(crate) fn cloud_route(cloud: &CloudWorkspace) -> CloudRoute {
@@ -62,6 +90,9 @@ pub(crate) fn cloud_route(cloud: &CloudWorkspace) -> CloudRoute {
         status: i.status.clone(),
         provider_resource_id: i.provider_resource_id.clone(),
         disk_quota_gb: i.disk_quota_gb,
+        lapsed_at: i.lapsed_at.clone(),
+        tier_id: i.tier_id.clone(),
+        region: i.region.clone(),
       }),
     endpoint: status
       .and_then(|s| s.endpoint_summary())
@@ -79,6 +110,65 @@ pub(crate) fn cloud_route(cloud: &CloudWorkspace) -> CloudRoute {
     }),
     usage_error: cloud.usage_error.clone(),
     submitting: cloud.submitting,
+    tiers: cloud.catalog.clone().unwrap_or_default(),
+    selected_tier: cloud.selected_tier.clone(),
+    billing: cloud.billing,
+    migration: status.and_then(|s| s.migration.clone()),
+    resize_preflight: cloud.resize_preflight.clone(),
+    activity: cloud.activity.clone(),
+    spend: cloud.spend.clone(),
+    spend_cap_error: cloud.spend_cap_error.clone(),
+    notifications: cloud.notifications.clone(),
+    provider_keys: cloud.provider_keys.clone(),
+    provider_key_saving: cloud.provider_key_saving,
+    provider_key_error: cloud.provider_key_error.clone(),
+    byos_catalog: cloud.byos_catalog.clone(),
+    organizations: cloud.organizations.clone(),
+    profile: cloud.profile.clone(),
+    org_keys: cloud.org_keys.clone(),
+    team_saving: cloud.team_saving,
+    team_error: cloud.team_error.clone(),
+  }
+}
+
+/// The cloud card's size and resize buttons, which every view that draws
+/// the card forwards to Rust alike.
+pub fn cloud_press(id: &str) -> Option<CloudAction> {
+  match id {
+    "cloud.resize" => Some(CloudAction::Resize {
+      acknowledged_data_loss: false,
+    }),
+    "cloud.resize.confirm" => Some(CloudAction::Resize {
+      acknowledged_data_loss: true,
+    }),
+    "cloud.resize.cancel" => Some(CloudAction::CancelResize),
+    _ if id.starts_with("cloud.process.") => process_press(id),
+    _ if id.starts_with("cloud.notification.dismiss.") => Some(CloudAction::DismissNotification {
+      id: id
+        .strip_prefix("cloud.notification.dismiss.")
+        .unwrap_or_default()
+        .to_string(),
+    }),
+    _ => id
+      .strip_prefix("cloud.tier.")
+      .map(|tier_id| CloudAction::SelectTier {
+        tier_id: tier_id.to_string(),
+      }),
+  }
+}
+
+/// `cloud.process.kill.<pid>`, `cloud.process.pin.<pid>` and
+/// `cloud.process.unpin.<pin id>`.
+fn process_press(id: &str) -> Option<CloudAction> {
+  let rest = id.strip_prefix("cloud.process.")?;
+  let (verb, arg) = rest.split_once('.')?;
+  match verb {
+    "kill" => arg.parse().ok().map(|pid| CloudAction::KillProcess { pid }),
+    "pin" => arg.parse().ok().map(|pid| CloudAction::PinProcess { pid }),
+    "unpin" => Some(CloudAction::UnpinProcess {
+      pin_id: arg.to_string(),
+    }),
+    _ => None,
   }
 }
 
@@ -120,18 +210,39 @@ impl AccountHost for Backend {
 
   fn exchange_token(&self, token: &str) -> Result<(), String> {
     let cloud = self.cloud()?;
-    tauri::async_runtime::block_on(cloud.exchange_token(token))
+    crate::gpui_shell::block_on(cloud.exchange_token(token))
   }
 
   fn github_repositories(&self) -> Result<Vec<GithubRepository>, String> {
     let cloud = self.cloud()?;
-    tauri::async_runtime::block_on(account::github_repositories(&cloud.supabase))
+    crate::gpui_shell::block_on(account::github_repositories(&cloud.supabase))
       .map_err(|e| e.to_string())
   }
 
   fn linear_oauth_url(&self) -> Result<String, ApiError> {
     let cloud = self.cloud().map_err(|e| ApiError::new("unavailable", e))?;
-    tauri::async_runtime::block_on(account::linear_oauth_url(&cloud.supabase))
+    crate::gpui_shell::block_on(account::linear_oauth_url(&cloud.supabase))
+  }
+
+  fn delete_account(&self) -> Result<(), ApiError> {
+    let cloud = self.cloud().map_err(|e| ApiError::new("unavailable", e))?;
+    crate::gpui_shell::block_on(cloud.delete_account())
+  }
+
+  fn team(&self) -> Result<TeamData, ApiError> {
+    let cloud = self.cloud().map_err(|e| ApiError::new("unavailable", e))?;
+    let user_id = cloud
+      .supabase
+      .auth
+      .session()
+      .map(|s| s.user.id)
+      .ok_or_else(|| ApiError::new("unauthorized", "Sign in first."))?;
+    crate::gpui_shell::block_on(teams::load(&cloud.supabase, &user_id))
+  }
+
+  fn organization_action(&self, body: &serde_json::Value) -> Result<serde_json::Value, ApiError> {
+    let cloud = self.cloud().map_err(|e| ApiError::new("unavailable", e))?;
+    crate::gpui_shell::block_on(teams::organization_action(&cloud.supabase, body))
   }
 
   fn cloud_action(&self, action: CloudAction) {

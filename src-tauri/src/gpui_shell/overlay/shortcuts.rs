@@ -1,14 +1,21 @@
 //! `KeyboardShortcutsModal`: the "?" reference of the app's shortcuts.
 
-use crate::gpui_shell::ui::radius;
-use crate::gpui_shell::ui::zpx;
 use tauri_plugin_gpui::gpui::{self, div, prelude::*, SharedString};
 
 use crate::gpui_shell::{
-  keys::{PLATFORM, SECONDARY, SHIFT},
+  actions::{
+    Action, COMMAND_PALETTE, GO_TO_FILE, MAXIMIZE_TERMINAL, NEW_AGENT_SESSION,
+    NEW_AGENT_WITH_PROMPT, NEW_SHELL, NEW_WORKSPACE, STACK_ON_THIS, TOGGLE_TERMINAL,
+  },
+  keys::SECONDARY,
   theme::Palette,
   ui::{self, TextSize},
 };
+
+/// An action's row on the sheet.
+const fn row(action: Action) -> Shortcut {
+  (action.keys, action.label)
+}
 
 /// A shortcut's keys and what it does.
 type Shortcut = (&'static [&'static str], &'static str);
@@ -31,10 +38,11 @@ pub const SECTIONS: &[(&str, &[Shortcut])] = &[
   (
     "Global",
     &[
-      (&[SECONDARY, "N"], "New workspace"),
-      (&[SECONDARY, SHIFT, "N"], "Create stacked workspace"),
-      (&[SECONDARY, "K"], "Command Palette"),
-      (&[SECONDARY, "P"], "File Search"),
+      row(NEW_WORKSPACE),
+      row(STACK_ON_THIS),
+      row(COMMAND_PALETTE),
+      row(GO_TO_FILE),
+      row(NEW_AGENT_WITH_PROMPT),
       (&["?"], "Show keyboard shortcuts"),
       (&["Esc"], "Close dialog"),
     ],
@@ -42,10 +50,10 @@ pub const SECTIONS: &[(&str, &[Shortcut])] = &[
   (
     "Terminal",
     &[
-      (&[SECONDARY, "J"], "Toggle terminal pane"),
-      (&[PLATFORM, "Ctrl", "J"], "Maximize/restore terminal"),
-      (&[SECONDARY, "]"], "New agent terminal"),
-      (&[SECONDARY, "\\"], "New shell terminal"),
+      row(TOGGLE_TERMINAL),
+      row(MAXIMIZE_TERMINAL),
+      row(NEW_AGENT_SESSION),
+      row(NEW_SHELL),
       (&[SECONDARY, "W"], "Close selected terminal"),
       (COPY, "Copy selection (or interrupt)"),
       (PASTE, "Paste"),
@@ -60,20 +68,44 @@ pub const SECTIONS: &[(&str, &[Shortcut])] = &[
   ),
 ];
 
-/// A `<section>`: its uppercase heading, then one row per shortcut.
+/// A shortcut's keys, "Ctrl + K" style: each key a `Kbd`, joined by "+".
+/// The palette's rows show them the same way.
+pub fn keys(p: &Palette, keys: &[&str]) -> gpui::Div {
+  div()
+    .flex()
+    .flex_none()
+    .items_center()
+    .gap_1()
+    .children(keys.iter().enumerate().map(|(i, key)| {
+      div()
+        .flex()
+        .items_center()
+        .gap_1()
+        .when(i > 0, |this| {
+          this.child(
+            // Short label (['kbd separator']): 11px is fine.
+            // ast-grep-ignore: gpui-text-xs-short-label-only
+            ui::text(div(), TextSize::Xs)
+              .text_color(p.muted_foreground)
+              .child("+"),
+          )
+        })
+        .child(ui::Kbd::from_label(key.to_string(), p))
+    }))
+}
+
+/// A `<section>`: its heading, then one row per shortcut.
 fn section(p: &Palette, title: &str, shortcuts: &[Shortcut]) -> gpui::Div {
   div()
     .flex_1()
     .min_w_0()
     .flex()
     .flex_col()
-    .child(
-      ui::text(div(), TextSize::Xs)
-        .mb_3()
-        .font_weight(gpui::FontWeight::SEMIBOLD)
-        .text_color(p.muted_foreground)
-        .child(title.to_uppercase()),
-    )
+    .child(div().mb_3().child(ui::SectionHeader::new(
+      format!("shortcuts-{}", title.to_lowercase().replace(' ', "-")),
+      title.to_string(),
+      p,
+    )))
     .child(
       div()
         .flex()
@@ -90,30 +122,19 @@ fn section(p: &Palette, title: &str, shortcuts: &[Shortcut]) -> gpui::Div {
                 .text_color(p.foreground)
                 .child(SharedString::from(action.to_string())),
             )
-            .child(div().flex().flex_none().items_center().gap_1().children(
-              keys.iter().enumerate().map(|(i, key)| {
-                div()
-                  .flex()
-                  .items_center()
-                  .gap_1()
-                  .when(i > 0, |this| {
-                    this.child(
-                      ui::text(div(), TextSize::Xs)
-                        .text_color(p.muted_foreground)
-                        .child("+"),
-                    )
-                  })
-                  .child(ui::Kbd::from_label(key.to_string(), p))
-              }),
-            ))
+            .child(self::keys(p, keys))
         })),
     )
 }
 
-/// `DialogContent className="max-h-[85vh] max-w-2xl w-full overflow-y-auto"`
-/// with its header and the `sm:grid-cols-2` grid of sections.
-pub fn render(p: &Palette, viewport: gpui::Size<gpui::Pixels>) -> gpui::Stateful<gpui::Div> {
-  let mut grid = div().mt_4().flex().flex_col().gap_6();
+/// The sheet: a dialog with no action pair, so an X closes it, over the
+/// `sm:grid-cols-2` grid of sections, which scrolls past 85% of the window.
+pub fn render(
+  p: &Palette,
+  viewport: gpui::Size<gpui::Pixels>,
+  close: impl Fn(&mut gpui::Window, &mut gpui::App) + 'static,
+) -> ui::Dialog {
+  let mut grid = div().flex().flex_col().gap_6();
   for pair in SECTIONS.chunks(2) {
     let mut row = div().flex().gap_6();
     for (title, shortcuts) in pair {
@@ -124,27 +145,53 @@ pub fn render(p: &Palette, viewport: gpui::Size<gpui::Pixels>) -> gpui::Stateful
     }
     grid = grid.child(row);
   }
-  div()
-    .id("keyboard-shortcuts-modal")
-    .debug_selector(|| "keyboard-shortcuts-modal".into())
-    .role(gpui::Role::Dialog)
-    .aria_label("Keyboard shortcuts")
-    .w_full()
-    .max_w(zpx(672.))
-    .max_h(viewport.height * 0.85)
-    .overflow_y_scroll()
-    .p_6()
-    .rounded(radius::LG)
-    .border_1()
-    .border_color(p.border.opacity(0.5))
-    .bg(p.popover)
-    .text_color(p.popover_foreground)
-    .shadow_2xl()
-    .occlude()
+  ui::Dialog::new("keyboard-shortcuts-modal", p)
+    .width(672.)
+    .title("Keyboard shortcuts")
+    .on_close(close)
     .child(
-      ui::text(div(), TextSize::Lg)
-        .font_weight(gpui::FontWeight::SEMIBOLD)
-        .child("Keyboard shortcuts"),
+      div()
+        .id("keyboard-shortcuts-grid")
+        .max_h(viewport.height * 0.75)
+        .overflow_y_scroll()
+        .child(grid),
     )
-    .child(grid)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::gpui_shell::actions;
+
+  fn rows() -> impl Iterator<Item = &'static Shortcut> {
+    SECTIONS.iter().flat_map(|(_, rows)| rows.iter())
+  }
+
+  #[test]
+  fn the_sheet_uses_the_action_names() {
+    for action in [
+      actions::GO_TO_FILE,
+      actions::STACK_ON_THIS,
+      actions::NEW_WORKSPACE,
+      actions::NEW_AGENT_SESSION,
+      actions::NEW_AGENT_WITH_PROMPT,
+      actions::NEW_SHELL,
+      actions::TOGGLE_TERMINAL,
+      actions::MAXIMIZE_TERMINAL,
+    ] {
+      let row = rows()
+        .find(|(_, label)| *label == action.label)
+        .unwrap_or_else(|| panic!("{} is not on the sheet", action.label));
+      assert_eq!(row.0, action.keys, "{}", action.label);
+    }
+    for old in [
+      "File search",
+      "Create stacked workspace",
+      "New shell terminal",
+      "New agent terminal",
+      "Toggle terminal pane",
+    ] {
+      assert!(rows().all(|(_, label)| *label != old), "{old}");
+    }
+  }
 }

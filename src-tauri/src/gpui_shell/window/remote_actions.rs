@@ -4,6 +4,7 @@
 //! `startRemoteAgent`), and what a remote repository opening does to the
 //! window.
 
+use crate::gpui_shell::native::Toast;
 use serde_json::{json, Value};
 
 use super::{
@@ -12,21 +13,12 @@ use super::{
   remote::{self, Opened, RemoteEffect, UserManagedValues},
 };
 use crate::{
-  core::remote_pty::RemoteAgentId,
-  gpui_shell::{native::ToastTone, screen::account_data::CloudAction},
+  core::remote_pty::RemoteAgentId, gpui_shell::screen::account_data::CloudAction,
   local_db::Workspace,
 };
 
 fn remote(effects: Vec<RemoteEffect>) -> Vec<Effect> {
   effects.into_iter().map(Effect::from).collect()
-}
-
-fn toast(tone: ToastTone, title: &str, description: &str) -> Effect {
-  Effect::Toast {
-    tone,
-    title: title.into(),
-    description: description.into(),
-  }
 }
 
 impl Model {
@@ -39,6 +31,7 @@ impl Model {
   /// opens.
   pub fn open_remote_setup(&mut self) {
     self.remote.setup = true;
+    self.remote.setup_screen = None;
   }
 
   /// `invalidateRemoteRepositoryData` and `refreshRemoteRepository`.
@@ -48,6 +41,10 @@ impl Model {
   }
 
   /// The remote presses; `None` for any other.
+  #[expect(
+    clippy::string_slice,
+    reason = "slices after a checked starts_with() of an ASCII prefix"
+  )]
   pub fn remote_press(&mut self, id: &str) -> Option<Vec<Effect>> {
     let cloud = |action| vec![Effect::from(RemoteEffect::Cloud(action))];
     let effects = match id {
@@ -92,7 +89,38 @@ impl Model {
       "remote.cloud.repair" => cloud(CloudAction::Repair),
       "remote.cloud.delete" => cloud(CloudAction::Delete),
       "remote.cloud.openRepositories" => cloud(CloudAction::OpenRepositories),
+      // "Raise cap": the spend cap is changed in Account settings.
+      "remote.cloud.spendCap.edit" => {
+        self.remote.setup = false;
+        self.open_settings();
+        if let Page::Settings { tab } = &mut self.page {
+          *tab = "account".into();
+        }
+        Vec::new()
+      }
       id if id.starts_with("remoteRepo.") => remote(self.remote.form_press(id)),
+      // The Overview screen's machines and recent repositories.
+      // The cloud row before its workspace runs: the setup dialog, on the
+      // cloud workspace's screen.
+      "machines.cloud" => {
+        self.remote.setup = true;
+        self.remote.setup_screen = Some("managed");
+        Vec::new()
+      }
+      // The SSH Hosts section's +: the "Your own VM" form.
+      "machines.addSsh" => {
+        self.remote.setup = true;
+        self.remote.setup_screen = Some("ownVm");
+        Vec::new()
+      }
+      id if id.starts_with("machines.connect:") => {
+        let endpoint_id = id["machines.connect:".len()..].to_string();
+        vec![Effect::from(RemoteEffect::Connect { endpoint_id })]
+      }
+      id if id.starts_with("machines.openSaved:") => {
+        let id = id["machines.openSaved:".len()..].to_string();
+        vec![Effect::from(RemoteEffect::OpenSaved { id })]
+      }
       _ => return None,
     };
     Some(effects)
@@ -106,6 +134,7 @@ impl Model {
         match values {
           Ok(values) if self.remote.setup => {
             self.remote.registering = true;
+            self.remote.register_error = None;
             vec![Effect::from(RemoteEffect::RegisterUserManaged(values))]
           }
           _ => Vec::new(),
@@ -123,7 +152,9 @@ impl Model {
           .unwrap_or_else(|| remote::session_label(None, remote::now_ms()));
         let reattach = value["reattach"].as_bool().unwrap_or(false);
         let workspace = self.selected_workspace(data).cloned();
-        let effects = self.open_remote_target(workspace.as_ref(), label, None, reattach);
+        // The session's name on the host, which its column shows.
+        let title = value["title"].as_str().map(str::to_string);
+        let effects = self.open_remote_target(workspace.as_ref(), label, title, None, reattach);
         self.remote.terminal = false;
         effects
       }
@@ -135,7 +166,7 @@ impl Model {
           .find(|w| full_path(w) == dir)
           .cloned();
         let label = remote::session_label(None, remote::now_ms());
-        self.open_remote_target(workspace.as_ref(), label, None, false)
+        self.open_remote_target(workspace.as_ref(), label, None, None, false)
       }
       field if field.starts_with("remoteRepo.") => remote(self.remote.form_field(field, value)),
       _ => return None,
@@ -174,21 +205,21 @@ impl Model {
     &mut self,
     workspace: Option<&Workspace>,
     label: String,
+    title: Option<String>,
     agent: Option<RemoteAgentId>,
     reattach: bool,
   ) -> Vec<Effect> {
     match self.remote_scope(workspace) {
       Ok(mut target) => {
         target["label"] = label.into();
+        target["title"] = title.into();
         target["launch"] = serde_json::to_value(remote::launch_for(agent)).unwrap_or_default();
         target["reattach"] = reattach.into();
         self.terminal("openRemote", json!({"remote": target}));
         Vec::new()
       }
-      Err(why) => vec![toast(
-        ToastTone::Warning,
-        "Remote terminal unavailable",
-        why,
+      Err(why) => vec![Effect::from(
+        Toast::warning("Remote terminal unavailable").description(why),
       )],
     }
   }
@@ -198,22 +229,15 @@ impl Model {
   pub fn start_remote_agent(&mut self, workspace_id: Option<i64>, data: &Data) -> Vec<Effect> {
     let workspace = workspace_id.and_then(|id| self.workspace_in(self.repo(), id, data));
     // Any other agent the setting names starts Claude.
-    let chosen = self
+    let agent = self
       .prefs
       .default_agent
       .as_deref()
-      .filter(|agent| matches!(*agent, "codex" | "cursor" | "copilot"))
-      .unwrap_or("claude");
-    let Some(agent) = remote::remote_agent(chosen) else {
-      return vec![toast(
-        ToastTone::Warning,
-        "Agent unavailable on remote hosts",
-        "Copilot cannot be started in a remote workspace yet. Choose Claude, Codex or Cursor.",
-      )];
-    };
+      .and_then(remote::remote_agent)
+      .unwrap_or(RemoteAgentId::Claude);
     self.set_selected(workspace.as_ref().map(|w| w.id));
     let label = remote::session_label(Some(agent), remote::now_ms());
-    self.open_remote_target(workspace.as_ref(), label, Some(agent), false)
+    self.open_remote_target(workspace.as_ref(), label, None, Some(agent), false)
   }
 
   /// A remote repository opened: the window shows it as it shows a local
@@ -274,15 +298,16 @@ mod tests {
   }
 
   #[test]
-  fn refuses_an_agent_the_host_cannot_start() {
+  fn starts_copilot_on_the_host() {
     let mut model = remote_model();
     model.prefs.default_agent = Some("copilot".into());
-    let effects = model.start_remote_agent(None, &Data::default());
-    assert!(matches!(
-      effects.as_slice(),
-      [Effect::Toast { title, .. }] if title == "Agent unavailable on remote hosts"
-    ));
-    assert!(model.commands.is_empty());
+    model.start_remote_agent(None, &Data::default());
+    let command = &model.commands[0];
+    assert_eq!(command["remote"]["launch"]["agent"], "copilot");
+    assert!(command["remote"]["label"]
+      .as_str()
+      .unwrap()
+      .starts_with("copilot-"));
   }
 
   #[test]
@@ -290,7 +315,7 @@ mod tests {
     let mut model = remote_model();
     let id = model.remote.endpoint.clone().unwrap().id;
     model.remote.cutoffs.insert(id, "key_revoked".into());
-    let effects = model.open_remote_target(None, "shell-1".into(), None, false);
+    let effects = model.open_remote_target(None, "shell-1".into(), None, None, false);
     assert!(matches!(
       effects.as_slice(),
       [Effect::Toast { description, .. }] if description.starts_with("Reconnect")

@@ -1,3 +1,4 @@
+#![expect(clippy::expect_used, reason = "test code")]
 //! Real-`sshd` counterpart to `core::remote_ssh_transport`'s `mod tests`.
 //!
 //! Every test in that module runs against an in-process mock
@@ -19,9 +20,9 @@
 //!   current validity window) and reject (wrong CA, invalid principal,
 //!   not-yet-valid, expired);
 //! - PTY start in a selected directory, input/output, resize, and close;
-//! - the WebSocket relay transport used for managed Sprites, through a
-//!   local WebSocket-to-TCP bridge standing in for `remote-ssh-relay` and
-//!   the Sprites TCP proxy: certificate auth, host-key pinning, pooling,
+//! - the WebSocket relay transport used for managed VMs, through a local
+//!   WebSocket-to-TCP bridge standing in for `remote-ssh-relay` and
+//!   treq-gateway: certificate auth, host-key pinning, pooling,
 //!   and token refusal all run through the relayed byte stream.
 //!
 //! Certificates are issued with `ssh-keygen -s`, which writes the same
@@ -72,6 +73,13 @@
 //!   used only with a signed certificate.
 //! - `TREQ_SSH_IT_WORKSPACE_DIR`: directory created on the server for PTY
 //!   working-directory tests.
+
+#![expect(
+  clippy::unwrap_used,
+  clippy::let_underscore_must_use,
+  clippy::print_stderr,
+  reason = "test code reports progress on stderr"
+)]
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -154,6 +162,7 @@ fn it_config() -> Option<ItConfig> {
       host_keys,
       authentication: SshAuthentication::PublicKey { key_reference },
       transport: Default::default(),
+      terminal_backend: Default::default(),
     },
   })
 }
@@ -827,7 +836,7 @@ const RELAY_IT_TOKEN: &str = "relay-it-session-token";
 
 /// Stands in for the `remote-ssh-relay` Edge Function: accepts a WebSocket
 /// only when the Authorization header carries `RELAY_IT_TOKEN`, then pipes
-/// raw bytes to the real sshd over TCP, as the Sprites TCP proxy does.
+/// raw bytes to the real sshd over TCP, as treq-gateway does.
 /// Returns the relay URL.
 async fn spawn_ws_to_tcp_bridge(sshd_host: String, sshd_port: u16) -> String {
   use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
@@ -842,7 +851,10 @@ async fn spawn_ws_to_tcp_bridge(sshd_host: String, sshd_port: u16) -> String {
       };
       let sshd_host = sshd_host.clone();
       tokio::spawn(async move {
-        #[allow(clippy::result_large_err)]
+        #[expect(
+          clippy::result_large_err,
+          reason = "the callback signature is fixed by tungstenite's handshake callback"
+        )]
         let check = |request: &Request, response: Response| -> Result<Response, ErrorResponse> {
           let authorized = request
             .headers()
@@ -877,7 +889,7 @@ async fn relay_endpoint(mut endpoint: SshEndpoint) -> SshEndpoint {
   endpoint.id = format!("{}-relay", endpoint.id);
   endpoint.transport = SshTransport::Relay { url };
   // The relay transport never dials these; poison them to prove it.
-  endpoint.hostname = "sshd-inside-the-sprite.invalid".to_string();
+  endpoint.hostname = "sshd-inside-the-machine.invalid".to_string();
   endpoint.port = 1;
   endpoint
 }

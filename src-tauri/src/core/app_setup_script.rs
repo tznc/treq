@@ -3,6 +3,7 @@
 //! every app startup when `always_run` is on. Each run's output is stored as
 //! log records next to the app DB, so the Logs tab can show it.
 
+use crate::result_ext::ResultExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -112,16 +113,18 @@ impl RunLog {
   fn write(&self, stream: &str, level: &str, message: &str) {
     log::info!("App setup script {}: {}", stream, message);
     if let Some(writer) = &self.writer {
-      let _ = writer.write_line(&make_log_line(
-        now_timestamp(),
-        self.run_id,
-        LOG_JOB_ID,
-        0,
-        LOG_STEP_NAME,
-        stream,
-        level,
-        message,
-      ));
+      writer
+        .write_line(&make_log_line(
+          now_timestamp(),
+          self.run_id,
+          LOG_JOB_ID,
+          0,
+          LOG_STEP_NAME,
+          stream,
+          level,
+          message,
+        ))
+        .best_effort();
     }
   }
 }
@@ -397,10 +400,7 @@ mod tests {
     // Stands in for another Treq process that is mid-run on the same DB.
     let claim = FileLock::lock(claim_path(&db)).unwrap();
 
-    let waiting = std::thread::spawn({
-      let db = db.clone();
-      move || run_if_needed(&db, Trigger::Manual)
-    });
+    let waiting = std::thread::spawn(move || run_if_needed(&db, Trigger::Manual));
     std::thread::sleep(Duration::from_millis(300));
     assert_eq!(run_count(&dir), 0);
 

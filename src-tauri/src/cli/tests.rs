@@ -260,9 +260,8 @@ fn positional_cli_args_take_values_in_tauri_config() {
     .expect("plugins.cli.subcommands must be an object");
 
   for (subcommand_name, subcommand) in subcommands {
-    let args = match subcommand.get("args").and_then(Value::as_array) {
-      Some(args) => args,
-      None => continue,
+    let Some(args) = subcommand.get("args").and_then(Value::as_array) else {
+      continue;
     };
 
     for arg in args {
@@ -743,6 +742,65 @@ fn parses_repo_usage_into_machine_usage_request() {
 }
 
 #[test]
+fn keeps_the_home_shorthand_for_repo_dirs() {
+  let request = parse_remote_command_request(
+    "repo",
+    &remote_matches(&[("action", "dirs"), ("repo", "~")]),
+  )
+  .unwrap();
+  assert_eq!(
+    request,
+    crate::core::remote::TreqCommandRequest::ListDirectories { path: "~".into() }
+  );
+}
+
+#[test]
+fn rejects_an_empty_or_blank_repo_argument() {
+  for repo in ["", "   ", "\t"] {
+    let error = parse_remote_command_request(
+      "repo",
+      &remote_matches(&[("action", "status"), ("repo", repo)]),
+    )
+    .unwrap_err();
+    assert!(error.starts_with("invalid_arguments:"), "{repo:?}: {error}");
+    assert!(error.contains("--repo"), "{repo:?}: {error}");
+    assert_eq!(super::classify_cli_error(&error), "invalid_arguments");
+  }
+}
+
+#[test]
+fn cli_exits_non_zero_for_an_empty_repo_argument() {
+  for repo in ["", "  "] {
+    let code =
+      crate::cli::args::run(["treq", "repo", "status", "--repo", repo, "--format", "json"]);
+    assert_ne!(code, 0, "{repo:?}");
+  }
+}
+
+#[test]
+fn resolve_command_repo_rejects_an_empty_or_blank_repo_flag() {
+  for repo in ["", "  ", "\t"] {
+    let error = super::resolve_command_repo(&remote_matches(&[("repo", repo)])).unwrap_err();
+    assert_eq!(
+      error, "invalid_arguments: --repo must not be empty",
+      "{repo:?}"
+    );
+  }
+}
+
+#[test]
+fn absolute_repo_arg_rejects_empty_and_blank_values() {
+  for repo in ["", " ", "\n\t "] {
+    let error = super::absolute_repo_arg(repo).unwrap_err();
+    assert!(error.starts_with("invalid_arguments:"), "{repo:?}: {error}");
+  }
+  assert_eq!(
+    super::absolute_repo_arg("/srv/./r/../repo").unwrap(),
+    "/srv/repo"
+  );
+}
+
+#[test]
 fn rejects_unknown_remote_action_and_arbitrary_command_kinds() {
   let error = parse_remote_command_request(
     "repo",
@@ -815,7 +873,7 @@ fn workspace_create_rejects_invalid_metadata_json() {
 /// end to end: `cli_args` must only emit flags the remote CLI declares, and
 /// parsing those args back must give the same request.
 fn every_typed_remote_request() -> Vec<crate::core::remote::TreqCommandRequest> {
-  use crate::core::remote::{FileRevision, TreqCommandRequest as R};
+  use crate::core::remote::{FileRevision, ReviewScope, TreqCommandRequest as R};
   use crate::core::remote_pty::PtyLaunchSpec;
   use crate::core::workspaces::HunkSpec;
   let repo = || "/srv/r".to_string();
@@ -842,6 +900,12 @@ fn every_typed_remote_request() -> Vec<crate::core::remote::TreqCommandRequest> 
       repo: repo(),
       workspace: Some("1".into()),
       path: "a.rs".into(),
+    },
+    R::DiffFiles {
+      repo: repo(),
+      workspace: Some("1".into()),
+      paths: vec!["a.rs".into(), "b,c.rs".into()],
+      token: Some("t..u:git".into()),
     },
     R::ReadFile {
       repo: repo(),
@@ -880,9 +944,18 @@ fn every_typed_remote_request() -> Vec<crate::core::remote::TreqCommandRequest> 
       query: "main".into(),
       limit: Some(4),
     },
+    R::ListFiles {
+      repo: repo(),
+      workspace: Some("1".into()),
+      path: "src".into(),
+    },
     R::WorkspaceChangeMarker {
       repo: repo(),
       workspace: Some("1".into()),
+    },
+    R::WorkspaceBranchDeleted {
+      repo: repo(),
+      workspace: "1".into(),
     },
     R::WorkspaceSummaries { repo: repo() },
     R::PlanNewWorkspaces {
@@ -897,6 +970,8 @@ fn every_typed_remote_request() -> Vec<crate::core::remote::TreqCommandRequest> 
       idempotency_key: key(),
     },
     R::MachineUsage { root: repo() },
+    R::MachineTools { root: repo() },
+    R::ListDirectories { path: repo() },
     R::HostCheck { root: repo() },
     R::ProbeRepo { repo: repo() },
     R::CloneRepo {
@@ -1058,6 +1133,41 @@ fn every_typed_remote_request() -> Vec<crate::core::remote::TreqCommandRequest> 
       workspace: Some("1".into()),
       idempotency_key: key(),
     },
+    R::WorkspacePullRequest {
+      repo: repo(),
+      workspace: "1".into(),
+    },
+    R::CreatePullRequest {
+      repo: repo(),
+      workspace: "1".into(),
+      title: "Fix the schema".into(),
+      body: "Line one\nline two".into(),
+      draft: true,
+      idempotency_key: key(),
+    },
+    R::GithubRead {
+      repo: repo(),
+      query: crate::core::remote::GithubQuery::ListIssues {
+        state: "open".into(),
+        after: Some("cursor".into()),
+      },
+    },
+    R::GithubWrite {
+      repo: repo(),
+      action: crate::core::remote::GithubAction::SubmitPrReview {
+        number: 7,
+        event: "REQUEST_CHANGES".into(),
+        body: "Line one\nline two".into(),
+        comments: vec![crate::github::GhDraftReviewComment {
+          path: "a.rs".into(),
+          line: 4,
+          side: "RIGHT".into(),
+          start_line: Some(2),
+          body: "nit".into(),
+        }],
+      },
+      idempotency_key: key(),
+    },
     R::AgentStart {
       repo: repo(),
       workspace: "1".into(),
@@ -1092,16 +1202,30 @@ fn every_typed_remote_request() -> Vec<crate::core::remote::TreqCommandRequest> 
       cols: 80,
       rows: 24,
       idempotency_key: key(),
+      backend: Default::default(),
     },
     R::PtyList {
       repo: repo(),
       workspace: Some("1".into()),
+      backend: Default::default(),
     },
     R::PtyStop {
       repo: repo(),
       workspace: "1".into(),
       label: "shell".into(),
+      backend: crate::core::pty_remote_supervisor::PtyBackend::Tmux,
     },
+    R::PtyReset {
+      backend: crate::core::pty_remote_supervisor::PtyBackend::Tmux,
+    },
+    R::PtyRename {
+      backend: crate::core::pty_remote_supervisor::PtyBackend::Tmux,
+      repo: repo(),
+      workspace: "1".into(),
+      label: "claude-1".into(),
+      title: "Fix login redirect".into(),
+    },
+    R::PtyStatus,
     R::PtyAttachCommand {
       repo: repo(),
       workspace: "1".into(),
@@ -1110,6 +1234,48 @@ fn every_typed_remote_request() -> Vec<crate::core::remote::TreqCommandRequest> 
       launch: PtyLaunchSpec::Shell,
       cols: 80,
       rows: 24,
+      backend: Default::default(),
+    },
+    R::PtyPaste {
+      repo: repo(),
+      workspace: "1".into(),
+      label: "agent".into(),
+      text: "## Code Review\n\n> tidy".into(),
+      submit: true,
+      idempotency_key: key(),
+      backend: Default::default(),
+    },
+    R::PtyMsgDeliver {
+      repo: repo(),
+      workspace: "1".into(),
+      label: "agent".into(),
+      envelope: "{\"id\":\"m-1\"}".into(),
+    },
+    R::PtyMsgPoll {
+      repo: repo(),
+      workspace: "1".into(),
+      label: "agent".into(),
+      since: 3,
+    },
+    R::ReviewLoad {
+      repo: repo(),
+      workspace: "1".into(),
+      scope: ReviewScope::Changes,
+    },
+    R::ReviewSave {
+      repo: repo(),
+      workspace: "1".into(),
+      scope: ReviewScope::Files,
+      review: crate::core::review::Stored {
+        comments: vec![],
+        summary: "tidy".into(),
+        notes: vec![],
+      },
+    },
+    R::ReviewClear {
+      repo: repo(),
+      workspace: "1".into(),
+      scope: ReviewScope::Changes,
     },
   ]
 }
@@ -1338,6 +1504,7 @@ mod implicit_stdin {
 
   fn pipe() -> (i32, i32) {
     let mut fds = [0; 2];
+    // SAFETY: `fds` is a two-element array, as `pipe(2)` requires.
     assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
     (fds[0], fds[1])
   }
@@ -1348,6 +1515,7 @@ mod implicit_stdin {
     let started = Instant::now();
     assert!(!fd_has_input(read, Duration::from_millis(50)));
     assert!(started.elapsed() < Duration::from_secs(5));
+    // SAFETY: both fds came from `pipe()` above and are closed exactly once.
     unsafe {
       libc::close(read);
       libc::close(write);
@@ -1357,13 +1525,17 @@ mod implicit_stdin {
   #[test]
   fn a_pipe_with_data_or_eof_is_input() {
     let (read, write) = pipe();
+    // SAFETY: the buffer is two readable bytes and `write` is an open pipe fd.
     assert_eq!(unsafe { libc::write(write, b"{}".as_ptr().cast(), 2) }, 2);
     assert!(fd_has_input(read, Duration::from_millis(50)));
+    // SAFETY: `read` came from `pipe()` and is closed exactly once.
     unsafe { libc::close(read) };
 
     let (read, write) = pipe();
+    // SAFETY: `write` came from `pipe()` and is closed exactly once.
     unsafe { libc::close(write) };
     assert!(fd_has_input(read, Duration::from_millis(50)));
+    // SAFETY: `read` came from this `pipe()` and is closed exactly once.
     unsafe { libc::close(read) };
   }
 }
@@ -1739,7 +1911,6 @@ fn parsed_subcommand(args: &[&str]) -> SubcommandMatches {
 fn parses_repo_flag_on_workspace_commands() {
   for args in [
     &["treq", "add", "feat/x", "-r", "svc"][..],
-    &["treq", "agent", "feat/x", "do it", "--repo", "svc"][..],
     &["treq", "st", "-r", "svc"][..],
     &["treq", "commit", "feat/x", "-r", "svc", "-m", "msg"][..],
   ] {
@@ -1768,8 +1939,223 @@ fn mv_keeps_short_r_for_ranges_and_takes_long_repo() {
 
 #[test]
 fn agent_rejects_home_repo_branch() {
-  let sub = parsed_subcommand(&["treq", "agent", ".", "do it", "-r", "svc"]);
+  let sub = parsed_subcommand(&["treq", "agent", "start", ".", "do it", "-r", "svc"]);
   assert!(!super::workspace_handlers::handle_workspace_agent(
     &sub.matches
   ));
+}
+
+#[test]
+fn the_round_trip_samples_cover_every_typed_remote_request() {
+  // A variant missing from `every_typed_remote_request` is never checked for
+  // round-tripping, so its `cli_args` and parser arms can drift apart.
+  let source = include_str!("../core/remote.rs");
+  let start = source.find("pub enum TreqCommandRequest {").expect("enum");
+  let body = &source[start..];
+  let body = &body[..body.find("\n}\n").expect("enum end")];
+  let variants: std::collections::BTreeSet<&str> = body
+    .lines()
+    .filter_map(|line| {
+      let name = line.strip_prefix("  ")?;
+      let name = name.split([' ', '{', ',', '(']).next()?;
+      name
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_uppercase())
+        .then_some(name)
+    })
+    .collect();
+  let sampled: std::collections::BTreeSet<&str> = every_typed_remote_request()
+    .iter()
+    .map(|r| r.kind_name())
+    .collect();
+  assert!(variants.len() > 40, "parsed {} variants", variants.len());
+  let missing: Vec<_> = variants.difference(&sampled).collect();
+  assert!(missing.is_empty(), "not sampled: {missing:?}");
+}
+
+#[test]
+fn every_keyed_remote_request_is_claimed_in_the_idempotency_store() {
+  // A request carrying an idempotency key that `idempotency` misses would
+  // run again on every retry instead of replaying its first result.
+  for request in every_typed_remote_request() {
+    let wire = serde_json::to_value(&request).unwrap();
+    let key = wire.get("idempotency_key").and_then(|k| k.as_str());
+    let claimed = crate::core::remote::idempotency(&request).and_then(|(_, _, key)| key);
+    assert_eq!(claimed, key, "{}", request.kind_name());
+  }
+}
+
+#[test]
+fn gateway_parses_its_flags() {
+  let matches = super::args::parse([
+    "treq",
+    "gateway",
+    "--placement-id",
+    "pl_1",
+    "--secret-file",
+    "/tmp/s",
+    "--listen",
+    "0.0.0.0:8022",
+    "--allow",
+    "127.0.0.1:2222",
+    "--allow",
+    "localhost:22",
+  ])
+  .unwrap();
+  let sub = matches.subcommand.unwrap();
+  assert!(is_supported_cli_command("gateway"));
+  let args = super::parse_gateway_args(&sub.matches).unwrap();
+  assert_eq!(args.placement_id, "pl_1");
+  assert_eq!(args.secret_file, "/tmp/s");
+  assert_eq!(args.listen, "0.0.0.0:8022");
+  assert_eq!(
+    args.allow,
+    vec![
+      ("127.0.0.1".to_string(), 2222),
+      ("localhost".to_string(), 22)
+    ]
+  );
+}
+
+#[test]
+fn agent_start_parses_branch_prompt_and_repo() {
+  let sub = parsed_subcommand(&["treq", "agent", "start", "feat/x", "do it", "--repo", "svc"]);
+  assert_eq!(sub.name, "agent");
+  let start = sub.matches.subcommand.expect("start subcommand");
+  assert_eq!(start.name, "start");
+  let arg = |name: &str| {
+    start
+      .matches
+      .args
+      .get(name)
+      .and_then(|a| a.value.as_str().map(String::from))
+  };
+  assert_eq!(arg("branch").as_deref(), Some("feat/x"));
+  assert_eq!(arg("prompt").as_deref(), Some("do it"));
+  assert_eq!(arg("repo").as_deref(), Some("svc"));
+}
+
+#[test]
+fn agent_start_takes_the_harness_to_start() {
+  let sub = parsed_subcommand(&[
+    "treq", "agent", "start", "feat/x", "do it", "--agent", "codex",
+  ]);
+  let start = sub.matches.subcommand.expect("start subcommand");
+  assert_eq!(
+    super::workspace_handlers::start_agent_kind(&start.matches, "/no/repo"),
+    Ok("codex".to_string())
+  );
+}
+
+#[test]
+fn github_parses_its_subcommands() {
+  use super::GithubCommand;
+  assert!(is_supported_cli_command("github"));
+  let parse = |argv: &[&str]| {
+    let sub = parsed_subcommand(argv);
+    assert_eq!(sub.name, "github");
+    super::parse_github_command(&sub.matches)
+  };
+  assert_eq!(
+    parse(&["treq", "github", "token", "tznc/treq"]),
+    Ok(GithubCommand::Token {
+      repository: "tznc/treq".into()
+    })
+  );
+  assert_eq!(
+    parse(&["treq", "github", "credential", "get"]),
+    Ok(GithubCommand::Credential {
+      operation: "get".into()
+    })
+  );
+  assert_eq!(
+    parse(&[
+      "treq",
+      "github",
+      "gh",
+      "--",
+      "pr",
+      "list",
+      "-R",
+      "tznc/treq"
+    ]),
+    Ok(GithubCommand::Gh {
+      args: vec!["pr".into(), "list".into(), "-R".into(), "tznc/treq".into()],
+    })
+  );
+}
+
+#[test]
+fn gateway_defaults_secret_file_and_listen() {
+  let matches = super::args::parse(["treq", "gateway", "--placement-id", "pl_1"]).unwrap();
+  let args = super::parse_gateway_args(&matches.subcommand.unwrap().matches).unwrap();
+  assert_eq!(args.secret_file, "/etc/treq/gateway.secret");
+  assert_eq!(args.listen, "127.0.0.1:8022");
+  assert!(args.allow.is_empty());
+}
+
+#[test]
+fn gateway_rejects_allow_without_port() {
+  let matches =
+    super::args::parse(["treq", "gateway", "--placement-id", "p", "--allow", "host"]).unwrap();
+  assert!(super::parse_gateway_args(&matches.subcommand.unwrap().matches).is_err());
+}
+
+#[test]
+fn gateway_requires_placement_id() {
+  assert!(super::args::parse(["treq", "gateway"]).is_err());
+}
+
+#[test]
+fn agent_start_refuses_a_harness_treq_does_not_launch() {
+  let sub = parsed_subcommand(&[
+    "treq", "agent", "start", "feat/x", "do it", "--agent", "aider",
+  ]);
+  let start = sub.matches.subcommand.expect("start subcommand");
+  let error = super::workspace_handlers::start_agent_kind(&start.matches, "/no/repo").unwrap_err();
+  assert!(
+    error.contains("claude, codex, cursor, copilot, devin, gemini"),
+    "{error}"
+  );
+}
+
+#[test]
+fn agent_without_start_no_longer_takes_a_branch() {
+  assert!(super::args::parse(["treq", "agent", "feat/x", "do it"]).is_err());
+}
+
+#[test]
+fn review_commands_parse_without_repo() {
+  for args in [
+    &["treq", "changes", "list"][..],
+    &["treq", "workspace", "list"][..],
+    &["treq", "commits", "list"][..],
+  ] {
+    let sub = parsed_subcommand(args);
+    assert_eq!(super::get_arg_value(&sub.matches, "repo"), None, "{args:?}");
+  }
+}
+
+#[test]
+fn a_missing_repo_comes_from_the_current_workspace() {
+  let dir = tempfile::tempdir().unwrap();
+  let home = dir.path().canonicalize().unwrap();
+  let ws = home.join(".treq/workspaces/feat-a/src");
+  fs::create_dir_all(home.join(".jj")).unwrap();
+  fs::create_dir_all(home.join(".treq/workspaces/feat-a/.jj")).unwrap();
+  fs::create_dir_all(&ws).unwrap();
+  let mut matches = remote_matches(&[("action", "list")]);
+  super::fill_repo_from_cwd(&mut matches, &ws);
+  assert_eq!(
+    super::get_arg_value(&matches, "repo").as_deref(),
+    home.to_str()
+  );
+  // An explicit --repo wins.
+  let mut matches = remote_matches(&[("action", "list"), ("repo", "/srv/r")]);
+  super::fill_repo_from_cwd(&mut matches, &ws);
+  assert_eq!(
+    super::get_arg_value(&matches, "repo").as_deref(),
+    Some("/srv/r")
+  );
 }

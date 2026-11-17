@@ -9,22 +9,16 @@
 //! new workspace. Each dialog covers the whole window, sidebar included, as
 //! React's `Dialog` did.
 
-use crate::gpui_shell::ui::radius;
 use std::sync::Arc;
 
 use serde::Deserialize;
-use tauri_plugin_gpui::gpui::{
-  self, anchored, deferred, div, point, prelude::*, px, App, Div, FontWeight, SharedString,
-  Stateful,
-};
+use tauri_plugin_gpui::gpui::App;
 
 use super::{code_data::CodeHost, ActionSink, ScreenAction};
 use crate::{
   gpui_shell::{
-    native::{Backend, NativeEvent, ToastTone},
+    native::{Backend, NativeEvent},
     popup::PopupSink,
-    theme::Palette,
-    ui::{self, TextSize},
   },
   jj::JjRevisionDiff,
   local_db::{PromptHistoryEntry, StashEntry},
@@ -48,6 +42,17 @@ pub enum Modal {
 pub trait ModalsHost: CodeHost {
   /// Every prompt sent in the repository, most recent first.
   fn prompt_history(&self, repo_path: &str) -> Result<Vec<PromptHistoryEntry>, String>;
+  /// Up to `limit` of them after the newest `offset`, most recent first.
+  fn prompt_history_page(
+    &self,
+    repo_path: &str,
+    offset: usize,
+    limit: usize,
+  ) -> Result<Vec<PromptHistoryEntry>, String> {
+    self
+      .prompt_history(repo_path)
+      .map(|all| all.into_iter().skip(offset).take(limit).collect())
+  }
   fn stashes(&self, repo_path: &str) -> Result<Vec<StashEntry>, String>;
   fn stash_diff(&self, repo_path: &str, stash_id: i64) -> Result<JjRevisionDiff, String>;
   /// Copies the stash onto `target_branch` (`.` for the home repo).
@@ -58,7 +63,16 @@ pub trait ModalsHost: CodeHost {
 
 impl ModalsHost for Backend {
   fn prompt_history(&self, repo_path: &str) -> Result<Vec<PromptHistoryEntry>, String> {
-    crate::local_db::get_prompt_history(&self.state_scope(repo_path))
+    crate::core::sessions::prompt_history(&self.state_scope(repo_path))
+  }
+
+  fn prompt_history_page(
+    &self,
+    repo_path: &str,
+    offset: usize,
+    limit: usize,
+  ) -> Result<Vec<PromptHistoryEntry>, String> {
+    crate::core::sessions::prompt_history_page(&self.state_scope(repo_path), limit, offset)
   }
 
   fn stashes(&self, repo_path: &str) -> Result<Vec<StashEntry>, String> {
@@ -124,87 +138,12 @@ impl Env {
     super::workspace_data::WorkspaceHost::notify(self.host.as_ref(), event);
   }
 
-  pub fn toast(&self, tone: ToastTone, title: &str, description: impl Into<String>) {
-    self.notify(NativeEvent::Toast {
-      title: title.into(),
-      description: description.into(),
-      tone,
-      action: None,
-    });
-  }
-
   /// Tells React the repository's state changed (a stash was applied).
   pub fn workspace_changed(&self, repo_path: &str) {
     self.notify(NativeEvent::WorkspaceChanged {
       repo_path: repo_path.into(),
     });
   }
-}
-
-/// `ui/dialog.tsx`: the backdrop over the whole window (`bg-black/40`) and
-/// the panel (`p-6 rounded-xl border-border/50`) `width` wide, `height` tall
-/// when given, its content `gap-y-4` apart.
-pub fn dialog(
-  id: &'static str,
-  width: impl Into<gpui::Length> + Clone,
-  height: Option<gpui::Pixels>,
-  viewport: gpui::Size<gpui::Pixels>,
-  p: &Palette,
-) -> (Stateful<Div>, Div) {
-  let backdrop = div()
-    .id(SharedString::from(format!("{id}-backdrop")))
-    .w(viewport.width)
-    .h(viewport.height)
-    .p_4()
-    .flex()
-    .items_center()
-    .justify_center()
-    .bg(p.scrim())
-    .occlude();
-  let panel = div()
-    .debug_selector(move || id.into())
-    .w(width)
-    .max_w_full()
-    .when_some(height, |this, height| this.h(height).max_h_full())
-    .p_6()
-    .flex()
-    .flex_col()
-    .gap_4()
-    .rounded(radius::LG)
-    .border_1()
-    .border_color(p.border.opacity(0.5))
-    .bg(p.popover)
-    .text_color(p.popover_foreground)
-    .shadow_2xl();
-  (backdrop, panel)
-}
-
-/// Puts `backdrop` over the whole window, with `panel` in it.
-pub fn overlay(backdrop: Stateful<Div>, panel: impl IntoElement) -> impl IntoElement {
-  deferred(
-    anchored()
-      .position(point(px(0.), px(0.)))
-      .child(backdrop.child(panel)),
-  )
-  .with_priority(2)
-}
-
-/// `DialogTitle`: `text-lg font-semibold leading-none`.
-pub fn title(text: impl IntoElement) -> Div {
-  ui::text(div(), TextSize::Lg)
-    .font_weight(FontWeight::SEMIBOLD)
-    .child(text)
-}
-
-/// `text-sm text-muted-foreground py-8 text-center`.
-pub fn message(id: &'static str, text: impl Into<SharedString>, p: &Palette) -> Stateful<Div> {
-  ui::text(div(), TextSize::Sm)
-    .id(id)
-    .debug_selector(move || id.into())
-    .py_8()
-    .text_center()
-    .text_color(p.muted_foreground)
-    .child(text.into())
 }
 
 /// `a` contains `b`'s letters in order, ignoring case (cmdk's filter).

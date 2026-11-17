@@ -88,10 +88,13 @@ pub(crate) fn format_workspace_stack_lines(
       status.current.branch_name, status.current.title
     ));
     if let Some(description) = status.current.description.as_deref() {
-      lines.push(format!(
-        "{}   Description: {description}",
-        "   ".repeat(depth)
-      ));
+      let label = format!("{}   Description: ", "   ".repeat(depth));
+      let continuation = " ".repeat(label.chars().count());
+      let body = description.trim_end_matches(['\r', '\n']);
+      for (index, line) in body.lines().enumerate() {
+        let lead = if index == 0 { &label } else { &continuation };
+        lines.push(format!("{lead}{line}").trim_end().to_string());
+      }
     }
     if let Some(descendants) = children.get(status.current.branch_name.as_str()) {
       for child in descendants {
@@ -309,10 +312,14 @@ pub(crate) fn format_workspace_diff_lines(
     for file in conflict_hunks {
       lines.push(format!("=== {} ===", file.path));
       for hunk in &file.hunks {
-        if hunk.patch.is_empty() {
+        if hunk.header.is_empty() && hunk.lines.is_empty() {
           continue;
         }
-        lines.push(hunk.patch.trim_end().to_string());
+        lines.push(
+          format!("{}\n{}", hunk.header, hunk.lines.join("\n"))
+            .trim_end()
+            .to_string(),
+        );
       }
     }
   }
@@ -417,6 +424,55 @@ mod tests {
     );
   }
 
+  #[test]
+  fn stack_renders_every_line_of_a_multiline_description_aligned() {
+    let statuses = vec![
+      sidebar(workspace(1, "main-work", "Main", None, Some("main"))),
+      sidebar(workspace(
+        2,
+        "feat/api",
+        "API",
+        Some("Add endpoints\r\n\r\n- list\n- get\n"),
+        Some("main-work"),
+      )),
+      sidebar(workspace(3, "feat/ui", "UI", None, Some("feat/api"))),
+    ];
+
+    assert_eq!(
+      format_workspace_stack_lines(&statuses),
+      vec![
+        "Stack:",
+        "● main-work — Main",
+        "  └─ ● feat/api — API",
+        "      Description: Add endpoints",
+        "",
+        "                   - list",
+        "                   - get",
+        "     └─ ● feat/ui — UI",
+      ]
+    );
+  }
+
+  #[test]
+  fn stack_renders_single_line_description_unchanged() {
+    let statuses = vec![sidebar(workspace(
+      1,
+      "main-work",
+      "Main",
+      Some("Just one line\n"),
+      Some("main"),
+    ))];
+
+    assert_eq!(
+      format_workspace_stack_lines(&statuses),
+      vec![
+        "Stack:",
+        "● main-work — Main",
+        "   Description: Just one line"
+      ]
+    );
+  }
+
   fn checks(state: &str, passed: u32, failed: u32, pending: u32) -> PrCiStatus {
     PrCiStatus {
       state: state.to_string(),
@@ -492,7 +548,7 @@ mod tests {
   ) -> core::WorkspaceStatus {
     core::WorkspaceStatus {
       partial: core::WorkspacePartialStatus {
-        current: current.clone(),
+        current,
         has_conflicts,
         has_changes: false,
         commits_ahead: commit_count,
@@ -532,7 +588,7 @@ mod tests {
   #[test]
   fn focused_status_omits_diff_hint_when_clean() {
     let current = workspace(1, "feat/api", "API", None, Some("feat/core"));
-    let status = focused_status(current.clone(), false, vec![], 1);
+    let status = focused_status(current, false, vec![], 1);
     let lines = format_focused_workspace_status(&status, &[], 0, "main", None);
     assert!(lines.contains(&"  Conflicts: none".to_string()));
     assert!(!lines.iter().any(|line| line.contains("treq diff")));
@@ -548,8 +604,10 @@ mod tests {
         hunks: vec![crate::jj::JjDiffHunk {
           id: "h1".to_string(),
           header: "@@".to_string(),
-          lines: vec!["<<<<<<<".to_string()],
-          patch: "<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>>".to_string(),
+          lines: ["<<<<<<< HEAD", "ours", "=======", "theirs", ">>>>>>>"]
+            .map(String::from)
+            .to_vec(),
+          patch: String::new(),
           conflict_style: crate::conflict_markers::ConflictStyle::GitMerge,
           conflict_regions: Vec::new(),
         }],
@@ -560,6 +618,7 @@ mod tests {
       conflicted_files: vec!["src/app.rs".to_string()],
       too_large_to_render: false,
       render_block_reason: None,
+      working_copy_token: None,
     };
 
     let lines = format_workspace_diff_lines(
@@ -588,6 +647,7 @@ mod tests {
       conflicted_files: Vec::new(),
       too_large_to_render: false,
       render_block_reason: None,
+      working_copy_token: None,
     };
     assert_eq!(
       format_workspace_diff_lines(&diff, &[]),

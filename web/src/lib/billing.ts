@@ -22,10 +22,10 @@ export type CheckoutRequest =
   | { plan: "team"; organization_id: string };
 
 /**
- * Asks billing-checkout for an embedded Checkout session: Pro for the user,
- * or Team for an organization they own.
+ * Asks billing-checkout for a Stripe-hosted Checkout session URL: Pro for the
+ * user, or Team for an organization they own.
  */
-export async function fetchCheckoutClientSecret(
+export async function fetchCheckoutUrl(
   request: CheckoutRequest = { plan: "pro" },
 ): Promise<string> {
   const { data, error } = await supabase.functions.invoke("billing-checkout", {
@@ -34,9 +34,9 @@ export async function fetchCheckoutClientSecret(
   if (error) {
     throw new Error(await functionErrorMessage(error, "Could not start checkout"));
   }
-  const secret = (data as { client_secret?: unknown } | null)?.client_secret;
-  if (typeof secret !== "string") throw new Error("Could not start checkout");
-  return secret;
+  const url = (data as { url?: unknown } | null)?.url;
+  if (typeof url !== "string") throw new Error("Could not start checkout");
+  return url;
 }
 
 /**

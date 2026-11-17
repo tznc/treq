@@ -1,45 +1,34 @@
 //! What GPUI does itself that React's Dashboard and `ShowWorkspace`
-//! handlers did: run checks, create pull requests, retarget, queue for the
-//! merge queue, and delete or archive workspaces. Each reports with a toast
-//! and tells React which caches to refresh (`NativeEvent`).
+//! handlers did: run checks, create pull requests, retarget, and delete or
+//! archive workspaces. Each reports with a toast and tells React which caches to refresh (`NativeEvent`).
 
 use super::{
-  github_data::GithubHost, merge_queue_data::MergeQueueHost, workspace_data::WorkspaceHost,
+  code_data::CodeHost, github_data::GithubHost, workspace_data::WorkspaceHost,
+  workspace_dialog_data::WorkspaceDialogHost,
 };
+use crate::gpui_shell::native::Toast;
 use crate::{
-  core::{
-    self,
-    account::{self, QueueAction},
-    supabase::ApiError,
-  },
+  core,
   gpui_shell::{
     confirm::Question,
-    native::{Backend, NativeEvent, ToastTone},
+    native::{Backend, NativeEvent},
   },
 };
 
 /// What the workspace actions ask of the backend; faked in tests. All but
 /// the `WorkspaceHost` methods block, so they are called off the main
 /// thread.
-pub trait WorkspaceActionsHost: GithubHost + MergeQueueHost {
-  /// Adds the branch to, or takes it off, the merge queue.
-  fn queue(&self, full_name: &str, branch: &str, action: QueueAction) -> Result<(), ApiError>;
+pub trait WorkspaceActionsHost: GithubHost + CodeHost + WorkspaceDialogHost {
   fn delete_workspace(&self, repo_path: &str, workspace_id: i64) -> Result<(), String>;
   fn archive_workspace(&self, repo_path: &str, workspace_id: i64) -> Result<(), String>;
 }
 
 impl WorkspaceActionsHost for Backend {
-  fn queue(&self, full_name: &str, branch: &str, action: QueueAction) -> Result<(), ApiError> {
-    let cloud = crate::commands::cloud::owned_cloud(self.app())
-      .ok_or_else(|| ApiError::new("no_account", "The account is not available in this window."))?;
-    tauri::async_runtime::block_on(account::enqueue(&cloud.supabase, full_name, branch, action))
-  }
-
   fn delete_workspace(&self, repo_path: &str, workspace_id: i64) -> Result<(), String> {
     if let Some(remote) = self.remote(repo_path) {
       return remote.delete_workspace(workspace_id);
     }
-    core::delete_workspace(repo_path, &workspace_id).map(drop)
+    core::delete_workspace_removing_directory_later(repo_path, workspace_id)
   }
 
   fn archive_workspace(&self, repo_path: &str, workspace_id: i64) -> Result<(), String> {
@@ -48,18 +37,6 @@ impl WorkspaceActionsHost for Backend {
     }
     core::archive_workspace_removing_directory_later(repo_path, workspace_id)
   }
-}
-
-pub fn toast(host: &dyn WorkspaceHost, tone: ToastTone, title: &str, description: &str) {
-  WorkspaceHost::notify(
-    host,
-    NativeEvent::Toast {
-      title: title.into(),
-      description: description.into(),
-      tone,
-      action: None,
-    },
-  );
 }
 
 /// The workspace a removal is for.
@@ -93,18 +70,46 @@ pub fn delete_question(workspace: &Removed) -> Question {
   .destructive()
 }
 
+/// What Reset to remote asks first: what it discards for good.
+pub fn reset_question(branch: &str, ahead: usize, uncommitted: usize) -> Question {
+  let plural = |n: usize, what: &str| format!("{n} {what}{}", if n == 1 { "" } else { "s" });
+  let lost: Vec<String> = [
+    (ahead > 0).then(|| plural(ahead, "local commit")),
+    (uncommitted > 0).then(|| format!("uncommitted changes to {}", plural(uncommitted, "file"))),
+  ]
+  .into_iter()
+  .flatten()
+  .collect();
+  let message = if lost.is_empty() {
+    format!("Fetches and checks out origin/{branch}. Nothing local is lost.")
+  } else {
+    format!(
+      "Discards {}, then matches origin/{branch}.",
+      lost.join(" and ")
+    )
+  };
+  Question::new(
+    format!("Reset {branch} to origin?"),
+    message,
+    "Reset to remote",
+  )
+  .destructive()
+}
+
 /// `handleDelete`, once confirmed ([`delete_question`]): deletes, toasts
 /// and tells React. Returns whether the workspace went, so its terminals
 /// close.
 pub fn delete(host: &dyn WorkspaceActionsHost, workspace: &Removed) -> bool {
+  removing(host, &workspace.repo_path, vec![workspace.id]);
   match host.delete_workspace(&workspace.repo_path, workspace.id) {
     Ok(()) => {
       removed(host, &workspace.repo_path, vec![workspace.id]);
-      toast(host, ToastTone::Success, "Workspace deleted", "");
+      WorkspaceHost::notify(host, Toast::success("Workspace deleted").into());
       true
     }
     Err(err) => {
-      toast(host, ToastTone::Error, "Delete Failed", &err);
+      restored(host, &workspace.repo_path, vec![workspace.id]);
+      WorkspaceHost::notify(host, Toast::error("Delete failed").description(&err).into());
       false
     }
   }
@@ -112,14 +117,19 @@ pub fn delete(host: &dyn WorkspaceActionsHost, workspace: &Removed) -> bool {
 
 /// `archiveWorkspaceMutation`: archives, toasts and tells React.
 pub fn archive(host: &dyn WorkspaceActionsHost, workspace: &Removed) -> bool {
+  removing(host, &workspace.repo_path, vec![workspace.id]);
   match host.archive_workspace(&workspace.repo_path, workspace.id) {
     Ok(()) => {
       removed(host, &workspace.repo_path, vec![workspace.id]);
-      toast(host, ToastTone::Success, "Workspace archived", "");
+      WorkspaceHost::notify(host, Toast::success("Workspace archived").into());
       true
     }
     Err(err) => {
-      toast(host, ToastTone::Error, "Archive Failed", &err);
+      restored(host, &workspace.repo_path, vec![workspace.id]);
+      WorkspaceHost::notify(
+        host,
+        Toast::error("Archive failed").description(&err).into(),
+      );
       false
     }
   }
@@ -131,20 +141,29 @@ pub fn archive(host: &dyn WorkspaceActionsHost, workspace: &Removed) -> bool {
 pub fn archive_all(host: &dyn WorkspaceActionsHost, workspaces: &[Removed]) -> Vec<Removed> {
   let mut archived = Vec::new();
   let mut failures = Vec::new();
+  let mut failed_ids = Vec::new();
+  if let Some(first) = workspaces.first() {
+    removing(
+      host,
+      &first.repo_path,
+      workspaces.iter().map(|w| w.id).collect(),
+    );
+  }
   for workspace in workspaces {
     match host.archive_workspace(&workspace.repo_path, workspace.id) {
       Ok(()) => archived.push(workspace.clone()),
-      Err(err) => failures.push(err),
+      Err(err) => {
+        failed_ids.push(workspace.id);
+        failures.push(err);
+      }
     }
   }
   if let Some(first) = archived.first() {
     let n = archived.len();
     let s = if n > 1 { "s" } else { "" };
-    toast(
+    WorkspaceHost::notify(
       host,
-      ToastTone::Success,
-      &format!("{n} workspace{s} archived"),
-      "",
+      Toast::success(format!("{n} workspace{s} archived")).into(),
     );
     removed(
       host,
@@ -153,14 +172,40 @@ pub fn archive_all(host: &dyn WorkspaceActionsHost, workspaces: &[Removed]) -> V
     );
   }
   if !failures.is_empty() {
-    toast(
+    if let Some(first) = workspaces.first() {
+      restored(host, &first.repo_path, failed_ids);
+    }
+    WorkspaceHost::notify(
       host,
-      ToastTone::Error,
-      "Archive Failed",
-      &failures.join("\n"),
+      Toast::error("Archive failed")
+        .description(failures.join("\n"))
+        .into(),
     );
   }
   archived
+}
+
+/// The workspaces are going: their rows leave at once, ahead of the
+/// removal.
+fn removing(host: &dyn WorkspaceActionsHost, repo_path: &str, ids: Vec<i64>) {
+  WorkspaceHost::notify(
+    host,
+    NativeEvent::WorkspacesRemoving {
+      repo_path: repo_path.into(),
+      ids,
+    },
+  );
+}
+
+/// The removal failed: the rows come back.
+fn restored(host: &dyn WorkspaceActionsHost, repo_path: &str, ids: Vec<i64>) {
+  WorkspaceHost::notify(
+    host,
+    NativeEvent::WorkspacesRestored {
+      repo_path: repo_path.into(),
+      ids,
+    },
+  );
 }
 
 /// The workspaces went: React refreshes and leaves them.
@@ -194,6 +239,41 @@ pub fn move_workspace(
         repo_path: repo_path.into(),
       },
     ),
-    Err(err) => toast(host, ToastTone::Error, "Failed to move workspace", &err),
+    Err(err) => WorkspaceHost::notify(
+      host,
+      Toast::error("Failed to move workspace")
+        .description(&err)
+        .into(),
+    ),
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn reset_question_says_what_is_lost() {
+    let q = reset_question("feature/login", 4, 2);
+    assert_eq!(q.question, "Reset feature/login to origin?");
+    assert_eq!(
+      q.message,
+      "Discards 4 local commits and uncommitted changes to 2 files, then matches origin/feature/login."
+    );
+    assert_eq!(q.verb, "Reset to remote");
+    assert!(q.destructive);
+
+    assert_eq!(
+      reset_question("b", 1, 0).message,
+      "Discards 1 local commit, then matches origin/b."
+    );
+    assert_eq!(
+      reset_question("b", 0, 1).message,
+      "Discards uncommitted changes to 1 file, then matches origin/b."
+    );
+    assert_eq!(
+      reset_question("b", 0, 0).message,
+      "Fetches and checks out origin/b. Nothing local is lost."
+    );
   }
 }

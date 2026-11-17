@@ -1,0 +1,283 @@
+id: gpui-hover-token
+snapshots:
+  ? |
+    fn card() -> Div {
+      div().hover(|s| s.shadow_md())
+    }
+  : labels:
+    - source: s.shadow_md()
+      style: primary
+      start: 37
+      end: 50
+    - source: hover
+      style: secondary
+      start: 27
+      end: 32
+    - source: div().hover
+      style: secondary
+      start: 21
+      end: 32
+    - source: div().hover(|s| s.shadow_md())
+      style: secondary
+      start: 21
+      end: 51
+    - source: (|s| s.shadow_md())
+      style: secondary
+      start: 32
+      end: 51
+    - source: '|s| s.shadow_md()'
+      style: secondary
+      start: 33
+      end: 50
+    - source: shadow_md
+      style: secondary
+      start: 39
+      end: 48
+    - source: s.shadow_md
+      style: secondary
+      start: 37
+      end: 48
+  ? |
+    fn chrome() -> Div {
+      div().hover(|s| s.bg(chrome(0.15)))
+    }
+  : labels:
+    - source: s.bg(chrome(0.15))
+      style: primary
+      start: 39
+      end: 57
+    - source: hover
+      style: secondary
+      start: 29
+      end: 34
+    - source: div().hover
+      style: secondary
+      start: 23
+      end: 34
+    - source: div().hover(|s| s.bg(chrome(0.15)))
+      style: secondary
+      start: 23
+      end: 58
+    - source: (|s| s.bg(chrome(0.15)))
+      style: secondary
+      start: 34
+      end: 58
+    - source: '|s| s.bg(chrome(0.15))'
+      style: secondary
+      start: 35
+      end: 57
+  ? |
+    fn row(p: &Palette) -> Div {
+      div().hover(|s| s.bg(p.accent.opacity(0.3)))
+    }
+  : labels:
+    - source: s.bg(p.accent.opacity(0.3))
+      style: primary
+      start: 47
+      end: 74
+    - source: hover
+      style: secondary
+      start: 37
+      end: 42
+    - source: div().hover
+      style: secondary
+      start: 31
+      end: 42
+    - source: div().hover(|s| s.bg(p.accent.opacity(0.3)))
+      style: secondary
+      start: 31
+      end: 75
+    - source: (|s| s.bg(p.accent.opacity(0.3)))
+      style: secondary
+      start: 42
+      end: 75
+    - source: '|s| s.bg(p.accent.opacity(0.3))'
+      style: secondary
+      start: 43
+      end: 74
+  ? |
+    fn row(p: &Palette) -> Div {
+      div().hover(|s| s.bg(p.menu_accent))
+    }
+  : labels:
+    - source: s.bg(p.menu_accent)
+      style: primary
+      start: 47
+      end: 66
+    - source: hover
+      style: secondary
+      start: 37
+      end: 42
+    - source: div().hover
+      style: secondary
+      start: 31
+      end: 42
+    - source: div().hover(|s| s.bg(p.menu_accent))
+      style: secondary
+      start: 31
+      end: 67
+    - source: (|s| s.bg(p.menu_accent))
+      style: secondary
+      start: 42
+      end: 67
+    - source: '|s| s.bg(p.menu_accent)'
+      style: secondary
+      start: 43
+      end: 66
+  ? |
+    fn row(p: &Palette) -> Div {
+      div().hover(|s| s.bg(p.muted.opacity(0.5)))
+    }
+  : labels:
+    - source: s.bg(p.muted.opacity(0.5))
+      style: primary
+      start: 47
+      end: 73
+    - source: hover
+      style: secondary
+      start: 37
+      end: 42
+    - source: div().hover
+      style: secondary
+      start: 31
+      end: 42
+    - source: div().hover(|s| s.bg(p.muted.opacity(0.5)))
+      style: secondary
+      start: 31
+      end: 74
+    - source: (|s| s.bg(p.muted.opacity(0.5)))
+      style: secondary
+      start: 42
+      end: 74
+    - source: '|s| s.bg(p.muted.opacity(0.5))'
+      style: secondary
+      start: 43
+      end: 73
+  ? |
+    fn row(p: &Palette) -> Div {
+      let hover = p.hover();
+      div().hover(move |s| s.bg(hover))
+    }
+  : labels:
+    - source: s.bg(hover)
+      style: primary
+      start: 77
+      end: 88
+    - source: hover
+      style: secondary
+      start: 62
+      end: 67
+    - source: div().hover
+      style: secondary
+      start: 56
+      end: 67
+    - source: div().hover(move |s| s.bg(hover))
+      style: secondary
+      start: 56
+      end: 89
+    - source: (move |s| s.bg(hover))
+      style: secondary
+      start: 67
+      end: 89
+    - source: move |s| s.bg(hover)
+      style: secondary
+      start: 68
+      end: 88
+  ? |
+    fn row(p: Palette) -> Div {
+      div().active(move |s| s.bg(p.accent.opacity(0.5)))
+    }
+  : labels:
+    - source: s.bg(p.accent.opacity(0.5))
+      style: primary
+      start: 52
+      end: 79
+    - source: active
+      style: secondary
+      start: 36
+      end: 42
+    - source: div().active
+      style: secondary
+      start: 30
+      end: 42
+    - source: div().active(move |s| s.bg(p.accent.opacity(0.5)))
+      style: secondary
+      start: 30
+      end: 80
+    - source: (move |s| s.bg(p.accent.opacity(0.5)))
+      style: secondary
+      start: 42
+      end: 80
+    - source: move |s| s.bg(p.accent.opacity(0.5))
+      style: secondary
+      start: 43
+      end: 79
+  ? |
+    fn row(p: Palette) -> Div {
+      div().group_hover("row", move |s| s.bg(p.muted))
+    }
+  : labels:
+    - source: s.bg(p.muted)
+      style: primary
+      start: 64
+      end: 77
+    - source: group_hover
+      style: secondary
+      start: 36
+      end: 47
+    - source: div().group_hover
+      style: secondary
+      start: 30
+      end: 47
+    - source: div().group_hover("row", move |s| s.bg(p.muted))
+      style: secondary
+      start: 30
+      end: 78
+    - source: ("row", move |s| s.bg(p.muted))
+      style: secondary
+      start: 47
+      end: 78
+    - source: move |s| s.bg(p.muted)
+      style: secondary
+      start: 55
+      end: 77
+  ? |
+    fn row(p: Palette, on: bool) -> Div {
+      div().hover(move |s| {
+        s.bg(if on { p.primary } else { p.muted })
+      })
+    }
+  : labels:
+    - source: s.bg(if on { p.primary } else { p.muted })
+      style: primary
+      start: 67
+      end: 109
+    - source: hover
+      style: secondary
+      start: 46
+      end: 51
+    - source: div().hover
+      style: secondary
+      start: 40
+      end: 51
+    - source: |-
+        div().hover(move |s| {
+            s.bg(if on { p.primary } else { p.muted })
+          })
+      style: secondary
+      start: 40
+      end: 114
+    - source: |-
+        (move |s| {
+            s.bg(if on { p.primary } else { p.muted })
+          })
+      style: secondary
+      start: 51
+      end: 114
+    - source: |-
+        move |s| {
+            s.bg(if on { p.primary } else { p.muted })
+          }
+      style: secondary
+      start: 52
+      end: 113

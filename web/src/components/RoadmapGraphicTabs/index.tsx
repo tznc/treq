@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import type React from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
   getYearRoadmap,
   firstPlannedIndex,

@@ -1,11 +1,13 @@
 //! `PrDetailPanel`, `IssueDetailPanel` and their actions, and the PR's
 //! workspace checks (`PrWorkspaceChecks`).
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
+use gpui_kit::base::TestSupportExt as _;
 use tauri_plugin_gpui::gpui::{
-  self, anchored, deferred, div, point, prelude::*, px, Context, Div, FontWeight, KeyDownEvent,
-  MouseButton, SharedString, Window,
+  self, deferred, div, prelude::*, Context, Div, FontWeight, KeyDownEvent, MouseButton,
+  SharedString, Window,
 };
 
 use super::{
@@ -18,16 +20,14 @@ use crate::{
   github::{GhIssue, GhIssueComment, GhPullRequest, PrCiStatus},
   gpui_shell::{
     form,
-    native::ToastTone,
     popup::{Side, TooltipContent},
     screen::{
       code::markdown,
-      github_data::{self as data, CiState, GithubHost, IssueChange, PrChange, Tab, SETUP_KEY},
-      workspace_modal::{dialog_description, dialog_header, dialog_panel},
+      github_data::{self as data, CiState, GithubHost, IssueChange, PrChange, Tab},
     },
     theme::{self, Palette},
     time,
-    ui::{self, Button, EscapeExt as _, Size, TextSize, Tone, Variant},
+    ui::{self, Button, Size, TextSize, Tone, Variant},
   },
   local_db::Workspace,
 };
@@ -71,7 +71,7 @@ impl GithubView {
             if busy == Busy::Delete && current {
               view.detail.confirm_delete = false;
             }
-            view.toast(ToastTone::Error, fail, err);
+            view.host.notify(Toast::error(fail).description(err).into());
           }
         }
       },
@@ -172,7 +172,11 @@ impl GithubView {
             view.detail.editing = None;
             view.reload_list(false, cx);
           }
-          Err(err) => view.toast(ToastTone::Error, "Failed to update issue", err),
+          Err(err) => view.host.notify(
+            Toast::error("Failed to update issue")
+              .description(err)
+              .into(),
+          ),
         }
       },
     );
@@ -226,11 +230,17 @@ impl GithubView {
             } else {
               "Workspace opened"
             };
-            view.toast(ToastTone::Success, title, head.to_string());
+            view
+              .host
+              .notify(Toast::success(title).description(head).into());
             view.load_workspaces(cx);
             view.press(format!("github.openWorkspace:{id}"), cx);
           }
-          Err(err) => view.toast(ToastTone::Error, "Failed to open workspace", err),
+          Err(err) => view.host.notify(
+            Toast::error("Failed to open workspace")
+              .description(err)
+              .into(),
+          ),
         }
       },
     );
@@ -276,27 +286,34 @@ impl GithubView {
       );
     let loaded = self.detail.issue.is_some() || self.detail.pr.is_some();
     let body = if self.detail.loading {
-      div()
-        .flex_1()
-        .flex()
-        .items_center()
-        .justify_center()
-        .child(ui::spinner(
-          "github-detail-loading",
-          20.,
-          p.muted_foreground,
-        ))
-        .into_any_element()
-    } else if let (Some(err), false) = (self.detail.error.clone(), loaded) {
-      let what = if issue { "issue" } else { "pull request" };
-      parts::error_state(
-        "github-detail",
-        &format!("Could not load {what} #{number}"),
-        &err,
-        p,
-        None,
+      ui::delayed(
+        "github-detail-loading",
+        div()
+          .flex_1()
+          .flex()
+          .items_center()
+          .justify_center()
+          .child(ui::spinner(
+            "github-detail-loading-spinner",
+            20.,
+            p.muted_foreground,
+          )),
       )
       .into_any_element()
+    } else if let (Some(err), false) = (self.detail.error.clone(), loaded) {
+      let what = if issue { "issue" } else { "pull request" };
+      div()
+        .py_12()
+        .child(
+          ui::EmptyState::failed(
+            "github-detail-error",
+            format!("Couldn't load {what} #{number}"),
+            err.clone(),
+            p,
+          )
+          .action(ui::error_actions("github-detail", err, None, p)),
+        )
+        .into_any_element()
     } else if let Some(issue) = self.detail.issue.clone().filter(|_| issue) {
       self.issue_content(&issue, p, window, cx).into_any_element()
     } else if let Some(pr) = self.detail.pr.clone().filter(|_| !issue) {
@@ -314,13 +331,21 @@ impl GithubView {
       .child(body)
   }
 
-  /// The scrolling `px-4 py-3 space-y-4` column of a detail.
-  fn content() -> gpui::Stateful<Div> {
+  /// The scrolling detail page around its `px-4 py-3 space-y-4` column,
+  /// capped at `CONTENT_MAX_WIDTH`.
+  fn scroll(column: Div) -> gpui::Stateful<Div> {
     div()
       .id("github-detail-scroll")
       .flex_1()
       .min_h_0()
       .overflow_y_scroll()
+      .child(column)
+  }
+
+  fn content() -> Div {
+    div()
+      .w_full()
+      .max_w(zpx(theme::CONTENT_MAX_WIDTH))
       .px_4()
       .py_3()
       .flex()
@@ -352,49 +377,86 @@ impl GithubView {
     )
   }
 
+  /// The comments and, on a pull request, its reviewers' verdicts.
   fn comments(
     &self,
     comments: &Option<Vec<GhIssueComment>>,
+    reviews: &[crate::github::GhReview],
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> Option<Div> {
-    let comments = comments.as_ref().filter(|c| !c.is_empty())?;
+    let comments = comments.as_deref().unwrap_or_default();
+    let items = crate::core::pr_view::timeline(comments, reviews);
+    if items.is_empty() {
+      return None;
+    }
+    // `None` stands for the fold.
+    let shown = crate::gpui_shell::screen::rows::thread(items.len(), self.detail.comments_expanded);
     Some(
       div()
         .flex()
         .flex_col()
         .gap_3()
-        .child(parts::section_heading(
-          format!("Comments ({})", comments.len()),
-          Some(theme::ICON_MESSAGE),
-          p,
-        ))
-        .children(comments.iter().map(|c| {
-          parts::comment(
-            &c.author.login,
-            &time::date(&c.created_at),
-            markdown(
-              SharedString::from(format!("github-comment-{}", c.id)),
-              &c.body,
-              13.,
-              self.dark,
+        .child({
+          let (title, n) = if items.len() > comments.len() {
+            ("Activity", items.len())
+          } else {
+            ("Comments", comments.len())
+          };
+          ui::SectionHeader::new("github-comments-heading", title, p)
+            .icon(theme::ICON_MESSAGE)
+            .count(n)
+        })
+        .children(shown.iter().map(|&shown_ix| match shown_ix {
+          Some(ix) => {
+            let c = match &items[ix] {
+              crate::github::TimelineItem::Comment(c) => *c,
+              crate::github::TimelineItem::Review(r) => {
+                let image = self
+                  .avatars
+                  .get(&crate::core::pr_view::avatar_url(&r.author))
+                  .cloned()
+                  .flatten();
+                return parts::review_event(r, &time::date(&r.submitted_at), image, p)
+                  .into_any_element();
+              }
+            };
+            parts::comment(
+              &c.author.login,
+              &time::date(&c.created_at),
+              markdown(
+                SharedString::from(format!("github-comment-{}", c.id)),
+                &c.body,
+                13.,
+                self.dark,
+              )
+              .into_any_element(),
+              p,
             )
-            .into_any_element(),
+            .child(reactions::bar(
+              &self.tips,
+              self.reaction_picker.as_deref(),
+              &c.id,
+              &c.reactions,
+              p,
+              cx,
+            ))
+            .into_any_element()
+          }
+          None => parts::fold_row(
+            "github-comments-show-earlier",
+            crate::gpui_shell::screen::rows::hidden(items.len()),
             p,
-          )
-          .child(reactions::bar(
-            &self.tips,
-            self.reaction_picker.as_deref(),
-            &c.id,
-            &c.reactions,
-            p,
-            cx,
-          ))
+            cx.listener(|view, _, _, cx| {
+              view.detail.comments_expanded = true;
+              cx.notify();
+            }),
+          ),
         })),
     )
   }
 
-  /// "Add Comment": the box and the buttons after "Comment".
+  /// "Add comment": the box and the buttons after "Comment".
   fn add_comment(
     &mut self,
     submit_on_enter: bool,
@@ -407,7 +469,7 @@ impl GithubView {
     let state = self.textarea(
       "github.comment",
       &comment,
-      "Leave a comment...",
+      "Leave a comment…",
       3,
       window,
       cx,
@@ -417,7 +479,11 @@ impl GithubView {
       .flex()
       .flex_col()
       .gap_2()
-      .child(parts::section_heading("Add Comment", None, p))
+      .child(ui::SectionHeader::new(
+        "github-add-comment-heading",
+        "Add comment",
+        p,
+      ))
       .child(
         ui::text(div().id("github-comment-box"), TextSize::Sm)
           .debug_selector(|| "github-comment-box".into())
@@ -484,7 +550,6 @@ impl GithubView {
         .edit_form(&title, &body, p, window, cx)
         .into_any_element(),
       None => {
-        let destructive = p.destructive;
         let (number, url, title) = (issue.number, issue.url.clone(), issue.title.clone());
         let open = url.clone();
         let copy_link = self.copy_link(url.clone());
@@ -514,12 +579,10 @@ impl GithubView {
           .child(
             Button::new("github-delete", p)
               .aria_label("Delete issue")
-              .variant(Variant::Ghost)
+              .variant(Variant::DestructiveGhost)
               .size(Size::Icon)
               .w(zpx(32.))
               .h(zpx(32.))
-              .text_color(p.muted_foreground)
-              .hover_bg(destructive.opacity(0.1))
               .child(ui::icon(theme::ICON_TRASH, 16., p.muted_foreground))
               .on_click(cx.listener(|view, _, _, cx| {
                 view.detail.confirm_delete = true;
@@ -531,7 +594,7 @@ impl GithubView {
               .size(Size::Sm)
               .gap_1p5()
               .icon(theme::ICON_SPARKLES, 16.)
-              .label("Agent...")
+              .label("Agent…")
               .on_click(cx.listener(move |view, _, _, cx| {
                 view.field(
                   "github.startPrompt",
@@ -591,7 +654,7 @@ impl GithubView {
         .child(
           Self::action(
             "github-close-issue",
-            if closing { "Closing…" } else { "Close Issue" },
+            if closing { "Closing…" } else { "Close issue" },
             closing,
             p,
           )
@@ -655,7 +718,7 @@ impl GithubView {
         if reopening {
           "Reopening…"
         } else {
-          "Reopen Issue"
+          "Reopen issue"
         },
         reopening,
         p,
@@ -671,13 +734,15 @@ impl GithubView {
       .into_any_element()
     };
     let add = self.add_comment(true, vec![actions], p, window, cx);
-    Self::content()
-      .child(head)
-      .when(!editing, |d| {
-        d.children(self.body("github-issue-body", &issue.body, p))
-      })
-      .children(self.comments(&issue.comments, p, cx))
-      .child(add)
+    Self::scroll(
+      Self::content()
+        .child(head)
+        .when(!editing, |d| {
+          d.children(self.body("github-issue-body", &issue.body, p))
+        })
+        .children(self.comments(&issue.comments, &[], p, cx))
+        .child(add),
+    )
   }
 
   /// `IssueEditForm`.
@@ -756,74 +821,52 @@ impl GithubView {
   ) -> impl IntoElement {
     let number = self.route.selected.unwrap_or_default();
     let pending = self.detail.busy.contains(&Busy::Delete);
-    let (backdrop, panel) = dialog_panel("github-delete-dialog", 512., window.viewport_size(), p);
     let cancel = |view: &mut Self, cx: &mut Context<Self>| {
       if !view.detail.busy.contains(&Busy::Delete) {
         view.detail.confirm_delete = false;
         cx.notify();
       }
     };
-    let panel = panel
-      .child(dialog_header(
-        format!("Delete issue #{number}?"),
-        dialog_description(
-          "This permanently deletes the issue and its comments on GitHub. You cannot undo this.",
-          p,
-        ),
-      ))
-      .child(
-        div()
-          .mt_4()
-          .flex()
-          .justify_end()
-          .gap_2()
-          .child(
-            Button::new("github-delete-cancel", p)
-              .variant(Variant::Ghost)
-              .disabled(pending)
-              .label("Cancel")
-              .on_click(cx.listener(move |view, _, _, cx| cancel(view, cx))),
-          )
-          .child(
-            parts::busy_spinner(
-              Button::new("github-delete-confirm", p)
-                .bg(p.destructive)
-                .hover_bg(p.destructive.opacity(0.9))
-                .text_color(p.destructive_foreground)
-                .gap_1()
-                .disabled(pending),
-              "github-delete-confirm",
-              pending,
-              p.destructive_foreground,
-            )
-            .label("Delete")
-            .on_click(cx.listener(|view, _, _, cx| {
-              view.change_issue(
-                Busy::Delete,
-                "Failed to delete issue",
-                IssueChange::Delete,
-                cx,
-              )
-            })),
-          ),
-      );
-    deferred(
-      anchored().position(point(px(0.), px(0.))).child(
-        backdrop
-          .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |view, _, _, cx| cancel(view, cx)),
-          )
-          .child(
-            panel
-              .id("github-delete-panel")
-              .track_focus(self.dialog_focus())
-              .on_escape(cx.listener(move |view, _, _, cx| cancel(view, cx)))
-              .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()),
-          ),
-      ),
-    )
-    .with_priority(2)
+    let delete = |view: &mut Self, cx: &mut Context<Self>| {
+      view.change_issue(
+        Busy::Delete,
+        "Failed to delete issue",
+        IssueChange::Delete,
+        cx,
+      )
+    };
+    ui::Dialog::new("github-delete-dialog", p)
+      .overlay(window.viewport_size())
+      .width(512.)
+      .title(format!("Delete issue #{number}?"))
+      .description(
+        "This permanently deletes the issue and its comments on GitHub. You cannot undo this.",
+      )
+      .focus(self.dialog_focus())
+      .on_close(ui::handler(cx, move |view, _, cx| cancel(view, cx)))
+      .on_primary(ui::handler(cx, move |view, _, cx| delete(view, cx)))
+      .primary_disabled(pending)
+      .confirm()
+      .footer([
+        Button::new("github-delete-cancel", p)
+          .variant(Variant::Outline)
+          .disabled(pending)
+          .label("Cancel")
+          .on_click(cx.listener(move |view, _, _, cx| cancel(view, cx)))
+          .into_any_element(),
+        parts::busy_spinner(
+          Button::new("github-delete-confirm", p)
+            .variant(Variant::Destructive)
+            .gap_1()
+            .disabled(pending),
+          "github-delete-confirm",
+          pending,
+          p.destructive_foreground,
+        )
+        .label("Delete")
+        .on_click(cx.listener(move |view, _, _, cx| delete(view, cx)))
+        .into_any_element(),
+      ])
   }
 
   fn pr_content(
@@ -881,9 +924,9 @@ impl GithubView {
           .disabled(opening)
           .child(workspace_icon)
           .label(if existing.is_some() {
-            "Open Workspace"
+            "Open workspace"
           } else {
-            "Create Workspace"
+            "Create workspace"
           })
           .on_click(cx.listener(|view, _, _, cx| view.open_workspace(cx))),
       )
@@ -913,6 +956,7 @@ impl GithubView {
           .gap_2()
           .mt_1()
           .child(parts::state_chip(&pr.state, pr.is_draft, p))
+          .children(parts::review_chip(pr, p))
           .children(checks.as_ref().map(|c| self.ci_button(c, p, cx)))
           .child(
             ui::text(div(), TextSize::Sm)
@@ -933,47 +977,79 @@ impl GithubView {
           )),
       )
       .children(parts::labels(&pr.labels));
+    let open = self.detail.checks_open;
     let checks_list = checks.map(|c| {
+      let shown: Vec<_> = if open {
+        data::by_severity(&c.checks)
+          .into_iter()
+          .filter(|c| !crate::core::pr_view::is_inactive_check(c))
+          .collect()
+      } else {
+        crate::core::pr_view::collapsed_checks(&c.checks)
+      };
+      let toggle = Button::new("github-checks-toggle", p)
+        .variant(Variant::Ghost)
+        .size(Size::Sm)
+        .label(if open { "Collapse" } else { "Show all" })
+        .on_click(cx.listener(|view, _, _, cx| {
+          view.detail.checks_open = !view.detail.checks_open;
+          cx.notify();
+        }));
       div()
         .flex()
         .flex_col()
         .gap_2()
-        .child(parts::section_heading(
-          format!("Checks ({}/{})", c.passed, c.total),
-          Some(theme::ICON_LIST_CHECKS),
-          p,
-        ))
         .child(
           div()
-            .border_1()
-            .border_color(p.border)
-            .rounded(radius::MD)
-            .overflow_hidden()
-            .children(
-              data::by_severity(&c.checks)
-                .into_iter()
-                .enumerate()
-                .map(|(i, check)| {
-                  let link = check.link.clone();
-                  let copy_link = self.copy_link(link.clone());
-                  div()
-                    .when(i > 0, |d| d.border_t_1().border_color(p.border))
-                    .child(
-                      parts::check_row(
-                        format!("github-check-{i}"),
-                        check,
-                        p,
-                        Some(Box::new(
-                          cx.listener(move |view, _, _, _| view.open_url(&link)),
-                        )),
-                      )
-                      .when(!check.link.is_empty(), |row| {
-                        row.on_mouse_down(MouseButton::Right, copy_link)
-                      }),
-                    )
-                }),
-            ),
+            .flex()
+            .items_center()
+            .justify_between()
+            .child(
+              ui::SectionHeader::new("github-checks-heading", "Checks", p)
+                .icon(theme::ICON_LIST_CHECKS),
+            )
+            .child(toggle),
         )
+        .child({
+          let summary = crate::core::pr_view::checks_summary(&c.checks);
+          ui::text(named(div(), "github-checks-summary"), TextSize::Sm)
+            .role(gpui::Role::Label)
+            .aria_label(summary.clone())
+            .text_color(p.muted_foreground)
+            .child(summary)
+            .test_support()
+        })
+        .when(!shown.is_empty(), |d| {
+          d.child(
+            div()
+              .id("github-checks-list")
+              .debug_selector(|| "github-checks-list".into())
+              .max_h(zpx(data::CHECKS_MAX_HEIGHT))
+              .overflow_y_scroll()
+              .border_1()
+              .border_color(p.border)
+              .rounded(radius::MD)
+              .children(shown.into_iter().enumerate().map(|(i, check)| {
+                let link = check.link.clone();
+                let copy_link = self.copy_link(link.clone());
+                div()
+                  .when(i > 0, |d| d.border_t_1().border_color(p.border))
+                  .child(
+                    parts::check_row(
+                      format!("github-check-{i}"),
+                      check,
+                      p,
+                      Some(Box::new(
+                        cx.listener(move |view, _, _, _| view.open_url(&link)),
+                      )),
+                    )
+                    .when(!check.link.is_empty(), |row| {
+                      row.on_mouse_down(MouseButton::Right, copy_link)
+                    }),
+                  )
+              })),
+          )
+        })
     });
     let treq = existing.map(|ws| self.treq_section(&ws, p, cx));
     let busy = |b| self.detail.busy.contains(&b);
@@ -985,9 +1061,9 @@ impl GithubView {
         Self::action(
           "github-draft",
           if draft {
-            "Ready for Review"
+            "Ready for review"
           } else {
-            "Convert to Draft"
+            "Convert to draft"
           },
           drafting,
           p,
@@ -1035,13 +1111,15 @@ impl GithubView {
       );
     }
     let add = self.add_comment(false, actions, p, window, cx);
-    Self::content()
-      .child(head)
-      .children(checks_list)
-      .children(treq)
-      .children(self.body("github-pr-body", &pr.body, p))
-      .children(self.comments(&pr.comments, p, cx))
-      .child(add)
+    Self::scroll(
+      Self::content()
+        .child(head)
+        .children(checks_list)
+        .children(treq)
+        .children(self.body("github-pr-body", &pr.body, p))
+        .children(self.comments(&pr.comments, &pr.reviews, p, cx))
+        .child(add),
+    )
   }
 
   /// `CiStatusButton`: the passed/total pill and its checks popover.
@@ -1051,8 +1129,9 @@ impl GithubView {
       CiState::Success => Tone::Success,
       CiState::Failure => Tone::Danger,
       CiState::Pending => Tone::Warning,
+      CiState::Inactive => Tone::Neutral,
     };
-    let (border, text, hover) = (tone.color(p), tone.text(p), tone.tint(p));
+    let (border, text) = (tone.color(p), tone.text(p));
     let summary = format!(
       "{}: {}/{} checks passed",
       state.label(),
@@ -1090,7 +1169,6 @@ impl GithubView {
       .px_2()
       .border_color(border)
       .text_color(text)
-      .hover_bg(hover)
       .child(if state == CiState::Pending {
         ui::spin("github-ci-spin", icon).into_any_element()
       } else {
@@ -1118,6 +1196,8 @@ impl GithubView {
               view.close_popover(Popover::CiChecks, cx)
             })
             .child(
+              // Short label (['section heading']): 11px is fine.
+              // ast-grep-ignore: gpui-text-xs-short-label-only
               ui::text(div(), TextSize::Xs)
                 .px_2()
                 .pb_1()
@@ -1162,13 +1242,22 @@ impl GithubView {
   }
 
   /// `PrWorkspaceChecks`: the workflow checks of the PR's workspace.
-  fn treq_section(&self, ws: &Workspace, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+  fn treq_section(&self, ws: &Workspace, p: &Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
+    if self.detail.treq.as_ref().is_some_and(|c| !c.configured()) {
+      return ui::EmptyState::new("github-treq-none", "No Treq checks", p)
+        .message("This repository has no checks configured in .treq/workflows/.")
+        .into_any_element();
+    }
     let id = ws.id;
     let header = div()
       .flex()
       .items_center()
       .justify_between()
-      .child(parts::section_heading("Treq checks", None, p))
+      .child(ui::SectionHeader::new(
+        "github-treq-checks-heading",
+        "Treq checks",
+        p,
+      ))
       .when(self.logs_enabled, |d| {
         d.child(
           Button::new("github-open-logs", p)
@@ -1176,7 +1265,7 @@ impl GithubView {
             .size(Size::Sm)
             .gap_0()
             .child(ui::icon(theme::ICON_SCROLL_TEXT, 12., p.foreground).mr_1())
-            .label("Open in Logs")
+            .label("Open in logs")
             .on_click(
               cx.listener(move |view, _, _, cx| view.press(format!("github.openLogs:{id}"), cx)),
             ),
@@ -1195,6 +1284,7 @@ impl GithubView {
           .overflow_hidden()
           .child(self.checks_panel(ws, p, cx)),
       )
+      .into_any_element()
   }
 
   fn run_check(&self, ws: &Workspace, filename: &str, job: Option<&str>, cx: &mut Context<Self>) {
@@ -1211,18 +1301,10 @@ impl GithubView {
   /// `WorkspaceChecksPanel`.
   fn checks_panel(&self, ws: &Workspace, p: &Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
     let Some(checks) = self.detail.treq.clone() else {
-      return ui::text(div(), TextSize::Sm)
+      return div()
         .flex()
-        .items_center()
-        .gap_2()
         .p_4()
-        .text_color(p.muted_foreground)
-        .child(ui::spinner(
-          "github-checks-loading",
-          16.,
-          p.muted_foreground,
-        ))
-        .child("Loading checks…")
+        .child(ui::Loading::new("github-checks-loading", p).label("Loading checks…"))
         .into_any_element();
     };
     let running = &self.running_keys(cx);
@@ -1233,7 +1315,6 @@ impl GithubView {
       .as_ref()
       .is_some_and(|s| s.configured && (s.status == "pending" || s.status == "running"));
     let can_run = checks.trusted && !setup_running;
-    let rerunning_setup = is_running(SETUP_KEY, None);
     let mut panel = named(div(), "workspace-checks")
       .flex()
       .flex_col()
@@ -1270,7 +1351,7 @@ impl GithubView {
               .variant(Variant::Outline)
               .size(Size::Sm)
               .ml_4()
-              .label("Trust Repository")
+              .label("Trust repository")
               .on_click(cx.listener(|view, _, _, cx| {
                 let repo_path = view.route.repo_path.clone();
                 view.run(
@@ -1285,73 +1366,11 @@ impl GithubView {
           ),
       );
     }
-    if let Some(setup) = checks.setup.as_ref().filter(|s| s.configured) {
-      let failed = setup.status == "failed";
-      let label = if setup_running {
-        "Running workspace setup script before checks can run…".to_string()
-      } else if failed {
-        "Workspace setup script failed. Checks can still run.".to_string()
-      } else {
-        format!("Setup script: {}", setup.status)
-      };
-      let setup_ws = ws.clone();
-      panel = panel.child(
-        ui::text(named(div(), "setup-script-status"), TextSize::Sm)
-          .flex()
-          .items_center()
-          .justify_between()
-          .gap_2()
-          .rounded(radius::MD)
-          .border_1()
-          .border_color(p.border)
-          .px_4()
-          .py_2()
-          .child(
-            div()
-              .flex()
-              .items_center()
-              .gap_2()
-              .min_w_0()
-              .child(if failed {
-                ui::icon(theme::ICON_TRIANGLE_ALERT, 16., p.destructive).into_any_element()
-              } else {
-                status_icon("github-setup-status", Some(&setup.status), 16., p)
-              })
-              .child(label),
-          )
-          .child(
-            Button::new("github-rerun-setup", p)
-              .aria_label("Re-run setup script")
-              .variant(Variant::Ghost)
-              .size(Size::Sm)
-              .gap_0()
-              .disabled(rerunning_setup || setup_running)
-              .child(if rerunning_setup {
-                ui::spinner("github-rerun-setup-spin", 12., p.foreground).into_any_element()
-              } else {
-                ui::icon(theme::ICON_ROTATE_CW, 12., p.foreground).into_any_element()
-              })
-              .child(div().ml_1().child("Re-run setup script"))
-              .on_click(cx.listener(move |view, _, _, cx| {
-                view.run_treq_check(&setup_ws, CheckRun::Setup, cx)
-              })),
-          ),
-      );
-    }
     if checks.workflows.is_empty() {
       return panel
         .child(
-          ui::text(div(), TextSize::Sm)
-            .text_color(p.muted_foreground)
-            .child("No workflows found. Add YAML files to ")
-            .child(
-              div()
-                .font_family(theme::MONO_FONT)
-                .child(".treq/workflows/"),
-            )
-            .child(" to define checks.")
-            .flex()
-            .flex_wrap(),
+          ui::EmptyState::new("github-no-workflows", "No workflows", p)
+            .message("Add YAML files to .treq/workflows/ to define checks."),
         )
         .into_any_element();
     }
@@ -1391,6 +1410,8 @@ impl GithubView {
                     .child(wf.name.clone()),
                 )
                 .child(
+                  // Short label (['short status']): 11px is fine.
+                  // ast-grep-ignore: gpui-text-xs-short-label-only
                   ui::text(div(), TextSize::Xs)
                     .font_family(theme::MONO_FONT)
                     .text_color(p.muted_foreground)
@@ -1488,8 +1509,11 @@ impl GithubView {
   ) -> impl IntoElement {
     let open = self.detail.history_open.contains(filename);
     let file = filename.to_string();
-    let muted = p.muted;
+    // Short label (['toggle label']): 11px is fine.
+    // ast-grep-ignore: gpui-text-xs-short-label-only
     let toggle = ui::text(named(div(), format!("github-history-{w}")), TextSize::Xs)
+      .role(gpui::Role::Button)
+      .aria_label("Run history")
       .flex()
       .w_full()
       .items_center()
@@ -1499,7 +1523,7 @@ impl GithubView {
       .font_weight(FontWeight::MEDIUM)
       .text_color(p.muted_foreground)
       .cursor_pointer()
-      .hover(move |s| s.bg(muted.opacity(0.5)))
+      .hover(move |s| s.bg(p.hover()))
       .child(chevron(open, p))
       .child("Run history")
       .on_click(cx.listener(move |view, _, _, cx| {
@@ -1537,6 +1561,8 @@ impl GithubView {
                 named(div(), format!("run-history-item-{run_id}")),
                 TextSize::Sm,
               )
+              .role(gpui::Role::Button)
+              .aria_label(format!("Run #{run_id}"))
               .flex()
               .w_full()
               .items_center()
@@ -1544,7 +1570,7 @@ impl GithubView {
               .px_6()
               .py_1p5()
               .cursor_pointer()
-              .hover(move |s| s.bg(muted.opacity(0.5)))
+              .hover(move |s| s.bg(p.hover()))
               .child(chevron(open, p))
               .child(status_icon(
                 format!("github-run-{run_id}-status"),
@@ -1553,11 +1579,15 @@ impl GithubView {
                 p,
               ))
               .child(
+                // Short label (['run number']): 11px is fine.
+                // ast-grep-ignore: gpui-text-xs-short-label-only
                 ui::text(div(), TextSize::Xs)
                   .font_family(theme::MONO_FONT)
                   .child(format!("#{run_id}")),
               )
               .child(
+                // Short label (['timestamp']): 11px is fine.
+                // ast-grep-ignore: gpui-text-xs-short-label-only
                 ui::text(div(), TextSize::Xs)
                   .text_color(p.muted_foreground)
                   .child(time::run_time(&run.started_at)),
@@ -1605,10 +1635,13 @@ impl GithubView {
     p: &Palette,
   ) -> impl IntoElement {
     let body = if !job.has_logs {
-      ui::text(div(), TextSize::Xs)
-        .text_color(p.muted_foreground)
-        .child("No logs recorded.")
-        .into_any_element()
+      ui::EmptyState::new(
+        SharedString::from(format!("github-logs-{run_id}-{}-none", job.job_id)),
+        "No logs recorded",
+        p,
+      )
+      .message("There are no logs saved for this job.")
+      .into_any_element()
     } else {
       match self.detail.logs.get(&(run_id, job.job_id.clone())) {
         None => ui::spinner(
@@ -1617,7 +1650,7 @@ impl GithubView {
           p.muted_foreground,
         )
         .into_any_element(),
-        Some(Err(err)) => ui::text(div(), TextSize::Xs)
+        Some(Err(err)) => ui::text(div(), TextSize::Sm)
           .text_color(p.destructive)
           .child(err.clone())
           .into_any_element(),
@@ -1625,24 +1658,14 @@ impl GithubView {
           let text = if lines.is_empty() {
             "(empty)".to_string()
           } else {
-            lines
-              .iter()
-              .map(|l| {
-                if l.stream == "stderr" {
-                  format!("[stderr] {}", l.body)
-                } else {
-                  l.body.clone()
-                }
-              })
-              .collect::<Vec<_>>()
-              .join("\n")
+            log_text(lines)
           };
           ui::text(
             div().id(SharedString::from(format!(
               "github-logs-{run_id}-{}",
               job.job_id
             ))),
-            TextSize::Xs,
+            TextSize::Sm,
           )
           .max_h(zpx(256.))
           .overflow_y_scroll()
@@ -1656,8 +1679,10 @@ impl GithubView {
       }
     };
     named(div(), format!("run-job-logs-{run_id}-{}", job.job_id))
+      .role(gpui::Role::Group)
+      .aria_label(format!("{} logs", job.job_id))
       .child(
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
           .mb_1()
           .flex()
           .items_center()
@@ -1672,7 +1697,23 @@ impl GithubView {
           .child(job.job_id.clone()),
       )
       .child(body)
+      .test_support()
   }
+}
+
+/// A job log as text, stderr lines marked.
+fn log_text(lines: &[data::LogLine]) -> String {
+  lines
+    .iter()
+    .map(|l| {
+      if l.stream == "stderr" {
+        format!("[stderr] {}", l.body)
+      } else {
+        l.body.clone()
+      }
+    })
+    .collect::<Vec<_>>()
+    .join("\n")
 }
 
 fn chevron(open: bool, p: &Palette) -> impl IntoElement {
@@ -1759,7 +1800,9 @@ impl Reacts for GithubView {
           if let Some(comment) = view.comment_mut(&id) {
             reactions::toggle(&mut comment.reactions, content);
           }
-          view.toast(ToastTone::Error, "Failed to react", err);
+          view
+            .host
+            .notify(Toast::error("Failed to react").description(err).into());
         }
       },
     );

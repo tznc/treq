@@ -83,6 +83,8 @@ pub fn render(list: &Checklist, ctx: &Ctx) -> impl IntoElement {
           .h(zpx(24.))
           .gap_1()
           .px_2(),
+        // Short label (['button label']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         TextSize::Xs,
       )
       .child(if list.validating {
@@ -101,7 +103,7 @@ pub fn render(list: &Checklist, ctx: &Ctx) -> impl IntoElement {
       div()
         .mt_2()
         .child(
-          ui::text(div(), TextSize::Xs)
+          ui::text(div(), TextSize::Sm)
             .text_color(if group.error {
               p.destructive
             } else {
@@ -121,26 +123,32 @@ fn tool_row(tool: &Tool, ctx: &Ctx) -> impl IntoElement {
     _ => ui::icon(theme::ICON_CIRCLE, 16., p.muted_foreground),
   };
   let muted = |label: &'static str| {
+    // Short label (['status label']): 11px is fine.
+    // ast-grep-ignore: gpui-text-xs-short-label-only
     ui::text(div(), TextSize::Xs)
       .text_color(p.muted_foreground)
       .child(label)
       .into_any_element()
   };
   let trailing = match tool.installed {
-    None => muted("Checking..."),
+    None => muted("Checking…"),
     Some(true) => muted("Installed"),
     Some(false) => {
       let id = SharedString::from(format!("install-{}", tool.binary));
       ui::text(
-        Button::new(id.clone(), &p)
+        Button::new(id, &p)
           .variant(Variant::Link)
           .size(Size::Sm)
           .h_auto()
           .gap_1()
           .p_0(),
+        // Short label (['button label']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         TextSize::Xs,
       )
       .label("Install")
+      // Each missing tool has one: the name says which.
+      .aria_label(format!("Install {}", tool.label))
       .icon(theme::ICON_EXTERNAL_LINK, 12.)
       .on_click(ctx.send(ScreenAction::OpenUrl {
         url: tool.install_url.clone(),
@@ -161,7 +169,7 @@ fn tool_row(tool: &Tool, ctx: &Ctx) -> impl IntoElement {
         .child(ui::text(div(), TextSize::Sm).child(tool.label.clone()))
         .when_some(tool.note.clone(), |this, note| {
           this.child(
-            ui::text(div(), TextSize::Xs)
+            ui::text(div(), TextSize::Sm)
               .text_color(p.muted_foreground)
               .child(note),
           )
@@ -181,6 +189,9 @@ enum Kind {
 /// A tool the checklist reports on (`PREREQUISITE_TOOLS` in React).
 struct Known {
   binary: &'static str,
+  /// Only a machine Treq reaches over SSH or in a container needs it: the
+  /// app runs jj and its terminals itself.
+  host_only: bool,
   label: &'static str,
   kind: Kind,
   install_url: &'static str,
@@ -188,17 +199,35 @@ struct Known {
 }
 
 /// The tools, in display order. Their binaries are
-/// `core::PREREQUISITE_BINARIES`.
-const TOOLS: [Known; 6] = [
+/// `core::PREREQUISITE_BINARIES`, and `core::HOST_BINARIES` on a host.
+const TOOLS: [Known; 10] = [
   Known {
     binary: "git",
+    host_only: false,
     label: "Git",
     kind: Kind::Required,
     install_url: "https://git-scm.com/downloads",
     note: None,
   },
   Known {
+    binary: "jj",
+    host_only: true,
+    label: "Jujutsu",
+    kind: Kind::Required,
+    install_url: "https://jj-vcs.github.io/jj/latest/install-and-setup/",
+    note: None,
+  },
+  Known {
+    binary: "tmux",
+    host_only: true,
+    label: "tmux",
+    kind: Kind::Optional,
+    install_url: "https://github.com/tmux/tmux/wiki/Installing",
+    note: Some("Only for hosts set to keep terminals in tmux"),
+  },
+  Known {
     binary: "claude",
+    host_only: false,
     label: "Claude Code",
     kind: Kind::Agent,
     install_url: "https://code.claude.com/docs/en/setup",
@@ -206,6 +235,7 @@ const TOOLS: [Known; 6] = [
   },
   Known {
     binary: "codex",
+    host_only: false,
     label: "Codex",
     kind: Kind::Agent,
     install_url: "https://developers.openai.com/codex/cli",
@@ -213,6 +243,7 @@ const TOOLS: [Known; 6] = [
   },
   Known {
     binary: "cursor-agent",
+    host_only: false,
     label: "Cursor Agent",
     kind: Kind::Agent,
     install_url: "https://cursor.com/docs/cli/installation",
@@ -220,13 +251,31 @@ const TOOLS: [Known; 6] = [
   },
   Known {
     binary: "copilot",
+    host_only: false,
     label: "GitHub Copilot CLI",
     kind: Kind::Agent,
     install_url: "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli",
     note: None,
   },
   Known {
+    binary: "devin",
+    host_only: false,
+    label: "Devin",
+    kind: Kind::Agent,
+    install_url: "https://docs.devin.ai/cli",
+    note: None,
+  },
+  Known {
+    binary: "gemini",
+    host_only: false,
+    label: "Gemini CLI",
+    kind: Kind::Agent,
+    install_url: "https://geminicli.com/docs/get-started/installation",
+    note: None,
+  },
+  Known {
     binary: "gh",
+    host_only: false,
     label: "GitHub CLI",
     kind: Kind::Optional,
     install_url: "https://cli.github.com/",
@@ -241,11 +290,45 @@ const GROUPS: [(Kind, &str); 3] = [
 ];
 
 /// The checklist for `statuses` from `core::check_prerequisites`, or every
-/// tool still "Checking..." before the first check returns.
+/// tool still "Checking…" before the first check returns.
 pub fn from_statuses(
   title: &str,
   statuses: Option<&[PrerequisiteStatus]>,
   validating: bool,
+) -> Checklist {
+  checklist(title, statuses, validating, false)
+}
+
+/// The checklist of a machine Treq reaches over SSH or in a container:
+/// jj is required there too, and tmux is offered.
+pub fn from_host_statuses(
+  title: &str,
+  statuses: Option<&[PrerequisiteStatus]>,
+  validating: bool,
+) -> Checklist {
+  checklist(title, statuses, validating, true)
+}
+
+/// Whether every required tool is installed, or `None` before a check.
+pub fn ready(list: &Checklist) -> Option<bool> {
+  let required = || {
+    list
+      .groups
+      .iter()
+      .flat_map(|g| &g.tools)
+      .filter(|t| t.required)
+  };
+  if required().any(|t| t.installed.is_none()) {
+    return None;
+  }
+  Some(required().all(|t| t.installed == Some(true)) && !list.groups.iter().any(|g| g.error))
+}
+
+fn checklist(
+  title: &str,
+  statuses: Option<&[PrerequisiteStatus]>,
+  validating: bool,
+  host: bool,
 ) -> Checklist {
   let installed = |binary: &str| {
     statuses.map(|statuses| {
@@ -268,7 +351,7 @@ pub fn from_statuses(
         error: *kind == Kind::Agent && no_agent,
         tools: TOOLS
           .iter()
-          .filter(|tool| tool.kind == *kind)
+          .filter(|tool| tool.kind == *kind && (host || !tool.host_only))
           .map(|tool| Tool {
             binary: tool.binary.to_string(),
             label: tool.label.to_string(),

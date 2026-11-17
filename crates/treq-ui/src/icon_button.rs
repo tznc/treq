@@ -20,6 +20,15 @@ impl IconButtonSize {
       IconButtonSize::Medium => (28., 16.),
     }
   }
+
+  /// [`IconButtonSize::metrics`] at `density`: on a phone every icon button
+  /// is a 44 target with a 20 icon.
+  pub fn metrics_at(self, density: crate::theme::Density) -> (f32, f32) {
+    match density {
+      crate::theme::Density::Touch => (crate::theme::TOUCH_TARGET, 20.),
+      crate::theme::Density::Desktop => self.metrics(),
+    }
+  }
 }
 
 /// An icon-only [`Button`]: ghost in toolbars, outline beside fields. The
@@ -31,6 +40,7 @@ pub struct IconButton {
   icon: &'static str,
   size: IconButtonSize,
   selected: bool,
+  copied: Option<crate::copy_feedback::Copied>,
   tone: Option<Tone>,
   palette: Palette,
 }
@@ -50,9 +60,17 @@ impl IconButton {
       icon,
       size: IconButtonSize::default(),
       selected: false,
+      copied: None,
       tone: None,
       palette: *palette,
     }
+  }
+
+  /// A filled button in the primary colour: the one control that sends or
+  /// submits, such as a prompt's Send.
+  pub fn primary(mut self) -> Self {
+    self.button = self.button.variant(Variant::Default);
+    self
   }
 
   /// A bordered button, for one that sits beside a field.
@@ -69,6 +87,13 @@ impl IconButton {
   /// A toggle that is on, such as the panel it shows being open.
   pub fn selected(mut self, selected: bool) -> Self {
     self.selected = selected;
+    self
+  }
+
+  /// A copy button: its copy icon turns into the green check while
+  /// `copied`. Pair it with [`crate::copy_feedback::copyable`].
+  pub fn copied(mut self, copied: impl Into<crate::copy_feedback::Copied>) -> Self {
+    self.copied = Some(copied.into());
     self
   }
 
@@ -105,13 +130,16 @@ impl IconButton {
 }
 
 impl RenderOnce for IconButton {
-  fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
-    let (side, icon) = self.size.metrics();
+  fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    let (side, icon) = self.size.metrics_at(crate::theme::Density::current(cx));
     let p = self.palette;
     self
       .button
       .selected(self.selected)
-      .icon(self.icon, icon)
+      .map(|b| match self.copied {
+        Some(copied) => b.copy_icon(copied, icon),
+        None => b.icon(self.icon, icon),
+      })
       .w(zpx(side))
       .h(zpx(side))
       .when_some(self.tone, |b, tone| b.text_color(tone.color(&p)))
@@ -122,6 +150,20 @@ impl RenderOnce for IconButton {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::theme::Density;
+
+  #[test]
+  fn a_touch_icon_button_is_a_44_target() {
+    assert_eq!(
+      IconButtonSize::Medium.metrics_at(Density::Touch),
+      (44., 20.)
+    );
+    assert_eq!(IconButtonSize::Small.metrics_at(Density::Touch), (44., 20.));
+    assert_eq!(
+      IconButtonSize::Small.metrics_at(Density::Desktop),
+      (24., 14.)
+    );
+  }
   use crate::theme;
 
   #[test]
@@ -137,5 +179,12 @@ mod tests {
     assert!(button.selected);
     assert_eq!(button.tone, Some(Tone::Danger));
     assert_eq!(IconButtonSize::default().metrics(), (28., 16.));
+  }
+
+  #[test]
+  fn test_icon_button_primary_fills_with_the_primary_variant() {
+    let p = theme::palette(false);
+    let button = IconButton::new("send", theme::ICON_SEND, "Send", &p).primary();
+    assert!(button.button.variant == Variant::Default);
   }
 }

@@ -8,8 +8,7 @@ permissions:
   pull-requests: write
 
 jobs:
-  # One job, not four: each was a separate runner on every push. Steps run
-  # in order, so the title check sees the docs prefix the step before adds.
+  # One job, not several: each was a separate runner on every push.
   # Keeps the old title-check job id in case it is a required check.
   check-conventional-title:
     timeout-minutes: 15
@@ -23,7 +22,7 @@ jobs:
           labels: codex
 
       - name: Remove chatgpt.com link and divider
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const pr = context.payload.pull_request;
@@ -42,37 +41,11 @@ jobs:
               });
             }
 
-      - name: Add docs prefix if only web/ changes
-        uses: actions/github-script@v8
-        with:
-          script: |
-            const pr = context.payload.pull_request;
-
-            const files = await github.paginate(github.rest.pulls.listFiles, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: pr.number,
-              per_page: 100,
-            });
-
-            const onlyWebChanges = files.every(f => f.filename.startsWith('web/'));
-            if (!onlyWebChanges) return;
-
-            const title = pr.title;
-            if (title.startsWith('docs: ')) return;
-
-            await github.rest.pulls.update({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: pr.number,
-              title: `docs: ${title}`,
-            });
-
       - name: Enforce conventional commit title
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
-            // Re-fetch the PR so we see any title edits made by earlier jobs
+            // Re-fetch the PR so we check the title as it is now
             const { data: pr } = await github.rest.pulls.get({
               owner: context.repo.owner,
               repo: context.repo.repo,

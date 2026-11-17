@@ -7,28 +7,27 @@
 //! through the backend; it hands back only what React still owns: closing
 //! the dialog, opening the workspace it made, and deleting a workspace.
 
-use crate::gpui_shell::ui::radius;
-use crate::gpui_shell::ui::zpx;
 use std::sync::Arc;
 
-use gpui_kit::base::TestSupportExt as _;
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, Context, Div, Entity, FontWeight, Pixels, SharedString, Stateful,
+  self, div, prelude::*, Context, Div, Entity, FontWeight, SharedString,
 };
 
 use super::{
   change_move::{ChangeMoveDialog, ChangeMoveRoute},
   open_workspaces::OpenWorkspacesDialog,
   open_workspaces_data,
+  project_context_dialog::{ProjectContextDialog, ProjectContextRoute},
   rename_dialog::{RenameDialog, RenameRoute},
+  save_project_dialog::{SaveProjectDialog, SaveProjectRoute},
   workspace_deletion::{DeletionRoute, WorkspaceDeletion},
   workspace_dialog::WorkspaceDialog,
   workspace_dialog_data::{self, WorkspaceDialogHost},
   ActionSink, Host, ScreenAction,
 };
 use crate::gpui_shell::{
-  theme::{self, Palette},
+  theme::Palette,
   ui::{self, TextSize},
 };
 
@@ -40,12 +39,16 @@ pub enum ModalRoute {
   WorkspaceDialog(Box<workspace_dialog_data::Route>),
   /// `RenameWorkspaceDialog`.
   RenameWorkspace(RenameRoute),
-  /// `WorkspaceDeletion`, the command palette's "Delete Workspace".
+  /// `WorkspaceDeletion`, the command palette's "Delete workspace".
   WorkspaceDeletion(DeletionRoute),
   /// The `AlertDialog` that confirms moving dropped files.
   ConfirmChangeMove(ChangeMoveRoute),
   /// The sidebar's Open Workspaces dialog.
   OpenWorkspaces(open_workspaces_data::Route),
+  /// The project menu's Save project, or the close-window prompt.
+  SaveProject(SaveProjectRoute),
+  /// The project menu's Project Instructions….
+  ProjectContext(ProjectContextRoute),
 }
 
 impl ModalRoute {
@@ -58,6 +61,8 @@ impl ModalRoute {
       ModalRoute::WorkspaceDeletion(_) => (2, String::new()),
       ModalRoute::ConfirmChangeMove(route) => (3, route.files.join("\0")),
       ModalRoute::OpenWorkspaces(route) => (4, route.repo_path.clone()),
+      ModalRoute::SaveProject(route) => (5, route.closing.to_string()),
+      ModalRoute::ProjectContext(_) => (6, String::new()),
     }
   }
 }
@@ -69,6 +74,8 @@ pub enum Modal {
   WorkspaceDeletion(Entity<WorkspaceDeletion>),
   ConfirmChangeMove(Entity<ChangeMoveDialog>),
   OpenWorkspaces(Entity<OpenWorkspacesDialog>),
+  SaveProject(Entity<SaveProjectDialog>),
+  ProjectContext(Entity<ProjectContextDialog>),
 }
 
 /// A dialog and the route it was opened for.
@@ -98,6 +105,12 @@ impl OpenModal {
       }
       ModalRoute::WorkspaceDeletion(route) => {
         Modal::WorkspaceDeletion(cx.new(|cx| WorkspaceDeletion::new(route, sink, dark, cx)))
+      }
+      ModalRoute::ProjectContext(route) => Modal::ProjectContext(
+        cx.new(|cx| ProjectContextDialog::new(route, dialogs.clone(), sink, dark, cx)),
+      ),
+      ModalRoute::SaveProject(route) => {
+        Modal::SaveProject(cx.new(|cx| SaveProjectDialog::new(route, dialogs, sink, dark, cx)))
       }
       ModalRoute::ConfirmChangeMove(route) => {
         Modal::ConfirmChangeMove(cx.new(|cx| ChangeMoveDialog::new(route, dialogs, sink, dark, cx)))
@@ -132,6 +145,12 @@ impl OpenModal {
       (Modal::OpenWorkspaces(view), ModalRoute::OpenWorkspaces(_)) => {
         view.update(cx, |view, cx| view.set_dark(dark, cx))
       }
+      (Modal::ProjectContext(view), ModalRoute::ProjectContext(_)) => {
+        view.update(cx, |view, cx| view.set_dark(dark, cx))
+      }
+      (Modal::SaveProject(view), ModalRoute::SaveProject(_)) => {
+        view.update(cx, |view, cx| view.set_dark(dark, cx))
+      }
       _ => {}
     }
   }
@@ -145,6 +164,8 @@ impl OpenModal {
       Modal::WorkspaceDeletion(view) => !view.read(cx).dismissed,
       Modal::ConfirmChangeMove(view) => !view.read(cx).dismissed,
       Modal::OpenWorkspaces(view) => !view.read(cx).dismissed,
+      Modal::SaveProject(view) => !view.read(cx).dismissed,
+      Modal::ProjectContext(view) => !view.read(cx).dismissed,
     }
   }
 
@@ -155,6 +176,8 @@ impl OpenModal {
       Modal::WorkspaceDeletion(view) => view.clone().into_any_element(),
       Modal::ConfirmChangeMove(view) => view.clone().into_any_element(),
       Modal::OpenWorkspaces(view) => view.clone().into_any_element(),
+      Modal::SaveProject(view) => view.clone().into_any_element(),
+      Modal::ProjectContext(view) => view.clone().into_any_element(),
     }
   }
 }
@@ -164,76 +187,21 @@ pub fn press(sink: &ActionSink, id: &str, cx: &mut gpui::App) {
   sink(ScreenAction::Press { id: id.into() }, cx);
 }
 
-/// `ui/dialog.tsx`'s backdrop (`bg-black/40`, `p-4`) over the whole window,
-/// and its `DialogContent` panel, `max_width` wide at most.
-pub fn dialog_panel(
-  id: &'static str,
-  max_width: f32,
-  viewport: gpui::Size<Pixels>,
-  p: &Palette,
-) -> (Stateful<Div>, Div) {
-  let backdrop = div()
-    .id(SharedString::from(format!("{id}-backdrop")))
-    .w(viewport.width)
-    .h(viewport.height)
-    .p_4()
-    .flex()
-    .items_center()
-    .justify_center()
-    .bg(p.scrim())
-    .occlude();
-  let panel = div()
-    .debug_selector(move || id.into())
-    .w_full()
-    .max_w(zpx(max_width))
-    .p_6()
-    .rounded(radius::LG)
-    .border_1()
-    .border_color(p.border.opacity(0.5))
-    .bg(p.popover)
-    .text_color(p.popover_foreground)
-    .font_family(theme::SANS_FONT)
-    .shadow_2xl();
-  (backdrop, panel)
-}
+/// Field labels and input hints are body text, the size of the control's
+/// own text.
+pub const FIELD_TEXT_SIZE: TextSize = TextSize::Sm;
 
-/// `DialogTitle`: `text-lg font-semibold leading-none`.
-pub fn dialog_title(title: impl Into<SharedString>) -> Div {
-  ui::text(div(), TextSize::Lg)
-    .font_weight(FontWeight::SEMIBOLD)
-    .child(title.into())
-}
-
-/// `DialogDescription`: `text-sm text-muted-foreground`.
-pub fn dialog_description(text: impl Into<SharedString>, p: &Palette) -> Div {
-  ui::text(div(), TextSize::Sm)
-    .text_color(p.muted_foreground)
+/// A field's label: `text-sm font-medium`.
+pub fn field_label(text: impl Into<SharedString>) -> Div {
+  ui::text(div(), FIELD_TEXT_SIZE)
+    .font_weight(FontWeight::MEDIUM)
     .child(text.into())
 }
 
-/// `DialogHeader`: `flex flex-col space-y-1.5`.
-pub fn dialog_header(title: impl Into<SharedString>, description: Div) -> Div {
-  let title: SharedString = title.into();
-  div()
-    .flex()
-    .flex_col()
-    .gap_1p5()
-    // `DialogTitle` is the dialog's heading.
-    .child(
-      div()
-        .id("dialog-title")
-        .role(gpui::Role::Heading)
-        .aria_label(title.clone())
-        .test_support()
-        .child(dialog_title(title)),
-    )
-    .child(description)
-}
-
-/// `<Label className="text-xs">`: `font-medium leading-none`.
-pub fn label_xs(text: impl Into<SharedString>) -> Div {
-  ui::text(div(), TextSize::Xs)
-    .font_weight(FontWeight::MEDIUM)
+/// The muted helper line under an input: `text-sm text-muted-foreground`.
+pub fn field_hint(text: impl Into<SharedString>, p: &Palette) -> Div {
+  ui::text(div(), FIELD_TEXT_SIZE)
+    .text_color(p.muted_foreground)
     .child(text.into())
 }
 
@@ -252,5 +220,16 @@ impl From<Check> for ui::CheckState {
       Check::Off => ui::CheckState::Off,
       Check::Some => ui::CheckState::Mixed,
     }
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn field_text_matches_body_text_not_captions() {
+    assert_eq!(FIELD_TEXT_SIZE.metrics(), TextSize::Sm.metrics());
+    assert!(FIELD_TEXT_SIZE.metrics().0 > TextSize::Xs.metrics().0);
   }
 }

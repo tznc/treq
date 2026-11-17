@@ -6,6 +6,7 @@
 //! carries out (reading the backend, asking for a folder, starting an
 //! agent). [`super::snapshots`] draws it.
 
+use crate::gpui_shell::native::Toast;
 use std::collections::BTreeSet;
 
 use serde_json::{json, Value};
@@ -28,8 +29,6 @@ pub const DEFAULT_ZOOM: u32 = 100;
 pub const ZOOM_STEP: u32 = 5;
 pub const MIN_ZOOM: u32 = 50;
 pub const MAX_ZOOM: u32 = 200;
-/// `MERGE_QUEUE_HISTORY_PAGE_SIZE`.
-pub const HISTORY_PAGE: usize = 5;
 /// `useGpuiTerminalPane`'s `KEPT`.
 const KEPT_COMMANDS: usize = 20;
 
@@ -77,6 +76,8 @@ pub struct Github {
   pub creating: bool,
   /// The pull request whose review shows (`/review`).
   pub review: Option<u64>,
+  /// Bumped to read the selected PR again once a review was submitted.
+  pub reload: u64,
 }
 
 impl Github {
@@ -87,6 +88,7 @@ impl Github {
       selected: None,
       creating: false,
       review: None,
+      reload: 0,
     }
   }
 }
@@ -102,6 +104,8 @@ pub enum Page {
   },
   Github(Github),
   Linear,
+  /// The window's repositories as cards.
+  ProjectHome,
   MergePreview {
     workspace_id: i64,
   },
@@ -174,6 +178,10 @@ pub struct Dialogs {
   /// (`None`: the default branch).
   pub open_workspaces: Option<Option<String>>,
   pub deletion: bool,
+  /// The Save project dialog; `true` while the window waits to close.
+  pub save_project: Option<bool>,
+  /// The Project instructions dialog.
+  pub project_context: bool,
   pub change_move: Option<ChangeMove>,
   pub agent_prompt: Option<AgentPrompt>,
   /// The prompt history, focused on an entry.
@@ -184,6 +192,9 @@ pub struct Dialogs {
   pub workspace_picker: bool,
   pub branch_switcher: bool,
   pub file_picker: bool,
+  /// What the file picker opens searching for: the palette's text when no
+  /// command matched it, else empty.
+  pub file_query: String,
 }
 
 impl Dialogs {
@@ -194,6 +205,8 @@ impl Dialogs {
       || self.open_workspaces.is_some()
       || self.rename.is_some()
       || self.deletion
+      || self.save_project.is_some()
+      || self.project_context
       || self.change_move.is_some()
       || self.agent_prompt.is_some()
       || self.prompt_history.is_some()
@@ -209,6 +222,10 @@ impl Dialogs {
 /// `TerminalSessionSummary`, as far as the sidebar reads it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TerminalSummary {
+  /// The pane's column id; `None` from older summaries.
+  pub id: Option<String>,
+  /// The session's name ("AI Review" for a review's agent).
+  pub name: Option<String>,
   pub agent: bool,
   pub branch: Option<String>,
   pub repo_path: Option<String>,
@@ -324,9 +341,27 @@ pub enum Effect {
     title: String,
     description: String,
   },
+  /// An AI review of the workspace finished: toast its comment count, with
+  /// a button to its Changes tab.
+  ReviewDone {
+    repo_path: String,
+    workspace_id: i64,
+    branch: String,
+  },
   OpenUrl(String),
   /// The remote side's ([`super::remote`]).
   Remote(Box<RemoteEffect>),
+}
+
+impl From<Toast> for Effect {
+  /// The window's toasts have no button: `toast.action` is dropped.
+  fn from(toast: Toast) -> Self {
+    Self::Toast {
+      tone: toast.tone,
+      title: toast.title,
+      description: toast.description,
+    }
+  }
 }
 
 impl From<RemoteEffect> for Effect {
@@ -339,7 +374,7 @@ impl From<RemoteEffect> for Effect {
 pub fn not_a_repository() -> Effect {
   Effect::Toast {
     tone: ToastTone::Error,
-    title: "Not a Git Repository".into(),
+    title: "Not a Git repository".into(),
     description: "Please select a folder that contains a git repository.".into(),
   }
 }
@@ -374,18 +409,28 @@ impl Confirm {
   }
 
   /// Removes the supporting repository at `path` from the window.
-  pub fn remove_supporting(path: &str) -> Self {
+  /// Asks to close them first when `running` sessions stream in it.
+  pub fn remove_supporting(path: &str, running: usize) -> Self {
     let name = path
       .rsplit(['/', '\\'])
       .find(|s| !s.is_empty())
       .unwrap_or(path);
-    Self {
-      question: Question::new(
-        format!("Remove {name} from Treq?"),
-        format!("{path} leaves this window. Its files and workspaces aren't deleted."),
+    let kept = "Its files and workspaces aren't deleted.";
+    let (message, verb) = match running {
+      0 => (
+        format!("{path} leaves this window. {kept}"),
         "Remove repository",
-      )
-      .destructive(),
+      ),
+      n => (
+        format!(
+          "{n} running session{} in {name} will be closed. {kept}",
+          if n == 1 { "" } else { "s" }
+        ),
+        "Close sessions and remove",
+      ),
+    };
+    Self {
+      question: Question::new(format!("Remove {name} from Treq?"), message, verb).destructive(),
       confirmed: Effect::RemoveSupporting(path.to_string()),
       declined: None,
     }
@@ -412,6 +457,8 @@ pub struct Model {
   pub main_repo: String,
   /// A supporting repository put on screen in the sidebar.
   pub supporting: Option<String>,
+  /// The name of the window's project while it holds no repository.
+  pub empty_project: Option<String>,
   pub page: Page,
   /// Where closing Settings, GitHub or Linear goes (`previousViewModeRef`).
   pub back: Page,
@@ -432,13 +479,13 @@ pub struct Model {
   /// The terminal pane's commands (`GpuiTerminalCommand`), newest last.
   pub commands: Vec<Value>,
   pub nonce: u64,
-  /// The Merge Queue tab's history toggle and page.
-  pub show_merged: bool,
-  pub history_limit: usize,
   /// A workspace to select once it is listed.
   pub pending_select: Option<PendingSelect>,
   /// The remote dialogs, endpoint and repository.
   pub remote: Remote,
+  /// The catalog skill a `treq://skill/install` link asked to install,
+  /// until Settings' confirmation is answered.
+  pub skill_install: Option<String>,
   /// The confirmation on screen, over everything else.
   pub confirm: Option<Confirm>,
 }
@@ -459,7 +506,6 @@ impl Model {
   pub fn new(repo: Option<String>) -> Self {
     Self {
       main_repo: repo.unwrap_or_default(),
-      history_limit: HISTORY_PAGE,
       ..Self::default()
     }
   }
@@ -470,6 +516,19 @@ impl Model {
       Some(path) if !self.main_repo.is_empty() => path,
       _ => &self.main_repo,
     }
+  }
+
+  /// The window's project lost its last repository: it shows the project's
+  /// Home, empty, until one is added.
+  pub fn show_empty_project(&mut self, name: String) {
+    self.main_repo.clear();
+    self.supporting = None;
+    self.selected = None;
+    self.active_session = None;
+    self.multi.clear();
+    self.page = Page::ProjectHome;
+    self.view = WorkspaceView::default();
+    self.empty_project = Some(name);
   }
 
   pub fn has_repo(&self) -> bool {
@@ -496,6 +555,7 @@ impl Model {
       effects.push(Effect::from(RemoteEffect::Show(None)));
     }
     self.main_repo = path.to_string();
+    self.empty_project = None;
     self.supporting = None;
     self.selected = None;
     self.active_session = None;
@@ -511,6 +571,14 @@ impl Model {
   pub fn ask(&mut self, confirm: Confirm) {
     if self.confirm.is_none() {
       self.confirm = Some(confirm);
+    }
+  }
+
+  /// Closes the terminals of repository `path` and of its workspaces.
+  pub fn close_repo_terminals(&mut self, path: &str, data: &Data) {
+    let dirs = std::iter::once(path.to_string()).chain(data.workspaces(path).iter().map(full_path));
+    for dir in dirs {
+      self.terminal("closeWorkspace", json!({ "dir": dir }));
     }
   }
 
@@ -586,6 +654,15 @@ impl Model {
     }
   }
 
+  /// A `treq://skill/install` link: Settings' Skills tab confirms it.
+  pub fn open_skill_install(&mut self, skill_id: String) {
+    self.open_settings();
+    if let Page::Settings { tab } = &mut self.page {
+      *tab = "skills".into();
+    }
+    self.skill_install = Some(skill_id);
+  }
+
   /// `closeSettings`.
   pub fn close_settings(&mut self) {
     self.page = std::mem::take(&mut self.back);
@@ -609,6 +686,10 @@ impl Model {
   }
 
   /// `openLinear`.
+  pub fn open_project_home(&mut self) {
+    self.leave_for(Page::ProjectHome);
+  }
+
   pub fn open_linear(&mut self) {
     self.leave_for(Page::Linear);
   }
@@ -895,8 +976,8 @@ impl Model {
       format!("{}/{path}", self.repo().trim_end_matches('/'))
     };
     let dir = selected
-      .rfind('/')
-      .map(|i| selected[..i].to_string())
+      .rsplit_once('/')
+      .map(|(dir, _)| dir.to_string())
       .unwrap_or_default();
     self.view.file_browser = Some(FileBrowser {
       selected_file: Some(selected),
@@ -992,7 +1073,6 @@ impl Model {
     let cutoffs = std::mem::take(&mut self.remote.cutoffs);
     *self = Self {
       prefs: self.prefs.clone(),
-      history_limit: HISTORY_PAGE,
       ..Self::default()
     };
     self.remote.cutoffs = cutoffs;
@@ -1017,4 +1097,13 @@ pub fn workspace_source(workspace: &Workspace) -> Value {
     "branchName": workspace.branch_name,
     "targetBranch": workspace.target_branch,
   })
+}
+
+/// The finished-review toast's title.
+pub fn review_done_title(comments: usize) -> String {
+  match comments {
+    0 => "Review done · no comments".into(),
+    1 => "Review done · 1 comment".into(),
+    n => format!("Review done · {n} comments"),
+  }
 }

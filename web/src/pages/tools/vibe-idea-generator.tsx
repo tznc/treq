@@ -289,8 +289,8 @@ async function buildScene(canvas: HTMLCanvasElement, onReveal: (idea: string) =>
   const wallTarget = new Vector3(0, 2.6, -7.9);
 
   // ── Easing ────────────────────────────────────────────────────────────────────
-  const easeOut = (x: number) => 1 - Math.pow(1 - x, 3);
-  const easeInOut = (x: number) => x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2;
+  const easeOut = (x: number) => 1 - (1 - x) ** 3;
+  const easeInOut = (x: number) => x < 0.5 ? 2 * x * x : 1 - (-2 * x + 2) ** 2 / 2;
 
   // ── Render loop ───────────────────────────────────────────────────────────────
   let lastTime = 0;

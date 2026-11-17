@@ -51,16 +51,18 @@ test.describe("Skills Library (/skills)", () => {
 
   test("skill cards navigate to the skill detail page", async ({ page }) => {
     const card = page.getByRole("link", { name: /^pdf/ }).first();
-    await expect(card).toHaveAttribute("href", "/skills/anthropic/pdf");
+    await expect(card).toHaveAttribute("href", "/skills/anthropic/pdf/");
     await expect(card).not.toHaveAttribute("target", "_blank");
   });
 
-  test("proprietary skills show a notice on their card instead of a description", async ({
+  // Anthropic relicensed pdf (with docx, pptx and xlsx) from proprietary to
+  // Apache-2.0 upstream, so its card now shows a description and its license.
+  test("licensed skills show their license on the card, not a proprietary notice", async ({
     page,
   }) => {
     const card = page.getByRole("link", { name: /^pdf/ }).first();
-    await expect(card).toContainText("Proprietary license");
-    await expect(card).toContainText("Proprietary");
+    await expect(card).toContainText("Apache-2.0");
+    await expect(card).not.toContainText("Proprietary license");
   });
 });
 
@@ -129,6 +131,12 @@ test.describe("Skill detail page", () => {
     );
   });
 
+  test("offers an Open in Treq deep link for the skill", async ({ page }) => {
+    await expect(
+      page.getByRole("link", { name: "Open in Treq" }),
+    ).toHaveAttribute("href", "treq://skill/install?id=anthropic%2Fmcp-builder");
+  });
+
   test("file tree lists the skill files", async ({ page }) => {
     await expect(page.getByRole("button", { name: "SKILL.md" })).toBeVisible();
     await expect(
@@ -136,13 +144,24 @@ test.describe("Skill detail page", () => {
     ).toBeVisible();
   });
 
-  test("SKILL.md is selected by default and its content loads", async ({
+  test("SKILL.md is part of the page, with credit to its author and license", async ({
+    page,
+  }) => {
+    await expect(page.getByTestId("skill-body")).toContainText("MCP");
+    await expect(page.getByTestId("skill-credit")).toContainText(
+      "Apache-2.0 license",
+    );
+  });
+
+  test("the file browser opens on the next file and loads it", async ({
     page,
   }) => {
     // Content is fetched live from GitHub's raw CDN, so give the network
     // request more headroom than the default UI-interaction assertions.
     test.setTimeout(30_000);
-    await expect(page.getByTestId("viewer-path")).toHaveText("SKILL.md");
+    await expect(page.getByTestId("viewer-path")).toHaveText(
+      "reference/evaluation.md",
+    );
     await expect(page.getByTestId("viewer-body")).toContainText("MCP", {
       timeout: 20_000,
     });
@@ -189,7 +208,7 @@ test.describe("Skill detail page", () => {
       "false",
     );
     const viewerBody = page.getByTestId("viewer-body");
-    // The rendered SKILL.md has several h1s; any one being visible proves the
+    // The rendered markdown file has an h1; it being visible proves the
     // markdown was rendered rather than shown as raw source.
     await expect(
       viewerBody.getByRole("heading", { level: 1 }).first(),
@@ -214,9 +233,9 @@ test.describe("Skill detail page", () => {
   });
 });
 
-// ── Proprietary skill detail page ───────────────────────────────────────────
+// ── Relicensed skill detail page ────────────────────────────────────────────
 
-test.describe("Proprietary skill detail page", () => {
+test.describe("Relicensed skill detail page", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
     await page
@@ -226,14 +245,15 @@ test.describe("Proprietary skill detail page", () => {
     await page.getByRole("link", { name: /^pdf/ }).first().click();
   });
 
-  test("shows a proprietary callout, no file browser, but keeps the GitHub link", async ({
+  test("shows the file browser and Open in Treq, with no proprietary callout", async ({
     page,
   }) => {
     await expect(
       page.getByRole("heading", { name: "pdf", level: 1 }),
     ).toBeVisible();
-    await expect(page.getByTestId("proprietary-callout")).toBeVisible();
-    await expect(page.getByTestId("skill-file-browser")).toHaveCount(0);
+    await expect(page.getByTestId("proprietary-callout")).toHaveCount(0);
+    await expect(page.getByTestId("skill-file-browser")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Open in Treq" })).toBeVisible();
     await expect(page.getByTestId("repo-github-link")).toHaveAttribute(
       "href",
       "https://github.com/anthropics/skills/tree/main/skills/pdf",
@@ -271,7 +291,9 @@ test.describe("Skill detail page on mobile", () => {
   test("picking a file from the dropdown updates the preview", async ({
     page,
   }) => {
-    await expect(page.getByTestId("viewer-path")).toHaveText("SKILL.md");
+    await expect(page.getByTestId("viewer-path")).toHaveText(
+      "reference/evaluation.md",
+    );
     await page
       .getByLabel("Choose a file")
       .selectOption("reference/mcp_best_practices.md");

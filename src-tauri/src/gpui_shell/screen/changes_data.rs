@@ -28,6 +28,8 @@ pub const LARGE_FILE_LINES: usize = 250;
 pub const LARGE_CHANGESET_LINES: usize = 1000;
 /// Lines each "Show more lines" click reads.
 pub const CONTEXT_STEP: usize = 20;
+/// The largest hidden gap "Expand all" offers to read in one click.
+pub const EXPAND_ALL_MAX: usize = 40;
 /// Unchanged lines the backend's diff keeps around each change.
 const DIFF_CONTEXT: usize = 3;
 /// The first files read before the rest (`INITIAL_FILE_BATCH`).
@@ -58,11 +60,14 @@ pub trait ChangesHost: CommitsHost {
   ) -> Result<Vec<JjFileChange>, String>;
   /// `get_workspace_diff`: working copy, committed files and conflicts.
   fn workspace_diff(&self, repo_path: &str, workspace_id: i64) -> Result<JjRevisionDiff, String>;
+  /// The hunks of `paths`, from the diff `token` names (`working_copy_token`)
+  /// when given and still readable, else from a snapshot.
   fn file_hunks(
     &self,
     repo_path: &str,
     workspace_id: Option<i64>,
     paths: Vec<String>,
+    token: Option<&str>,
   ) -> Result<WorkspaceFileHunksBatch, String>;
   /// Lines `start..=end` of the working-copy file, for context.
   fn file_lines(
@@ -95,6 +100,8 @@ pub trait ChangesHost: CommitsHost {
   fn stash_all(&self, repo_path: &str, workspace_id: Option<i64>) -> Result<StashEntry, String>;
   fn mark_viewed(&self, workspace_path: &str, path: &str, hash: &str) -> Result<(), String>;
   fn unmark_viewed(&self, workspace_path: &str, path: &str) -> Result<(), String>;
+  /// The files marked viewed, with the hash of the diff each was viewed at.
+  fn viewed_files(&self, workspace_path: &str) -> Result<Vec<(String, String)>, String>;
   /// The repository has a GitHub remote (`useGitRemoteInfo`).
   fn github_remote(&self, repo_path: &str) -> bool;
   fn editor_apps(&self) -> EditorApps;
@@ -169,13 +176,14 @@ impl ChangesHost for Backend {
     repo_path: &str,
     workspace_id: Option<i64>,
     paths: Vec<String>,
+    token: Option<&str>,
   ) -> Result<WorkspaceFileHunksBatch, String> {
     if let Some(remote) = self.remote_containing(repo_path) {
-      return remote.file_hunks_batch(workspace_id, paths);
+      return remote.file_hunks_batch(workspace_id, paths, token);
     }
     let state = tauri::Manager::state::<crate::AppState>(self.app());
     let style = core::resolve_conflict_marker_style(&state.db);
-    core::list_file_hunks_batch(repo_path, workspace_id, paths, &style)
+    core::list_file_hunks_batch(repo_path, workspace_id, paths, &style, token)
   }
 
   fn file_lines(
@@ -256,7 +264,7 @@ impl ChangesHost for Backend {
     repo_path: &str,
     workspace_id: i64,
   ) -> Result<Option<PendingReview>, String> {
-    crate::local_db::get_pending_review(&self.state_scope(repo_path), workspace_id)
+    crate::core::review_drafts::pending_review(&self.state_scope(repo_path), workspace_id)
   }
 
   fn save_review(
@@ -268,12 +276,11 @@ impl ChangesHost for Backend {
     notes: Option<&str>,
   ) -> Result<(), String> {
     let scope = self.state_scope(repo_path);
-    crate::local_db::save_pending_review(&scope, workspace_id, comments, None, summary, notes)
-      .map(|_| ())
+    crate::core::review_drafts::save_pending_review(&scope, workspace_id, comments, summary, notes)
   }
 
   fn clear_review(&self, repo_path: &str, workspace_id: i64) -> Result<(), String> {
-    crate::local_db::clear_pending_review(&self.state_scope(repo_path), workspace_id)
+    crate::core::review_drafts::clear_pending_review(&self.state_scope(repo_path), workspace_id)
   }
 
   fn review_threads(&self, repo_path: &str, branch: &str) -> Result<Vec<GhReviewThread>, String> {
@@ -281,38 +288,11 @@ impl ChangesHost for Backend {
     if self.remote_containing(repo_path).is_some() {
       return Ok(Vec::new());
     }
-    let Some(remote) = crate::github::get_git_remote_url_impl(repo_path)? else {
-      return Ok(Vec::new());
-    };
-    let pr = crate::pr_status::global()
-      .get_cached(repo_path, branch)
-      .flatten();
-    let Some(pr) = pr else {
-      return Ok(Vec::new());
-    };
-    let gh = crate::binary_paths::get_binary_path("gh")
-      .or_else(|| crate::binary_paths::detect_binary("gh"))
-      .ok_or_else(|| "gh CLI not found".to_string())?;
-    crate::github::gh_list_pr_review_threads_impl(
-      &gh,
-      &remote.owner,
-      &remote.repo,
-      pr.number,
-      &crate::binary_paths::get_extended_path(),
-    )
+    crate::core::github_cli::branch_review_threads(repo_path, branch)
   }
 
   fn react(&self, comment_id: &str, content: &str, on: bool) -> Result<(), String> {
-    let gh = crate::binary_paths::get_binary_path("gh")
-      .or_else(|| crate::binary_paths::detect_binary("gh"))
-      .ok_or_else(|| "gh CLI not found".to_string())?;
-    crate::github::gh_set_reaction_impl(
-      &gh,
-      comment_id,
-      content,
-      on,
-      &crate::binary_paths::get_extended_path(),
-    )
+    crate::core::github_cli::set_reaction(comment_id, content, on)
   }
 
   fn agent_comments(
@@ -320,19 +300,15 @@ impl ChangesHost for Backend {
     repo_path: &str,
     workspace_id: i64,
   ) -> Result<Vec<AgentReviewComment>, String> {
-    crate::local_db::list_agent_review_comments(
-      &self.state_scope(repo_path),
-      super::changes_threads::WORKSPACE_DIFF,
-      &workspace_id.to_string(),
-    )
+    crate::core::agent_review::workspace_comments(&self.state_scope(repo_path), workspace_id)
   }
 
   fn resolve_agent_comment(&self, repo_path: &str, id: &str) -> Result<(), String> {
-    crate::local_db::resolve_agent_review_comment(&self.state_scope(repo_path), id)
+    crate::core::agent_review::resolve_comment(&self.state_scope(repo_path), id)
   }
 
   fn delete_agent_comment(&self, repo_path: &str, id: &str) -> Result<(), String> {
-    crate::local_db::delete_agent_review_comment(&self.state_scope(repo_path), id)
+    crate::core::agent_review::delete_comment(&self.state_scope(repo_path), id)
   }
 
   fn apply_agent_suggestion(&self, repo_path: &str, id: &str) -> Result<(), String> {
@@ -377,11 +353,25 @@ impl ChangesHost for Backend {
       .map_err(|e| e.to_string())
   }
 
+  fn viewed_files(&self, workspace_path: &str) -> Result<Vec<(String, String)>, String> {
+    let state = tauri::Manager::state::<crate::AppState>(self.app());
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let views = db
+      .get_viewed_files(&self.state_scope(workspace_path))
+      .map_err(|e| e.to_string())?;
+    Ok(
+      views
+        .into_iter()
+        .map(|v| (v.file_path, v.content_hash))
+        .collect(),
+    )
+  }
+
   fn github_remote(&self, repo_path: &str) -> bool {
     if let Some(remote) = self.remote_containing(repo_path) {
       return remote.git_remote().ok().flatten().is_some();
     }
-    crate::github::get_git_remote_url_impl(repo_path)
+    crate::core::github_cli::remote(repo_path)
       .ok()
       .flatten()
       .is_some()
@@ -403,7 +393,7 @@ impl ChangesHost for Backend {
       log::warn!("failed to reveal {path}: {err}");
       self.toast(
         crate::gpui_shell::native::ToastTone::Error,
-        "Open Failed",
+        "Open failed",
         err.to_string(),
       );
     }
@@ -434,7 +424,7 @@ impl ChangedFile {
 }
 
 /// The files the tab lists, from one read.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Snapshot {
   pub files: Vec<ChangedFile>,
   /// Committed on the branch, conflicted paths included.
@@ -444,12 +434,43 @@ pub struct Snapshot {
   pub conflicted: Option<Vec<String>>,
   /// Listed paths that are generated, their diffs behind "Load diff".
   pub generated: HashSet<String>,
+  /// The diff `files` were read from (`working_copy_token`), when known.
+  pub token: Option<String>,
+  /// Each file's `content_id` in that diff, where known.
+  pub content_ids: HashMap<String, String>,
+  /// Dirty files also committed, shown as one diff from the fork point to
+  /// the working copy (their `committed_hunks`) while Committed is on.
+  pub branch_diff: HashSet<String>,
 }
 
 impl Snapshot {
+  /// Committed on the branch with no working-copy change: the card shows
+  /// only committed work.
+  pub fn purely_committed(&self, path: &str) -> bool {
+    self.committed.iter().any(|f| f.path == path) && !self.files.iter().any(|f| f.path == path)
+  }
+
+  /// How many files the review summary counts.
+  /// Uncommitted and committed paths, each once: an empty working copy
+  /// on top of branch commits still has a diff to review.
+  pub fn review_file_count(&self) -> usize {
+    let paths: HashSet<&str> = self
+      .files
+      .iter()
+      .map(|f| f.path.as_str())
+      .chain(self.committed.iter().map(|f| f.path.as_str()))
+      .collect();
+    paths.len()
+  }
+
   /// What `loadChangedFiles` keeps of a workspace's diff.
   pub fn from_workspace_diff(diff: JjRevisionDiff, show_committed: bool) -> Self {
     let files = ChangedFile::parse(&diff.uncommitted_files);
+    let content_ids = diff
+      .uncommitted_files
+      .iter()
+      .filter_map(|f| Some((f.path.clone(), f.content_id.clone()?)))
+      .collect();
     let conflicted = diff.conflicted_files.clone();
     let uncommitted: HashSet<&str> = files.iter().map(|f| f.path.as_str()).collect();
     let mut committed = diff.committed_files.clone();
@@ -461,9 +482,20 @@ impl Snapshot {
           previous_path: None,
           changed_line_count: 0,
           diff_deferred: false,
+          content_id: None,
         });
       }
     }
+    let branch_diff = if show_committed {
+      diff
+        .hunks_by_file
+        .iter()
+        .filter(|f| uncommitted.contains(f.path.as_str()) && !conflicted.contains(&f.path))
+        .map(|f| f.path.clone())
+        .collect()
+    } else {
+      HashSet::new()
+    };
     let committed_hunks = diff
       .hunks_by_file
       .into_iter()
@@ -484,7 +516,33 @@ impl Snapshot {
       committed_hunks,
       conflicted: Some(conflicted),
       generated: HashSet::new(),
+      token: diff.working_copy_token,
+      content_ids,
+      branch_diff,
     }
+  }
+
+  /// `path` shows its branch diff rather than the working copy's.
+  pub fn shows_branch_diff(&self, path: &str) -> bool {
+    self.branch_diff.contains(path)
+  }
+
+  /// Takes the hunks of committed files that read the same as in
+  /// `previous`, so that comparing the two is a pointer check and the
+  /// rows built from them are kept.
+  pub fn sharing_hunks(mut self, previous: Option<&Snapshot>) -> Self {
+    let Some(previous) = previous else {
+      return self;
+    };
+    for (path, new) in &mut self.committed_hunks {
+      if let Some(old) = previous.committed_hunks.get(path) {
+        if new.hunks != old.hunks {
+          continue;
+        }
+        new.hunks = old.hunks.clone();
+      }
+    }
+    self
   }
 
   /// Marks the listed paths `rules` call generated.
@@ -509,15 +567,17 @@ impl Snapshot {
 }
 
 /// `filterVisibleCommittedFiles`: committed files show when the toggle is
-/// on, or when they are also dirty or conflicted.
-pub fn visible_committed<'a>(
-  committed: &'a [JjFileChange],
+/// on, or when they are also dirty or conflicted. By index into `committed`.
+pub fn visible_committed_at(
+  committed: &[JjFileChange],
   show: bool,
   always: &HashSet<String>,
-) -> Vec<&'a JjFileChange> {
+) -> Vec<usize> {
   committed
     .iter()
-    .filter(|f| show || always.contains(&f.path))
+    .enumerate()
+    .filter(|(_, f)| show || always.contains(&f.path))
+    .map(|(ix, _)| ix)
     .collect()
 }
 
@@ -754,15 +814,20 @@ pub fn full_path(workspace_path: &str, path: &str) -> String {
 
 /// `computeHunksHash`: djb2 over each hunk's header and lines, in hex.
 pub fn hunks_hash(hunks: &[JjDiffHunk]) -> String {
-  let text = hunks
-    .iter()
-    .map(|h| format!("{}{}", h.header, h.lines.concat()))
-    .collect::<Vec<_>>()
-    .join("|");
   let mut hash: u64 = 5381;
-  // JavaScript's `charCodeAt` counts UTF-16 units.
-  for unit in text.encode_utf16() {
-    hash = (hash * 33 + u64::from(unit)) % (1 << 32);
+  // JavaScript's `charCodeAt` counts UTF-16 units. Hashed piece by piece,
+  // as the hunks' text joined with `|`, without building that string.
+  let mut add = |text: &str| {
+    for unit in text.encode_utf16() {
+      hash = (hash * 33 + u64::from(unit)) % (1 << 32);
+    }
+  };
+  for (i, hunk) in hunks.iter().enumerate() {
+    if i > 0 {
+      add("|");
+    }
+    add(&hunk.header);
+    hunk.lines.iter().for_each(|line| add(line));
   }
   format!("{hash:x}")
 }
@@ -784,11 +849,14 @@ pub fn line_counts(hunks: &[JjDiffHunk]) -> (usize, usize) {
 }
 
 /// A file's diff as read.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct FileHunks {
   pub hunks: Arc<Vec<JjDiffHunk>>,
   pub loading: bool,
   pub error: Option<String>,
+  /// The file's `content_id` the hunks were read at, when known: a reread
+  /// listing the same id keeps them.
+  pub content_id: Option<String>,
 }
 
 /// What a file card shows below its header (`fileDisplayState.body`).
@@ -819,6 +887,12 @@ pub struct BodyInput<'a> {
   pub generated: bool,
   /// "Load diff" was clicked on the generated file.
   pub loaded_generated: bool,
+}
+
+/// Whether the tab draws a diff for the file: a binary file shows a note
+/// and a deleted one a placeholder, so their hunks are not read.
+pub fn draws_hunks(path: &str, status: &str) -> bool {
+  !is_binary(path) && status != "D"
 }
 
 /// Whether the file card is shut: comments keep it open; binary files and
@@ -865,6 +939,7 @@ pub fn total_lines<'a>(files: impl Iterator<Item = &'a FileHunks>) -> usize {
     .sum()
 }
 
+#[expect(clippy::expect_used, reason = "constant pattern")]
 static NEW_RANGE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@").expect("hunk header regex")
 });
@@ -886,9 +961,55 @@ pub fn new_range(header: &str) -> (usize, usize) {
 /// lines shows none (`last == first - 1`).
 pub fn new_lines(header: &str) -> (usize, usize) {
   match new_range(header) {
-    (start, 0) => (start + 1, start),
-    (start, count) => (start, start + count - 1),
+    (start, 0) => (start.saturating_add(1), start),
+    (start, count) => (start, start.saturating_add(count - 1)),
   }
+}
+
+#[expect(clippy::expect_used, reason = "constant pattern")]
+static OLD_RANGE: LazyLock<Regex> =
+  LazyLock::new(|| Regex::new(r"@@ -(\d+)(?:,(\d+))?").expect("hunk header regex"));
+
+/// The old-side lines a hunk shows, as [`new_lines`] numbers the new side.
+fn old_lines(header: &str) -> (usize, usize) {
+  let (start, count): (usize, usize) = OLD_RANGE
+    .captures(header)
+    .map(|c| {
+      (
+        c[1].parse().unwrap_or(1),
+        c.get(2).map_or(1, |n| n.as_str().parse().unwrap_or(1)),
+      )
+    })
+    .unwrap_or((1, 1));
+  match count {
+    0 => (start.saturating_add(1), start),
+    _ => (start, start.saturating_add(count - 1)),
+  }
+}
+
+/// The old and new numbers of new-side line `new`, an unchanged line read
+/// above (or, `after`, below) the hunk `header` opens.
+pub fn context_number(header: &str, after: bool, new: usize) -> (i64, i64) {
+  let (old_first, old_last) = old_lines(header);
+  let (new_first, new_last) = new_lines(header);
+  let shift = if after {
+    (old_last as i64).saturating_sub(new_last as i64)
+  } else {
+    (old_first as i64).saturating_sub(new_first as i64)
+  };
+  ((new as i64).saturating_add(shift), new as i64)
+}
+
+/// The old and new numbers of row `i` of the `read` lines shown above (or,
+/// `after`, below) the hunk `header` opens.
+pub fn context_row_numbers(header: &str, after: bool, read: usize, i: usize) -> (i64, i64) {
+  let (first, last) = new_lines(header);
+  let new = if after {
+    last.saturating_add(1).saturating_add(i)
+  } else {
+    (first + i).saturating_sub(read)
+  };
+  context_number(header, after, new)
 }
 
 /// Unchanged lines closing the hunk. The backend's diff keeps
@@ -921,22 +1042,60 @@ pub fn context_ranges(
   let (first, last) = new_lines(&hunks[h].header);
   let (above, below) = loaded(h);
   let floor = match h.checked_sub(1) {
-    Some(prev) => new_lines(&hunks[prev].header).1 + loaded(prev).1,
+    Some(prev) => new_lines(&hunks[prev].header)
+      .1
+      .saturating_add(loaded(prev).1),
     None => 0,
   };
-  let before = (first - 1)
+  let before = first
+    .saturating_sub(1)
     .checked_sub(above)
     .filter(|end| *end > floor)
     .map(|end| ((end + 1).saturating_sub(CONTEXT_STEP).max(floor + 1), end));
-  let start = last + 1 + below;
+  let start = last.saturating_add(1).saturating_add(below);
   let after = match hunks.get(h + 1) {
     Some(next) => {
       let ceiling = new_lines(&next.header).0.saturating_sub(loaded(h + 1).0);
-      (start < ceiling).then(|| (start, (start + CONTEXT_STEP - 1).min(ceiling - 1)))
+      (start < ceiling).then(|| {
+        (
+          start,
+          start.saturating_add(CONTEXT_STEP - 1).min(ceiling - 1),
+        )
+      })
     }
     None if ended || (below == 0 && trailing_context(&hunks[h]) < DIFF_CONTEXT) => None,
-    None => Some((start, start + CONTEXT_STEP - 1)),
+    None => Some((start, start.saturating_add(CONTEXT_STEP - 1))),
   };
+  (before, after)
+}
+
+/// The whole of the hidden gaps above and below hunk `h`, as
+/// [`context_ranges`] reads them a step at a time. Below the last hunk the
+/// file's end is unknown, so that gap is `None`.
+pub fn gap_ranges(
+  hunks: &[JjDiffHunk],
+  h: usize,
+  loaded: impl Fn(usize) -> (usize, usize),
+  ended: bool,
+) -> ContextReads {
+  let (first, last) = new_lines(&hunks[h].header);
+  let (above, below) = loaded(h);
+  let floor = match h.checked_sub(1) {
+    Some(prev) => new_lines(&hunks[prev].header)
+      .1
+      .saturating_add(loaded(prev).1),
+    None => 0,
+  };
+  let before = first
+    .saturating_sub(1)
+    .checked_sub(above)
+    .filter(|end| *end > floor)
+    .map(|end| (floor + 1, end));
+  let after = hunks.get(h + 1).and_then(|next| {
+    let start = last.saturating_add(1).saturating_add(below);
+    let ceiling = new_lines(&next.header).0.saturating_sub(loaded(h + 1).0);
+    (!ended && start < ceiling).then(|| (start, ceiling - 1))
+  });
   (before, after)
 }
 
@@ -1179,6 +1338,18 @@ mod tests {
   }
 
   #[test]
+  fn hunks_hash_joins_hunks_with_a_bar() {
+    let djb2 = |text: &str| {
+      let hash = text
+        .encode_utf16()
+        .fold(5381u64, |h, u| (h * 33 + u64::from(u)) % (1 << 32));
+      format!("{hash:x}")
+    };
+    let hunks = [hunk("@@ 1", &["+a", " é"]), hunk("@@ 2", &[])];
+    assert_eq!(hunks_hash(&hunks), djb2("@@ 1+a é|@@ 2"));
+  }
+
+  #[test]
   fn body_follows_the_display_rules() {
     let loaded = FileHunks {
       hunks: vec![hunk("@@ -1 +1 @@", &["+a"])].into(),
@@ -1239,6 +1410,7 @@ mod tests {
       previous_path: None,
       changed_line_count: 1,
       diff_deferred: false,
+      content_id: None,
     };
     let snapshot = Snapshot {
       files: ChangedFile::parse(&[change("Cargo.lock"), change("src/a.rs")]),
@@ -1252,6 +1424,69 @@ mod tests {
       generated,
       ["Cargo.lock", "gen/api.ts", "web/package-lock.json"]
     );
+  }
+
+  #[test]
+  fn expanded_rows_number_old_and_new_sides() {
+    // The report: old 117-137 / new 130-150 hidden between two hunks.
+    let first = "@@ -110,8 +120,9 @@";
+    let next = "@@ -138,6 +151,17 @@";
+    // Twenty read below the first hunk: old 118.., new 129..
+    assert_eq!(context_row_numbers(first, true, 20, 0), (118, 129));
+    assert_eq!(context_row_numbers(first, true, 20, 19), (137, 148));
+    // Two read above the next: old 136-137, new 149-150.
+    assert_eq!(context_row_numbers(next, false, 2, 0), (136, 149));
+    assert_eq!(context_row_numbers(next, false, 2, 1), (137, 150));
+  }
+
+  #[test]
+  fn context_lines_number_both_sides() {
+    // Old 117-137 / new 130-150 hidden between the hunks.
+    let header = "@@ -110,7 +123,7 @@";
+    assert_eq!(context_number(header, false, 122), (109, 122));
+    assert_eq!(context_number(header, true, 130), (117, 130));
+    // A hunk that only adds lines: the old side resumes after its start.
+    let added = "@@ -5,0 +6,3 @@";
+    assert_eq!(context_number(added, false, 5), (5, 5));
+    assert_eq!(context_number(added, true, 9), (6, 9));
+    // One that only removes them.
+    let removed = "@@ -5,2 +4,0 @@";
+    assert_eq!(context_number(removed, false, 4), (4, 4));
+    assert_eq!(context_number(removed, true, 5), (7, 5));
+  }
+
+  #[test]
+  fn gap_ranges_cover_the_whole_hidden_gap() {
+    let hunks = [
+      hunk("@@ -1,4 +1,4 @@", &["-a", "+a", " b", " c", " d"]),
+      hunk("@@ -30,4 +30,4 @@", &[" a", " b", " c", "-d", "+d"]),
+    ];
+    let none = |_| (0, 0);
+    // Lines 5-29 between the hunks; the file's end is unknown below the last.
+    assert_eq!(gap_ranges(&hunks, 0, none, false), (None, Some((5, 29))));
+    assert_eq!(gap_ranges(&hunks, 1, none, false), (Some((5, 29)), None));
+    // Twenty read below the first leave 25-29.
+    let loaded = |i| if i == 0 { (0, 20) } else { (0, 0) };
+    assert_eq!(gap_ranges(&hunks, 0, loaded, false).1, Some((25, 29)));
+    // Twenty read above the second leave 5-9.
+    let loaded = |i| if i == 1 { (20, 0) } else { (0, 0) };
+    assert_eq!(gap_ranges(&hunks, 0, loaded, false).1, Some((5, 9)));
+    // Above the first hunk the gap runs from line 1.
+    assert_eq!(gap_ranges(&hunks[1..], 0, none, false).0, Some((1, 29)));
+  }
+
+  #[test]
+  fn malformed_hunk_headers_do_not_panic() {
+    let big = format!("@@ -{m},5 +{m},5 @@", m = usize::MAX);
+    for header in ["@@ -0,5 +0,5 @@", "@@ -1,1 +0,5 @@", big.as_str()] {
+      let hunks = [hunk(header, &[" a"])];
+      let _ = new_lines(header);
+      let _ = old_lines(header);
+      let _ = context_number(header, true, 1);
+      let _ = context_row_numbers(header, true, 3, 1);
+      let _ = context_ranges(&hunks, 0, |_| (0, 0), false);
+      let _ = gap_ranges(&hunks, 0, |_| (0, 0), false);
+    }
   }
 
   #[test]
@@ -1316,6 +1551,7 @@ mod tests {
       previous_path: None,
       changed_line_count: 1,
       diff_deferred: false,
+      content_id: None,
     };
     let diff = JjRevisionDiff {
       committed_files: vec![change("done.rs", "M")],
@@ -1324,17 +1560,115 @@ mod tests {
       conflicted_files: vec!["clash.rs".into(), "dirty.rs".into()],
       too_large_to_render: false,
       render_block_reason: None,
+      working_copy_token: None,
     };
     let snap = Snapshot::from_workspace_diff(diff, false);
     let committed: Vec<&str> = snap.committed.iter().map(|f| f.path.as_str()).collect();
     assert_eq!(committed, ["done.rs", "clash.rs"]);
     assert_eq!(snap.committed[1].status, "C");
     let always = set(&["dirty.rs", "clash.rs"]);
-    let visible: Vec<&str> = visible_committed(&snap.committed, false, &always)
+    let visible: Vec<&str> = visible_committed_at(&snap.committed, false, &always)
       .iter()
-      .map(|f| f.path.as_str())
+      .map(|&ix| snap.committed[ix].path.as_str())
       .collect();
     assert_eq!(visible, ["clash.rs"]);
+  }
+
+  /// A file committed on the branch with no working-copy change is purely
+  /// committed; one that is also dirty, or only dirty, is not.
+  #[test]
+  fn purely_committed_needs_committed_and_no_working_copy_change() {
+    let change = |path: &str| JjFileChange {
+      path: path.into(),
+      status: "M".into(),
+      previous_path: None,
+      changed_line_count: 1,
+      diff_deferred: false,
+      content_id: None,
+    };
+    let diff = JjRevisionDiff {
+      committed_files: vec![change("done.rs"), change("both.rs")],
+      hunks_by_file: Vec::new(),
+      uncommitted_files: vec![change("both.rs"), change("dirty.rs")],
+      conflicted_files: Vec::new(),
+      too_large_to_render: false,
+      render_block_reason: None,
+      working_copy_token: None,
+    };
+    let snap = Snapshot::from_workspace_diff(diff, false);
+    assert!(snap.purely_committed("done.rs"));
+    assert!(!snap.purely_committed("both.rs"));
+    assert!(!snap.purely_committed("dirty.rs"));
+  }
+
+  /// With Committed on, a file both committed and dirty shows the branch
+  /// diff (fork point to working copy), not the working copy's own diff;
+  /// with it off, or for dirty-only and conflicted files, the working copy's.
+  #[test]
+  fn dirty_committed_file_shows_the_branch_diff_with_committed_on() {
+    let change = |path: &str| JjFileChange {
+      path: path.into(),
+      status: "M".into(),
+      previous_path: None,
+      changed_line_count: 1,
+      diff_deferred: false,
+      content_id: None,
+    };
+    let hunks = |path: &str| crate::jj::JjFileDiff {
+      path: path.into(),
+      hunks: Vec::new(),
+      conflict_style: Default::default(),
+      conflict_regions: Vec::new(),
+    };
+    let diff = || JjRevisionDiff {
+      committed_files: vec![change("done.rs")],
+      hunks_by_file: vec![hunks("both.rs"), hunks("done.rs"), hunks("clash.rs")],
+      uncommitted_files: vec![change("both.rs"), change("dirty.rs"), change("clash.rs")],
+      conflicted_files: vec!["clash.rs".into()],
+      too_large_to_render: false,
+      render_block_reason: None,
+      working_copy_token: None,
+    };
+    let on = Snapshot::from_workspace_diff(diff(), true);
+    assert!(on.shows_branch_diff("both.rs"));
+    assert!(!on.shows_branch_diff("dirty.rs"));
+    assert!(!on.shows_branch_diff("clash.rs"));
+    let off = Snapshot::from_workspace_diff(diff(), false);
+    assert!(!off.shows_branch_diff("both.rs"));
+  }
+
+  /// A jj workspace whose working copy is empty but whose branch has
+  /// commits: the review must count the committed files, not report 0.
+  #[test]
+  fn review_counts_committed_files_when_the_working_copy_is_empty() {
+    let change = |path: &str| JjFileChange {
+      path: path.into(),
+      status: "M".into(),
+      previous_path: None,
+      changed_line_count: 1,
+      diff_deferred: false,
+      content_id: None,
+    };
+    let diff = JjRevisionDiff {
+      committed_files: vec![change("a.rs"), change("b.rs"), change("c.rs")],
+      hunks_by_file: Vec::new(),
+      uncommitted_files: Vec::new(),
+      conflicted_files: Vec::new(),
+      too_large_to_render: false,
+      render_block_reason: None,
+      working_copy_token: None,
+    };
+    let snap = Snapshot::from_workspace_diff(diff, false);
+    assert_eq!(snap.review_file_count(), 3);
+  }
+
+  /// A jj workspace has no `.git` of its own, so `git diff` there reads
+  /// the home repository's working copy. The prompt must not suggest it.
+  #[test]
+  fn built_in_review_prompt_does_not_send_the_agent_to_git_diff() {
+    let prompt = review_prompt(None, "7", "");
+    assert!(!prompt.contains("git diff"), "prompt suggests `git diff`");
+    assert!(prompt.contains("treq changes workspace-diff"));
   }
 
   #[test]
@@ -1345,6 +1679,9 @@ mod tests {
     assert!(prompt.starts_with("You are reviewing the current changes in this repository."));
     assert!(prompt.contains("--target-type workspace_diff --target-id 7"));
     assert!(prompt.contains("What is under review: the feat/a workspace diff"));
+    // In a Treq workspace git reads the home repo, so never point at it.
+    assert!(!prompt.contains("git diff"));
+    assert!(prompt.contains("treq changes workspace-diff"));
     assert_eq!(
       review_prompt(Some("Look at {workspace_id}"), "7", ""),
       "Look at 7"

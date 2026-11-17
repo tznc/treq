@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Treq",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "identifier": "com.treq",
   "build": {},
   "app": {
@@ -181,35 +181,128 @@
           ]
         },
         "agent": {
-          "description": "Start an agent session in a workspace",
-          "args": [
-            {
-              "name": "branch",
-              "index": 1,
-              "takesValue": true,
-              "required": true,
-              "description": "Workspace branch name"
+          "description": "Start and coordinate agent sessions",
+          "subcommands": {
+            "start": {
+              "description": "Start an agent session in a workspace",
+              "args": [
+                {
+                  "name": "branch",
+                  "index": 1,
+                  "takesValue": true,
+                  "required": true,
+                  "description": "Workspace branch name"
+                },
+                {
+                  "name": "prompt",
+                  "index": 2,
+                  "takesValue": true,
+                  "required": true,
+                  "description": "Prompt to send to the agent"
+                },
+                {
+                  "name": "mode",
+                  "short": "m",
+                  "takesValue": true,
+                  "description": "Permission mode: edit or plan"
+                },
+                {
+                  "name": "repo",
+                  "short": "r",
+                  "takesValue": true,
+                  "description": "Supporting repository (path or directory name) to act on"
+                },
+                {
+                  "name": "agent",
+                  "short": "a",
+                  "takesValue": true,
+                  "description": "Agent to start: claude, codex, cursor or copilot (default: the repository's default agent)"
+                }
+              ]
             },
-            {
-              "name": "prompt",
-              "index": 2,
-              "takesValue": true,
-              "required": true,
-              "description": "Prompt to send to the agent"
-            },
-            {
-              "name": "mode",
-              "short": "m",
-              "takesValue": true,
-              "description": "Permission mode: edit or plan"
-            },
-            {
-              "name": "repo",
-              "short": "r",
-              "takesValue": true,
-              "description": "Supporting repository (path or directory name) to act on"
+            "msg": {
+              "description": "Message other agents treq launched, read your inbox, reply and report status",
+              "afterHelp": "Examples:\n  treq agent msg claude-2 \"rebase done?\" --ask\n  treq agent msg --all --repo app \"main moved, rebase before pushing\"\n  treq agent msg --inbox\n  treq agent msg --reply m-7f3a0c11 \"done, head 9c41e2a\"\n  treq agent msg --ack m-7f3a0c11\n  treq agent msg --status done --note \"rebased\"\n  treq agent msg --list",
+              "args": [
+                {
+                  "name": "args",
+                  "index": 1,
+                  "takesValue": true,
+                  "multiple": true,
+                  "description": "The agent to message and the text; with --all or --reply, only the text; with --status, optionally the agent to report to"
+                },
+                {
+                  "name": "all",
+                  "description": "Send to every other agent in this project (narrow with --repo)"
+                },
+                {
+                  "name": "everywhere",
+                  "description": "With --all or --list: every agent treq can reach, not only this project's"
+                },
+                {
+                  "name": "repo",
+                  "short": "r",
+                  "takesValue": true,
+                  "description": "Only agents in this repository (path or directory name)"
+                },
+                {
+                  "name": "ask",
+                  "description": "Wait for the reply and print it. Exits 3 when it times out"
+                },
+                {
+                  "name": "timeout",
+                  "takesValue": true,
+                  "description": "How long the message waits to be acked or replied to: 30s, 1m (default and most: 1m)"
+                },
+                {
+                  "name": "reply",
+                  "takesValue": true,
+                  "description": "Reply to this message id"
+                },
+                {
+                  "name": "inbox",
+                  "description": "List the messages waiting for you, oldest first, and mark them read"
+                },
+                {
+                  "name": "peek",
+                  "description": "With --inbox: do not mark them read"
+                },
+                {
+                  "name": "wait",
+                  "description": "With --inbox: wait up to a minute for a message"
+                },
+                {
+                  "name": "types",
+                  "takesValue": true,
+                  "description": "With --inbox: only these kinds, comma separated (message, ask, reply, status)"
+                },
+                {
+                  "name": "ack",
+                  "takesValue": true,
+                  "multiple": true,
+                  "description": "Acknowledge a message id; repeatable"
+                },
+                {
+                  "name": "status",
+                  "takesValue": true,
+                  "description": "Report your status: working, blocked or done"
+                },
+                {
+                  "name": "note",
+                  "takesValue": true,
+                  "description": "With --status: what you are doing"
+                },
+                {
+                  "name": "list",
+                  "description": "List the agents you can message"
+                },
+                {
+                  "name": "json",
+                  "description": "Print JSON"
+                }
+              ]
             }
-          ]
+          }
         },
         "commit": {
           "description": "Commit changes in a workspace",
@@ -299,7 +392,7 @@
               "index": 1,
               "takesValue": true,
               "required": true,
-              "description": "Action: inspect, status, branches, probe, init, clone, usage, host-check, switch-branch"
+              "description": "Action: inspect, status, branches, probe, init, clone, usage, tools, dirs, host-check, switch-branch"
             },
             {
               "name": "repo",
@@ -333,12 +426,12 @@
               "index": 1,
               "takesValue": true,
               "required": true,
-              "description": "Action: list, summaries, inspect, create, plan-new, new, rename, update, delete, archive, move, rebase, marker, stash, snapshot, restore-all, restore-snapshot"
+              "description": "Action: list, summaries, inspect, create, plan-new, new, rename, update, delete, archive, move, rebase, marker, branch-deleted, stash, snapshot, restore-all, restore-snapshot"
             },
             {
               "name": "repo",
               "takesValue": true,
-              "required": true,
+              "required": false,
               "description": "Repository path"
             },
             {
@@ -397,12 +490,12 @@
               "index": 1,
               "takesValue": true,
               "required": true,
-              "description": "Action: list, workspace-diff, diff"
+              "description": "Action: list, workspace-diff, diff, diff-files, review, review-save, review-clear"
             },
             {
               "name": "repo",
               "takesValue": true,
-              "required": true,
+              "required": false,
               "description": "Repository path"
             },
             {
@@ -414,6 +507,26 @@
               "name": "path",
               "takesValue": true,
               "description": "Repository-relative file path"
+            },
+            {
+              "name": "paths",
+              "takesValue": true,
+              "description": "diff-files: the repository-relative paths, as a JSON list"
+            },
+            {
+              "name": "token",
+              "takesValue": true,
+              "description": "diff-files: the working-copy token of the workspace diff to read from"
+            },
+            {
+              "name": "target",
+              "takesValue": true,
+              "description": "review, review-save, review-clear: the review's page, changes or files"
+            },
+            {
+              "name": "value",
+              "takesValue": true,
+              "description": "review-save: the review as JSON {comments, summary, notes}"
             },
             {
               "name": "format",
@@ -431,12 +544,12 @@
               "index": 1,
               "takesValue": true,
               "required": true,
-              "description": "Action: search, read, restore, patch"
+              "description": "Action: list, search, read, restore, patch"
             },
             {
               "name": "repo",
               "takesValue": true,
-              "required": true,
+              "required": false,
               "description": "Repository path"
             },
             {
@@ -447,8 +560,7 @@
             {
               "name": "path",
               "takesValue": true,
-              "required": true,
-              "description": "Repository-relative file path"
+              "description": "Repository-relative file path (read, restore, patch), or directory for list (default: the root)"
             },
             {
               "name": "revision",
@@ -501,7 +613,7 @@
             {
               "name": "repo",
               "takesValue": true,
-              "required": true,
+              "required": false,
               "description": "Repository path"
             },
             {
@@ -555,7 +667,7 @@
             {
               "name": "repo",
               "takesValue": true,
-              "required": true,
+              "required": false,
               "description": "Repository path"
             },
             {
@@ -586,7 +698,7 @@
           ]
         },
         "git": {
-          "description": "Git fetch, bookmark tracking, and push",
+          "description": "Git fetch, bookmark tracking, push and GitHub pull requests",
           "afterHelp": "Example:\n  treq git push --repo . --workspace 1 --idempotency-key k1",
           "args": [
             {
@@ -594,12 +706,12 @@
               "index": 1,
               "takesValue": true,
               "required": true,
-              "description": "Command action: fetch, pull, remote-info, bookmark-track, push"
+              "description": "Command action: fetch, pull, remote-info, bookmark-track, push, pr, pr-create, github-read, github-write"
             },
             {
               "name": "repo",
               "takesValue": true,
-              "required": true,
+              "required": false,
               "description": "Repository path"
             },
             {
@@ -615,12 +727,22 @@
             {
               "name": "value",
               "takesValue": true,
-              "description": "Bookmark name for bookmark-track"
+              "description": "Bookmark name for bookmark-track, the pull request body for pr-create, or the JSON query or action for github-read and github-write"
             },
             {
               "name": "idempotency-key",
               "takesValue": true,
               "description": "Idempotency key for mutations where a retry could duplicate work"
+            },
+            {
+              "name": "title",
+              "takesValue": true,
+              "description": "Pull request title for pr-create"
+            },
+            {
+              "name": "draft",
+              "takesValue": true,
+              "description": "true to open the pull request as a draft (pr-create)"
             },
             {
               "name": "format",
@@ -643,7 +765,7 @@
             {
               "name": "repo",
               "takesValue": true,
-              "required": true,
+              "required": false,
               "description": "Repository path"
             },
             {
@@ -737,8 +859,78 @@
             }
           ]
         },
+        "github": {
+          "description": "GitHub tokens for agents in a treq cloud sandbox, through integration-proxy",
+          "afterHelp": "Examples:\n  treq github token tznc/treq\n  git config --global credential.https://github.com.helper \"/usr/local/bin/treq github credential\"\n  treq github gh -- pr list -R tznc/treq",
+          "subcommands": {
+            "token": {
+              "description": "Print an installation token for a repository the sandbox owner can push to",
+              "args": [
+                {
+                  "name": "repository",
+                  "index": 1,
+                  "takesValue": true,
+                  "required": true,
+                  "description": "The repository, as owner/name"
+                }
+              ]
+            },
+            "credential": {
+              "description": "Git credential helper: answers `get` for https://github.com/<owner>/<name> (needs credential.useHttpPath)",
+              "args": [
+                {
+                  "name": "operation",
+                  "index": 1,
+                  "takesValue": true,
+                  "required": true,
+                  "description": "get, store or erase, as git passes it"
+                }
+              ]
+            },
+            "gh": {
+              "description": "Run the GitHub CLI with a token for the repository it works on (-R/--repo, else the current directory's remote)",
+              "args": [
+                {
+                  "name": "args",
+                  "index": 1,
+                  "takesValue": true,
+                  "multiple": true,
+                  "description": "Arguments for gh, after --"
+                }
+              ]
+            }
+          }
+        },
+        "gateway": {
+          "description": "Run the cloud machine's SSH gateway: a WebSocket server that lets the Treq SSH relay reach this machine's sshd",
+          "afterHelp": "Example:\n  treq gateway --placement-id pl_123 --listen 127.0.0.1:8022",
+          "args": [
+            {
+              "name": "placement-id",
+              "takesValue": true,
+              "required": true,
+              "description": "Placement this machine serves; tokens for other placements are refused"
+            },
+            {
+              "name": "secret-file",
+              "takesValue": true,
+              "description": "File holding the placement's gateway secret (default /etc/treq/gateway.secret)"
+            },
+            {
+              "name": "listen",
+              "takesValue": true,
+              "description": "Address to listen on (default 127.0.0.1:8022)"
+            },
+            {
+              "name": "allow",
+              "takesValue": true,
+              "multiple": true,
+              "description": "host:port a client may connect to; repeatable (default 127.0.0.1:2222 and localhost:2222)"
+            }
+          ]
+        },
         "pty-remote": {
-          "description": "VM-local persistent PTY sessions (tmux/screen-backed) for full terminal streaming and reattach",
+          "description": "Persistent PTY sessions on this host (held by the Treq terminal daemon, or tmux) for full terminal streaming and reattach",
           "afterHelp": "Example:\n  treq pty-remote list --repo . --workspace 1",
           "args": [
             {
@@ -746,12 +938,17 @@
               "index": 1,
               "takesValue": true,
               "required": true,
-              "description": "Command action: start, list, stop, attach-command"
+              "description": "Command action: start, list, stop, rename, attach-command, attach, paste, msg-deliver, msg-poll, status, reset, daemon"
+            },
+            {
+              "name": "backend",
+              "takesValue": true,
+              "description": "What holds the sessions: daemon (default) or tmux"
             },
             {
               "name": "repo",
               "takesValue": true,
-              "required": true,
+              "required": false,
               "description": "Repository path"
             },
             {
@@ -767,12 +964,41 @@
             {
               "name": "value",
               "takesValue": true,
-              "description": "JSON-encoded {remote_dir, command, cols, rows} launch payload for start/attach-command"
+              "description": "JSON-encoded {remote_dir, command, cols, rows} launch payload for start/attach-command; the title for rename (empty clears it); the text for paste"
+            },
+            {
+              "name": "submit",
+              "takesValue": true,
+              "description": "paste: true to press Enter after the text"
             },
             {
               "name": "idempotency-key",
               "takesValue": true,
               "description": "Idempotency key for mutations where a retry could duplicate work"
+            },
+            {
+              "name": "format",
+              "takesValue": true,
+              "description": "Output format: human or json (default: human)"
+            }
+          ]
+        },
+        "project": {
+          "description": "Show and extend the saved project that holds this repository",
+          "afterHelp": "Examples:\n  treq project status --format json\n  treq project add-repo tznc/my-repo\n  treq project list",
+          "args": [
+            {
+              "name": "action",
+              "index": 1,
+              "takesValue": true,
+              "required": true,
+              "description": "Action: list, status, add-repo"
+            },
+            {
+              "name": "value",
+              "index": 2,
+              "takesValue": true,
+              "description": "add-repo: a folder, a clone URL, or owner/name (cloned under ~/.treq/repos)"
             },
             {
               "name": "format",

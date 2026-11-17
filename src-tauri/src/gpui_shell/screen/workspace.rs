@@ -10,32 +10,41 @@
 //!
 //! [`workspace_data`]: super::workspace_data
 
-use crate::gpui_shell::ui::radius;
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::zpx;
-use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc, time::Duration};
-
+use crate::result_ext::ResultExt;
 use gpui_kit::base::TestSupportExt as _;
+use std::{
+  cell::RefCell,
+  collections::{HashMap, HashSet},
+  rc::Rc,
+  sync::Arc,
+  time::Duration,
+};
+
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, Animation, AnimationExt as _, App, Bounds, Context, Div, Entity,
-  FontWeight, Hsla, MouseDownEvent, Pixels, SharedString, Stateful, Task, Window,
+  self, div, prelude::*, App, Bounds, Context, Div, Entity, FontWeight, Hsla, MouseDownEvent,
+  Pixels, SharedString, Stateful, Task, WeakEntity, Window,
 };
 
 use super::launch_data::LaunchRequest;
 use super::{
   changes::{self, ChangesView},
-  code::{CodeView, Parent},
+  code::{CodeChrome, CodeView, Parent, StackCard},
   commits::CommitsView,
   commits_data::CommitsHost,
   file_browser::{FileBrowserView, Opening},
   file_browser_data::FileBrowserHost,
   logs::LogsView,
   logs_data::LogsHost,
+  prefetch,
   terminal::{Place, TerminalPane},
   terminal_data::TerminalHost,
   workspace_data::{
     workspace_view, Loaded, Outcome, Pending, PrCache, Route, WorkspaceHost, DEFAULT_BRANCH,
   },
+  workspace_title::TitleEditor,
   ActionSink, ScreenAction,
 };
 use crate::gpui_shell::{
@@ -47,6 +56,10 @@ use crate::gpui_shell::{
 };
 
 mod actions;
+mod tabs;
+
+/// How a stand-in tab view ([`Body::StandIn`]) is dimmed.
+const STAND_IN_OPACITY: f32 = 0.6;
 
 /// React's base-ui tooltips open after 200ms (`TooltipProvider delay={200}`).
 const TOOLTIP_DELAY: Duration = Duration::from_millis(200);
@@ -54,6 +67,23 @@ const TOOLTIP_DELAY: Duration = Duration::from_millis(200);
 /// Where the terminal pane was last placed: the repository, workspace and
 /// sessions revision.
 type TerminalPlace = (String, Option<i64>, u64);
+
+/// Which workspace a header read is for (`Route::key`).
+type RouteKey = (String, Option<i64>, String);
+
+/// How often the idle reads ahead check that the shown tab has read. A
+/// window in the background waits to come to the front instead.
+const IDLE_POLL: Duration = Duration::from_millis(500);
+
+/// How long the window idles on a workspace before the workspaces shown
+/// lately have their headers read ahead, and the pause between them.
+const IDLE_RECENT: Duration = Duration::from_secs(3);
+const IDLE_STAGGER: Duration = Duration::from_secs(1);
+/// How long after a workspace's last change its file index is read again.
+const REINDEX_AFTER: Duration = Duration::from_millis(1500);
+
+/// How many workspaces shown lately keep their header's last read.
+const RECENT: usize = 3;
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -66,6 +96,10 @@ pub struct Workspace {
 #[serde(rename_all = "camelCase")]
 pub struct Header {
   pub branch: String,
+  /// The workspace's title, which the header shows in place of `branch`;
+  /// `None` at home.
+  #[serde(default)]
+  pub title: Option<String>,
   pub home: bool,
   pub linear: Option<Linear>,
   pub target: Option<Target>,
@@ -74,10 +108,8 @@ pub struct Header {
   pub push: Option<Disabled>,
   pub view_pr: Option<ViewPr>,
   pub create_pr: Option<CreatePr>,
-  pub status_loading: bool,
   pub sync: Option<Sync>,
   pub checks: Option<Checks>,
-  pub merge_queue: Option<MergeQueue>,
   pub merge: Option<Merge>,
   pub details: bool,
   pub more: Option<Disabled>,
@@ -136,6 +168,25 @@ pub struct ViewPr {
 }
 
 /// React's `View PR (#12, open)`: the number and state the icon and color show.
+/// What the sync pip signals, as its tooltip and accessible name say it.
+/// The header's create button: a new workspace at home, one stacked on the
+/// workspace on screen elsewhere.
+pub(super) fn stack_label(home: bool) -> &'static str {
+  if home {
+    "New workspace…"
+  } else {
+    "Stack on this…"
+  }
+}
+
+fn sync_state(sync: &Sync) -> String {
+  match (sync.ahead, sync.behind) {
+    (a, 0) => format!("{a} to push"),
+    (0, b) => format!("{b} to pull"),
+    (a, b) => format!("{a} to push, {b} to pull"),
+  }
+}
+
 fn view_pr_name(pr: &ViewPr) -> String {
   let state = if pr.draft {
     "draft"
@@ -175,14 +226,6 @@ pub struct Checks {
   pub count: String,
   /// The accessible name, naming each source ("Checks: Treq 3/3, GitHub 4/4").
   pub name: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct MergeQueue {
-  pub label: String,
-  pub secondary: bool,
-  pub disabled: bool,
-  pub tooltip: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -264,11 +307,8 @@ pub struct WorkspaceView {
   confirm: Option<crate::gpui_shell::confirm::Pending<Self>>,
   popover_host: Arc<dyn PopoverHost>,
   code_host: Arc<dyn TerminalHost>,
-  /// The header popover that shows in the modal window, if one does.
+  /// The header popover drawn over the window, if one shows.
   popover: Option<(Entity<Popover>, gpui::Subscription)>,
-  /// The window this view draws in, which a press outside the popover goes
-  /// on to.
-  window: Option<gpui::AnyWindowHandle>,
   /// The terminal pane, while GPUI draws it, and the workspace it was
   /// last placed in.
   terminal: Option<(Entity<TerminalPane>, TerminalPlace)>,
@@ -276,14 +316,16 @@ pub struct WorkspaceView {
   pub(super) code: Option<Entity<CodeView>>,
   /// Whether the Code tab is the one drawn.
   code_shown: bool,
-  /// The Code tab's file browser, while GPUI draws it.
-  pub(super) file_browser: Option<Entity<FileBrowserView>>,
-  /// The Commits tab, while GPUI draws it.
-  pub(super) commits: Option<Entity<CommitsView>>,
-  /// The Changes tab, while GPUI draws it.
-  pub(super) changes: Option<Entity<ChangesView>>,
-  /// The Logs tab and the `logs_key` it started on.
+  /// The Code tab's file browser, the Commits tab and the Changes tab, by
+  /// workspace, kept while other tabs and workspaces show.
+  file_browser: tabs::Views<FileBrowserView>,
+  commits: tabs::Views<CommitsView>,
+  changes: tabs::Views<ChangesView>,
+  /// The Logs tab and the `logs_key` it started on, kept while other tabs
+  /// show.
   logs: Option<(Entity<LogsView>, u64)>,
+  /// The tab view drawn last.
+  drawn: Option<gpui::EntityId>,
   /// React, for what the header does not do itself.
   react: ActionSink,
   /// Where the tabs and the terminal pane send their actions: React, but
@@ -301,6 +343,29 @@ pub struct WorkspaceView {
   reload: bool,
   /// What `loaded` draws as, `None` before it is.
   snapshot: Option<Workspace>,
+  /// The other workspaces' header reads, by route key, with the revision
+  /// each was read at: the last read of those shown lately, and those read
+  /// ahead of a switch (`prefetch`). A switch draws one at once and reads
+  /// again behind it. Also those reads ahead on the way.
+  headers: prefetch::Lru<RouteKey, (u64, Loaded)>,
+  prefetching: HashSet<RouteKey>,
+  /// The workspaces shown lately, newest last, the shown one aside.
+  recent: Vec<Route>,
+  /// Reads ahead while the window idles on a workspace (`idle`), for the
+  /// workspace and revision it started on.
+  _idle: Task<()>,
+  idle_for: Option<(RouteKey, u64)>,
+  /// The header's title and its editor, for the workspace on screen.
+  title: Option<Entity<TitleEditor>>,
+  /// What the Code tab's stack card shows from the header: the branch, its
+  /// target picker and Stack on this….
+  stack_card: Rc<RefCell<StackCard>>,
+  /// The workspace whose file index was last asked to be built.
+  indexed: Option<RouteKey>,
+  /// The route's `changes_revision` the file index was last asked to read.
+  indexed_revision: u64,
+  /// The file index's pending re-read, replaced by the next change.
+  _reindex: Task<()>,
   dark: bool,
   popups: PopupSink,
   /// The element whose tooltip is pending or shown (`true`).
@@ -310,6 +375,7 @@ pub struct WorkspaceView {
   /// Where dropdown buttons were last drawn, in window coordinates.
   bounds: Rc<RefCell<HashMap<SharedString, Bounds<Pixels>>>>,
   _poll: Task<()>,
+  _place: Task<()>,
   /// Draws checks as running while one runs anywhere in the app.
   _running: gpui::Subscription,
 }
@@ -327,18 +393,29 @@ impl WorkspaceView {
     let sink: ActionSink = Rc::new(move |action, cx| {
       let view = view.clone();
       cx.defer(move |cx| {
-        let _ = view.update(cx, |view, cx| view.handle(action, cx));
+        view
+          .update(cx, |view, cx| view.handle(action, cx))
+          .ignore_closed();
       });
     });
     let children: ActionSink = {
       let (view, react) = (cx.weak_entity(), react.clone());
       Rc::new(move |action, cx| {
+        let view = view.clone();
+        if archives(&action) || header_press(&action) {
+          return cx.defer(move |cx| {
+            view
+              .update(cx, |view, cx| view.handle(action, cx))
+              .ignore_closed();
+          });
+        }
         if !launches(&action) {
           return react(action, cx);
         }
-        let view = view.clone();
         cx.defer(move |cx| {
-          let _ = view.update(cx, |view, cx| view.launch(action, cx));
+          view
+            .update(cx, |view, cx| view.launch(action, cx))
+            .ignore_closed();
         });
       })
     };
@@ -357,15 +434,15 @@ impl WorkspaceView {
       confirm: None,
       popover_host: host.clone(),
       popover: None,
-      window: None,
       code_host: host,
       terminal: None,
       code: None,
       code_shown: false,
-      file_browser: None,
-      commits: None,
-      changes: None,
+      file_browser: Default::default(),
+      commits: Default::default(),
+      changes: Default::default(),
       logs: None,
+      drawn: None,
       react,
       children,
       sink,
@@ -376,15 +453,27 @@ impl WorkspaceView {
       loading: false,
       reload: false,
       snapshot: None,
+      headers: prefetch::Lru::new(RECENT + 1),
+      prefetching: HashSet::new(),
+      recent: Vec::new(),
+      _idle: Task::ready(()),
+      idle_for: None,
+      title: None,
+      stack_card: Rc::default(),
+      indexed: None,
+      indexed_revision: 0,
+      _reindex: Task::ready(()),
       dark,
       popups,
       tooltip: None,
       tooltip_sent: Rc::default(),
       bounds: Rc::default(),
       _poll: poll,
+      _place: Task::ready(()),
       _running: running,
     };
     this.load(cx);
+    this.warm_file_index(cx);
     this
   }
 
@@ -393,20 +482,277 @@ impl WorkspaceView {
       return;
     }
     let moved = self.route.key() != route.key();
-    let stale = moved || self.route.revision != route.revision;
-    self.route = route;
+    let changed = self.route.changes_revision != route.changes_revision;
+    // A changed checkout or a refocused window (`changes_revision`) may mean
+    // history was rewritten outside treq: the tab badges read again too.
+    let stale = moved || changed || self.route.revision != route.revision;
+    let left = std::mem::replace(&mut self.route, route);
     self.dark = dark;
     if moved {
       self.close_popover(cx);
-      self.loaded = None;
+      // The header the workspace last read, or one read ahead, draws at
+      // once; the load below reads it again behind.
+      let now = cx.background_executor().now();
+      if let Some(loaded) = self.loaded.take() {
+        self
+          .headers
+          .insert(left.key(), now, (left.revision, loaded));
+      }
+      self.loaded = self
+        .headers
+        .take(&self.route.key())
+        .map(|(_, loaded)| loaded);
+      self
+        .recent
+        .retain(|r| r.key() != left.key() && r.key() != self.route.key());
+      self.recent.push(left);
+      if self.recent.len() > RECENT {
+        self.recent.remove(0);
+      }
       self.pr = PrCache::default();
       self.pending = Pending::None;
       self.busy = actions::Busy::default();
+      self.warm_file_index(cx);
+    } else if changed {
+      self.warm_file_index(cx);
     }
     if stale {
       self.load(cx);
     }
+    if moved && self.loaded.is_some() {
+      self.read_pr(cx);
+    }
     self.rebuild(cx);
+  }
+
+  /// Builds the shown workspace's file index off the main thread, once it
+  /// knows the workspace, so "Jump to File" searches it at once. The files
+  /// the workspace's changes add or remove are read again a moment after
+  /// the last change, so the index follows what an agent creates.
+  fn warm_file_index(&mut self, cx: &mut Context<Self>) {
+    let key = self.route.key();
+    let first = self.indexed.as_ref() != Some(&key);
+    let revision = self.route.changes_revision;
+    if self.route.remote_chrome.is_some() || (!first && self.indexed_revision == revision) {
+      return;
+    }
+    let Some(parent) = self.parent() else {
+      return;
+    };
+    self.indexed = Some(key);
+    self.indexed_revision = revision;
+    let host: Arc<dyn super::code_data::CodeHost> = self.code_host.clone();
+    let warm = async move {
+      host.warm_file_index(
+        &parent.repo_path,
+        parent.workspace_id(),
+        &parent.working_directory(),
+      );
+    };
+    if first {
+      cx.background_spawn(warm).detach();
+    } else {
+      let executor = cx.background_executor().clone();
+      self._reindex = cx.background_spawn(async move {
+        executor.timer(REINDEX_AFTER).await;
+        warm.await;
+      });
+    }
+  }
+
+  /// Reads ahead what showing `route`'s workspace would read, so a switch
+  /// to it draws at once: its header, and its view of the shown tab, made
+  /// hidden. Nothing on screen changes. Only another workspace of the
+  /// shown local repository is read ahead.
+  pub fn prefetch(&mut self, route: Route, cx: &mut Context<Self>) {
+    if route.repo_path != self.route.repo_path
+      || route.key() == self.route.key()
+      || route.remote_chrome.is_some()
+    {
+      return;
+    }
+    self.prefetch_header(route.clone(), cx);
+    if let Some(parent) = parent_of(&route) {
+      self.prefetch_tab(route.tab, parent, &route, cx);
+    }
+  }
+
+  /// Reads `route`'s header into `headers`, unless it was read lately at
+  /// this revision or is on the way.
+  fn prefetch_header(&mut self, route: Route, cx: &mut Context<Self>) {
+    let key = route.key();
+    let now = cx.background_executor().now();
+    let read = self
+      .headers
+      .fresh(&key, now)
+      .is_some_and(|(revision, _)| *revision == route.revision);
+    if read || key == self.route.key() || !self.prefetching.insert(key.clone()) {
+      return;
+    }
+    let host = self.host.clone();
+    let revision = route.revision;
+    cx.spawn(async move |this, cx| {
+      let loaded = cx.background_spawn(async move { host.load(&route) }).await;
+      this
+        .update(cx, |view, cx| {
+          view.prefetching.remove(&key);
+          if view.route.key() != key {
+            let now = cx.background_executor().now();
+            view.headers.insert(key, now, (revision, loaded));
+          }
+        })
+        .ignore_closed();
+    })
+    .detach();
+  }
+
+  /// Makes workspace `parent`'s view of `tab`, hidden, so showing it draws
+  /// what it read; the Code tab, once made, reads it ahead instead.
+  fn prefetch_tab(&mut self, tab: Tab, parent: Parent, route: &Route, cx: &mut Context<Self>) {
+    let dark = self.dark;
+    let (host, react, popups) = (
+      self.code_host.clone(),
+      self.children.clone(),
+      self.popups.clone(),
+    );
+    let key = parent.key();
+    match tab {
+      Tab::Logs => {}
+      Tab::Changes => {
+        let options = changes::Options {
+          show_committed: route.show_committed,
+          move_targets: route.move_targets.clone(),
+          revision: route.changes_revision,
+        };
+        self.changes.prefetch(
+          key,
+          |cx| cx.new(|cx| ChangesView::new(parent, options, host, react, popups, dark, cx)),
+          cx,
+        );
+      }
+      Tab::Commits => {
+        let host: Arc<dyn CommitsHost> = host;
+        self.commits.prefetch(
+          key,
+          |cx| cx.new(|cx| CommitsView::new(parent, None, host, react, popups, dark, cx)),
+          cx,
+        );
+      }
+      Tab::Overview => match route.file_browser.clone() {
+        Some(route) => {
+          let opening = Opening {
+            route,
+            revision: self.route.changes_revision,
+          };
+          let host: Arc<dyn FileBrowserHost> = host;
+          self.file_browser.prefetch(
+            key,
+            |cx| cx.new(|cx| FileBrowserView::new(parent, opening, host, react, popups, dark, cx)),
+            cx,
+          );
+        }
+        None => match &self.code {
+          Some(code) => code.update(cx, |code, cx| code.prefetch(parent, cx)),
+          // Not shown yet: made on the workspace, hidden until it shows.
+          None => {
+            let host: Arc<dyn CommitsHost> = host;
+            let chrome = self.code_chrome();
+            self.code =
+              Some(cx.new(|cx| CodeView::new(parent, host, react, popups, chrome, dark, cx)));
+          }
+        },
+      },
+    }
+  }
+
+  /// Once the shown tab has read, makes the workspace's other tab views
+  /// ahead, one at a time; after [`IDLE_RECENT`] more, reads the headers
+  /// of the workspaces shown lately, one every [`IDLE_STAGGER`]. Starts
+  /// over when the workspace or revision changes, and waits while the
+  /// window is in the background.
+  fn idle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    let key = (self.route.key(), self.route.revision);
+    if self.idle_for.as_ref() == Some(&key) {
+      return;
+    }
+    self.idle_for = Some(key);
+    if self.route.remote_chrome.is_some() {
+      self._idle = Task::ready(());
+      return;
+    }
+    self._idle = cx.spawn_in(window, async move |this, cx| {
+      let tabs = [Tab::Commits, Tab::Changes];
+      for step in 0..=tabs.len() {
+        // Waits for the shown tab, and the last one made ahead, to read.
+        loop {
+          cx.background_executor().timer(IDLE_POLL).await;
+          match this.update_in(cx, |view, window, cx| {
+            (window.is_window_active(), view.settled(cx))
+          }) {
+            Ok((true, true)) => break,
+            Ok((false, _)) => in_front(&this, cx).await,
+            Ok((true, false)) => {}
+            Err(_) => return,
+          }
+        }
+        let Some(&tab) = tabs.get(step) else {
+          break;
+        };
+        let made = this.update(cx, |view, cx| {
+          if view.route.tab == tab {
+            return;
+          }
+          if let Some(parent) = view.parent() {
+            let route = view.route.clone();
+            view.prefetch_tab(tab, parent, &route, cx);
+          }
+        });
+        if made.is_err() {
+          return;
+        }
+      }
+      cx.background_executor().timer(IDLE_RECENT).await;
+      let Ok(recent) = this.update(cx, |view, _| view.recent.clone()) else {
+        return;
+      };
+      for route in recent.into_iter().rev() {
+        let read = this.update_in(cx, |view, window, cx| {
+          if !window.is_window_active() {
+            return false;
+          }
+          let revision = view.route.revision;
+          let read = view
+            .headers
+            .get(&route.key())
+            .is_some_and(|(at, _)| *at == revision);
+          if !read {
+            view.prefetch_header(Route { revision, ..route }, cx);
+          }
+          !read
+        });
+        match read {
+          Ok(true) => cx.background_executor().timer(IDLE_STAGGER).await,
+          Ok(false) => {}
+          Err(_) => return,
+        }
+      }
+    });
+  }
+
+  /// Whether the header, the shown workspace's tab views and any read ahead
+  /// have all read.
+  fn settled(&self, cx: &App) -> bool {
+    let Some(parent) = self.parent() else {
+      return false;
+    };
+    let key = parent.key();
+    !self.loading
+      && self.loaded.is_some()
+      && self.prefetching.is_empty()
+      && self.commits.ready_for(&key, cx)
+      && self.changes.ready_for(&key, cx)
+      && self.file_browser.ready_for(&key, cx)
+      && self.code.as_ref().is_none_or(|code| code.read(cx).ready())
   }
 
   /// Reads everything again off the main thread; a load asked for while one
@@ -421,17 +767,20 @@ impl WorkspaceView {
     cx.spawn(async move |this, cx| {
       let key = route.key();
       let loaded = cx.background_spawn(async move { host.load(&route) }).await;
-      let _ = this.update(cx, |view, cx| {
-        view.loading = false;
-        if view.route.key() == key {
-          view.loaded = Some(loaded);
-          view.read_pr(cx);
-          view.rebuild(cx);
-        }
-        if std::mem::take(&mut view.reload) {
-          view.load(cx);
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          view.loading = false;
+          if view.route.key() == key {
+            view.loaded = Some(loaded);
+            view.read_pr(cx);
+            view.warm_file_index(cx);
+            view.rebuild(cx);
+          }
+          if std::mem::take(&mut view.reload) {
+            view.load(cx);
+          }
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -454,12 +803,14 @@ impl WorkspaceView {
       let pr = cx
         .background_spawn(async move { host.pr_cache(&repo, &branch) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if view.route.key() == key && view.pr != pr {
-          view.pr = pr;
-          view.rebuild(cx);
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.route.key() == key && view.pr != pr {
+            view.pr = pr;
+            view.rebuild(cx);
+          }
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -473,6 +824,11 @@ impl WorkspaceView {
       return;
     };
     let (header, tab_row) = workspace_view(&route, loaded, &self.pr, self.pending);
+    if let (Some((pane, _)), Some(workspace)) = (&self.terminal, &loaded.workspace) {
+      let loc = tab_row.as_ref().and_then(|row| row.loc.clone());
+      let dir = super::merge::full_path(workspace);
+      pane.update(cx, |pane, cx| pane.set_loc(loc.map(|loc| (dir, loc)), cx));
+    }
     let snapshot = Some(Workspace { header, tab_row });
     if self.snapshot != snapshot {
       self.snapshot = snapshot;
@@ -518,6 +874,7 @@ impl WorkspaceView {
         Some(popover::Kind::Target(popover::TargetSpec {
           repo_path,
           current: target.branch.clone(),
+          branches: None,
         }))
       }
       "workspace-checks" => Some(popover::Kind::Checks(self.checks_input(cx)?)),
@@ -525,7 +882,7 @@ impl WorkspaceView {
     }
   }
 
-  /// Opens the popover under header button `key` in the modal window.
+  /// Opens the popover under header button `key`, drawn over the window.
   fn open_popover(&mut self, key: &'static str, cx: &mut Context<Self>) {
     let Some(anchor) = self.bounds.borrow().get(key).copied() else {
       return;
@@ -541,19 +898,29 @@ impl WorkspaceView {
       cx.notify();
     }
     let (host, react, dark) = (self.popover_host.clone(), self.sink.clone(), self.dark);
-    let shell = self.window;
-    let popover = cx.new(|cx| Popover::new(kind, anchor, shell, dark, host, react, cx));
+    let popover = cx.new(|cx| Popover::new(kind, anchor, dark, host, react, cx));
     let subscription = cx.subscribe(&popover, |this, _, _: &popover::Closed, cx| {
       this.close_popover(cx)
     });
-    self.popover = Some((popover.clone(), subscription));
-    (self.popups)(PopupRequest::ShowPopover { popover, dark }, cx);
+    self.popover = Some((popover, subscription));
+    cx.notify();
   }
 
   fn close_popover(&mut self, cx: &mut Context<Self>) {
     if self.popover.take().is_some() {
-      (self.popups)(PopupRequest::HidePopover, cx);
+      cx.notify();
     }
+  }
+
+  /// The open popover, laid over the whole window from its origin, as the
+  /// popover's anchor is in window coordinates.
+  fn popover_layer(&self) -> Option<impl IntoElement> {
+    let (popover, _) = self.popover.as_ref()?;
+    Some(gpui::deferred(
+      gpui::anchored()
+        .position(gpui::Point::default())
+        .child(popover.clone()),
+    ))
   }
 
   /// Passes the open popover what changed under it.
@@ -622,24 +989,26 @@ impl WorkspaceView {
     let repo_path = self.route.repo_path.clone();
     cx.spawn(async move |this, cx| {
       let outcome = cx.background_spawn(async move { work(&*host) }).await;
-      let _ = this.update(cx, |view, cx| {
-        view.pending = Pending::None;
-        view.host.notify(NativeEvent::Toast {
-          title: outcome.title,
-          description: outcome.description,
-          tone: match (outcome.ok, outcome.warning) {
-            (false, _) => ToastTone::Error,
-            (true, true) => ToastTone::Warning,
-            (true, false) => ToastTone::Success,
-          },
-          action: None,
-        });
-        view
-          .host
-          .notify(NativeEvent::WorkspaceChanged { repo_path });
-        view.load(cx);
-        view.rebuild(cx);
-      });
+      this
+        .update(cx, |view, cx| {
+          view.pending = Pending::None;
+          view.host.notify(NativeEvent::from(Toast::new(
+            match (outcome.ok, outcome.warning) {
+              (false, _) => ToastTone::Error,
+              (true, true) => ToastTone::Warning,
+              (true, false) => ToastTone::Success,
+            },
+            outcome.title,
+            outcome.description,
+          )));
+          // The window reads again on this and bumps the route's revision,
+          // which reloads the header (`set_route`).
+          view
+            .host
+            .notify(NativeEvent::WorkspaceChanged { repo_path });
+          view.rebuild(cx);
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -672,6 +1041,46 @@ impl WorkspaceView {
 
   /// Records the bounds of its parent as `key`'s, for a dropdown to open
   /// below.
+  /// What the Code tab draws of the header: its stack card's branch, target
+  /// picker and Stack on this…, anchored where the header's popovers open.
+  fn code_chrome(&self) -> CodeChrome {
+    CodeChrome {
+      card: self.stack_card.clone(),
+      bounds: self.bounds.clone(),
+    }
+  }
+
+  /// The header's title for the workspace on screen, made or brought up to
+  /// date, and the stack card's header data; `None` at home.
+  fn sync_header_chrome(&mut self, header: &Header, cx: &mut Context<Self>) {
+    let card = StackCard {
+      branch: header.branch.clone(),
+      target: header.target.clone(),
+      stack_tooltip: header.stack.as_ref().map(|s| s.tooltip.clone()),
+    };
+    if *self.stack_card.borrow() != card {
+      *self.stack_card.borrow_mut() = card;
+      if let Some(code) = &self.code {
+        code.update(cx, |_, cx| cx.notify());
+      }
+    }
+    let (Some(title), Some(id)) = (header.title.clone(), self.route.workspace_id) else {
+      self.title = None;
+      return;
+    };
+    let repo = self.route.repo_path.clone();
+    let dark = self.dark;
+    match &self.title {
+      Some(editor) if editor.read(cx).workspace() == (repo.as_str(), id) => {
+        editor.update(cx, |editor, cx| editor.set_title(title, dark, cx));
+      }
+      _ => {
+        let host: Arc<dyn super::code_data::CodeHost> = self.code_host.clone();
+        self.title = Some(cx.new(|_| TitleEditor::new(host, repo, id, title, dark)));
+      }
+    }
+  }
+
   fn record_bounds(&self, key: &'static str) -> impl IntoElement {
     let bounds = self.bounds.clone();
     gpui::canvas(
@@ -700,14 +1109,16 @@ impl WorkspaceView {
     self.tooltip = Some((key.clone(), false));
     cx.spawn(async move |this, cx| {
       cx.background_executor().timer(TOOLTIP_DELAY).await;
-      let _ = this.update(cx, |this, cx| {
-        if let Some((k, shown)) = this.tooltip.as_mut() {
-          if *k == key && !*shown {
-            *shown = true;
-            cx.notify();
+      this
+        .update(cx, |this, cx| {
+          if let Some((k, shown)) = this.tooltip.as_mut() {
+            if *k == key && !*shown {
+              *shown = true;
+              cx.notify();
+            }
           }
-        }
-      });
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -798,72 +1209,15 @@ impl WorkspaceView {
       .items_center()
       .gap_2()
       .min_w_0()
-      .child(ui::icon(theme::ICON_BRANCH_BOLD, 16., p.muted_foreground));
+      .when(h.home, |left| {
+        left.child(ui::icon(theme::ICON_BRANCH_BOLD, 16., p.muted_foreground))
+      });
 
     if !h.home {
-      left = left.child(mono_title(&h.branch).debug_selector(|| "workspace-branch".into()));
-      if let Some(linear) = &h.linear {
-        let url = linear.url.clone();
-        let sink = self.sink.clone();
-        left = left.child(
-          ui::text(div(), TextSize::Xs)
-            .id("workspace-linear")
-            .debug_selector(|| "workspace-linear".into())
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap_1()
-            .px_2()
-            .py_0p5()
-            .rounded_full()
-            .bg(p.muted)
-            .font_weight(FontWeight::MEDIUM)
-            .text_color(p.muted_foreground)
-            .cursor_pointer()
-            .hover(|s| s.bg(p.muted.opacity(0.8)))
-            .child(ui::icon(theme::ICON_ZAP, 12., p.muted_foreground))
-            .child(linear.key.clone())
-            .on_click(move |_, _, cx| sink(ScreenAction::OpenUrl { url: url.clone() }, cx)),
-        );
-      }
-      if let Some(target) = &h.target {
-        let label = target.branch.clone().unwrap_or_else(|| "Select...".into());
-        let button = Button::new("workspace-target", p)
-          .aria_label("Workspace target")
-          .variant(Variant::Outline)
-          .size(Size::Sm)
-          .disabled(target.disabled)
-          .max_w(zpx(220.))
-          .map(|b| {
-            let fg = b.foreground();
-            if target.loading {
-              b.child(ui::spinner("workspace-target-spin", 16., fg))
-            } else {
-              b.icon(theme::ICON_BRANCH_BOLD, 16.)
-            }
-          })
-          .child(
-            div()
-              .font_family(theme::MONO_FONT)
-              .min_w_0()
-              .truncate()
-              .child(label),
-          )
-          .child(ui::icon(
-            theme::ICON_CHEVRON_DOWN,
-            16.,
-            p.foreground.opacity(0.5),
-          ))
-          .on_click(self.press("workspace.target"));
-        left = left
-          .child(ui::icon(theme::ICON_ARROW_RIGHT, 16., p.muted_foreground))
-          .child(
-            div()
-              .relative()
-              .flex_none()
-              .child(button)
-              .child(self.record_bounds("workspace-target")),
-          );
+      // The title in place of the branch: the branch, its target and Stack
+      // on this… live in the Code tab's stack card.
+      if let Some(title) = &self.title {
+        left = left.child(title.clone());
       }
       if h.details {
         let button = Button::new("workspace-details", p)
@@ -949,21 +1303,21 @@ impl WorkspaceView {
           ));
         }
       }
-      if let Some(stack) = &h.stack {
-        let button = Button::new("workspace-stack", p)
-          .size(Size::Sm)
-          .gap_1()
-          .px_2()
-          .icon(theme::ICON_LAYERS, 16.)
-          .label("Stack")
-          .on_click(self.press("workspace.stack"));
-        left = left.child(self.with_tooltip(
-          "workspace-stack",
-          Some(TooltipContent::Text(stack.tooltip.clone().into())),
-          button,
-          cx,
-        ));
-      }
+    }
+    if let Some(stack) = h.stack.as_ref().filter(|_| h.home) {
+      let button = Button::new("workspace-stack", p)
+        .size(Size::Sm)
+        .gap_1()
+        .px_2()
+        .icon(theme::ICON_PR_CREATE, 16.)
+        .label(stack_label(h.home))
+        .on_click(self.press("workspace.stack"));
+      left = left.child(self.with_tooltip(
+        "workspace-stack",
+        Some(TooltipContent::Text(stack.tooltip.clone().into())),
+        button,
+        cx,
+      ));
     }
 
     // The row wraps it whole first; alone on its row and still too wide (at
@@ -978,7 +1332,7 @@ impl WorkspaceView {
       .ml_auto();
     if let Some(push) = &h.push {
       let button = Button::new("workspace-push", p)
-        .size(Size::Sm)
+        .size(Size::Md)
         .disabled(push.disabled)
         .icon(theme::ICON_UPLOAD, 16.)
         .label("Push")
@@ -989,6 +1343,33 @@ impl WorkspaceView {
         button,
         cx,
       ));
+    }
+    // The Linear issue sits with the GitHub checks and pull request.
+    if let Some(linear) = h.linear.as_ref().filter(|_| !h.home) {
+      let url = linear.url.clone();
+      let sink = self.sink.clone();
+      right = right.child(
+        // Short label (['issue key']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
+        ui::text(div(), TextSize::Xs)
+          .id("workspace-linear")
+          .role(gpui::Role::Link)
+          .aria_label(linear.key.clone())
+          .debug_selector(|| "workspace-linear".into())
+          .flex()
+          .flex_none()
+          .items_center()
+          .px_2()
+          .py_0p5()
+          .rounded_full()
+          .bg(p.muted)
+          .font_weight(FontWeight::MEDIUM)
+          .text_color(p.muted_foreground)
+          .cursor_pointer()
+          .hover(|s| s.bg(p.hover()))
+          .child(linear.key.clone())
+          .on_click(move |_, _, cx| sink(ScreenAction::OpenUrl { url: url.clone() }, cx)),
+      );
     }
     if let Some(checks) = &h.checks {
       right = right.child(
@@ -1005,68 +1386,43 @@ impl WorkspaceView {
     if let Some(create) = &h.create_pr {
       right = right.child(self.create_pr(create, p, cx));
     }
-    if h.status_loading {
-      right = right.child(
-        div()
-          .id("workspace-status-skeleton")
-          .debug_selector(|| "workspace-status-skeleton".into())
-          .h(zpx(24.))
-          .w(zpx(56.))
-          .rounded(radius::SM)
-          .bg(p.muted.opacity(0.6))
-          .with_animation("workspace-status-pulse", pulse(), |el, delta| {
-            el.opacity(pulse_opacity(delta))
-          }),
-      );
-    }
     if let Some(sync) = &h.sync {
       right = right.child(self.sync(sync, p, cx));
     }
-    if let Some(queue) = &h.merge_queue {
-      let button = Button::new("workspace-merge-queue", p)
-        .variant(if queue.secondary {
-          Variant::Secondary
-        } else {
-          Variant::Outline
-        })
-        .size(Size::Sm)
+    let merged = h
+      .view_pr
+      .as_ref()
+      .is_some_and(|pr| pr.state == PrState::Merged);
+    if h.merge.is_some() && merged {
+      // The work landed: archiving is the next step, not merging again.
+      let button = Button::new("workspace-archive", p)
+        .variant(Variant::Outline)
+        .size(Size::Md)
         .gap_1()
-        .disabled(queue.disabled)
-        .icon(theme::ICON_MERGE, 16.)
-        .label(queue.label.clone())
-        .on_click(self.press("workspace.mergeQueue"));
+        .icon(theme::ICON_ARCHIVE, 16.)
+        .label("Archive")
+        .on_click(self.press("workspace.archive"));
       right = right.child(self.with_tooltip(
-        "workspace-merge-queue",
-        Some(TooltipContent::Text(queue.tooltip.clone().into())),
+        "workspace-archive",
+        Some(TooltipContent::Text(
+          "The pull request merged. Archive this workspace.".into(),
+        )),
         button,
         cx,
       ));
-    }
-    if let Some(merge) = &h.merge {
-      let green = ui::Tone::Success.color(p);
-      let hover = green.opacity(0.85);
+    } else if let Some(merge) = &h.merge {
       let button = Button::new("workspace-merge", p)
-        .aria_label("Merge...")
+        .aria_label("Merge…")
         .variant(if merge.passing {
-          Variant::Default
+          Variant::Success
         } else {
           Variant::Outline
         })
-        .size(Size::Sm)
+        .size(Size::Md)
         .gap_1()
         .disabled(merge.disabled)
-        .when(merge.passing, |b| {
-          b.bg(green).text_color(p.primary_foreground).hover_bg(hover)
-        })
-        .map(|b| {
-          let fg = if merge.passing {
-            p.primary_foreground
-          } else {
-            b.foreground()
-          };
-          b.child(ui::icon(theme::ICON_COMPARE, 16., fg))
-            .child("Merge...")
-        })
+        .icon(theme::ICON_COMPARE, 16.)
+        .label("Merge…")
         .on_click(self.press("workspace.merge"));
       right = right.child(
         self.with_tooltip(
@@ -1088,7 +1444,7 @@ impl WorkspaceView {
           .child(
             Button::new("workspace-more", p)
               .variant(Variant::Ghost)
-              .size(Size::Sm)
+              .size(Size::Md)
               .px_1()
               .disabled(more.disabled)
               .icon(theme::ICON_MORE, 16.)
@@ -1157,15 +1513,11 @@ impl WorkspaceView {
   }
 
   fn create_pr(&self, create: &CreatePr, p: &Palette, cx: &mut Context<Self>) -> Div {
-    let bg = p.github();
-    let hover = bg.opacity(0.85);
     let white = p.primary_foreground;
     let styled = |b: Button| {
       b.size(Size::Sm)
         .disabled(create.disabled)
-        .bg(bg)
-        .text_color(white)
-        .hover_bg(hover)
+        .variant(Variant::Github)
     };
     let main = styled(Button::new("workspace-create-pr", p))
       .gap_1()
@@ -1188,7 +1540,7 @@ impl WorkspaceView {
       )
       .px_1p5()
       .child(ui::icon(theme::ICON_CHEVRON_DOWN, 16., white))
-      .aria_label("More Create PR options")
+      .aria_label("More create PR options")
       .on_click(self.press("workspace.createPrMenu"));
     div()
       .flex()
@@ -1213,16 +1565,17 @@ impl WorkspaceView {
   }
 
   fn sync(&self, sync: &Sync, p: &Palette, cx: &mut Context<Self>) -> Stateful<Div> {
-    let dot = ui::Tone::Warning.color(p);
+    // The header only draws sync while the branch and its remote differ;
+    // the pip says so at a glance, and the tooltip says by how much.
+    let state = sync_state(sync);
     let button = Button::new("workspace-sync", p)
-      .aria_label("Sync with remote")
+      .aria_label(format!("Sync with remote: {state}"))
       .variant(if sync.ahead > 0 {
         Variant::Outline
       } else {
         Variant::Ghost
       })
-      .size(Size::Sm)
-      .h(zpx(24.))
+      .size(Size::Md)
       .gap_1()
       .px_2()
       .text_color(p.muted_foreground)
@@ -1242,31 +1595,33 @@ impl WorkspaceView {
       .with_tooltip(
         "workspace-sync",
         Some(TooltipContent::Text(
-          "Sync with remote (fetch and push)".into(),
+          format!("{state}. Sync with remote (fetch and push)").into(),
         )),
         button,
         cx,
       )
       .child(
+        // Solid status colour, ringed in the background so it reads against
+        // the button's border in both themes; inset so nothing clips it.
         div()
+          .debug_selector(|| "workspace-sync-pip".into())
           .absolute()
-          .top(zpx(-2.))
-          .right(zpx(-2.))
-          .size(zpx(8.))
+          .top(zpx(-4.))
+          .right(zpx(-4.))
+          .size(zpx(10.))
           .rounded_full()
-          .bg(dot)
-          .with_animation("workspace-sync-pulse", pulse(), |el, delta| {
-            el.opacity(0.5 * pulse_opacity(delta))
-          }),
+          .border(zpx(1.5))
+          .border_color(p.background)
+          .bg(ui::Tone::Warning.color(p)),
       )
   }
 
   fn checks(&self, checks: &Checks, p: &Palette) -> Button {
     let icon = match checks.status.as_deref() {
-      Some("passed") => ui::icon(theme::ICON_CIRCLE_CHECK, 14., ui::Tone::Success.color(p)),
-      Some("failed") => ui::icon(theme::ICON_CIRCLE_X, 14., ui::Tone::Danger.color(p)),
-      Some(_) => ui::icon(theme::ICON_SPINNER, 14., p.muted_foreground),
-      None => ui::icon(theme::ICON_CIRCLE_DOT, 14., p.muted_foreground),
+      Some("passed") => ui::icon(theme::ICON_CIRCLE_CHECK, 16., ui::Tone::Success.color(p)),
+      Some("failed") => ui::icon(theme::ICON_CIRCLE_X, 16., ui::Tone::Danger.color(p)),
+      Some(_) => ui::icon(theme::ICON_SPINNER, 16., p.muted_foreground),
+      None => ui::icon(theme::ICON_CIRCLE_DOT, 16., p.muted_foreground),
     };
     let running = checks
       .status
@@ -1274,7 +1629,7 @@ impl WorkspaceView {
       .is_some_and(|s| s != "passed" && s != "failed");
     Button::new("workspace-checks", p)
       .variant(Variant::Outline)
-      .size(Size::Sm)
+      .size(Size::Md)
       .gap_1p5()
       .px_2()
       .map(|b| {
@@ -1294,100 +1649,66 @@ impl WorkspaceView {
       .on_right_click(self.copy_link(self.pr_url().map(|url| format!("{url}/checks"))))
   }
 
-  fn tab_row(&self, row: &TabRow, p: &Palette) -> Div {
+  /// The workspace's tab bar: the view tabs, then its busy and loc status.
+  fn tab_bar(&self, row: &TabRow, p: &Palette) -> Div {
     // Counts are neutral; a conflict shows once, as a danger dot.
-    let pill = |count: u32, tone: Tone, id: &'static str| {
-      div()
-        .debug_selector(move || id.into())
-        .flex()
-        .items_center()
-        .gap_1p5()
-        .child(ui::Count::new(count as usize, p))
-        .when(tone == Tone::Conflict, |el| {
-          el.child(ui::Dot::new(ui::Tone::Danger, p))
-        })
+    let commits = ui::Tab::new("workspace-tab-commits", "Commits").icon(theme::ICON_COMMIT);
+    let commits = match &row.commits {
+      Some(CommitsLabel::Count { count, tone }) => {
+        let tab = commits.count(*count as usize);
+        if *tone == Tone::Conflict {
+          tab.dot(ui::Tone::Danger, "Conflicted commits")
+        } else {
+          tab
+        }
+      }
+      Some(CommitsLabel::HomeConflict) => commits.dot(ui::Tone::Danger, "Conflicted commits"),
+      None => commits,
     };
-    let mut tabs: Vec<(Tab, &'static str, &'static str, Option<Div>)> = vec![
-      (Tab::Overview, theme::ICON_CODE, "Code", None),
-      (
-        Tab::Commits,
-        theme::ICON_COMMIT,
-        "Commits",
-        row.commits.as_ref().map(|label| match label {
-          CommitsLabel::Count { count, tone } => pill(*count, *tone, "commits-tab-count"),
-          CommitsLabel::HomeConflict => div()
-            .debug_selector(|| "commits-tab-conflict-icon".into())
-            .child(ui::Dot::new(ui::Tone::Danger, p)),
-        }),
-      ),
-      (
-        Tab::Changes,
-        theme::ICON_FILE_DIFF,
-        "Changes",
-        row
-          .changes
-          .as_ref()
-          .map(|c| pill(c.count, c.tone, "review-change-count")),
-      ),
+    let changes = ui::Tab::new("workspace-tab-changes", "Changes").icon(theme::ICON_FILE_DIFF);
+    let changes = match &row.changes {
+      Some(c) if c.tone == Tone::Conflict => changes
+        .count(c.count as usize)
+        .dot(ui::Tone::Danger, "Conflict"),
+      Some(c) => changes.count(c.count as usize),
+      None => changes,
+    };
+    let mut values = vec![Tab::Overview, Tab::Commits, Tab::Changes];
+    let mut tabs = vec![
+      ui::Tab::new("workspace-tab-overview", "Code").icon(theme::ICON_CODE),
+      commits,
+      changes,
     ];
     if row.logs {
-      tabs.push((Tab::Logs, theme::ICON_DATABASE, "Logs", None));
+      values.push(Tab::Logs);
+      tabs.push(ui::Tab::new("workspace-tab-logs", "Logs").icon(theme::ICON_DATABASE));
     }
-    let list = div()
-      .flex()
-      // At a large zoom the tabs wrap inside their pill rather than run past
-      // the window's edge.
-      .flex_wrap()
-      .gap_1()
-      .p_1()
-      .rounded(radius::MD)
-      .bg(p.muted)
-      .children(tabs.into_iter().map(|(tab, icon, label, extra)| {
-        let active = tab == row.tab;
-        let id = SharedString::from(format!("workspace-tab-{}", tab.value()));
-        let selector = id.to_string();
-        let sink = self.sink.clone();
-        let color = if active {
-          p.foreground
-        } else {
-          p.muted_foreground
-        };
-        ui::text(div(), TextSize::Sm)
-          .id(id)
-          .debug_selector(move || selector)
-          .role(gpui::Role::Tab)
-          .aria_label(label)
-          .aria_selected(active)
-          .test_support()
-          .flex()
-          .items_center()
-          .gap_1p5()
-          .px_3()
-          .py_1()
-          .rounded(radius::MD)
-          .font_weight(FontWeight::MEDIUM)
-          .cursor_pointer()
-          .text_color(color)
-          .map(|this| {
-            if active {
-              this.bg(p.background).shadow_sm()
-            } else {
-              this.hover(|s| s.bg(p.background.opacity(0.5)).text_color(p.foreground))
-            }
-          })
-          .child(ui::icon(icon, 16., color))
-          .child(label)
-          .children(extra)
-          .on_click(move |_, _, cx| {
-            sink(
-              ScreenAction::Field {
-                field: "workspace.tab".into(),
-                value: tab.value().into(),
-              },
-              cx,
-            )
-          })
-      }));
+    let selected = values.iter().position(|t| *t == row.tab).unwrap_or(0);
+    let sink = self.sink.clone();
+    let home_sink = self.sink.clone();
+    let home_values = values.clone();
+    let list = ui::Tabs::segmented("workspace-tabs", p)
+      .tabs(tabs)
+      .selected(selected)
+      .on_select(move |ix, _, cx| {
+        sink(
+          ScreenAction::Field {
+            field: "workspace.tab".into(),
+            value: values[ix].value().into(),
+          },
+          cx,
+        )
+      })
+      // A double click returns the tab to its base page.
+      .on_double_click(move |ix, _, cx| {
+        home_sink(
+          ScreenAction::Field {
+            field: "workspace.tabHome".into(),
+            value: home_values[ix].value().into(),
+          },
+          cx,
+        )
+      });
 
     let mut status = div().flex().flex_none().items_center().gap_3();
     if let Some(busy) = &row.busy {
@@ -1422,17 +1743,40 @@ impl WorkspaceView {
   }
 }
 
-/// Tailwind's `animate-pulse`: 2s, opacity dipping to half midway.
-fn pulse() -> Animation {
-  Animation::new(Duration::from_secs(2)).repeat()
+/// Returns once the window comes to the front, waking for nothing before.
+async fn in_front(this: &WeakEntity<WorkspaceView>, cx: &mut gpui::AsyncWindowContext) {
+  let (tx, rx) = futures::channel::oneshot::channel();
+  let mut tx = Some(tx);
+  let Ok(watch) = this.update_in(cx, |_, window, cx| {
+    (!window.is_window_active()).then(|| {
+      cx.observe_window_activation(window, move |_, window, _| {
+        if window.is_window_active() {
+          if let Some(tx) = tx.take() {
+            tx.send(()).ignore_closed();
+          }
+        }
+      })
+    })
+  }) else {
+    return;
+  };
+  if let Some(_watch) = watch {
+    rx.await.ignore_closed();
+  }
 }
 
-fn pulse_opacity(delta: f32) -> f32 {
-  1. - 0.5 * (1. - (2. * delta - 1.).abs())
+/// One of `LocDiffMarker`'s counts, `+N` or `-N`, in its tone's color.
+pub(super) fn loc_count(text: String, color: Hsla) -> Div {
+  // Short label (['line count']): 11px is fine.
+  // ast-grep-ignore: gpui-text-xs-short-label-only
+  ui::text(div(), TextSize::Xs)
+    .font_family(theme::MONO_FONT)
+    .text_color(color)
+    .child(text)
 }
 
 /// `LocDiffMarker`: green `+N`, a centered insertion/deletion bar, red `-N`.
-fn loc_marker(loc: &Loc, p: &Palette) -> Div {
+fn loc_marker(loc: &Loc, p: &Palette) -> impl IntoElement {
   const HALF: f32 = 14.;
   let scale = loc.insertions.max(loc.deletions) as f32;
   let width = |n: u32| {
@@ -1442,16 +1786,17 @@ fn loc_marker(loc: &Loc, p: &Palette) -> Div {
       ((n as f32 / scale) * HALF).round().max(1.)
     }
   };
-  let (added, removed) = (ui::Tone::GitOpen, ui::Tone::GitClosed);
+  let (added, removed) = (ui::Tone::DiffAdded, ui::Tone::DiffRemoved);
   let (green, red) = (added.color(p), removed.color(p));
-  let count = |text: String, color: Hsla| {
-    ui::text(div(), TextSize::Xs)
-      .font_family(theme::MONO_FONT)
-      .text_color(color)
-      .child(text)
-  };
+  let count = loc_count;
   div()
+    .id("loc-diff-marker")
     .debug_selector(|| "loc-diff-marker".into())
+    .role(gpui::Role::Image)
+    .aria_label(format!(
+      "{} lines added, {} lines removed",
+      loc.insertions, loc.deletions
+    ))
     .flex()
     .items_center()
     .gap_1p5()
@@ -1480,10 +1825,21 @@ fn loc_marker(loc: &Loc, p: &Palette) -> Div {
         ),
     )
     .child(count(format!("-{}", loc.deletions), removed.text(p)))
+    .test_support()
 }
 
 /// The tabs' actions that start an agent session, which the view handles
 /// itself ([`WorkspaceView::launch`]).
+/// A tab's Archive, which the header's own actions run (`actions::act`).
+fn archives(action: &ScreenAction) -> bool {
+  matches!(action, ScreenAction::Press { id } if id == "workspace.archive")
+}
+
+/// The header's actions the Code tab's stack card presses.
+fn header_press(action: &ScreenAction) -> bool {
+  matches!(action, ScreenAction::Press { id } if id == "workspace.target")
+}
+
 fn launches(action: &ScreenAction) -> bool {
   matches!(action, ScreenAction::Field { field, .. } if matches!(
     field.as_str(),
@@ -1523,39 +1879,75 @@ impl WorkspaceView {
       "changes.startReview" => {
         let agent = value["agent"].as_str().map(str::to_string);
         let prompt = text("prompt");
-        self.start(cx, None, "Failed to create agent", move |host| {
+        let branch = self
+          .snapshot_branch()
+          .unwrap_or_else(|| "this workspace".into());
+        let started = (
+          format!("Review started on {branch}"),
+          "Comments will appear inline",
+        );
+        self.start_then(cx, Some(started), "Failed to create agent", move |host| {
           let agent = host.resolve_agent(&repo, agent.as_deref());
           request("AI Review", prompt, "acceptEdits", agent)
         });
       }
       "changes.review" | "fileBrowser.review" => {
         let (markdown, mode) = (text("markdown"), text("mode"));
+        let scope = if field == "changes.review" {
+          "changes"
+        } else {
+          "files"
+        };
+        let (host, workspace_id) = (self.code_host.clone(), self.route.workspace_id);
+        let (record_repo, record_markdown, record_mode) =
+          (repo.clone(), markdown.clone(), mode.clone());
+        cx.background_spawn(async move {
+          host.record_review(
+            &record_repo,
+            workspace_id,
+            scope,
+            &record_markdown,
+            &record_mode,
+          );
+        })
+        .detach();
         if value["useIdleAgent"].as_bool() == Some(true) {
           match self.send_to_idle(&markdown, cx) {
             None => return (self.react)(ScreenAction::Field { field, value }, cx),
-            Some(true) => return self.toast(ToastTone::Success, "Review sent to agent", ""),
+            Some(true) => {
+              return self
+                .host
+                .notify(Toast::success("Review sent to agent").into())
+            }
             Some(false) => {}
           }
         }
         self.start(cx, None, "Failed to create agent", move |host| {
           let agent = host.resolve_agent(&repo, None);
-          request("Code Review", markdown, &mode, agent)
+          request("Code review", markdown, &mode, agent)
         });
       }
       "changes.agentComment" => {
         let Ok(comment) = serde_json::from_value(value.clone()) else {
           return;
         };
-        let dir = self.terminal_place().working_directory;
+        let dir = self
+          .shown_workspace()
+          .map(|w| super::merge::full_path(&w))
+          .unwrap_or_else(|| self.route.repo_path.clone());
         let prompt = crate::core::agent_launch::review_comment_prompt(&comment, &dir);
         match self.send_to_idle(&prompt, cx) {
           None => return (self.react)(ScreenAction::Field { field, value }, cx),
-          Some(true) => return self.toast(ToastTone::Success, "Comment sent to agent", ""),
+          Some(true) => {
+            return self
+              .host
+              .notify(Toast::success("Comment sent to agent").into())
+          }
           Some(false) => {}
         }
         let done = ("Comment sent to agent", "");
         self.start(cx, Some(done), "Failed to create agent", move |_| {
-          request("Review Comment", prompt, "acceptEdits", None)
+          request("Review comment", prompt, "acceptEdits", None)
         });
       }
       "logs.sendToAgent" => {
@@ -1581,14 +1973,12 @@ impl WorkspaceView {
     }))
   }
 
-  /// The shown workspace's branch; `None` for the home repository.
+  /// The shown workspace's branch, from what was read rather than a
+  /// workspace listing on the main thread; `None` for the home repository.
   fn snapshot_branch(&self) -> Option<String> {
     let id = self.route.workspace_id?;
-    super::code_data::CodeHost::workspaces(&*self.code_host, &self.route.repo_path)
-      .ok()?
-      .into_iter()
-      .find(|w| w.id == id)
-      .map(|w| w.branch_name)
+    let workspace = self.shown_workspace()?;
+    (workspace.id == id).then_some(workspace.branch_name)
   }
 
   /// Starts the session `request` builds, off the main thread; toasts
@@ -1600,6 +1990,18 @@ impl WorkspaceView {
     failed: &'static str,
     request: impl FnOnce(&dyn TerminalHost) -> LaunchRequest + Send + 'static,
   ) {
+    let done = done.map(|(title, description)| (title.to_string(), description));
+    self.start_then(cx, done, failed, request);
+  }
+
+  /// [`Self::start`] with a toast title built at the call.
+  fn start_then(
+    &self,
+    cx: &mut Context<Self>,
+    done: Option<(String, &'static str)>,
+    failed: &'static str,
+    request: impl FnOnce(&dyn TerminalHost) -> LaunchRequest + Send + 'static,
+  ) {
     let host = self.code_host.clone();
     cx.spawn(async move |this, cx| {
       let result = cx
@@ -1608,22 +2010,19 @@ impl WorkspaceView {
           host.launch_session(&request, false)
         })
         .await;
-      let _ = this.update(cx, |view, _| match (result, done) {
-        (Ok(_), Some((title, description))) => view.toast(ToastTone::Success, title, description),
-        (Ok(_), None) => {}
-        (Err(err), _) => view.toast(ToastTone::Error, failed, err),
-      });
+      this
+        .update(cx, |view, _| match (result, done) {
+          (Ok(_), Some((title, description))) => view
+            .host
+            .notify(Toast::success(&title).description(description).into()),
+          (Ok(_), None) => {}
+          (Err(err), _) => view
+            .host
+            .notify(Toast::error(failed).description(err).into()),
+        })
+        .ignore_closed();
     })
     .detach();
-  }
-
-  fn toast(&self, tone: ToastTone, title: &str, description: impl Into<String>) {
-    self.host.notify(NativeEvent::Toast {
-      title: title.into(),
-      description: description.into(),
-      tone,
-      action: None,
-    });
   }
 }
 
@@ -1659,22 +2058,26 @@ impl WorkspaceView {
     let pane = match &self.terminal {
       Some((pane, placed)) if *placed == key => pane.clone(),
       _ => {
-        let place = self.terminal_place();
         let pane = match &self.terminal {
-          Some((pane, _)) => {
-            pane.update(cx, |pane, cx| pane.set_place(place, cx));
-            pane.clone()
-          }
+          Some((pane, _)) => pane.clone(),
           None => {
             let (host, react, popups) = (
               self.code_host.clone(),
               self.children.clone(),
               self.popups.clone(),
             );
+            // The repository's root until its workspaces are read.
+            let place = Place {
+              repo_path: self.route.repo_path.clone(),
+              working_directory: self.route.repo_path.clone(),
+              current_branch: self.route.home_branch.clone(),
+              ..Place::default()
+            };
             cx.new(|cx| TerminalPane::new(host, react, popups, place, cx))
           }
         };
         self.terminal = Some((pane.clone(), key));
+        self.place_terminal(pane.downgrade(), cx);
         pane
       }
     };
@@ -1682,133 +2085,185 @@ impl WorkspaceView {
     Some(pane)
   }
 
-  fn terminal_place(&self) -> Place {
-    let repo = self.route.repo_path.clone();
-    let workspaces =
-      super::code_data::CodeHost::workspaces(&*self.code_host, &repo).unwrap_or_default();
-    let selected = self
-      .route
-      .workspace_id
-      .and_then(|id| workspaces.iter().find(|w| w.id == id));
-    Place {
-      working_directory: selected
-        .map(super::merge::full_path)
-        .unwrap_or_else(|| repo.clone()),
-      current_branch: self.route.home_branch.clone(),
-      branches: workspaces
-        .iter()
-        .map(|w| (super::merge::full_path(w), w.branch_name.clone()))
-        .collect(),
-      workspace_ids: workspaces
-        .iter()
-        .map(|w| (super::merge::full_path(w), w.id))
-        .collect(),
-      repo_path: repo,
+  /// Places the pane in the shown workspace once its repository's
+  /// workspaces are read, off the main thread: a remote repository's go
+  /// over SSH.
+  fn place_terminal(&mut self, pane: WeakEntity<TerminalPane>, cx: &mut Context<Self>) {
+    let (host, repo, workspace_id, home) = (
+      self.code_host.clone(),
+      self.route.repo_path.clone(),
+      self.route.workspace_id,
+      self.route.home_branch.clone(),
+    );
+    self._place = cx.spawn(async move |_, cx| {
+      let place = cx
+        .background_spawn(async move { terminal_place(&*host, repo, workspace_id, home) })
+        .await;
+      pane
+        .update(cx, |pane, cx| pane.set_place(place, cx))
+        .ignore_closed();
+    });
+  }
+
+  /// The tab's workspace: as the header read it, else as the window
+  /// listed it, so the tab starts on a new workspace before the header's
+  /// load lands. `None` while neither knows it.
+  fn parent(&self) -> Option<Parent> {
+    let (workspace, conflicted_files) = match &self.loaded {
+      Some(loaded) => (
+        loaded.workspace.clone(),
+        loaded
+          .status
+          .as_ref()
+          .map(|s| s.conflicted_files.clone())
+          .unwrap_or_default(),
+      ),
+      None => return parent_of(&self.route),
+    };
+    Some(Parent {
+      repo_path: self.route.repo_path.clone(),
+      workspace,
+      conflicted_files,
+      default_branch: self.route.default_target().to_string(),
+      revision: self.route.revision,
+      remote: self.route.remote_chrome.is_some(),
+    })
+  }
+
+  /// The route's workspace as the window listed it: `Some(None)` at home,
+  /// `None` when the route doesn't carry it.
+  fn listed_workspace(&self) -> Option<Option<crate::local_db::Workspace>> {
+    listed_workspace(&self.route)
+  }
+
+  /// The shown workspace: the header's once loaded, else the window's.
+  fn shown_workspace(&self) -> Option<crate::local_db::Workspace> {
+    match &self.loaded {
+      Some(loaded) => loaded.workspace.clone(),
+      None => self.listed_workspace().flatten(),
     }
   }
 
-  /// The tab GPUI draws (Code or Commits), kept in step with the header.
+  /// The tab GPUI draws, kept in step with the header.
   fn tab_body(&mut self, cx: &mut Context<Self>) -> Option<Body> {
     let tab = self.route.tab;
     if !matches!(tab, Tab::Overview | Tab::Commits | Tab::Changes | Tab::Logs) {
       self.code = None;
-      self.file_browser = None;
-      self.commits = None;
-      self.changes = None;
+      self.file_browser.clear();
+      self.commits.clear();
+      self.changes.clear();
       self.logs = None;
+      self.drawn = None;
       return None;
     }
     // Another workspace is loading: keep the tab drawn as it was.
-    let Some(loaded) = self.loaded.as_ref() else {
-      return self.kept_body();
+    let Some(parent) = self.parent() else {
+      return self.kept_body(cx);
     };
-    let parent = Parent {
-      repo_path: self.route.repo_path.clone(),
-      workspace: loaded.workspace.clone(),
-      conflicted_files: loaded
-        .status
-        .as_ref()
-        .map(|s| s.conflicted_files.clone())
-        .unwrap_or_default(),
-      default_branch: self.route.default_target().to_string(),
-      revision: self.route.revision,
-      remote: self.route.remote_chrome.is_some(),
-    };
+    let body = self.body(tab, parent, cx);
+    let id = body.entity_id();
+    if self.drawn != Some(id) {
+      // Kept views stop polling while hidden, and read again once shown.
+      self.drawn = Some(id);
+      self.commits.show_only(Some(id), cx);
+      self.changes.show_only(Some(id), cx);
+      self.file_browser.show_only(Some(id), cx);
+      if let Some((logs, _)) = &self.logs {
+        let shown = logs.entity_id() == id;
+        logs.update(cx, |logs, _| logs.set_shown(shown));
+      }
+    }
+    Some(body)
+  }
+
+  fn body(&mut self, tab: Tab, parent: Parent, cx: &mut Context<Self>) -> Body {
     let dark = self.dark;
     let (host, react, popups) = (
       self.code_host.clone(),
       self.children.clone(),
       self.popups.clone(),
     );
+    let key = parent.key();
     if tab == Tab::Logs {
       self.code_shown = false;
-      self.file_browser = None;
-      self.commits = None;
-      self.changes = None;
       let key = self.route.logs_key;
       if let Some((logs, started)) = &self.logs {
         if *started == key {
           let repo = self.route.repo_path.clone();
           logs.update(cx, |view, cx| view.set_repo(repo, dark, cx));
-          return Some(Body::Logs(logs.clone()));
+          return Body::Logs(logs.clone());
         }
       }
       let host: Arc<dyn LogsHost> = host;
       let (repo, source) = (self.route.repo_path.clone(), self.route.logs_source.clone());
       let logs = cx.new(|cx| LogsView::new(repo, source.as_deref(), host, react, popups, dark, cx));
       self.logs = Some((logs.clone(), key));
-      return Some(Body::Logs(logs));
+      return Body::Logs(logs);
     }
-    self.logs = None;
+    // A workspace's first view of the tab draws once it has read; the
+    // tab's last view stays drawn meanwhile.
     if tab == Tab::Changes {
       self.code_shown = false;
-      self.file_browser = None;
-      self.commits = None;
       let options = changes::Options {
         show_committed: self.route.show_committed,
         move_targets: self.route.move_targets.clone(),
         revision: self.route.changes_revision,
       };
-      if let Some(changes) = &self.changes {
-        changes.update(cx, |view, cx| view.set_parent(parent, options, dark, cx));
-        return Some(Body::Changes(changes.clone()));
-      }
-      let changes = cx.new(|cx| ChangesView::new(parent, options, host, react, popups, dark, cx));
-      self.changes = Some(changes.clone());
-      return Some(Body::Changes(changes));
+      let was_drawn = self.drawn.is_some_and(|id| self.changes.has(id));
+      let view = self.changes.view(
+        key,
+        was_drawn,
+        |cx| {
+          let (parent, options) = (parent.clone(), options.clone());
+          cx.new(|cx| ChangesView::new(parent, options, host, react, popups, dark, cx))
+        },
+        cx,
+      );
+      view.update(cx, |view, cx| view.set_parent(parent, options, dark, cx));
+      return drawn_body(self.changes.drawn(cx), Body::Changes).unwrap_or(Body::Changes(view));
     }
-    self.changes = None;
     let host: Arc<dyn CommitsHost> = host;
     if tab == Tab::Commits {
       self.code_shown = false;
-      self.file_browser = None;
+      // The log reads again with the tab badges when the checkout changes
+      // (`changes_revision`), so the list and its count stay one read.
+      let mut parent = parent;
+      parent.revision += self.route.changes_revision;
       let scroll_to = self.route.scroll_to_commit.clone();
-      if let Some(commits) = &self.commits {
-        commits.update(cx, |view, cx| view.set_parent(parent, scroll_to, dark, cx));
-        return Some(Body::Commits(commits.clone()));
-      }
-      let commits = cx.new(|cx| CommitsView::new(parent, scroll_to, host, react, popups, dark, cx));
-      self.commits = Some(commits.clone());
-      return Some(Body::Commits(commits));
+      let was_drawn = self.drawn.is_some_and(|id| self.commits.has(id));
+      let view = self.commits.view(
+        key,
+        was_drawn,
+        |cx| {
+          let (parent, scroll_to) = (parent.clone(), scroll_to.clone());
+          cx.new(|cx| CommitsView::new(parent, scroll_to, host, react, popups, dark, cx))
+        },
+        cx,
+      );
+      view.update(cx, |view, cx| view.set_parent(parent, scroll_to, dark, cx));
+      return drawn_body(self.commits.drawn(cx), Body::Commits).unwrap_or(Body::Commits(view));
     }
-    self.commits = None;
     if let Some(route) = self.route.file_browser.clone() {
       self.code_shown = false;
       let opening = Opening {
         route,
         revision: self.route.changes_revision,
       };
-      if let Some(browser) = &self.file_browser {
-        browser.update(cx, |view, cx| view.set_parent(parent, opening, dark, cx));
-        return Some(Body::FileBrowser(browser.clone()));
-      }
+      let was_drawn = self.drawn.is_some_and(|id| self.file_browser.has(id));
       let host: Arc<dyn FileBrowserHost> = self.code_host.clone();
-      let browser =
-        cx.new(|cx| FileBrowserView::new(parent, opening, host, react, popups, dark, cx));
-      self.file_browser = Some(browser.clone());
-      return Some(Body::FileBrowser(browser));
+      let view = self.file_browser.view(
+        key,
+        was_drawn,
+        |cx| {
+          let (parent, opening) = (parent.clone(), opening.clone());
+          cx.new(|cx| FileBrowserView::new(parent, opening, host, react, popups, dark, cx))
+        },
+        cx,
+      );
+      view.update(cx, |view, cx| view.set_parent(parent, opening, dark, cx));
+      return drawn_body(self.file_browser.drawn(cx), Body::FileBrowser)
+        .unwrap_or(Body::FileBrowser(view));
     }
-    self.file_browser = None;
     // Back on the Code tab: draw what it last read and read it again behind.
     let returning = !std::mem::replace(&mut self.code_shown, true);
     if let Some(code) = &self.code {
@@ -1818,23 +2273,83 @@ impl WorkspaceView {
           code.revalidate(cx);
         }
       });
-      return Some(Body::Code(code.clone()));
+      return Body::Code(code.clone());
     }
-    let code = cx.new(|cx| CodeView::new(parent, host, react, popups, dark, cx));
+    let chrome = self.code_chrome();
+    let code = cx.new(|cx| CodeView::new(parent, host, react, popups, chrome, dark, cx));
     self.code = Some(code.clone());
-    Some(Body::Code(code))
+    Body::Code(code)
   }
 
   /// The tab's view as last drawn, while the route's workspace loads.
-  fn kept_body(&self) -> Option<Body> {
+  fn kept_body(&mut self, cx: &App) -> Option<Body> {
     match self.route.tab {
       Tab::Logs => self.logs.as_ref().map(|(logs, _)| Body::Logs(logs.clone())),
-      Tab::Changes => self.changes.clone().map(Body::Changes),
-      Tab::Commits => self.commits.clone().map(Body::Commits),
-      _ if self.route.file_browser.is_some() => self.file_browser.clone().map(Body::FileBrowser),
+      Tab::Changes => drawn_body(self.changes.drawn(cx), Body::Changes),
+      Tab::Commits => drawn_body(self.commits.drawn(cx), Body::Commits),
+      _ if self.route.file_browser.is_some() => {
+        drawn_body(self.file_browser.drawn(cx), Body::FileBrowser)
+      }
       _ => self.code.clone().map(Body::Code),
     }
   }
+
+  /// The file browser's view, the one drawn once ready.
+  #[cfg(test)]
+  pub(super) fn file_browser(&self) -> Option<&Entity<FileBrowserView>> {
+    self.file_browser.newest()
+  }
+
+  /// The Changes tab's view, the one drawn once ready.
+  #[cfg(test)]
+  pub(super) fn changes(&self) -> Option<&Entity<ChangesView>> {
+    self.changes.newest()
+  }
+
+  /// The Commits tab's view, the one drawn once ready.
+  #[cfg(test)]
+  pub(super) fn commits(&self) -> Option<&Entity<CommitsView>> {
+    self.commits.newest()
+  }
+
+  /// The branch the header draws, once it has read.
+  #[cfg(test)]
+  pub(super) fn branch(&self) -> Option<&str> {
+    Some(self.snapshot.as_ref()?.header.branch.as_str())
+  }
+}
+
+/// `route`'s workspace as the window listed it: `Some(None)` at home, `None`
+/// when the route doesn't carry it.
+fn listed_workspace(route: &Route) -> Option<Option<crate::local_db::Workspace>> {
+  match route.workspace_id {
+    None => Some(None),
+    Some(id) => route.workspace.clone().filter(|w| w.id == id).map(Some),
+  }
+}
+
+/// The tabs' workspace for `route`, as the window listed it, before its
+/// header is read.
+fn parent_of(route: &Route) -> Option<Parent> {
+  Some(Parent {
+    repo_path: route.repo_path.clone(),
+    workspace: listed_workspace(route)?,
+    conflicted_files: Vec::new(),
+    default_branch: route.default_target().to_string(),
+    revision: route.revision,
+    remote: route.remote_chrome.is_some(),
+  })
+}
+
+/// What a tab draws ([`tabs::Views::drawn`]) as a [`Body`].
+fn drawn_body<V: tabs::TabView>(
+  drawn: Option<(Entity<V>, bool)>,
+  body: fn(Entity<V>) -> Body,
+) -> Option<Body> {
+  drawn.map(|(view, stand_in)| match stand_in {
+    true => Body::StandIn(Box::new(body(view))),
+    false => body(view),
+  })
 }
 
 /// The tab drawn above the terminal pane.
@@ -1844,9 +2359,23 @@ enum Body {
   Commits(Entity<CommitsView>),
   Changes(Entity<ChangesView>),
   Logs(Entity<LogsView>),
+  /// Another workspace's view, drawn until the shown one's first read
+  /// lands: dimmed, and not clickable, since it acts on that workspace.
+  StandIn(Box<Body>),
 }
 
 impl Body {
+  fn entity_id(&self) -> gpui::EntityId {
+    match self {
+      Body::Code(code) => code.entity_id(),
+      Body::FileBrowser(browser) => browser.entity_id(),
+      Body::Commits(commits) => commits.entity_id(),
+      Body::Changes(changes) => changes.entity_id(),
+      Body::Logs(logs) => logs.entity_id(),
+      Body::StandIn(body) => body.entity_id(),
+    }
+  }
+
   fn into_any_element(self) -> gpui::AnyElement {
     match self {
       Body::Code(code) => code.into_any_element(),
@@ -1854,17 +2383,39 @@ impl Body {
       Body::Commits(commits) => commits.into_any_element(),
       Body::Changes(changes) => changes.into_any_element(),
       Body::Logs(logs) => logs.into_any_element(),
+      Body::StandIn(body) => div()
+        .debug_selector(|| "workspace-tab-stand-in".into())
+        .relative()
+        .size_full()
+        .opacity(STAND_IN_OPACITY)
+        .child(body.into_any_element())
+        .child(
+          div()
+            .id("workspace-tab-stand-in-cover")
+            .role(gpui::Role::ProgressIndicator)
+            .aria_label("Loading workspace")
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
+            .occlude()
+            .test_support(),
+        )
+        .into_any_element(),
     }
   }
 }
 
 impl Render for WorkspaceView {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-    self.window = Some(window.window_handle());
     self.sync_tooltip_popup(cx);
+    self.idle(window, cx);
     let p = theme::palette(self.dark);
     let confirm = crate::gpui_shell::confirm::render(Self::confirm_slot, self, window, &p, cx);
     let snapshot = self.snapshot.clone();
+    if let Some(snapshot) = &snapshot {
+      self.sync_header_chrome(&snapshot.header, cx);
+    }
     let header = match &snapshot {
       Some(snapshot) => self.header(&snapshot.header, &p, cx),
       // Until the first load: the empty bar, as tall as a row of buttons.
@@ -1877,7 +2428,7 @@ impl Render for WorkspaceView {
     };
     let tab_row = snapshot
       .and_then(|snapshot| snapshot.tab_row)
-      .map(|row| self.tab_row(&row, &p));
+      .map(|row| self.tab_bar(&row, &p));
     let code = self.tab_body(cx);
     let remote = self.route.remote_chrome.clone();
     let cut_off = remote.as_ref().is_some_and(|r| r.cut_off);
@@ -1945,6 +2496,7 @@ impl Render for WorkspaceView {
           .text_color(p.foreground)
           .children(strip)
           .child(pane_area)
+          .children(self.popover_layer())
           .children(confirm)
           .into_any_element();
       }
@@ -1978,7 +2530,65 @@ impl Render for WorkspaceView {
             d.child(super::remote_chrome::cutoff_overlay(&p))
           }),
       )
+      .children(self.popover_layer())
       .children(confirm)
       .into_any_element()
+  }
+}
+
+/// Where the terminal pane runs for workspace `workspace_id` of `repo`.
+fn terminal_place(
+  host: &dyn TerminalHost,
+  repo: String,
+  workspace_id: Option<i64>,
+  home_branch: String,
+) -> Place {
+  let workspaces = super::code_data::CodeHost::workspaces(host, &repo).unwrap_or_default();
+  let selected = workspace_id.and_then(|id| workspaces.iter().find(|w| w.id == id));
+  Place {
+    working_directory: selected
+      .map(super::merge::full_path)
+      .unwrap_or_else(|| repo.clone()),
+    current_branch: home_branch,
+    branches: workspaces
+      .iter()
+      .map(|w| (super::merge::full_path(w), w.branch_name.clone()))
+      .collect(),
+    titles: workspaces
+      .iter()
+      .map(|w| {
+        (
+          super::merge::full_path(w),
+          super::code_data::display_title(w),
+        )
+      })
+      .collect(),
+    workspace_ids: workspaces
+      .iter()
+      .map(|w| (super::merge::full_path(w), w.id))
+      .collect(),
+    loc: None,
+    repo_path: repo,
+  }
+}
+
+#[cfg(test)]
+mod sync_state_tests {
+  use super::*;
+
+  fn sync(ahead: u32, behind: u32) -> Sync {
+    Sync {
+      ahead,
+      behind,
+      disabled: false,
+      spinning: false,
+    }
+  }
+
+  #[test]
+  fn names_what_to_push_and_pull() {
+    assert_eq!(sync_state(&sync(2, 0)), "2 to push");
+    assert_eq!(sync_state(&sync(0, 3)), "3 to pull");
+    assert_eq!(sync_state(&sync(2, 3)), "2 to push, 3 to pull");
   }
 }

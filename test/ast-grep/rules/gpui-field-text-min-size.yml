@@ -1,0 +1,29 @@
+id: gpui-field-text-min-size
+language: rust
+severity: error
+message: >
+  Field labels and input hints are body text: use `field_label` /
+  `field_hint` (TextSize::Sm), never TextSize::Xs. Keep Xs for badges,
+  kbd, captions and metadata.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+  - "crates/treq-ui/src/**/*.rs"
+rule:
+  any:
+    # An Xs label helper, defined or called.
+    - kind: function_item
+      has:
+        field: name
+        regex: ^label_xs$
+    - kind: call_expression
+      has:
+        field: function
+        regex: (^|::)label_xs$
+    # TextSize::Xs inside a label/hint builder.
+    - pattern: TextSize::Xs
+      inside:
+        kind: function_item
+        has:
+          field: name
+          regex: ^(label|hint|field_\w+|label_\w+|\w+_hint)$
+        stopBy: end

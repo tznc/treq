@@ -5,7 +5,9 @@
  */
 
 /* Tailwind utilities (no preflight — Infima handles base styles) */
+/* biome-ignore lint/suspicious/noUnknownAtRules: Tailwind v3 directive */
 @tailwind components;
+/* biome-ignore lint/suspicious/noUnknownAtRules: Tailwind v3 directive */
 @tailwind utilities;
 
 /* ── Shared design-system tokens ──────────────────────────────────────────────
@@ -525,4 +527,123 @@ a:hover {
 /* Spinner animation for auth pages */
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* Dashboard: sidebar becomes a top bar on tablets and phones. */
+.dashboard-more {
+  display: none;
+}
+@media (max-width: 768px) {
+  .dashboard-page {
+    flex-direction: column;
+    gap: 1.25rem !important;
+    padding: 1.25rem 1rem !important;
+  }
+  .dashboard-sidebar {
+    width: 100% !important;
+    flex-direction: row !important;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .dashboard-sidebar-header {
+    flex: 1 1 100%;
+    min-width: 0;
+    margin-bottom: 0.25rem !important;
+    padding-bottom: 0.75rem !important;
+  }
+  .dashboard-sidebar-header > div:last-child {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .dashboard-nav {
+    flex-direction: row !important;
+    flex: 1;
+    gap: 0.25rem !important;
+  }
+  .dashboard-nav-item {
+    width: auto !important;
+    min-height: 44px;
+    padding: 0.5rem 1rem !important;
+  }
+  .dashboard-signout {
+    display: none !important;
+  }
+  .dashboard-more {
+    display: block;
+    position: relative;
+  }
+  .dashboard-content .dashboard-row,
+  .dashboard-content .dashboard-field,
+  .dashboard-content .dashboard-integration-header {
+    flex-wrap: wrap;
+  }
+  .dashboard-content .dashboard-row-actions {
+    gap: 0 0.75rem !important;
+  }
+  .dashboard-content .dashboard-link-button {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 0.25rem !important;
+  }
+  .dashboard-content .dashboard-form {
+    flex-wrap: wrap;
+  }
+  .dashboard-content .dashboard-form input {
+    flex: 1 1 12rem;
+    min-height: 44px;
+  }
+  .dashboard-content button {
+    min-height: 44px;
+  }
+  /* 16px stops iOS Safari zooming in on focus. */
+  .dashboard-content input {
+    font-size: 16px !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .dashboard-content button[aria-label^="Revoke invite"] {
+    width: 44px !important;
+    height: 44px !important;
+  }
+}
+
+/* Dashboard tooltip: shown on hover and keyboard focus of its button. */
+.dashboard-tooltip-anchor {
+  position: relative;
+  display: inline-flex;
+}
+.dashboard-tooltip {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  background: var(--ifm-color-emphasis-900);
+  color: var(--ifm-color-emphasis-0);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  pointer-events: none;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 0.1s;
+  z-index: 10;
+}
+.dashboard-tooltip-anchor:hover .dashboard-tooltip,
+.dashboard-tooltip-anchor:focus-within .dashboard-tooltip {
+  visibility: visible;
+  opacity: 1;
+}
+
+/* Dashboard grey text: darker in light theme for contrast, unchanged in dark. */
+:root {
+  --dashboard-text-muted: var(--ifm-color-emphasis-700);
+  --dashboard-text-subtle: var(--ifm-color-emphasis-800);
+}
+
+[data-theme='dark'] {
+  --dashboard-text-muted: var(--ifm-color-emphasis-500);
+  --dashboard-text-subtle: var(--ifm-color-emphasis-600);
 }

@@ -359,7 +359,7 @@ fn auto_rebase_preserves_only_unmerged_commits_across_multiple_squashed_levels()
 }
 
 #[test]
-fn test_force_rebase_rooted_subtree_handles_conflicted_local_main_target() {
+fn force_rebase_rooted_subtree_holds_children_of_conflicted_local_main() {
   let repo = TestRepo::with_remote().expect("Failed to create test repo with remote");
   let default_branch = repo.default_branch();
 
@@ -422,19 +422,121 @@ fn test_force_rebase_rooted_subtree_handles_conflicted_local_main_target() {
     default_branch,
     "diff",
   )
-  .expect("force rooted-subtree rebase should not fail when local main is conflicted");
+  .expect("force rooted-subtree rebase should not error when local main is conflicted")
+  .expect("force rooted-subtree should run");
 
-  assert!(result.is_some(), "force rooted-subtree should run");
-  let result = result.expect("result should be present");
+  // A diverged target holds its children back rather than rebasing onto it.
   assert!(
-    result.rebase_result.success,
-    "force rooted-subtree rebase should succeed: {}",
+    !result.rebase_result.success,
+    "{}",
     result.rebase_result.message
   );
-  let conflicted_name_msg = format!("Name '{default_branch}' is conflicted");
+  assert!(result.workspaces_rebased.is_empty());
+  assert_eq!(
+    treq_lib::core::rebase_guard::hold(&repo.repo_path, child.id),
+    Some(treq_lib::core::rebase_guard::RebaseHold::TargetDiverged {
+      bookmark: default_branch.to_string()
+    })
+  );
+}
+
+#[test]
+fn rebase_reports_failure_when_it_produces_conflicts() {
+  let repo = TestRepo::with_remote().unwrap();
+  let ws = repo
+    .create_workspace_with_commit("feat/conf", "shared.txt", "work", None)
+    .unwrap();
+  let target = repo.default_branch().to_string();
+  treq_lib::local_db::update_workspace_target_branch(&repo.repo_path, ws.id, &target).unwrap();
+  repo
+    .remote_commit_file("shared.txt", "upstream", "conflicting")
+    .unwrap();
+
+  let result =
+    treq_lib::core::check_and_rebase_workspaces(&repo.repo_path, Some(ws.id), None, None, "diff")
+      .unwrap();
+
+  assert!(result.rebased);
   assert!(
-    !result.rebase_result.message.contains(&conflicted_name_msg),
-    "force rebase should not fail on conflicted local main resolution: {}",
-    result.rebase_result.message
+    !result.success,
+    "conflicted rebase reported as success: {}",
+    result.message
+  );
+  assert!(result.message.contains("conflicts"), "{}", result.message);
+}
+
+#[test]
+fn rebase_skips_stack_whose_changes_already_landed_on_target() {
+  assert_landed_stack_is_left_alone(None);
+}
+
+#[test]
+fn forced_rebase_skips_stack_whose_changes_already_landed_on_target() {
+  assert_landed_stack_is_left_alone(Some(true));
+}
+
+fn assert_landed_stack_is_left_alone(force: Option<bool>) {
+  let repo = TestRepo::with_remote().unwrap();
+  let ws = repo
+    .create_workspace_with_commit("feat/landed", "a.txt", "one", None)
+    .unwrap();
+  let workspace_path = repo.workspace_full_path(&ws);
+  TestRepo::write_workspace_file(&workspace_path, "b.txt", "two").unwrap();
+  treq_lib::core::commit_workspace(&repo.repo_path, ws.id, "second").unwrap();
+  let target = repo.default_branch().to_string();
+  treq_lib::local_db::update_workspace_target_branch(&repo.repo_path, ws.id, &target).unwrap();
+  // Squash-merged upstream: the same changes under new hashes, then main moves on.
+  // No PR status is cached, so only the diffs can tell the stack landed.
+  repo
+    .remote_commit_file("a.txt", "one", "squash part 1")
+    .unwrap();
+  repo
+    .remote_commit_file("b.txt", "two", "squash part 2")
+    .unwrap();
+  repo
+    .remote_commit_file("later.txt", "later", "unrelated")
+    .unwrap();
+  let before = jj::jj_get_commit_id(&workspace_path, "feat/landed").unwrap();
+
+  let result =
+    treq_lib::core::check_and_rebase_workspaces(&repo.repo_path, Some(ws.id), None, force, "diff")
+      .unwrap();
+
+  // A forced rebase always reports `rebased`; the stack must still be untouched.
+  assert!(result.success, "{}", result.message);
+  assert_eq!(
+    jj::jj_get_commit_id(&workspace_path, "feat/landed").unwrap(),
+    before,
+    "landed stack was rewritten: {}",
+    result.message
+  );
+}
+
+#[test]
+fn rebase_still_moves_stack_whose_changes_only_partly_landed() {
+  let repo = TestRepo::with_remote().unwrap();
+  let ws = repo
+    .create_workspace_with_commit("feat/partial", "a.txt", "one", None)
+    .unwrap();
+  let workspace_path = repo.workspace_full_path(&ws);
+  TestRepo::write_workspace_file(&workspace_path, "b.txt", "two").unwrap();
+  treq_lib::core::commit_workspace(&repo.repo_path, ws.id, "second").unwrap();
+  let target = repo.default_branch().to_string();
+  treq_lib::local_db::update_workspace_target_branch(&repo.repo_path, ws.id, &target).unwrap();
+  repo
+    .remote_commit_file("a.txt", "one", "lands a only")
+    .unwrap();
+  let before = jj::jj_get_commit_id(&workspace_path, "feat/partial").unwrap();
+
+  let result =
+    treq_lib::core::check_and_rebase_workspaces(&repo.repo_path, Some(ws.id), None, None, "diff")
+      .unwrap();
+
+  assert!(result.success, "{}", result.message);
+  assert_ne!(
+    jj::jj_get_commit_id(&workspace_path, "feat/partial").unwrap(),
+    before,
+    "unlanded changes must still rebase: {}",
+    result.message
   );
 }

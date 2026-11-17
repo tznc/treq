@@ -3,6 +3,8 @@
 //! every invalidation, runs the [`Effect`]s the model asks for, and hands
 //! the shell what to draw ([`Presentation`]) whenever that changes.
 
+use crate::gpui_shell::native::Toast;
+use crate::result_ext::ResultExt;
 use std::{collections::HashMap, rc::Rc, sync::Arc};
 
 use futures::StreamExt;
@@ -11,8 +13,8 @@ use tauri_plugin_gpui::gpui::{prelude::*, App, Context, Task};
 
 use super::{
   actions::{Menu, Shortcut},
-  data::{Data, Read, RepoRead, POLL, SESSIONS_POLL},
-  host::{read_repo, FileWatch, WindowHost},
+  data::{Data, Flags, Read, RepoRead, BACKGROUND_EVERY, POLL, SESSIONS_POLL},
+  host::{read_detail, read_repo, FileWatch, WindowHost},
   model::{self, Confirm, Effect, FolderPurpose, Model},
   remote::{self, Opened, RemoteEffect},
   sidebar, snapshots,
@@ -23,9 +25,9 @@ use crate::{
   },
   gpui_shell::{
     confirm::Question,
-    native::{NativeEvent, ToastTone},
+    native::NativeEvent,
     overlay::OverlaySnapshot,
-    screen::{file_picker::Scope, Modal, ScreenAction, ScreenSnapshot},
+    screen::{file_picker::Scope, workspace_data, Modal, ScreenAction, ScreenSnapshot, View},
     sidebar::{SidebarAction, SidebarSnapshot},
   },
 };
@@ -63,6 +65,14 @@ pub struct WindowController {
   recheck_branch: bool,
   /// The checkout watched for edits on disk, and the task that hears them.
   watching: Option<(String, Task<()>)>,
+  /// The repository whose workspace database is watched for writes from
+  /// outside the window (the CLI, another window), and the task that hears them.
+  watching_db: Option<(String, Task<()>)>,
+  /// Another window or app has the focus: polls read only every
+  /// [`BACKGROUND_EVERY`]th tick, and what they skip waits in `skipped`
+  /// for the window to come back.
+  background: bool,
+  skipped: Option<Read>,
   _pollers: Vec<Task<()>>,
 }
 
@@ -74,9 +84,13 @@ impl WindowController {
     host: Arc<dyn WindowHost>,
     repo: Option<String>,
     present: Presenter,
+    system_dark: Option<bool>,
     cx: &mut Context<Self>,
   ) -> Self {
     let repo = repo.filter(|r| !r.is_empty());
+    // A project's remote repository opens on its machine, as its recent would.
+    let remote = repo.as_deref().and_then(crate::core::projects::remote_repo);
+    let repo = repo.filter(|_| remote.is_none());
     // A saved folder that is no longer a repository opens onboarding, and
     // opens the folder as the picker does, which offers to initialize it,
     // before a read writes `.treq/` into it.
@@ -99,12 +113,27 @@ impl WindowController {
       queued: None,
       recheck_branch: false,
       watching: None,
+      watching_db: None,
+      background: false,
+      skipped: None,
       _pollers: pollers,
     };
+    this.model.prefs.system_dark = system_dark.unwrap_or_default();
+    // A window on a project that holds no repository shows it empty.
+    if !this.model.has_repo() && remote.is_none() {
+      if let Some(name) = this.host.project_name() {
+        this.model.show_empty_project(name);
+      }
+    }
     let host = this.host.clone();
     cx.background_spawn(async move { host.detect_editors() })
       .detach();
-    let mut effects = vec![Effect::ReadPrefs, Effect::Refresh { revision: false }];
+    // The saved theme, zoom and sidebar width are in the first frame, not a
+    // frame later: a read of a few settings costs far less than a flash of
+    // the default theme.
+    let (values, flags) = read_prefs(&*this.host, &settings_keys(&this.model.main_repo));
+    this.apply_prefs(&values, flags);
+    let mut effects = vec![Effect::Refresh { revision: false }];
     match repo {
       // The first read races `prepare_repo`'s jj init: a branch read before
       // `.jj` exists fails, and only a refresh reads the branch again. So
@@ -121,7 +150,14 @@ impl WindowController {
         },
         cx,
       ),
-      None => effects.push(Effect::from(RemoteEffect::RestoreLast)),
+      // An empty project stays as it is.
+      None if this.model.empty_project.is_some() => {}
+      None => effects.push(Effect::from(match remote {
+        Some(remote) => RemoteEffect::OpenSaved {
+          id: remote.saved_id(),
+        },
+        None => RemoteEffect::RestoreLast,
+      })),
     }
     if let Some(path) = refused {
       effects.push(Effect::OpenRepoAt(path));
@@ -130,13 +166,57 @@ impl WindowController {
     this
   }
 
+  fn apply_prefs(&mut self, values: &HashMap<String, Option<String>>, flags: Flags) {
+    self
+      .model
+      .apply_settings(|key| values.get(key).cloned().flatten());
+    self.data.flags = flags;
+  }
+
+  /// Workspace `id` of `repo`, as last read.
+  pub fn workspace(&self, repo: &str, id: i64) -> Option<&crate::local_db::Workspace> {
+    self.data.workspaces(repo).iter().find(|w| w.id == id)
+  }
+
+  /// The workspace view's route were a click to select workspace `id` of
+  /// the shown repository, for reading it ahead.
+  pub fn workspace_route(&self, id: i64) -> Option<workspace_data::Route> {
+    let workspace = self.model.workspace_in(self.model.repo(), id, &self.data)?;
+    let mut model = self.model.clone();
+    model.select_workspace(Some(&workspace), &self.data);
+    match snapshots::screen(&model, &self.data)?.view {
+      View::Workspace(route) => Some(*route),
+      _ => None,
+    }
+  }
+
   fn poll(every: std::time::Duration, read: Read, cx: &mut Context<Self>) -> Task<()> {
-    cx.spawn(async move |this, cx| loop {
-      cx.background_executor().timer(every).await;
-      if this.update(cx, |this, cx| this.read(read, cx)).is_err() {
-        break;
+    cx.spawn(async move |this, cx| {
+      let mut tick = 0u32;
+      loop {
+        cx.background_executor().timer(every).await;
+        tick = tick.wrapping_add(1);
+        if this
+          .update(cx, |this, cx| this.tick(read, tick, cx))
+          .is_err()
+        {
+          break;
+        }
       }
     })
+  }
+
+  /// A poll's `tick`th turn: it reads, unless the window is in the
+  /// background and this turn is one it skips.
+  fn tick(&mut self, read: Read, tick: u32, cx: &mut Context<Self>) {
+    if self.background && !tick.is_multiple_of(BACKGROUND_EVERY) {
+      let skipped = self.skipped.get_or_insert_with(Read::default);
+      skipped.workspaces |= read.workspaces;
+      skipped.sessions |= read.sessions;
+      skipped.detail |= read.detail;
+      return;
+    }
+    self.read(read, cx);
   }
 
   #[cfg(test)]
@@ -171,6 +251,13 @@ impl WindowController {
         .detach();
     }
     let effects = self.model.native_event(event, &self.data);
+    // After the model: leaving a removed workspace reads its stack parent
+    // from the list the rows are about to leave.
+    match event {
+      NativeEvent::WorkspacesRemoving { repo_path, ids } => self.data.hide(repo_path, ids),
+      NativeEvent::WorkspacesRestored { repo_path, ids } => self.data.unhide(repo_path, ids),
+      _ => {}
+    }
     self.run(effects, cx);
   }
 
@@ -190,6 +277,12 @@ impl WindowController {
     self.run(effects, cx);
   }
 
+  /// A `treq://skill/install` link: Settings shows its confirmation.
+  pub fn open_skill_install(&mut self, skill_id: String, cx: &mut Context<Self>) {
+    self.model.open_skill_install(skill_id);
+    self.run(Vec::new(), cx);
+  }
+
   /// A folder the menu bar's "Open…" picked: opens it in this window.
   pub fn open_folder(&mut self, path: String, cx: &mut Context<Self>) {
     self.run(vec![Effect::OpenRepoAt(path)], cx);
@@ -197,14 +290,33 @@ impl WindowController {
 
   /// The window gained focus: the Changes tab and file browser read again
   /// (`useChangesRevision`); SWR itself does not revalidate on focus.
+  /// Back from the background, it reads what its polls skipped meanwhile.
   pub fn focused(&mut self, cx: &mut Context<Self>) {
+    self.background = false;
+    if let Some(read) = self.skipped.take() {
+      self.read(read, cx);
+    }
     self.model.view.changes_revision += 1;
     self.present(cx);
+  }
+
+  /// The window lost focus: its polls slow down until it is back.
+  pub fn blurred(&mut self) {
+    self.background = true;
   }
 
   /// The watched checkout changed on disk: the Changes tab reads again.
   pub fn files_changed(&mut self, cx: &mut Context<Self>) {
     self.model.view.changes_revision += 1;
+    // A checkout outside treq (`git checkout`, a new jj op) moves the home
+    // branch, which only the detail read picks up.
+    self.read(
+      Read {
+        detail: true,
+        ..Read::default()
+      },
+      cx,
+    );
     self.present(cx);
   }
 
@@ -225,6 +337,7 @@ impl WindowController {
 
   /// Follows the selection: watches its checkout, dropping the last one.
   fn watch(&mut self, cx: &mut Context<Self>) {
+    self.watch_db(cx);
     let target = self.watch_target();
     if self.watching.as_ref().map(|(path, _)| path) == target.as_ref() {
       return;
@@ -252,9 +365,54 @@ impl WindowController {
     });
   }
 
-  /// `pr-statuses-updated`: the PR poller's cache changed.
-  pub fn prs_changed(&mut self, cx: &mut Context<Self>) {
-    self.read(Read::default(), cx);
+  /// Follows the repository: reads its workspaces again when their database
+  /// changes, so a title or description set elsewhere shows at once.
+  fn watch_db(&mut self, cx: &mut Context<Self>) {
+    let target =
+      (self.model.has_repo() && !self.model.is_remote()).then(|| self.model.main_repo.clone());
+    if self.watching_db.as_ref().map(|(path, _)| path) == target.as_ref() {
+      return;
+    }
+    self.watching_db = target.map(|repo| {
+      let (host, at) = (self.host.clone(), repo.clone());
+      let task = cx.spawn(async move |this, cx| {
+        let watch = cx.background_spawn(async move { host.watch_db(&at) }).await;
+        let Some(FileWatch {
+          mut changes,
+          _watcher,
+        }) = watch
+        else {
+          return;
+        };
+        while changes.next().await.is_some() {
+          if this
+            .update(cx, |this, cx| this.read(Read::POLL, cx))
+            .is_err()
+          {
+            break;
+          }
+        }
+      });
+      (repo, task)
+    });
+  }
+
+  /// `pr-statuses-updated`: the PR poller's cache for `repo_path` changed,
+  /// and with `stacks_moved` it retargeted workspaces to follow GitHub.
+  /// Windows that show other repositories have nothing to refresh.
+  pub fn prs_changed(&mut self, repo_path: &str, stacks_moved: bool, cx: &mut Context<Self>) {
+    let shown = self.model.main_repo == repo_path
+      || self.data.supporting().iter().any(|r| r.path == repo_path);
+    if shown {
+      self.read(
+        if stacks_moved {
+          Read::POLL
+        } else {
+          Read::default()
+        },
+        cx,
+      );
+    }
   }
 
   /// `listenManagedEndpoint`: the cloud workspace connected, or its
@@ -346,7 +504,9 @@ impl WindowController {
     let host = self.host.clone();
     cx.spawn(async move |this, cx| {
       let value = cx.background_spawn(async move { f(&*host) }).await;
-      let _ = this.update(cx, |this, cx| then(this, value, cx));
+      this
+        .update(cx, |this, cx| then(this, value, cx))
+        .ignore_closed();
     })
     .detach();
   }
@@ -396,7 +556,9 @@ impl WindowController {
           |this, result, cx| {
             if let Err(err) = result {
               this.run(
-                vec![toast(ToastTone::Error, "Failed to start session", &err)],
+                vec![Effect::from(
+                  Toast::error("Failed to start session").description(&err),
+                )],
                 cx,
               );
             }
@@ -418,7 +580,9 @@ impl WindowController {
         |this, result: Result<(), String>, cx| {
           if let Err(err) = result {
             this.run(
-              vec![toast(ToastTone::Error, "Failed to open repository", &err)],
+              vec![Effect::from(
+                Toast::error("Failed to open repository").description(&err),
+              )],
               cx,
             );
           }
@@ -428,18 +592,9 @@ impl WindowController {
       Effect::ReadPrefs => {
         let keys = settings_keys(&main);
         self.background(
-          move |host| {
-            let values: HashMap<String, Option<String>> = keys
-              .into_iter()
-              .map(|k| (k.clone(), host.setting(&k)))
-              .collect();
-            (values, host.flags())
-          },
+          move |host| read_prefs(host, &keys),
           |this, (values, flags), cx| {
-            this
-              .model
-              .apply_settings(|key| values.get(key).cloned().flatten());
-            this.data.flags = flags;
+            this.apply_prefs(&values, flags);
             this.present(cx);
           },
           cx,
@@ -457,14 +612,39 @@ impl WindowController {
         },
         |this, (path, result), cx| {
           let effects = match result {
+            Ok(()) if this.model.main_repo == path => {
+              // The window's main repository left: the next one takes over,
+              // or the project shows empty.
+              let next = this
+                .data
+                .supporting()
+                .iter()
+                .find(|r| r.exists && r.path != path);
+              match next {
+                Some(next) => vec![Effect::OpenRepoAt(next.path.clone())],
+                None => {
+                  this.host.clear_repo();
+                  let name = this
+                    .host
+                    .project_name()
+                    .unwrap_or_else(|| "Untitled".into());
+                  this.model.show_empty_project(name);
+                  this.data.clear();
+                  Vec::new()
+                }
+              }
+            }
             Ok(()) => {
+              this.model.close_repo_terminals(&path, &this.data);
               if this.model.supporting.as_deref() == Some(path.as_str()) {
                 this.model.supporting = None;
                 this.model.selected = None;
               }
               vec![Effect::Refresh { revision: false }]
             }
-            Err(err) => vec![toast(ToastTone::Error, "Failed to remove repository", &err)],
+            Err(err) => vec![Effect::from(
+              Toast::error("Failed to remove repository").description(&err),
+            )],
           };
           this.run(effects, cx);
         },
@@ -482,7 +662,7 @@ impl WindowController {
           this.data.clear();
           this.host.show_remote(None);
           this.run(
-            vec![toast(ToastTone::Success, "Factory reset complete", "")],
+            vec![Effect::from(Toast::success("Settings reset to defaults"))],
             cx,
           );
         },
@@ -503,16 +683,12 @@ impl WindowController {
                 result.message
               };
               if result.success {
-                toast(ToastTone::Success, "Force rebase complete", &message)
+                Effect::from(Toast::success("Rebased").description(&message))
               } else {
-                toast(
-                  ToastTone::Warning,
-                  "Force rebase completed with errors",
-                  &message,
-                )
+                Effect::from(Toast::warning("Rebased with errors").description(&message))
               }
             }
-            Err(err) => toast(ToastTone::Error, "Force rebase failed", &err),
+            Err(err) => Effect::from(Toast::error("Force rebase failed").description(&err)),
           };
           this.run(vec![done, Effect::Refresh { revision: false }], cx);
         },
@@ -522,7 +698,16 @@ impl WindowController {
         tone,
         title,
         description,
-      } => self.host.toast(tone, &title, &description),
+      } => self.host.show_toast(Toast::new(tone, &title, &description)),
+      Effect::ReviewDone {
+        repo_path,
+        workspace_id,
+        ..
+      } => self.background(
+        move |host| host.review_done(&repo_path, workspace_id),
+        |_, (), _| {},
+        cx,
+      ),
       Effect::OpenUrl(url) => self.host.open_url(&url),
       Effect::Remote(effect) => self.remote_effect(*effect, cx),
     }
@@ -556,14 +741,17 @@ impl WindowController {
         },
         cx,
       ),
-      RemoteEffect::Probe { endpoint, path } => self.background(
-        move |host| remote::probe(host, &endpoint, &path),
-        |this, result, cx| {
-          this.model.remote.probed(result);
-          this.present(cx);
-        },
-        cx,
-      ),
+      RemoteEffect::Browse { endpoint, path } => {
+        let endpoint_id = endpoint.id.clone();
+        self.background(
+          move |host| remote::list_directories(host, &endpoint, &path),
+          move |this, result, cx| {
+            this.model.remote.browsed(&endpoint_id, result);
+            this.present(cx);
+          },
+          cx,
+        )
+      }
       RemoteEffect::Open {
         endpoint,
         generation,
@@ -610,6 +798,36 @@ impl WindowController {
           // A repository opened meanwhile keeps the window.
           if let Some(opened) = opened.filter(|_| !this.model.has_repo()) {
             this.remote_opened(&opened, cx);
+          }
+        },
+        cx,
+      ),
+      RemoteEffect::Connect { endpoint_id } => self.background(
+        move |host| host.machine_endpoint(&endpoint_id),
+        |this, endpoint, cx| {
+          let effects = match endpoint {
+            Some((endpoint, generation)) => this.model.remote.connect(endpoint, generation),
+            None => {
+              this.model.open_remote_setup();
+              Vec::new()
+            }
+          };
+          this.run(effects.into_iter().map(Effect::from).collect(), cx);
+          this.present(cx);
+        },
+        cx,
+      ),
+      RemoteEffect::OpenSaved { id } => self.background(
+        move |host| remote::open_saved(host, &id),
+        |this, result, cx| match result {
+          Ok(opened) => this.remote_opened(&opened, cx),
+          Err(Some(failure)) => {
+            this.model.remote.restore_failed(failure);
+            this.present(cx);
+          }
+          Err(None) => {
+            this.model.open_remote_setup();
+            this.present(cx);
           }
         },
         cx,
@@ -676,15 +894,16 @@ impl WindowController {
           },
           |this, result, cx| {
             let effect = match result {
+              Ok(added) if !this.model.has_repo() => Effect::OpenRepoAt(added),
               Ok(added) => {
                 let name = added
                   .rsplit(['/', '\\'])
                   .find(|s| !s.is_empty())
                   .unwrap_or(&added)
                   .to_string();
-                toast(ToastTone::Success, &format!("Added {name}"), "")
+                Effect::from(Toast::success(format!("Added {name}")))
               }
-              Err(err) => toast(ToastTone::Error, "Failed to add repository", &err),
+              Err(err) => Effect::from(Toast::error("Failed to add repository").description(&err)),
             };
             this.run(vec![effect, Effect::Refresh { revision: false }], cx);
           },
@@ -728,6 +947,11 @@ impl WindowController {
         (path, ids)
       })
       .collect();
+    // Nothing of this repository is read yet: draw it as it arrives.
+    if read == Read::ALL && !self.data.loaded(&main) {
+      self.read_first(main, supporting, known, cx);
+      return;
+    }
     self.background(
       // A read that panics must not leave `reading` set, or the window
       // never reads again.
@@ -737,24 +961,77 @@ impl WindowController {
         }))
       },
       move |this, result, cx| {
-        this.reading = false;
+        let panicked = result.is_err();
         match result {
           // A repository opened while reading the one before.
-          Ok((main, supporting, reads)) if main == this.model.main_repo => {
-            this.apply(supporting, reads, cx);
-            if std::mem::take(&mut this.recheck_branch) {
-              this.reread_missing_branch(cx);
-            }
-          }
-          Ok(_) => {}
+          Ok(stage) => this.apply_stage(stage, cx),
           Err(_) => log::error!("reading the window's repositories panicked"),
         }
-        if let Some(next) = this.queued.take() {
-          this.read(next, cx);
-        }
+        this.read_done(panicked, cx);
       },
       cx,
     );
+  }
+
+  /// [`read_first`]'s stages, each applied as it arrives.
+  fn read_first(
+    &mut self,
+    main: String,
+    supporting: Vec<SupportingRepo>,
+    known: HashMap<String, Vec<i64>>,
+    cx: &mut Context<Self>,
+  ) {
+    let host = self.host.clone();
+    let (send, mut stages) = futures::channel::mpsc::unbounded();
+    cx.background_spawn(async move {
+      let read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        read_first(&*host, &main, supporting, &known, |stage| {
+          send.unbounded_send(Some(stage)).ignore_closed();
+        })
+      }));
+      if read.is_err() {
+        send.unbounded_send(None).ignore_closed();
+      }
+    })
+    .detach();
+    cx.spawn(async move |this, cx| {
+      let mut panicked = false;
+      while let Some(stage) = stages.next().await {
+        match stage {
+          Some(stage) => {
+            this
+              .update(cx, |this, cx| this.apply_stage(stage, cx))
+              .ignore_closed();
+          }
+          None => {
+            log::error!("reading the window's repositories panicked");
+            panicked = true;
+          }
+        }
+      }
+      this
+        .update(cx, |this, cx| this.read_done(panicked, cx))
+        .ignore_closed();
+    })
+    .detach();
+  }
+
+  /// Takes one stage of a read, unless a repository opened meanwhile.
+  fn apply_stage(&mut self, (main, supporting, reads): ReadAll, cx: &mut Context<Self>) {
+    if main == self.model.main_repo {
+      self.apply(supporting, reads, cx);
+    }
+  }
+
+  /// The read in flight returned: the next one queued starts.
+  fn read_done(&mut self, panicked: bool, cx: &mut Context<Self>) {
+    self.reading = false;
+    if std::mem::take(&mut self.recheck_branch) && !panicked {
+      self.reread_missing_branch(cx);
+    }
+    if let Some(next) = self.queued.take() {
+      self.read(next, cx);
+    }
   }
 
   fn apply(
@@ -765,6 +1042,7 @@ impl WindowController {
   ) {
     if let Some(supporting) = supporting {
       self.data.set_supporting(supporting);
+      self.data.set_project(self.host.project());
     }
     let paths: Vec<String> = reads.iter().map(|(path, _)| path.clone()).collect();
     for (path, read) in reads {
@@ -823,6 +1101,7 @@ impl WindowController {
       workspace_path: workspace
         .map(model::full_path)
         .unwrap_or_else(|| self.model.repo().to_string()),
+      query: self.model.dialogs.file_query.clone(),
     })
   }
 }
@@ -830,6 +1109,89 @@ impl WindowController {
 /// The supporting repositories (read again with the detail) and each
 /// repository's read, main first.
 type ReadAll = (String, Option<Vec<SupportingRepo>>, Vec<(String, RepoRead)>);
+
+/// The first read of a window's repositories, handed on in stages so the
+/// sidebar draws from the database at once, the header follows with the
+/// branch, and the jj reads (statuses, uncommitted changes), which wait on
+/// repository locks, come last. A repository over SSH has no database to
+/// list, so it is read whole.
+fn read_first(
+  host: &dyn WindowHost,
+  main: &str,
+  supporting: Vec<SupportingRepo>,
+  known: &HashMap<String, Vec<i64>>,
+  emit: impl Fn(ReadAll),
+) {
+  let listed = |path: &str| {
+    let workspaces = host.listed_workspaces(path)?;
+    Some(RepoRead {
+      sessions: Some(host.sessions(path)),
+      workspaces: Some(workspaces),
+      prs: host.prs(path),
+      ..RepoRead::default()
+    })
+  };
+  let Some(first) = listed(main) else {
+    emit(read_all(host, main, supporting, Read::ALL, known));
+    return;
+  };
+  let supporting = host.supporting(main);
+  host.set_supporting_paths(
+    supporting
+      .iter()
+      .filter(|r| r.exists)
+      .map(|r| r.path.clone())
+      .collect(),
+  );
+  let paths: Vec<String> = std::iter::once(main.to_string())
+    .chain(
+      supporting
+        .iter()
+        .filter(|r| r.exists)
+        .map(|r| r.path.clone()),
+    )
+    .collect();
+  let rows = paths
+    .iter()
+    .map(|path| {
+      let read = if path == main {
+        first.clone()
+      } else {
+        listed(path).unwrap_or_else(|| RepoRead {
+          prs: host.prs(path),
+          ..RepoRead::default()
+        })
+      };
+      (path.clone(), read)
+    })
+    .collect();
+  crate::startup::mark("first read: rows listed");
+  emit((main.to_string(), Some(supporting), rows));
+  let detail = paths
+    .iter()
+    .map(|path| {
+      let mut read = RepoRead {
+        prs: host.prs(path),
+        ..RepoRead::default()
+      };
+      read_detail(host, path, &mut read);
+      (path.clone(), read)
+    })
+    .collect();
+  crate::startup::mark("first read: branch");
+  emit((main.to_string(), None, detail));
+  let rest = Read {
+    workspaces: true,
+    sessions: false,
+    detail: false,
+  };
+  let jj = paths
+    .iter()
+    .map(|path| (path.clone(), read_repo(host, path, rest, &[])))
+    .collect();
+  crate::startup::mark("first read: statuses and changes");
+  emit((main.to_string(), None, jj));
+}
 
 fn read_all(
   host: &dyn WindowHost,
@@ -860,6 +1222,12 @@ fn read_all(
   (main.to_string(), listed, reads)
 }
 
+/// The values of settings `keys`, and the preview flags.
+fn read_prefs(host: &dyn WindowHost, keys: &[String]) -> (HashMap<String, Option<String>>, Flags) {
+  let values = keys.iter().map(|k| (k.clone(), host.setting(k))).collect();
+  (values, host.flags())
+}
+
 /// The app settings the model follows for a window on `main`.
 fn settings_keys(main: &str) -> Vec<String> {
   [
@@ -872,12 +1240,4 @@ fn settings_keys(main: &str) -> Vec<String> {
   .map(String::from)
   .chain([model::collapsed_key(main)])
   .collect()
-}
-
-fn toast(tone: ToastTone, title: &str, description: &str) -> Effect {
-  Effect::Toast {
-    tone,
-    title: title.into(),
-    description: description.into(),
-  }
 }

@@ -9,7 +9,6 @@ use crate::{
   },
   gpui_shell::native::{Backend, NativeEvent},
   jj::JjBranch,
-  local_db,
 };
 
 /// `useWorkspaceChecks`, as far as the palette's commands need it.
@@ -36,6 +35,8 @@ pub struct PrLink {
 pub struct WorkspaceRow {
   pub id: i64,
   pub branch_name: String,
+  /// What the workspace is called (its title, else its branch).
+  pub title: String,
   /// The workspace's agent sessions.
   pub agents: usize,
 }
@@ -47,6 +48,8 @@ pub trait OverlayHost: Send + Sync {
   fn pr(&self, repo_path: &str, branch: &str) -> Option<PrLink>;
   fn workspaces(&self, repo_path: &str) -> Result<Vec<WorkspaceRow>, String>;
   fn branches(&self, repo_path: &str) -> Result<Vec<JjBranch>, String>;
+  /// The branch the home repository has checked out; `None` when detached.
+  fn current_branch(&self, repo_path: &str) -> Option<String>;
   fn switch_branch(&self, repo_path: &str, name: &str) -> Result<(), String>;
   fn open_url(&self, url: &str);
   /// Where workspace `workspace_id`'s checks run.
@@ -70,7 +73,7 @@ impl OverlayHost for Backend {
     let setup = core::get_setup_script_status_sync(repo_path, workspace_id).ok();
     PaletteChecks {
       workflows,
-      trusted: local_db::is_repo_trusted(repo_path),
+      trusted: core::repo::is_repo_trusted(repo_path),
       setup_configured: setup.as_ref().is_some_and(|s| s.configured),
       setup_running: setup
         .as_ref()
@@ -89,7 +92,7 @@ impl OverlayHost for Backend {
   }
 
   fn workspaces(&self, repo_path: &str) -> Result<Vec<WorkspaceRow>, String> {
-    let sessions = local_db::get_sessions(repo_path).unwrap_or_default();
+    let sessions = core::sessions::list_sessions(repo_path).unwrap_or_default();
     Ok(
       core::list_workspaces(repo_path)?
         .into_iter()
@@ -99,6 +102,7 @@ impl OverlayHost for Backend {
             .filter(|s| s.workspace_id == Some(w.id))
             .count(),
           id: w.id,
+          title: crate::gpui_shell::screen::code_data::display_title(&w),
           branch_name: w.branch_name,
         })
         .collect(),
@@ -107,6 +111,12 @@ impl OverlayHost for Backend {
 
   fn branches(&self, repo_path: &str) -> Result<Vec<JjBranch>, String> {
     core::list_repo_branches(repo_path)
+  }
+
+  fn current_branch(&self, repo_path: &str) -> Option<String> {
+    core::repo::get_repo_current_branch(repo_path)
+      .ok()
+      .and_then(|branch| branch.current_branch)
   }
 
   fn switch_branch(&self, repo_path: &str, name: &str) -> Result<(), String> {
@@ -134,7 +144,7 @@ impl OverlayHost for Backend {
   }
 
   fn trust_repo(&self, repo_path: &str) -> Result<(), String> {
-    local_db::trust_repo(repo_path)?;
+    core::repo::trust_repo(repo_path)?;
     Backend::notify(
       self,
       NativeEvent::WorkspaceChanged {

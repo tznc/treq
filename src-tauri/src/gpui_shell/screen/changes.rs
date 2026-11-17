@@ -14,13 +14,21 @@ mod rows;
 pub(in crate::gpui_shell::screen) mod search;
 pub(super) mod threads;
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
 use std::{
   cell::RefCell,
   collections::{HashMap, HashSet},
   rc::Rc,
+  sync::Arc,
+  time::{Duration, Instant},
 };
+
+/// Prefix of a viewed hash taken from a file's content id, for files with
+/// no diff lines to hash (binary, empty, mode-only, or not yet loaded).
+const CONTENT_ID_MARK: &str = "id:";
 
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
@@ -35,19 +43,22 @@ use tauri_plugin_gpui::gpui::{
 use super::{
   changes_data::{
     body, check_message, commit_label, conflict_lines, conflicts, context_ranges, deleted_sides,
-    diff_summary, discarded, full_path, hunks_hash, pending_label, review_prompt, section_label,
-    select_all_label, split_path, stashed, total_lines, visible_committed, Body, BodyInput,
-    ChangedFile, ChangesHost, CommitAction, Conflict, ContextReads, EditorApps, FileHunks, Host,
-    List, Snapshot, Staging, BATCH, FIRST_BATCH, HOME_ENDPOINT, LARGE_CHANGESET_LINES,
+    diff_summary, discarded, draws_hunks, full_path, gap_ranges, hunks_hash, pending_label,
+    review_prompt, section_label, select_all_label, split_path, stashed, total_lines,
+    visible_committed_at, Body, BodyInput, ChangedFile, ChangesHost, CommitAction, Conflict,
+    ContextReads, EditorApps, FileHunks, Host, List, Snapshot, Staging, BATCH, EXPAND_ALL_MAX,
+    FIRST_BATCH, HOME_ENDPOINT, LARGE_CHANGESET_LINES,
   },
   code::Parent,
   commits_data::{line_kind, line_numbers, LineKind},
-  highlight, ActionSink, ScreenAction,
+  highlight,
+  rows::Rows as ListRows,
+  ActionSink, ScreenAction,
 };
 use crate::{
   conflict_markers::{ConflictLineKind, ConflictLineRole},
   gpui_shell::{
-    native::{self, NativeEvent, ToastAction, ToastTone},
+    native::{self, NativeEvent, ToastAction},
     popup::{self, MenuIcon, NativeMenuItem, PopupRequest, PopupSink, Side, TooltipContent},
     theme::{self, Palette},
     tooltips::{HasTooltips, Tooltips},
@@ -55,6 +66,10 @@ use crate::{
   },
   jj::{JjDiffHunk, JjFileChange},
 };
+
+/// Hunk batches landing closer together than this redraw once: a frame of
+/// a large changeset costs more than a batch takes to read.
+const BATCH_REDRAW: Duration = Duration::from_millis(100);
 
 /// Opacity of a viewed file's name in the file lists.
 const VIEWED_OPACITY: f32 = 0.5;
@@ -81,15 +96,6 @@ fn tell(host: &dyn ChangesHost, event: NativeEvent) {
   super::workspace_data::WorkspaceHost::notify(host, event);
 }
 
-fn toast_event(tone: ToastTone, title: &str, description: impl Into<String>) -> NativeEvent {
-  NativeEvent::Toast {
-    title: title.into(),
-    description: description.into(),
-    tone,
-    action: None,
-  }
-}
-
 /// Which side of a hunk "Show more lines" reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum Dir {
@@ -103,6 +109,46 @@ enum Section {
   Conflicts,
   Selected,
   Changes,
+}
+
+/// One row of the sidebar's virtual list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SideRow {
+  Filter,
+  ConflictsHeader,
+  /// By index into [`SideData::conflicted`].
+  Conflict(usize),
+  Header(List),
+  /// The message and Commit button, under the first uncommitted group's
+  /// header. What changes its height is in the key, so a change re-measures
+  /// the row.
+  CommitBox {
+    lines: usize,
+    error: bool,
+    pending: bool,
+  },
+  /// Where the uncommitted groups would be, when nothing is uncommitted.
+  NothingToCommit,
+  /// By index into the list's files in [`SideData`].
+  File(List, usize),
+  CommittedHeader,
+  /// By index into [`SideData::committed`].
+  Committed(usize),
+  /// Nothing changed, nothing committed.
+  Empty,
+}
+
+/// What the sidebar's rows read, by index into the snapshot's files.
+#[derive(Default)]
+struct SideData {
+  conflicted: Vec<String>,
+  staged: Vec<usize>,
+  unstaged: Vec<usize>,
+  /// Into the snapshot's committed files.
+  committed: Vec<usize>,
+  /// The row that shows the file buttons, by index into the snapshot's files.
+  last_staged: Option<usize>,
+  last_changed: Option<usize>,
 }
 
 pub struct ChangesView {
@@ -119,7 +165,17 @@ pub struct ChangesView {
   /// Another read was asked for while one ran.
   reload: bool,
   pub(super) hunks: HashMap<String, FileHunks>,
+  /// The working-copy diff every file in `hunks` was read from, once all
+  /// were read from the same one.
+  hunks_token: Option<String>,
+  /// When a hunk batch last redrew, and whether a redraw of the batches
+  /// since is waiting on a timer.
+  batch_drawn: Option<Instant>,
+  batch_flush: bool,
   generation: u64,
+  /// Bumped when the snapshot, the hunks, the lines read around them or
+  /// the parent change: what the diff's rows are laid out from.
+  pub(super) layout_gen: u64,
   pub(super) staging: Staging,
   pub(super) active: Option<String>,
   collapsed_sections: HashSet<Section>,
@@ -153,19 +209,25 @@ pub struct ChangesView {
   editors: EditorApps,
   /// The diff's rows and the list drawing them.
   diff: rows::DiffRows,
+  /// The sidebar's rows and the list drawing them.
+  side: ListRows<SideRow>,
+  side_data: SideData,
   pub(super) scroll_to: Option<String>,
   /// The button a dropdown opens below, by key.
   anchors: Rc<RefCell<HashMap<String, Bounds<Pixels>>>>,
   /// Line comments, notes and the pending review.
   pub(super) review: review::Review,
   /// The find bar.
-  pub(super) search: search::Search,
+  pub(super) search: super::find::Find,
+  pub(super) matches: search::Matches,
   /// GitHub review threads and the review agent's comments.
   pub(super) threads: threads::Threads,
   /// The pull request reviewed instead of a workspace (`PrReviewPage`).
   pub(super) pr: Option<pr::PrMode>,
   /// Held by the diff, so it takes the arrow keys.
   focus: FocusHandle,
+  /// Hidden while another tab or workspace shows.
+  hidden: bool,
   _subscriptions: Vec<Subscription>,
 }
 
@@ -187,6 +249,7 @@ impl ChangesView {
   ) -> Self {
     let mut this = Self::blank(parent, options, host, react, popups, dark, cx);
     this.hydrate_review(cx);
+    this.hydrate_viewed(cx);
     this.load(cx);
     this.watch_threads(cx);
     this.load_pr(cx);
@@ -215,7 +278,11 @@ impl ChangesView {
       loading: false,
       reload: false,
       hunks: HashMap::new(),
+      hunks_token: None,
+      batch_drawn: None,
+      batch_flush: false,
       generation: 0,
+      layout_gen: 0,
       staging: Staging::default(),
       active: None,
       collapsed_sections: HashSet::new(),
@@ -240,13 +307,17 @@ impl ChangesView {
       pr_state: None,
       editors,
       diff: rows::DiffRows::default(),
+      side: ListRows::default(),
+      side_data: SideData::default(),
       scroll_to: None,
       anchors: Rc::default(),
       review: review::Review::default(),
-      search: search::Search::default(),
+      search: super::find::Find::default(),
+      matches: search::Matches::default(),
       threads: threads::Threads::default(),
       pr: None,
       focus: cx.focus_handle(),
+      hidden: false,
       _subscriptions: Vec::new(),
     }
   }
@@ -273,11 +344,16 @@ impl ChangesView {
     let reread = moved
       || self.options.revision != options.revision
       || self.options.show_committed != options.show_committed;
+    // The status's conflicts stand in until the diff lists its own.
+    if moved || self.parent.conflicted_files != parent.conflicted_files {
+      self.layout_gen += 1;
+    }
     self.parent = parent;
     self.options = options;
     if moved {
       self.snapshot = None;
       self.hunks.clear();
+      self.hunks_token = None;
       self.staging = Staging::default();
       self.active = None;
       self.collapsed_files.clear();
@@ -291,15 +367,41 @@ impl ChangesView {
       self.message_input = None;
       self.discard_dialog = false;
       self.review = review::Review::default();
-      self.close_search(cx);
+      super::find::close(self, cx);
       self.watch_threads(cx);
       self.hydrate_review(cx);
+      self.hydrate_viewed(cx);
       self.load_pr(cx);
     }
     if reread {
       self.load(cx);
     }
     cx.notify();
+  }
+
+  /// Its first read landed.
+  pub(super) fn ready(&self) -> bool {
+    self.snapshot.is_some()
+  }
+
+  /// Hidden while another tab or workspace shows, it stops polling its
+  /// threads and hearing Cmd+F; shown again, it reads the diff, the threads and the pull
+  /// request again behind what it draws.
+  pub(super) fn set_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
+    if self.hidden != shown {
+      return;
+    }
+    self.hidden = !shown;
+    if !shown {
+      self.stop_threads();
+      super::find::unwatch_key(self);
+      return;
+    }
+    self.poll_threads(cx);
+    self.load_pr(cx);
+    if !self.loading {
+      self.load(cx);
+    }
   }
 
   pub(super) fn set_dark(&mut self, dark: bool, cx: &mut Context<Self>) {
@@ -323,18 +425,36 @@ impl ChangesView {
     apply: impl FnOnce(&mut Self, T, &mut Context<Self>) + 'static,
     cx: &mut Context<Self>,
   ) {
+    self.run_changed(
+      work,
+      |view, value, cx| {
+        apply(view, value, cx);
+        true
+      },
+      cx,
+    );
+  }
+
+  /// [`Self::run`], redrawing only when `apply` says what shows changed.
+  fn run_changed<T: Send + 'static>(
+    &self,
+    work: impl FnOnce(&dyn ChangesHost, &Parent) -> T + Send + 'static,
+    apply: impl FnOnce(&mut Self, T, &mut Context<Self>) -> bool + 'static,
+    cx: &mut Context<Self>,
+  ) {
     let (host, parent) = (self.host.clone(), self.parent.clone());
     let key = parent.key();
     cx.spawn(async move |this, cx| {
       let value = cx
         .background_spawn(async move { work(host.as_ref(), &parent) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if view.parent.key() == key {
-          apply(view, value, cx);
-          cx.notify();
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.parent.key() == key && apply(view, value, cx) {
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -352,10 +472,6 @@ impl ChangesView {
       },
       cx,
     );
-  }
-
-  fn toast(&self, tone: ToastTone, title: &str, description: impl Into<String>) {
-    tell(self.host.as_ref(), toast_event(tone, title, description));
   }
 
   /// Everything React read from the repository is stale.
@@ -432,19 +548,37 @@ impl ChangesView {
     let Some(snapshot) = &self.snapshot else {
       return Vec::new();
     };
+    self
+      .visible_committed_at()
+      .into_iter()
+      .filter_map(|ix| snapshot.committed.get(ix).cloned())
+      .collect()
+  }
+
+  /// [`Self::visible_committed`], by index into the snapshot's committed
+  /// files.
+  fn visible_committed_at(&self) -> Vec<usize> {
+    let Some(snapshot) = &self.snapshot else {
+      return Vec::new();
+    };
     if self.options.show_committed == Some(false) {
       return Vec::new();
     }
-    let always: HashSet<String> = snapshot
-      .files
-      .iter()
-      .map(|f| f.path.clone())
-      .chain(self.conflicted())
-      .collect();
-    visible_committed(&snapshot.committed, self.show_committed(), &always)
+    let show = self.show_committed();
+    // Only a filtered list needs the files that stay in it.
+    let always: HashSet<String> = if show {
+      HashSet::new()
+    } else {
+      snapshot
+        .files
+        .iter()
+        .map(|f| f.path.clone())
+        .chain(self.conflicted())
+        .collect()
+    };
+    visible_committed_at(&snapshot.committed, show, &always)
       .into_iter()
-      .filter(|f| !self.hides(&f.path))
-      .cloned()
+      .filter(|&ix| !self.hides(&snapshot.committed[ix].path))
       .collect()
   }
 
@@ -460,68 +594,110 @@ impl ChangesView {
     }
     self.loading = true;
     let show = self.show_committed();
-    self.run(
+    // What shows now, so the read compares against it off the main thread.
+    let shown = self.snapshot.clone();
+    self.run_changed(
       move |host, parent| {
-        let snapshot = match parent.workspace_id() {
-          Some(id) => host
-            .workspace_diff(&parent.repo_path, id)
-            .map(|diff| Snapshot::from_workspace_diff(diff, show)),
-          None => host
-            .changed_files(&parent.repo_path, None)
-            .map(|files| Snapshot::from_home(&files)),
-        };
-        let rules = host.generated_files(&parent.repo_path, parent.workspace_id());
-        snapshot.map(|s| s.with_generated(&rules))
+        // The generated-file rules don't depend on the diff: read both at once.
+        std::thread::scope(|scope| {
+          let rules =
+            scope.spawn(|| host.generated_files(&parent.repo_path, parent.workspace_id()));
+          let snapshot = match parent.workspace_id() {
+            Some(id) => host
+              .workspace_diff(&parent.repo_path, id)
+              .map(|diff| Snapshot::from_workspace_diff(diff, show)),
+            None => host
+              .changed_files(&parent.repo_path, None)
+              .map(|files| Snapshot::from_home(&files)),
+          };
+          let rules = super::joined(rules);
+          snapshot.map(|s| s.with_generated(&rules).sharing_hunks(shown.as_ref()))
+        })
       },
       |view, result, cx| {
         view.loading = false;
-        match result {
+        // A refresh that reads back what shows draws no frame.
+        let changed = match result {
           Ok(snapshot) if std::mem::take(&mut view.review.apply_next) => {
             view.review.stale.clear();
             view.review.parked = None;
-            view.apply(snapshot, cx)
+            view.apply(snapshot, cx);
+            true
           }
-          Ok(snapshot) if view.park(&snapshot) => {}
-          Ok(snapshot) if view.in_review() && view.snapshot.is_some() => view.recheck(snapshot, cx),
+          Ok(snapshot) if view.park(&snapshot) => true,
+          // The reviewed hunks were read from this same diff.
+          Ok(snapshot)
+            if view.in_review()
+              && snapshot.token.is_some()
+              && snapshot.token == view.hunks_token =>
+          {
+            false
+          }
+          Ok(snapshot) if view.in_review() && view.snapshot.is_some() => {
+            view.recheck(snapshot, cx);
+            false
+          }
           Ok(snapshot) => view.apply(snapshot, cx),
           Err(err) => {
-            view.toast(ToastTone::Error, "JJ Error", err);
+            tell(
+              view.host.as_ref(),
+              Toast::error("JJ Error").description(err).into(),
+            );
             view.snapshot.get_or_insert_with(Snapshot::default);
+            view.layout_gen += 1;
+            true
           }
-        }
+        };
         if std::mem::take(&mut view.reload) {
           view.load(cx);
         }
+        changed
       },
       cx,
     );
   }
 
-  fn apply(&mut self, snapshot: Snapshot, cx: &mut Context<Self>) {
-    let files: Vec<serde_json::Value> = snapshot
-      .files
-      .iter()
-      .map(|f| {
-        json!({
-          "path": f.path,
-          "workspaceStatus": f.status,
-          "oldPath": f.old_path,
-          "isConflicted": f.status == "C",
-        })
-      })
-      .collect();
-    self.field("changes.files", files.into(), cx);
+  /// Shows `snapshot`; `true` when that changed what is drawn. Hunks still
+  /// to read redraw as they land.
+  fn apply(&mut self, snapshot: Snapshot, cx: &mut Context<Self>) -> bool {
+    let marks = |view: &Self| {
+      let s = &view.staging;
+      let staging = s.staged.len() + s.selected.len() + s.selected_staged.len();
+      (view.layout_gen, view.viewed.len(), staging)
+    };
+    let before = marks(self);
     self.staging.retain(&snapshot.files);
     // Generated files are read only once "Load diff" asks.
     let paths: Vec<String> = snapshot
       .files
       .iter()
+      .filter(|f| draws_hunks(&f.path, &f.status))
       .map(|f| f.path.clone())
       .filter(|p| !snapshot.generated.contains(p) || self.loaded_generated.contains(p))
       .collect();
-    self.snapshot = Some(snapshot);
-    self.load_hunks(paths, cx);
-    self.unmark_stale(cx);
+    // A refresh of an unchanged working copy (window focus, a watcher event
+    // for an ignored write) has no hunk to read again.
+    let current = snapshot.token.is_some()
+      && snapshot.token == self.hunks_token
+      && paths.len() == self.hunks.len()
+      && paths.iter().all(|p| {
+        self
+          .hunks
+          .get(p)
+          .is_some_and(|d| !d.loading && d.error.is_none())
+      });
+    let token = snapshot.token.clone();
+    // A refresh that finds the same files keeps the snapshot, and with it
+    // the committed hunks the rows were laid out from.
+    if self.snapshot.as_ref() != Some(&snapshot) {
+      self.snapshot = Some(snapshot);
+      self.layout_gen += 1;
+    }
+    if !current {
+      self.load_hunks(paths, token, cx);
+    }
+    self.unmark_stale(None, cx);
+    marks(self) != before
   }
 
   /// "Load diff" on a generated file: its diff, read now if it is the
@@ -530,6 +706,7 @@ impl ChangesView {
     self.loaded_generated.insert(path.to_string());
     let working = self.files().iter().any(|f| f.path == path);
     if working && self.pr.is_none() && !self.hunks.contains_key(path) {
+      self.layout_gen += 1;
       self.hunks.insert(
         path.to_string(),
         FileHunks {
@@ -537,7 +714,8 @@ impl ChangesView {
           ..FileHunks::default()
         },
       );
-      self.load_batches(self.generation, vec![vec![path.to_string()]], cx);
+      let token = self.hunks_token.clone();
+      self.load_batches(self.generation, vec![vec![path.to_string()]], token, cx);
     }
     cx.notify();
   }
@@ -550,63 +728,187 @@ impl ChangesView {
   }
 
   /// `loadAllFileHunks`: the first files, then the rest in batches, each
-  /// shown as it arrives. What was read before stays until replaced.
-  fn load_hunks(&mut self, paths: Vec<String>, cx: &mut Context<Self>) {
+  /// shown as it arrives. What was read before stays until replaced, and
+  /// files whose content id held are not read again.
+  fn load_hunks(&mut self, paths: Vec<String>, token: Option<String>, cx: &mut Context<Self>) {
     self.generation += 1;
+    self.hunks_token = None;
     let listed: HashSet<&String> = paths.iter().collect();
+    let before = self.hunks.len();
     self.hunks.retain(|p, _| listed.contains(p));
+    let kept = self.hunks.len();
     for path in &paths {
       self.hunks.entry(path.clone()).or_insert_with(|| FileHunks {
         loading: true,
         ..FileHunks::default()
       });
     }
+    if self.hunks.len() != before || kept != before {
+      self.layout_gen += 1;
+    }
+    let ids = self.snapshot.as_ref().map(|s| &s.content_ids);
+    let paths: Vec<String> = paths
+      .into_iter()
+      .filter(|path| {
+        let shown = self
+          .hunks
+          .get(path)
+          .filter(|d| !d.loading && d.error.is_none());
+        let id = ids.and_then(|ids| ids.get(path));
+        id.is_none() || shown.and_then(|d| d.content_id.as_ref()) != id
+      })
+      .collect();
     let mut batches: Vec<Vec<String>> = Vec::new();
     let (first, rest) = paths.split_at(paths.len().min(FIRST_BATCH));
     if !first.is_empty() {
       batches.push(first.to_vec());
     }
     batches.extend(rest.chunks(BATCH).map(<[String]>::to_vec));
-    self.load_batches(self.generation, batches, cx);
+    self.load_batches(self.generation, batches, token, cx);
   }
 
+  /// Reads `batches` in turn. `token` is the diff they should all read
+  /// from; once every one did, it names the hunks.
   fn load_batches(
     &mut self,
     generation: u64,
     mut batches: Vec<Vec<String>>,
+    mut token: Option<String>,
     cx: &mut Context<Self>,
   ) {
     if batches.is_empty() {
+      self.hunks_token = token;
+      // No file needed reading: what a Reload prunes is already known.
+      self.prune_comments(cx);
       return;
     }
     let batch = batches.remove(0);
-    self.run(
-      move |host, parent| host.file_hunks(&parent.repo_path, parent.workspace_id(), batch),
+    // Read from the listed diff's trees, and named by its file ids.
+    let (trees, ids) = match &self.snapshot {
+      Some(s) => {
+        let ids: HashMap<String, String> = batch
+          .iter()
+          .filter_map(|p| Some((p.clone(), s.content_ids.get(p)?.clone())))
+          .collect();
+        (s.token.clone(), ids)
+      }
+      None => (None, HashMap::new()),
+    };
+    // What the batch's files show now, so the read compares against it off
+    // the main thread.
+    let shown: HashMap<String, (Arc<Vec<JjDiffHunk>>, Option<String>)> = batch
+      .iter()
+      .filter_map(|path| {
+        let d = self.hunks.get(path).filter(|d| !d.loading)?;
+        Some((path.clone(), (d.hunks.clone(), d.error.clone())))
+      })
+      .collect();
+    let read_from = trees.clone();
+    self.run_changed(
+      move |host, parent| {
+        let read = host.file_hunks(
+          &parent.repo_path,
+          parent.workspace_id(),
+          batch,
+          read_from.as_deref(),
+        )?;
+        // A refresh reads every file again; one that reads the same keeps
+        // its hunks, so its rows and marks are not redone.
+        let files: Vec<_> = read
+          .files
+          .into_iter()
+          .map(|file| {
+            let same = shown
+              .get(&file.path)
+              .filter(|(hunks, error)| *error == file.error && **hunks == file.hunks)
+              .map(|(hunks, _)| hunks.clone());
+            let data = FileHunks {
+              hunks: same.clone().unwrap_or_else(|| file.hunks.into()),
+              loading: false,
+              error: file.error,
+              content_id: None,
+            };
+            (file.path, same.is_some(), data)
+          })
+          .collect();
+        Ok::<_, String>((read.snapshot_token, files))
+      },
       move |view, result, cx| {
         if view.generation != generation {
-          return;
+          return false;
         }
+        // A file read again unchanged (a refresh) draws nothing new.
+        let mut changed = HashSet::new();
         match result {
-          Ok(batch) => {
-            for file in batch.files {
-              let data = FileHunks {
-                hunks: file.hunks.into(),
-                loading: false,
-                error: file.error,
-              };
-              view.hunks.insert(file.path, data);
+          Ok((snapshot_token, files)) => {
+            // Read at another diff than listed: the ids don't name them.
+            let listed = trees.as_ref() == Some(&snapshot_token);
+            if token.as_ref() != Some(&snapshot_token) {
+              token = None;
+            }
+            for (path, same, mut data) in files {
+              if listed && data.error.is_none() {
+                data.content_id = ids.get(&path).cloned();
+              }
+              // Still showing the hunks it read the same as.
+              if let Some(shown) = view
+                .hunks
+                .get_mut(&path)
+                .filter(|d| same && !d.loading && Arc::ptr_eq(&d.hunks, &data.hunks))
+              {
+                shown.content_id = data.content_id;
+                continue;
+              }
+              view.layout_gen += 1;
+              view.hunks.insert(path.clone(), data);
+              changed.insert(path);
             }
           }
-          Err(err) => log::warn!("Failed to load file hunks: {err}"),
+          Err(err) => {
+            token = None;
+            log::warn!("Failed to load file hunks: {err}");
+          }
         }
-        view.unmark_stale(cx);
+        let marks = (view.viewed.len(), view.review.comments.len());
+        view.unmark_stale(Some(&changed), cx);
         if batches.is_empty() {
           view.prune_comments(cx);
         }
-        view.load_batches(generation, batches, cx);
+        let last = batches.is_empty();
+        view.load_batches(generation, batches, token, cx);
+        let drawn = !changed.is_empty() || marks != (view.viewed.len(), view.review.comments.len());
+        drawn && (last || view.batch_redraw_due(cx))
       },
       cx,
     );
+  }
+
+  /// Whether a batch landing now redraws. One landing within
+  /// [`BATCH_REDRAW`] of a redraw waits, and a timer draws what landed.
+  fn batch_redraw_due(&mut self, cx: &mut Context<Self>) -> bool {
+    let now = Instant::now();
+    let since = self.batch_drawn.map(|at| now.duration_since(at));
+    // Laying out many files takes long: leave the thread time between.
+    let every = BATCH_REDRAW.max(self.diff.layout_cost * 4);
+    if since.is_none_or(|since| since >= every) {
+      self.batch_drawn = Some(now);
+      return true;
+    }
+    if !std::mem::replace(&mut self.batch_flush, true) {
+      let wait = every.saturating_sub(since.unwrap_or_default());
+      cx.spawn(async move |this, cx| {
+        cx.background_executor().timer(wait).await;
+        this
+          .update(cx, |view, cx| {
+            view.batch_flush = false;
+            view.batch_drawn = Some(Instant::now());
+            cx.notify();
+          })
+          .ignore_closed();
+      })
+      .detach();
+    }
+    false
   }
 
   fn load_pr(&mut self, cx: &mut Context<Self>) {
@@ -615,7 +917,7 @@ impl ChangesView {
       .workspace
       .as_ref()
       .map(|w| w.branch_name.clone());
-    self.run(
+    self.run_changed(
       move |host, parent| {
         let github = host.github_remote(&parent.repo_path);
         let pr = branch
@@ -624,11 +926,18 @@ impl ChangesView {
         (github, pr)
       },
       |view, (github, pr), _| {
+        let changed = view.github != github || view.pr_state != pr;
         view.github = github;
         view.pr_state = pr;
+        changed
       },
       cx,
     );
+  }
+
+  /// The content id the latest snapshot lists for `path`.
+  fn content_id(&self, path: &str) -> Option<String> {
+    self.snapshot.as_ref()?.content_ids.get(path).cloned()
   }
 
   /// The diff a file card shows: the working copy's, else the branch's.
@@ -636,8 +945,38 @@ impl ChangesView {
     self.shown_hunks(path).cloned()
   }
 
-  /// Viewed files whose diff changed since are viewed no longer.
-  fn unmark_stale(&mut self, cx: &mut Context<Self>) {
+  /// The files kept as viewed, folded as when they were marked; the stale
+  /// ones go once the diff is read.
+  fn hydrate_viewed(&mut self, cx: &mut Context<Self>) {
+    if self.read_only() {
+      return;
+    }
+    let workspace = self.parent.working_directory();
+    self.run(
+      move |host, _| host.viewed_files(&workspace),
+      |view, result, cx| match result {
+        Ok(files) => {
+          for (path, hash) in files {
+            view.collapsed_files.insert(path.clone());
+            view.viewed.entry(path).or_insert(hash);
+          }
+          if view.snapshot.is_some() {
+            view.unmark_stale(None, cx);
+          }
+          cx.notify();
+        }
+        Err(err) => log::warn!("Failed to load viewed files: {err}"),
+      },
+      cx,
+    );
+  }
+
+  /// Viewed files whose diff changed since are viewed no longer. `read`
+  /// limits the check to the files whose hunks were just replaced.
+  fn unmark_stale(&mut self, read: Option<&HashSet<String>>, cx: &mut Context<Self>) {
+    if self.viewed.is_empty() {
+      return;
+    }
     // Committed files can be marked viewed too, so they stay listed.
     let listed: HashSet<String> = self
       .snapshot
@@ -652,7 +991,12 @@ impl ChangesView {
       .viewed
       .iter()
       .filter(|(path, hash)| {
+        // Files with no diff lines to hash were marked by their content.
+        if let Some(id) = hash.strip_prefix(CONTENT_ID_MARK) {
+          return self.content_id(path).is_some_and(|now| now != id);
+        }
         !hash.is_empty()
+          && read.is_none_or(|read| read.contains(*path))
           && self
             .file_hunks(path)
             .filter(|d| !d.loading && !d.hunks.is_empty())
@@ -758,7 +1102,10 @@ impl ChangesView {
             view.staging.selected.clear();
             view.discarded(workspace, snapshot, discarded(&paths), cx);
           }
-          Err(err) => view.toast(ToastTone::Error, "Discard Failed", err),
+          Err(err) => tell(
+            view.host.as_ref(),
+            Toast::error("Discard failed").description(err).into(),
+          ),
         }
       },
       cx,
@@ -780,7 +1127,10 @@ impl ChangesView {
         Ok((workspace, snapshot)) => {
           view.discarded(workspace, snapshot, "All changes discarded".into(), cx)
         }
-        Err(err) => view.toast(ToastTone::Error, "Discard All Failed", err),
+        Err(err) => tell(
+          view.host.as_ref(),
+          Toast::error("Discard all failed").description(err).into(),
+        ),
       },
       cx,
     );
@@ -800,23 +1150,22 @@ impl ChangesView {
       let event = match host.restore_snapshot(&workspace, &snapshot) {
         Ok(()) => {
           Self::changed(host.as_ref(), &parent);
-          toast_event(ToastTone::Success, "Changes restored", "")
+          NativeEvent::from(Toast::success("Changes restored"))
         }
-        Err(err) => toast_event(ToastTone::Error, "Undo Failed", err),
+        Err(err) => NativeEvent::from(Toast::error("Undo failed").description(err)),
       };
       tell(host.as_ref(), event);
     });
     tell(
       self.host.as_ref(),
-      NativeEvent::Toast {
-        title: "Discarded".into(),
-        description,
-        tone: ToastTone::Success,
-        action: Some(ToastAction {
-          label: "Undo".into(),
-          id: undo,
-        }),
-      },
+      NativeEvent::from(
+        Toast::success("Discarded")
+          .description(description)
+          .action(ToastAction {
+            label: "Undo".into(),
+            id: undo,
+          }),
+      ),
     );
     self.load(cx);
   }
@@ -827,12 +1176,20 @@ impl ChangesView {
       |host, parent| host.stash_all(&parent.repo_path, parent.workspace_id()),
       |view, result, cx| match result {
         Ok(entry) => {
-          view.toast(ToastTone::Success, "Changes stashed", stashed(&entry));
+          tell(
+            view.host.as_ref(),
+            Toast::success("Changes stashed")
+              .description(stashed(&entry))
+              .into(),
+          );
           Self::changed(view.host.as_ref(), &view.parent);
           view.field("commits.stashed", serde_json::Value::Null, cx);
           view.load(cx);
         }
-        Err(err) => view.toast(ToastTone::Error, "Stash Failed", err),
+        Err(err) => tell(
+          view.host.as_ref(),
+          Toast::error("Stash failed").description(err).into(),
+        ),
       },
       cx,
     );
@@ -902,7 +1259,10 @@ impl ChangesView {
     let message = match check_message(&message) {
       Ok(m) => m,
       Err(err) => {
-        self.toast(ToastTone::Error, "Commit message", err);
+        tell(
+          self.host.as_ref(),
+          Toast::error("Commit message").description(err).into(),
+        );
         return;
       }
     };
@@ -915,50 +1275,90 @@ impl ChangesView {
       .map(|f| f.path.clone())
       .collect();
     let split = !staged.is_empty();
-    self.run(
-      move |host, parent| {
-        let result = if split {
-          host.split(&parent.working_directory(), &message, staged)
-        } else {
-          host.commit(&parent.repo_path, parent.workspace_id(), &message)
-        };
-        let result = result.map_err(|e| ("Commit failed", e))?;
-        if action == CommitAction::Push {
-          host
-            .push_remote(&parent.repo_path, parent.workspace_id())
-            .map_err(|e| ("Failed to push", e))?;
-        }
-        Ok::<_, (&str, String)>(result)
-      },
-      move |view, result, cx| {
-        view.pending = None;
-        if split {
-          view.staging.staged.clear();
-        }
-        match result {
-          Ok(result) => {
-            let text = result.trim();
-            view.toast(ToastTone::Success, "Commit created", text);
-            view.committed_collapsed = true;
-            if action == CommitAction::Push {
-              view.toast(ToastTone::Success, "Pushed to remote", "");
-            }
-            if action == CommitAction::Pr {
-              view.send_react(
-                ScreenAction::Press {
-                  id: "workspace.createPr".into(),
-                },
-                cx,
-              );
-            }
+    let (host, parent) = (self.host.clone(), self.parent.clone());
+    let key = parent.key();
+    // The commit is reported as soon as it lands; the push is a second stage
+    // with its own feedback, and runs even if the tab moved on meanwhile.
+    cx.spawn(async move |this, cx| {
+      let (work_host, work_parent) = (host.clone(), parent.clone());
+      let committed = cx
+        .background_spawn(async move {
+          if split {
+            work_host.split(&work_parent.working_directory(), &message, staged)
+          } else {
+            work_host.commit(&work_parent.repo_path, work_parent.workspace_id(), &message)
           }
-          Err((title, err)) => view.toast(ToastTone::Error, title, err),
-        }
-        Self::changed(view.host.as_ref(), &view.parent);
-        view.load(cx);
-      },
-      cx,
-    );
+        })
+        .await;
+      let pushing = committed.is_ok() && action == CommitAction::Push;
+      this
+        .update(cx, |view, cx| {
+          if view.parent.key() != key {
+            return;
+          }
+          if !pushing {
+            view.pending = None;
+          }
+          if split {
+            view.staging.staged.clear();
+          }
+          match committed {
+            Ok(result) => {
+              tell(
+                view.host.as_ref(),
+                Toast::success("Commit created")
+                  .description(result.trim())
+                  .into(),
+              );
+              view.committed_collapsed = true;
+              if action == CommitAction::Pr {
+                view.send_react(
+                  ScreenAction::Press {
+                    id: "workspace.createPr".into(),
+                  },
+                  cx,
+                );
+              }
+            }
+            Err(err) => tell(
+              view.host.as_ref(),
+              Toast::error("Commit failed").description(err).into(),
+            ),
+          }
+          Self::changed(view.host.as_ref(), &view.parent);
+          view.load(cx);
+          cx.notify();
+        })
+        .ignore_closed();
+      if !pushing {
+        return;
+      }
+      let pushed = cx
+        .background_spawn(async move { host.push_remote(&parent.repo_path, parent.workspace_id()) })
+        .await;
+      this
+        .update(cx, |view, cx| {
+          if view.parent.key() != key {
+            return;
+          }
+          view.pending = None;
+          match pushed {
+            Ok(_) => tell(
+              view.host.as_ref(),
+              Toast::success("Pushed to remote").into(),
+            ),
+            Err(err) => tell(
+              view.host.as_ref(),
+              Toast::error("Failed to push").description(err).into(),
+            ),
+          }
+          Self::changed(view.host.as_ref(), &view.parent);
+          view.load(cx);
+          cx.notify();
+        })
+        .ignore_closed();
+    })
+    .detach();
   }
 
   fn ensure_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -976,9 +1376,13 @@ impl ChangesView {
       ._subscriptions
       .push(cx.subscribe(&state, |view, state, event: &InputEvent, cx| {
         if let InputEvent::Change = event {
+          let was_empty = view.message.trim().is_empty();
           view.message = state.read(cx).value().to_string();
-          view.message_error = None;
-          cx.notify();
+          // The view draws only whether the message is empty, and the
+          // error a keystroke clears; the box redraws itself.
+          if view.message_error.take().is_some() || was_empty != view.message.trim().is_empty() {
+            cx.notify();
+          }
         }
       }));
     self.message_input = Some(state);
@@ -1025,6 +1429,11 @@ impl ChangesView {
         .file_hunks(&path)
         .filter(|d| !d.loading && !d.hunks.is_empty())
         .map(|d| hunks_hash(&d.hunks))
+        .or_else(|| {
+          self
+            .content_id(&path)
+            .map(|id| format!("{CONTENT_ID_MARK}{id}"))
+        })
         .unwrap_or_default();
       self.viewed.insert(path.clone(), hash.clone());
       self.collapsed_files.insert(path.clone());
@@ -1055,63 +1464,119 @@ impl ChangesView {
     )
   }
 
-  fn expand_context(&mut self, path: &str, h: usize, dir: Dir, cx: &mut Context<Self>) {
-    // The PR's files are not checked out.
-    if self.read_only() {
+  /// [`gap_ranges`] for hunk `h` of `path`, from the lines read so far.
+  fn gap_ranges(&self, path: &str, hunks: &[JjDiffHunk], h: usize) -> ContextReads {
+    let read = |i: usize, dir: Dir| {
+      self
+        .context
+        .get(&(path.to_string(), i, dir))
+        .map_or(0, Vec::len)
+    };
+    let ended = self.context_ended.contains(&(path.to_string(), h));
+    gap_ranges(
+      hunks,
+      h,
+      |i| (read(i, Dir::Before), read(i, Dir::After)),
+      ended,
+    )
+  }
+
+  /// The hidden gap "Expand all" reads above or below hunk `h`, when it
+  /// is small enough to offer.
+  pub(super) fn expand_all_range(
+    &self,
+    path: &str,
+    hunks: &[JjDiffHunk],
+    h: usize,
+    dir: Dir,
+  ) -> Option<(usize, usize)> {
+    let (before, after) = self.gap_ranges(path, hunks, h);
+    match dir {
+      Dir::Before => before,
+      Dir::After => after,
+    }
+    .filter(|(start, end)| end + 1 - start <= EXPAND_ALL_MAX)
+  }
+
+  /// `handleExpandContext`; `all` reads the whole gap ("Expand all").
+  fn expand_context(&mut self, path: &str, h: usize, dir: Dir, all: bool, cx: &mut Context<Self>) {
+    // A committed card's lines are read from the working copy, which only
+    // matches the branch head while the file has no uncommitted edits.
+    if !self.hunks.contains_key(path)
+      && self
+        .snapshot
+        .as_ref()
+        .is_some_and(|s| s.files.iter().any(|f| f.path == path))
+    {
       return;
     }
-    let Some(hunks) = self.hunks.get(path).map(|d| &d.hunks) else {
+    let Some(hunks) = self.shown_hunks(path).map(|d| &d.hunks) else {
       return;
     };
     if h >= hunks.len() {
       return;
     }
-    let (before, after) = self.context_ranges(path, hunks, h);
-    let range = match dir {
-      Dir::Before => before,
-      Dir::After => after,
+    let range = if all {
+      self.expand_all_range(path, hunks, h, dir)
+    } else {
+      let (before, after) = self.context_ranges(path, hunks, h);
+      match dir {
+        Dir::Before => before,
+        Dir::After => after,
+      }
     };
     let Some((start, end)) = range else {
       return;
     };
     let key = (path.to_string(), h, dir);
     let file = path.to_string();
+    let apply = move |view: &mut Self, result: Result<Vec<String>, String>| {
+      let Ok(lines) = result else {
+        return;
+      };
+      view.layout_gen += 1;
+      if dir == Dir::After && lines.len() <= end - start {
+        view.context_ended.insert((key.0.clone(), h));
+      }
+      if lines.is_empty() {
+        return;
+      }
+      let entry = view.context.entry(key).or_default();
+      match dir {
+        Dir::Before => {
+          let mut all = lines;
+          all.append(entry);
+          *entry = all;
+        }
+        Dir::After => entry.extend(lines),
+      }
+    };
+    // The PR's files are not checked out: read them at the PR's head.
+    if self.read_only() {
+      self.run_pr(
+        move |host, pr| host.pr_file_lines(&pr.full_name, pr.number, &file, start, end),
+        move |view, result, _| apply(view, result),
+        cx,
+      );
+      return;
+    }
     self.run(
       move |host, parent| {
         host.file_lines(&parent.repo_path, parent.workspace_id(), &file, start, end)
       },
-      move |view, result, _| {
-        let Ok(lines) = result else {
-          return;
-        };
-        if dir == Dir::After && lines.len() <= end - start {
-          view.context_ended.insert((key.0.clone(), h));
-        }
-        if lines.is_empty() {
-          return;
-        }
-        let entry = view.context.entry(key).or_default();
-        match dir {
-          Dir::Before => {
-            let mut all = lines;
-            all.append(entry);
-            *entry = all;
-          }
-          Dir::After => entry.extend(lines),
-        }
-      },
+      move |view, result, _| apply(view, result),
       cx,
     );
   }
 
-  /// "Start Review": a review agent with the repository's prompt.
+  /// "Start review": a review agent with the repository's prompt.
   fn start_review(&mut self, cx: &mut Context<Self>) {
     let Some(workspace) = self.parent.workspace.clone() else {
       return;
     };
     self.starting_review = true;
     cx.notify();
-    let files = self.files().len();
+    let files = self.snapshot.as_ref().map_or(0, |s| s.review_file_count());
     self.run(
       move |host, parent| {
         let keys = ["review_prompt".to_string(), "review_agent".to_string()];
@@ -1141,7 +1606,7 @@ impl ChangesView {
 
   fn copy(&self, text: String, title: String, cx: &mut App) {
     cx.write_to_clipboard(ClipboardItem::new_string(text));
-    self.toast(ToastTone::Success, &title, "");
+    tell(self.host.as_ref(), Toast::success(&title).into());
   }
 
   fn open_in(&self, scheme: &str, path: &str) {
@@ -1160,7 +1625,9 @@ impl ChangesView {
       if on {
         let (view, path) = (cx.entity().downgrade(), path.to_string());
         items.push(NativeMenuItem::item(label, move |cx| {
-          let _ = view.update(cx, |view, _| view.open_in(scheme, &path));
+          view
+            .update(cx, |view, _| view.open_in(scheme, &path))
+            .ignore_closed();
         }));
       }
     }
@@ -1179,7 +1646,9 @@ impl ChangesView {
     let copy = |text: String, title: String| {
       let entity = entity.clone();
       move |cx: &mut App| {
-        let _ = entity.update(cx, |view, cx| view.copy(text.clone(), title.clone(), cx));
+        entity
+          .update(cx, |view, cx| view.copy(text.clone(), title.clone(), cx))
+          .ignore_closed();
       }
     };
     let mut open = vec![{
@@ -1193,17 +1662,14 @@ impl ChangesView {
     let mut items = vec![
       NativeMenuItem::item(
         "Copy relative path",
-        copy(relative.clone(), "Relative path copied".into()),
+        copy(relative, "Relative path copied".into()),
       )
       .icon(MenuIcon::Copy),
-      NativeMenuItem::item(
-        "Copy full path",
-        copy(full.clone(), "Full path copied".into()),
-      )
-      .icon(MenuIcon::Copy),
+      NativeMenuItem::item("Copy full path", copy(full, "Full path copied".into()))
+        .icon(MenuIcon::Copy),
       NativeMenuItem::Separator,
       NativeMenuItem::Submenu {
-        text: "Open in...".into(),
+        text: "Open in…".into(),
         icon: Some(MenuIcon::FolderOpen),
         detail: None,
         items: open,
@@ -1227,7 +1693,7 @@ impl ChangesView {
       let paths = self.staging.targets(path);
       items.push(NativeMenuItem::Separator);
       items.push(NativeMenuItem::Submenu {
-        text: "Move to workspace...".into(),
+        text: "Move to workspace…".into(),
         icon: Some(MenuIcon::ArrowRightLeft),
         detail: None,
         items: targets
@@ -1235,7 +1701,9 @@ impl ChangesView {
           .map(|target| {
             let (entity, paths) = (entity.clone(), paths.clone());
             NativeMenuItem::item(target.label.clone(), move |cx| {
-              let _ = entity.update(cx, |view, cx| view.move_files(paths.clone(), &target, cx));
+              entity
+                .update(cx, |view, cx| view.move_files(paths.clone(), &target, cx))
+                .ignore_closed();
             })
           })
           .collect(),
@@ -1268,7 +1736,9 @@ impl ChangesView {
       let (entity, path) = (cx.entity().downgrade(), path.to_string());
       items.push(
         NativeMenuItem::item(label, move |cx| {
-          let _ = entity.update(cx, |view, cx| view.discard_files(&path, cx));
+          entity
+            .update(cx, |view, cx| view.discard_files(&path, cx))
+            .ignore_closed();
         })
         .destructive(),
       );
@@ -1297,17 +1767,19 @@ impl ChangesView {
     let action = |action: CommitAction| {
       let entity = entity.clone();
       move |cx: &mut App| {
-        let _ = entity.update(cx, |view, cx| {
-          let message = view.message.trim().to_string();
-          if message.is_empty() {
-            view.message_error = Some("Enter a commit message.");
-            cx.notify();
-            return;
-          }
-          view.message.clear();
-          view.message_input = None;
-          view.commit(action, message, cx);
-        });
+        entity
+          .update(cx, |view, cx| {
+            let message = view.message.trim().to_string();
+            if message.is_empty() {
+              view.message_error = Some("Enter a commit message.");
+              cx.notify();
+              return;
+            }
+            view.message.clear();
+            view.message_input = None;
+            view.commit(action, message, cx);
+          })
+          .ignore_closed();
       }
     };
     let mut items = vec![NativeMenuItem::item(
@@ -1359,23 +1831,27 @@ impl ChangesView {
   }
 }
 
-/// A `p-1 rounded` icon button of the section headers.
+/// A `p-1 rounded` icon button of the section headers, named `label`;
+/// the caller ends it with `.test_support()`, after its handlers.
 fn header_button(
   id: impl Into<SharedString>,
   icon: &'static str,
+  label: impl Into<SharedString>,
   fg: Hsla,
-  hover: Hsla,
+  p: &Palette,
 ) -> Stateful<Div> {
   let id: SharedString = id.into();
   let selector = id.to_string();
   div()
     .id(id)
     .debug_selector(move || selector)
+    .role(gpui::Role::Button)
+    .aria_label(label.into())
     .p_1()
     .rounded(radius::SM)
     .cursor_pointer()
     .text_color(fg)
-    .hover(move |s| s.bg(hover))
+    .hover(move |s| s.bg(p.hover()))
     .child(ui::icon(icon, 12., fg))
 }
 
@@ -1385,12 +1861,19 @@ impl Render for ChangesView {
     self.ensure_input(window, cx);
     self.ensure_review_inputs(window, cx);
     self.ensure_reply_inputs(window, cx);
-    self.watch_find_key(window, cx);
-    self.ensure_search_input(window, cx);
+    super::find::watch_key(self, window, cx);
+    super::find::ensure_input(self, window, cx);
+    // The rows first: the threads and the find index follow their revision.
+    self.sync_rows(window);
+    if !self.read_only() {
+      self.sync_side(window);
+    }
     self.place_threads();
     self.index_matches();
-    self.sync_rows(window);
     self.reveal_match(window, cx);
+    // Drawn lines record their layouts afresh each frame; a scrolled-off
+    // line must not be found under the pointer.
+    self.review.layouts.borrow_mut().clear();
     self.reveal_line(window, cx);
     self.scroll_to_file(window, cx);
     if std::mem::take(&mut self.review.refocus) {
@@ -1410,8 +1893,17 @@ impl Render for ChangesView {
         let held = crate::gpui_shell::keys::held(k.modifiers);
         if view.focus.is_focused(window)
           && !(held.platform || held.control || held.alt)
-          && view.diff_key(&k.key, held.shift, cx)
+          && view.diff_key(&k.key, held, cx)
         {
+          cx.stop_propagation();
+        } else if k.key == "c"
+          && (held.platform || held.control)
+          && !held.shift
+          && view.review.text.is_some()
+        {
+          if let Some(text) = view.selected_code() {
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
+          }
           cx.stop_propagation();
         } else if k.key == "a"
           && (crate::gpui_shell::keys::held(k.modifiers).platform
@@ -1422,7 +1914,9 @@ impl Render for ChangesView {
           let files = view.listed();
           view.staging.select_all(&files);
           cx.notify();
-        } else if ui::is_escape(k) && view.review.selection.is_some() {
+        } else if ui::is_escape(k)
+          && (view.review.selection.is_some() || view.review.text.is_some())
+        {
           view.clear_selection(cx);
         }
       }))
@@ -1433,7 +1927,27 @@ impl Render for ChangesView {
       .on_mouse_up_out(
         MouseButton::Left,
         cx.listener(|view, _, _, cx| view.end_drag(cx)),
-      );
+      )
+      .when(self.dragging(), |this| {
+        // A drag follows the pointer anywhere in the window, off the rows.
+        let view = cx.entity().downgrade();
+        this.child(
+          gpui::canvas(
+            |_, _, _| {},
+            move |_, _, window, _| {
+              window.on_mouse_event(move |e: &gpui::MouseMoveEvent, phase, _, cx| {
+                if phase == gpui::DispatchPhase::Bubble {
+                  view
+                    .update(cx, |view, cx| view.drag_pointer(e.position, cx))
+                    .ignore_closed();
+                }
+              });
+            },
+          )
+          .absolute()
+          .size_0(),
+        )
+      });
     let sidebar = (!self.read_only()).then(|| self.sidebar(&p, cx));
     let main = div()
       .flex_1()
@@ -1451,7 +1965,7 @@ impl Render for ChangesView {
           .child(self.content(&p, cx))
           .children(self.search_bar(&p, cx)),
       );
-    let dialog = self.dialog(window, &p, cx);
+    let dialog = self.discard_all_dialog(window, &p, cx);
     let finish = self.finish_popover(&p, cx);
     let review_dialog = self.review_dialog(window, &p, cx);
     root
@@ -1464,75 +1978,135 @@ impl Render for ChangesView {
 }
 
 impl ChangesView {
-  fn sidebar(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
-    let mut list = div()
-      .id("changes-sidebar-scroll")
-      .flex_1()
-      .overflow_y_scroll()
-      .px_4()
-      .pb_4();
-    match &self.snapshot {
-      None => {
-        list = list.child(
-          div()
-            .size_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(ui::spinner("changes-sidebar-spin", 24., p.muted_foreground)),
-        );
-      }
-      Some(_) => {
-        list = list.children(self.filter_row(p, cx));
-        let conflicted = self.conflicted();
-        if !conflicted.is_empty() {
-          list = list.child(self.conflicts_section(&conflicted, p, cx));
-        }
-        let files = self.listed();
-        let committed = match self.options.show_committed {
-          Some(false) => 0,
-          _ => self.snapshot.as_ref().map_or(0, |s| s.committed.len()),
-        };
-        if files.is_empty() && committed == 0 {
-          list = list.child(
-            div()
-              .size_full()
-              .flex()
-              .flex_col()
-              .items_center()
-              .justify_center()
-              .py_12()
-              .child(ui::icon(
-                theme::ICON_CIRCLE_CHECK,
-                48.,
-                p.muted_foreground.opacity(0.4),
-              ))
-              .child(
-                div()
-                  .mt_3()
-                  .text_color(p.muted_foreground)
-                  .child("No changes"),
-              ),
-          );
-        } else if !files.is_empty() {
-          let staged: Vec<ChangedFile> = self
-            .staging
-            .staged_list(&files)
-            .into_iter()
-            .cloned()
-            .collect();
-          if !staged.is_empty() {
-            list = list.child(self.files_section(List::Selected, &staged, p, cx));
-          }
-          let unstaged: Vec<ChangedFile> =
-            self.staging.unstaged(&files).into_iter().cloned().collect();
-          list = list.child(self.files_section(List::Changes, &unstaged, p, cx));
-        }
-        if committed > 0 {
-          list = list.child(self.committed_section(p, cx));
-        }
+  /// What the sidebar's rows stand for now, and the data they read.
+  fn layout_side(&self) -> (Vec<SideRow>, SideData) {
+    let Some(snapshot) = self.snapshot.as_ref() else {
+      return Default::default();
+    };
+    let mut data = SideData::default();
+    let mut rows = Vec::new();
+    if self.filter_shown() {
+      rows.push(SideRow::Filter);
+    }
+    data.conflicted = self.conflicted();
+    if !data.conflicted.is_empty() {
+      rows.push(SideRow::ConflictsHeader);
+      if !self.collapsed_sections.contains(&Section::Conflicts) {
+        rows.extend((0..data.conflicted.len()).map(SideRow::Conflict));
       }
     }
+    let mut listed = Vec::new();
+    for (ix, file) in snapshot.files.iter().enumerate() {
+      if self.hides(&file.path) {
+        continue;
+      }
+      listed.push(ix);
+      if self.staging.staged.contains(&file.path) {
+        data.staged.push(ix);
+      } else {
+        data.unstaged.push(ix);
+      }
+    }
+    let committed = match self.options.show_committed {
+      Some(false) => 0,
+      _ => snapshot.committed.len(),
+    };
+    let commit_box = SideRow::CommitBox {
+      lines: self.message.lines().count().max(1),
+      error: self.message_error.is_some(),
+      pending: self.pending.is_some(),
+    };
+    if listed.is_empty() && committed == 0 && data.conflicted.is_empty() {
+      rows.push(SideRow::Empty);
+    } else if listed.is_empty() {
+      // The filter button shares the "Nothing to commit" row.
+      if rows == [SideRow::Filter] {
+        rows.clear();
+      }
+      rows.push(SideRow::NothingToCommit);
+    } else {
+      if !data.staged.is_empty() {
+        rows.push(SideRow::Header(List::Selected));
+        rows.push(commit_box);
+        if !self.collapsed_sections.contains(&Section::Selected) {
+          rows.extend((0..data.staged.len()).map(|k| SideRow::File(List::Selected, k)));
+        }
+      }
+      rows.push(SideRow::Header(List::Changes));
+      if data.staged.is_empty() {
+        rows.push(commit_box);
+      }
+      if !self.collapsed_sections.contains(&Section::Changes) {
+        rows.extend((0..data.unstaged.len()).map(|k| SideRow::File(List::Changes, k)));
+      }
+    }
+    if committed > 0 {
+      rows.push(SideRow::CommittedHeader);
+      if !self.committed_collapsed {
+        data.committed = self.visible_committed_at();
+        rows.extend((0..data.committed.len()).map(SideRow::Committed));
+      }
+    }
+    data.last_staged = self
+      .staging
+      .staged_anchor
+      .and_then(|k| data.staged.get(k))
+      .copied();
+    data.last_changed = self.staging.anchor.and_then(|k| listed.get(k)).copied();
+    (rows, data)
+  }
+
+  /// Tells the sidebar's list which rows changed.
+  fn sync_side(&mut self, window: &Window) {
+    let (rows, data) = self.layout_side();
+    self.side_data = data;
+    self.side.sync(window, rows, |a, b| a == b);
+  }
+
+  fn sidebar(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    let scroll = div()
+      .id("changes-sidebar-scroll")
+      .flex_1()
+      .min_h_0()
+      .px_4()
+      .pb_4();
+    let list = if self.snapshot.is_none() {
+      scroll.overflow_y_scroll().child(
+        div()
+          .size_full()
+          .flex()
+          .items_center()
+          .justify_center()
+          .child(ui::spinner("changes-sidebar-spin", 24., p.muted_foreground)),
+      )
+    } else if self.side.get(self.side.len().wrapping_sub(1)) == Some(&SideRow::Empty) {
+      // Nothing to scroll: the empty state fills what the rows leave.
+      #[expect(
+        clippy::needless_collect,
+        reason = "the rows borrow self, which side_row needs mutably"
+      )]
+      let rows: Vec<SideRow> = (0..self.side.len())
+        .filter_map(|ix| self.side.get(ix).copied())
+        .collect();
+      scroll
+        .overflow_y_scroll()
+        .children(rows.into_iter().map(|row| self.side_row(row, p, cx)))
+    } else {
+      // Only the rows on screen are built, however many files changed.
+      scroll.child(
+        gpui::list(
+          self.side.list.clone(),
+          cx.processor(|this, ix, _, cx| {
+            let p = theme::palette(this.dark);
+            match this.side.get(ix).copied() {
+              Some(row) => this.side_row(row, &p, cx),
+              None => div().into_any_element(),
+            }
+          }),
+        )
+        .size_full(),
+      )
+    };
     div()
       .w(zpx(240.))
       .flex_none()
@@ -1542,18 +2116,110 @@ impl ChangesView {
       .border_r_1()
       .border_color(p.border)
       .bg(p.sidebar)
-      .child(self.commit_box(p, cx))
       .child(list)
+  }
+
+  /// One row of the sidebar.
+  fn side_row(&mut self, row: SideRow, p: &Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
+    match row {
+      SideRow::Filter => self.filter_row(p, cx).map_or_else(
+        || div().into_any_element(),
+        |filter| {
+          div()
+            .pt_3()
+            .child(div().flex().justify_end().child(filter))
+            .into_any_element()
+        },
+      ),
+      SideRow::ConflictsHeader => {
+        let count = self.side_data.conflicted.len();
+        self.conflicts_header(count, p, cx).into_any_element()
+      }
+      SideRow::Conflict(i) => self.conflict_list_row(i, p, cx).into_any_element(),
+      SideRow::Header(list) => {
+        let count = match list {
+          List::Selected => self.side_data.staged.len(),
+          List::Changes => self.side_data.unstaged.len(),
+        };
+        self.files_header(list, count, p, cx).into_any_element()
+      }
+      SideRow::File(list, k) => {
+        let (ids, selected, last) = match list {
+          List::Selected => (
+            &self.side_data.staged,
+            &self.staging.selected_staged,
+            self.side_data.last_staged,
+          ),
+          List::Changes => (
+            &self.side_data.unstaged,
+            &self.staging.selected,
+            self.side_data.last_changed,
+          ),
+        };
+        let Some(&ix) = ids.get(k) else {
+          return div().into_any_element();
+        };
+        let Some(file) = self.snapshot.as_ref().and_then(|s| s.files.get(ix)) else {
+          return div().into_any_element();
+        };
+        let (selected, last) = (selected.contains(&file.path), last == Some(ix));
+        let file = file.clone();
+        div()
+          .when(k == 0, |this| this.pt_2())
+          .child(self.file_row(list, &file, selected, last, p, cx))
+          .into_any_element()
+      }
+      SideRow::CommitBox { .. } => self.commit_box(p, cx).into_any_element(),
+      SideRow::NothingToCommit => div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .child(
+          ui::text(div(), TextSize::Sm)
+            .debug_selector(|| "changes-nothing-to-commit".into())
+            .py_2()
+            .text_color(p.muted_foreground)
+            .child("Nothing to commit"),
+        )
+        .children(self.filter_row(p, cx))
+        .into_any_element(),
+      SideRow::CommittedHeader => {
+        // Flush under "Nothing to commit": no gap above the header.
+        let d = &self.side_data;
+        let flush = d.staged.is_empty() && d.unstaged.is_empty() && d.conflicted.is_empty();
+        self
+          .committed_header(p, cx)
+          .when(flush, |this| this.pt_0())
+          .into_any_element()
+      }
+      SideRow::Committed(i) => self.committed_row(i, p, cx).into_any_element(),
+      SideRow::Empty => div()
+        .size_full()
+        .flex()
+        .items_center()
+        .justify_center()
+        .py_4()
+        .child(
+          ui::EmptyState::new("changes-empty", "No changes", p)
+            .icon(theme::ICON_CIRCLE_CHECK)
+            .message("The working copy matches the last commit. Edit a file to see it here."),
+        )
+        .into_any_element(),
+    }
   }
 
   /// The row above the file lists whose filter menu picks what they show:
   /// generated files and the committed group, when either applies.
-  fn filter_row(&mut self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+  fn filter_shown(&self) -> bool {
     let generated = self
       .snapshot
       .as_ref()
       .is_some_and(|s| !s.generated.is_empty());
-    if !generated && self.options.show_committed.is_none() {
+    generated || self.options.show_committed.is_some()
+  }
+
+  fn filter_row(&mut self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    if !self.filter_shown() {
       return None;
     }
     let filtering = self.hide_generated || self.options.show_committed == Some(false);
@@ -1561,27 +2227,26 @@ impl ChangesView {
     let filter = header_button(
       "changes-filter",
       theme::ICON_FILTER,
+      "Filter changes",
       if filtering {
         primary
       } else {
         p.muted_foreground
       },
-      p.foreground.opacity(0.1),
+      p,
     )
     .relative()
     .when(filtering, |b| b.bg(primary.opacity(0.1)))
-    .role(gpui::Role::Button)
-    .aria_label("Filter changes")
     .on_click(cx.listener(|view, _, _, cx| view.filter_menu(cx)))
     .test_support()
     .child(self.anchor("changes-filter".into()));
-    Some(div().mt_3().flex().justify_end().child(self.tips.wrap(
+    Some(self.tips.wrap(
       "changes-filter-tip",
       Side::Bottom,
       Some(TooltipContent::Text("Filter changes".into())),
       filter,
       cx,
-    )))
+    ))
   }
 
   /// The filter button's menu: one checkbox item per kind of file shown.
@@ -1598,7 +2263,9 @@ impl ChangesView {
       let entity = cx.entity().downgrade();
       items.push(
         NativeMenuItem::item("Generated files", move |cx| {
-          let _ = entity.update(cx, |view, cx| view.toggle_hide_generated(cx));
+          entity
+            .update(cx, |view, cx| view.toggle_hide_generated(cx))
+            .ignore_closed();
         })
         .check(!self.hide_generated),
       );
@@ -1607,10 +2274,12 @@ impl ChangesView {
       let entity = cx.entity().downgrade();
       items.push(
         NativeMenuItem::item("Committed", move |cx| {
-          let _ = entity.update(cx, |view, cx| {
-            let show = view.options.show_committed.unwrap_or(show);
-            view.field("changes.showCommitted", (!show).into(), cx);
-          });
+          entity
+            .update(cx, |view, cx| {
+              let show = view.options.show_committed.unwrap_or(show);
+              view.field("changes.showCommitted", (!show).into(), cx);
+            })
+            .ignore_closed();
         })
         .check(show),
       );
@@ -1634,8 +2303,8 @@ impl ChangesView {
       None => commit_label(self.staging.staged.len()),
     };
     let error = self.message_error;
-    let border = p.primary_foreground.opacity(0.2);
     let main = Button::new("commit-button", p)
+      .variant(Variant::Outline)
       .size(Size::Sm)
       .flex_1()
       .h_auto()
@@ -1644,7 +2313,7 @@ impl ChangesView {
       .rounded_r_none()
       .disabled(disabled || empty)
       .when(self.pending.is_some(), |b| {
-        b.child(ui::spinner("commit-spin", 16., p.primary_foreground))
+        b.child(ui::spinner("commit-spin", 16., p.muted_foreground))
       })
       .label(label)
       .on_click(
@@ -1656,27 +2325,22 @@ impl ChangesView {
       .child(
         Button::new("commit-options", p)
           .aria_label("More commit options")
+          .variant(Variant::Outline)
           .size(Size::Sm)
           .h_auto()
           .py_1p5()
           .px_1p5()
           .rounded_l_none()
-          .border_l_1()
-          .border_color(border)
+          .border_l_0()
           .disabled(disabled || empty)
-          .child(ui::icon(
-            theme::ICON_CHEVRON_DOWN,
-            16.,
-            p.primary_foreground,
-          ))
+          .icon(theme::ICON_CHEVRON_DOWN, 16.)
           .on_click(cx.listener(|view, _, _, cx| view.commit_menu(cx))),
       )
       .child(self.anchor("commit-menu".into()));
     div()
-      .px_4()
-      .py_3()
-      .border_b_1()
-      .border_color(p.border)
+      .w_full()
+      .pt_1()
+      .pb_3()
       .flex()
       .flex_col()
       .gap_2()
@@ -1708,142 +2372,86 @@ impl ChangesView {
       .when_some(error, |this, err| {
         this.child(
           div()
+            .id("commit-message-error")
             .debug_selector(|| "commit-message-error".into())
+            .role(gpui::Role::Alert)
+            .aria_label(err)
             .text_color(p.destructive)
-            .child(err),
+            .child(err)
+            .test_support(),
         )
       })
       .child(div().flex().w_full().child(main).child(menu))
   }
 
-  #[allow(clippy::too_many_arguments)]
-  fn section_header(
-    &mut self,
-    id: &'static str,
-    title: &'static str,
-    collapsed: bool,
-    color: Hsla,
-    p: &Palette,
-    cx: &mut Context<Self>,
-    on_toggle: impl Fn(&mut Self, &mut Context<Self>) + 'static,
-  ) -> Stateful<Div> {
-    let fg = p.foreground;
-    div()
-      .id(id)
-      .debug_selector(move || id.into())
-      .flex()
-      .items_center()
-      .gap_1()
-      .cursor_pointer()
-      .text_color(color)
-      .hover(move |s| s.text_color(fg))
-      .child(ui::icon(
-        if collapsed {
-          theme::ICON_CHEVRON_RIGHT
-        } else {
-          theme::ICON_CHEVRON_DOWN
-        },
-        12.,
-        color,
-      ))
-      .child(title)
-      .on_click(cx.listener(move |view, _, _, cx| on_toggle(view, cx)))
+  fn conflicts_header(&mut self, count: usize, p: &Palette, cx: &mut Context<Self>) -> Div {
+    let collapsed = self.collapsed_sections.contains(&Section::Conflicts);
+    div().pt_4().child(
+      ui::SectionHeader::new("conflicts-section-title", "Conflicts", p)
+        .collapsible(
+          "conflicts-section-toggle",
+          collapsed,
+          cx.listener(|view, _, _, cx| view.toggle_section(Section::Conflicts, cx)),
+        )
+        .count(count)
+        .action(ui::Dot::new(Tone::Danger, "Conflict", p)),
+    )
   }
 
-  fn conflicts_section(
-    &mut self,
-    files: &[String],
-    p: &Palette,
-    cx: &mut Context<Self>,
-  ) -> impl IntoElement {
-    let collapsed = self.collapsed_sections.contains(&Section::Conflicts);
-    let header = self.section_header(
-      "conflicts-section-toggle",
-      "Conflicts",
-      collapsed,
-      p.muted_foreground,
-      p,
-      cx,
-      |view, cx| view.toggle_section(Section::Conflicts, cx),
-    );
-    let mut rows = div().mt_2().overflow_hidden();
-    if !collapsed {
-      for path in files {
-        let active = self.active.as_deref() == Some(path.as_str());
-        let (name, dir) = split_path(path);
-        let hover = p.accent.opacity(0.3);
-        let file = path.clone();
-        rows = rows.child(
-          div()
-            .id(SharedString::from(format!("conflict-row-{path}")))
-            .debug_selector({
-              let id = format!("conflict-row-{path}");
-              move || id
-            })
-            .py_1()
-            .flex()
-            .items_center()
-            .gap_1()
-            .cursor_pointer()
-            .when(active, |this| this.bg(p.selected()))
-            .when(!active, |this| this.hover(move |s| s.bg(hover)))
-            .child(
-              div()
-                .ml_1()
-                .flex_1()
-                .flex()
-                .items_center()
-                .gap_2()
-                .min_w_0()
-                .child(
-                  div()
-                    .flex_none()
-                    .font_weight(FontWeight::MEDIUM)
-                    .truncate()
-                    .child(name),
-                )
-                .when_some(dir, |this, dir| {
-                  this.child(
-                    ui::text(div(), TextSize::Xs)
-                      .truncate()
-                      .text_color(p.muted_foreground.opacity(0.6))
-                      .child(dir),
-                  )
-                }),
-            )
-            .child(div().mr_1().child(ui::Dot::new(Tone::Danger, p)))
-            .on_click(cx.listener(move |view, _, _, cx| view.show_file(&file, cx))),
-        );
-      }
-    }
-    div()
-      .mt_4()
+  /// The `i`th conflicted file's row.
+  fn conflict_list_row(&mut self, i: usize, p: &Palette, cx: &mut Context<Self>) -> Div {
+    let Some(path) = self.side_data.conflicted.get(i) else {
+      return div();
+    };
+    let active = self.active.as_deref() == Some(path.as_str());
+    let (name, dir) = split_path(path);
+    let file = path.clone();
+    let row = ui::Row::new(SharedString::from(format!("conflict-row-{path}")), p)
+      .label(path.clone())
+      .selected(active)
+      .gap_1()
+      .px_0()
+      .rounded_none()
       .child(
         div()
+          .ml_1()
+          .flex_1()
           .flex()
           .items_center()
-          .justify_between()
-          .text_color(p.muted_foreground)
+          .gap_2()
+          .min_w_0()
           .child(
             div()
-              .flex()
-              .items_center()
-              .gap_2()
-              .child(header)
-              .child(ui::Dot::new(Tone::Danger, p)),
+              .flex_none()
+              .font_weight(FontWeight::MEDIUM)
+              .truncate()
+              .child(name),
           )
-          .child(ui::Count::new(files.len(), p)),
+          .when_some(dir, |this, dir| {
+            this.child(
+              ui::text(div(), TextSize::Sm)
+                .truncate()
+                .text_color(p.muted_foreground.opacity(0.6))
+                .child(dir),
+            )
+          }),
       )
-      .when(!collapsed, |this| this.child(rows))
+      .trailing(
+        div()
+          .mr_1()
+          .child(ui::Dot::new(Tone::Danger, "Conflict", p)),
+      )
+      .on_click(cx.listener(move |view, _, _, cx| view.show_file(&file, cx)));
+    div().when(i == 0, |this| this.pt_2()).child(row)
   }
 
-  fn files_section(
+  fn files_header(
     &mut self,
     list: List,
-    files: &[ChangedFile],
+    count: usize,
     p: &Palette,
     cx: &mut Context<Self>,
-  ) -> impl IntoElement {
+  ) -> Stateful<Div> {
     let staged = list == List::Selected;
     let section = if staged {
       Section::Selected
@@ -1851,39 +2459,50 @@ impl ChangesView {
       Section::Changes
     };
     let collapsed = self.collapsed_sections.contains(&section);
-    let selected = if staged {
-      self.staging.selected_staged.clone()
+    let selected_len = if staged {
+      self.staging.selected_staged.len()
     } else {
-      self.staging.selected.clone()
+      self.staging.selected.len()
     };
-    let header = self.section_header(
+    let header = ui::SectionHeader::new(
+      if staged {
+        "selected-section-title"
+      } else {
+        "changes-section-title"
+      },
+      if staged { "Selected" } else { "Changes" },
+      p,
+    )
+    .collapsible(
       if staged {
         "selected-section-toggle"
       } else {
         "changes-section-toggle"
       },
-      if staged { "Selected" } else { "Changes" },
       collapsed,
-      p.muted_foreground,
-      p,
-      cx,
-      move |view, cx| {
+      cx.listener(move |view, _, _, cx| {
         view.toggle_section(section, cx);
         view.deselect(list, cx);
-      },
-    );
+      }),
+    )
+    .count(count);
     let muted = p.muted_foreground;
-    let hover = p.foreground.opacity(0.1);
     let mut buttons = div().flex().items_center().gap_1();
-    if !files.is_empty() {
+    if count > 0 {
       // `onStashAll` is left out for a remote repository.
       if !staged && !self.parent.remote {
-        let stash = header_button("stash-all-changes", theme::ICON_ARCHIVE, muted, hover).on_click(
-          cx.listener(|view, _, _, cx| {
-            cx.stop_propagation();
-            view.stash_all(cx);
-          }),
-        );
+        let stash = header_button(
+          "stash-all-changes",
+          theme::ICON_ARCHIVE,
+          "Stash all changes",
+          muted,
+          p,
+        )
+        .on_click(cx.listener(|view, _, _, cx| {
+          cx.stop_propagation();
+          view.stash_all(cx);
+        }))
+        .test_support();
         buttons = buttons.child(self.tips.wrap(
           "stash-all-tip",
           Side::Bottom,
@@ -1899,14 +2518,21 @@ impl ChangesView {
           "discard-all-changes"
         },
         theme::ICON_UNDO,
+        // It opens the "Discard all changes" confirmation.
+        if staged {
+          "Discard selected changes…"
+        } else {
+          "Discard all changes…"
+        },
         muted,
-        hover,
+        p,
       )
       .on_click(cx.listener(|view, _, _, cx| {
         cx.stop_propagation();
         view.discard_dialog = true;
         cx.notify();
-      }));
+      }))
+      .test_support();
       buttons = buttons.child(self.tips.wrap(
         if staged {
           "discard-selected-tip"
@@ -1919,15 +2545,15 @@ impl ChangesView {
         cx,
       ));
       if !staged {
-        let label = select_all_label(selected.len(), files.len());
-        let select = header_button("select-all-changes", theme::ICON_PLUS, muted, hover).on_click(
-          cx.listener(|view, _, _, cx| {
+        let label = select_all_label(selected_len, count);
+        let select = header_button("select-all-changes", theme::ICON_PLUS, label, muted, p)
+          .on_click(cx.listener(|view, _, _, cx| {
             cx.stop_propagation();
             let files = view.listed();
             view.staging.toggle_all_unstaged(&files);
             cx.notify();
-          }),
-        );
+          }))
+          .test_support();
         buttons = buttons.child(self.tips.wrap(
           "select-all-tip",
           Side::Bottom,
@@ -1936,20 +2562,22 @@ impl ChangesView {
           cx,
         ));
       }
-      if !selected.is_empty() {
+      if selected_len > 0 {
         let primary = p.primary;
-        let n = selected.len();
+        let n = selected_len;
         let arrow = div()
           .id(if staged {
             "move-selected-files"
           } else {
             "move-changes-files"
           })
+          .role(gpui::Role::Button)
+          .aria_label("Move to a new workspace")
           .p_1()
           .rounded(radius::SM)
           .cursor_pointer()
-          .bg(primary.opacity(0.1))
-          .hover(move |s| s.bg(primary.opacity(0.2)))
+          .bg(p.selected())
+          .hover(move |s| s.bg(p.selected_hover()))
           .child(ui::icon(theme::ICON_ARROW_RIGHT, 12., primary))
           .on_click(cx.listener(|view, _, _, cx| {
             cx.stop_propagation();
@@ -1970,12 +2598,19 @@ impl ChangesView {
         ));
       }
       if staged {
-        let minus = header_button("unselect-all-changes", theme::ICON_MINUS, muted, p.muted)
-          .on_click(cx.listener(|view, _, _, cx| {
-            cx.stop_propagation();
-            view.staging.unstage_all();
-            cx.notify();
-          }));
+        let minus = header_button(
+          "unselect-all-changes",
+          theme::ICON_MINUS,
+          "Unselect all changes",
+          muted,
+          p,
+        )
+        .on_click(cx.listener(|view, _, _, cx| {
+          cx.stop_propagation();
+          view.staging.unstage_all();
+          cx.notify();
+        }))
+        .test_support();
         buttons = buttons.child(self.tips.wrap(
           "unselect-all-tip",
           Side::Bottom,
@@ -1985,35 +2620,13 @@ impl ChangesView {
         ));
       }
     }
-    buttons = buttons.child(div().ml_1().child(ui::Count::new(files.len(), p)));
-    let last = if staged {
-      self
-        .staging
-        .staged_anchor
-        .and_then(|i| files.get(i))
-        .map(|f| f.path.clone())
-    } else {
-      self
-        .staging
-        .anchor
-        .and_then(|i| self.listed().get(i).cloned())
-        .map(|f| f.path.clone())
-    };
-    let mut rows = div().mt_2().overflow_hidden();
-    if !collapsed {
-      for file in files {
-        let is_selected = selected.contains(&file.path);
-        let is_last = last.as_deref() == Some(file.path.as_str());
-        rows = rows.child(self.file_row(list, file, is_selected, is_last, p, cx));
-      }
-    }
     div()
       .id(if staged {
         "selected-section"
       } else {
         "changes-section"
       })
-      .mt_4()
+      .pt_4()
       .child(
         div()
           .id(if staged {
@@ -2028,11 +2641,113 @@ impl ChangesView {
           .text_color(p.muted_foreground)
           // A click on the header clears the selection; it is not a control.
           .cursor_default()
-          .child(header)
-          .child(buttons)
+          .child(div().flex_1().min_w_0().child(header.action(buttons)))
           .on_click(cx.listener(move |view, _, _, cx| view.deselect(list, cx))),
       )
-      .when(!collapsed && !files.is_empty(), |this| this.child(rows))
+  }
+
+  fn committed_header(&mut self, p: &Palette, cx: &mut Context<Self>) -> Div {
+    let total = self.snapshot.as_ref().map_or(0, |s| s.committed.len());
+    div().pt_4().child(
+      ui::SectionHeader::new("committed-section-title", "Committed", p)
+        .collapsible(
+          "committed-section-toggle",
+          self.committed_collapsed,
+          cx.listener(|view, _, _, cx| {
+            view.committed_collapsed = !view.committed_collapsed;
+            cx.notify();
+          }),
+        )
+        .count(total),
+    )
+  }
+
+  /// The `i`th committed file's row.
+  fn committed_row(&mut self, i: usize, p: &Palette, cx: &mut Context<Self>) -> Div {
+    let muted = p.muted_foreground;
+    let Some(file) = self
+      .side_data
+      .committed
+      .get(i)
+      .and_then(|&ix| self.snapshot.as_ref()?.committed.get(ix))
+      .cloned()
+    else {
+      return div();
+    };
+    let (name, dir) = split_path(&file.path);
+    let active = self.active.as_deref() == Some(file.path.as_str());
+    let dimmed = self.viewed.contains_key(&file.path);
+    let path = file.path.clone();
+    let menu = file.path.clone();
+    let row = ui::Row::new(
+      SharedString::from(format!("committed-row-{}", file.path)),
+      p,
+    )
+    .label(file.path.clone())
+    .selected(active)
+    .gap_1()
+    .px_0()
+    .rounded_none()
+    .border_l_2()
+    .border_color(gpui::transparent_black())
+    .child(
+      div()
+        .ml_1()
+        .flex_1()
+        .flex()
+        .items_center()
+        .gap_2()
+        .min_w_0()
+        .child(
+          div()
+            .font_weight(FontWeight::MEDIUM)
+            .truncate()
+            .when(dimmed, |this| this.opacity(VIEWED_OPACITY))
+            .child(name),
+        )
+        .when_some(dir, |this, dir| {
+          this.child(
+            ui::text(div(), TextSize::Sm)
+              .flex_1()
+              .truncate()
+              .text_color(p.muted_foreground.opacity(0.6))
+              .child(dir),
+          )
+        }),
+    )
+    .trailing(self.status_letter(format!("committed-{}", file.path), &file.status, muted, cx))
+    .on_mouse_down(
+      MouseButton::Right,
+      cx.listener(move |view, e: &gpui::MouseDownEvent, _, cx| {
+        view.file_menu(&menu, false, e.position, cx);
+      }),
+    )
+    .on_click(cx.listener(move |view, _, _, cx| view.show_file(&path, cx)));
+    div().when(i == 0, |this| this.pt_2()).child(row)
+  }
+
+  /// A file's status letter, named in words for its tooltip and readers.
+  fn status_letter(
+    &self,
+    key: String,
+    status: &str,
+    color: Hsla,
+    cx: &mut Context<Self>,
+  ) -> Stateful<Div> {
+    let word = super::file_browser_data::status_title(status);
+    self.tip(
+      format!("status-tip-{key}"),
+      word,
+      div()
+        .id(SharedString::from(format!("status-{key}")))
+        .role(gpui::Role::Label)
+        .aria_label(word)
+        .test_support()
+        .min_w(zpx(8.))
+        .text_color(color)
+        .child(status.to_string()),
+      cx,
+    )
   }
 
   /// `el` with a tooltip of `text` above it.
@@ -2052,7 +2767,6 @@ impl ChangesView {
     )
   }
 
-  #[allow(clippy::too_many_arguments)]
   fn file_row(
     &mut self,
     list: List,
@@ -2067,42 +2781,34 @@ impl ChangesView {
     // Viewed files fade back, like GitHub's file tree.
     let dimmed = self.viewed.contains_key(&file.path) && !selected;
     let (name, dir) = split_path(&file.path);
-    let tint = p.selected();
-    let hover = p.accent.opacity(0.2);
     let path = file.path.clone();
     let name_color = p.foreground;
     let dir_color = p.muted_foreground.opacity(0.6);
-    let small = |id: String, icon: &'static str, fg: Hsla, hover_bg: Hsla, hidden: bool| {
-      let selector = id.clone();
-      div()
-        .id(SharedString::from(id))
-        .debug_selector(move || selector)
-        .p_0p5()
-        .rounded(radius::SM)
-        .cursor_pointer()
-        .when(hidden, |this| {
-          this.opacity(0.).group_hover("file-row", |s| s.opacity(1.))
-        })
-        .hover(move |s| s.bg(hover_bg))
-        .child(ui::icon(icon, 12., fg))
-    };
+    let small =
+      |id: String, icon: &'static str, fg: Hsla, hidden: bool| file_action(id, icon, fg, hidden, p);
     let red = Tone::Danger.text(p);
     let status_color = p.muted_foreground;
-    let mut actions = div().flex().items_center().gap_1().flex_none().child(
-      div()
-        .min_w(zpx(8.))
-        .text_color(status_color)
-        .child(file.status.clone()),
-    );
-    if last && selected && !staged {
+    let mut actions = div()
+      .flex()
+      .items_center()
+      .gap_1()
+      .flex_none()
+      .child(self.status_letter(
+        format!("{list:?}-{}", file.path),
+        &file.status,
+        status_color,
+        cx,
+      ));
+    if !staged {
+      // The selection's last row keeps its buttons; the others show them on hover.
+      let hidden = !(last && selected);
       let target = path.clone();
       let tip_key = format!("discard-tip-{}", file.path);
       let el = small(
         format!("discard-{}", file.path),
         theme::ICON_UNDO,
         red,
-        Tone::Danger.tint(p),
-        false,
+        hidden,
       )
       .on_click(cx.listener(move |view, _, _, cx| {
         cx.stop_propagation();
@@ -2115,8 +2821,7 @@ impl ChangesView {
         format!("stage-{}", file.path),
         theme::ICON_PLUS,
         name_color,
-        p.accent,
-        false,
+        hidden,
       )
       .on_click(cx.listener(move |view, _, _, cx| {
         cx.stop_propagation();
@@ -2131,7 +2836,6 @@ impl ChangesView {
         format!("unstage-{}", file.path),
         theme::ICON_MINUS,
         name_color,
-        p.accent,
         !selected,
       )
       .on_click(cx.listener(move |view, _, _, cx| {
@@ -2140,174 +2844,71 @@ impl ChangesView {
       }));
       actions = actions.child(self.tip(tip_key, "Unstage file", el, cx));
     }
-    let (click, menu) = (path.clone(), path.clone());
-    div()
-      .id(SharedString::from(format!(
+    let (click, menu) = (path.clone(), path);
+    ui::Row::new(
+      SharedString::from(format!(
         "{}-row-{}",
         if staged { "selected" } else { "changes" },
         file.path
-      )))
-      .debug_selector({
-        let id = format!("file-row-{}", file.path);
-        move || id
-      })
-      .group("file-row")
-      .relative()
-      .min_w_0()
-      .py_1()
-      .flex()
-      .items_center()
-      .gap_1()
-      .cursor_pointer()
-      .border_l_2()
-      .border_color(gpui::transparent_black())
-      .when(selected || active, |this| this.bg(tint))
-      .when(selected, |this| this.font_weight(FontWeight::SEMIBOLD))
-      .when(!selected && !active, |this| {
-        this.hover(move |s| s.bg(hover))
-      })
-      .child(
-        div()
-          .ml_1()
-          .flex_1()
-          .flex()
-          .items_center()
-          .gap_2()
-          .min_w_0()
-          .child(
-            div()
-              .min_w_0()
-              .truncate()
-              .font_weight(FontWeight::MEDIUM)
-              .text_color(name_color)
-              .when(dimmed, |this| this.opacity(VIEWED_OPACITY))
-              .child(name),
-          )
-          .when_some(dir, |this, dir| {
-            this.child(
-              ui::text(div(), TextSize::Xs)
-                .min_w_0()
-                .flex_1()
-                .truncate()
-                .text_color(dir_color)
-                .child(dir),
-            )
-          }),
-      )
-      .child(actions)
-      .on_mouse_down(
-        MouseButton::Right,
-        cx.listener(move |view, e: &gpui::MouseDownEvent, _, cx| {
-          view.file_menu(&menu, !staged, e.position, cx);
-        }),
-      )
-      .on_click(cx.listener(move |view, e: &gpui::ClickEvent, _, cx| {
-        let m = e.modifiers();
-        view.click_file(list, &click, m.shift, m.platform || m.control, cx);
-      }))
-  }
-
-  fn committed_section(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
-    let collapsed = self.committed_collapsed;
-    let total = self.snapshot.as_ref().map_or(0, |s| s.committed.len());
-    let visible = self.visible_committed();
-    let muted = p.muted_foreground;
-    let fg = p.foreground;
-    let header = div()
-      .id("committed-section-toggle")
-      .debug_selector(|| "committed-section-toggle".into())
-      .flex()
-      .items_center()
-      .gap_1()
-      .cursor_pointer()
-      .hover(move |s| s.text_color(fg))
-      .child(ui::icon(
-        if collapsed {
-          theme::ICON_CHEVRON_RIGHT
-        } else {
-          theme::ICON_CHEVRON_DOWN
-        },
-        12.,
-        muted,
-      ))
-      .child("Committed")
-      .child(div().ml_1().child(ui::Count::new(total, p)))
-      .on_click(cx.listener(|view, _, _, cx| {
-        view.committed_collapsed = !view.committed_collapsed;
-        cx.notify();
-      }));
-    let mut rows = div().mt_2().overflow_hidden();
-    if !collapsed {
-      for file in &visible {
-        let (name, dir) = split_path(&file.path);
-        let active = self.active.as_deref() == Some(file.path.as_str());
-        let dimmed = self.viewed.contains_key(&file.path);
-        let hover = p.accent.opacity(0.2);
-        let path = file.path.clone();
-        let menu = file.path.clone();
-        rows = rows.child(
+      )),
+      p,
+    )
+    .debug_selector({
+      let id = format!("file-row-{}", file.path);
+      move || id
+    })
+    .label(file.path.clone())
+    .selected(selected || active)
+    .group("file-row")
+    .relative()
+    .min_w_0()
+    .gap_1()
+    .px_0()
+    .rounded_none()
+    .border_l_2()
+    .border_color(gpui::transparent_black())
+    .child(
+      div()
+        .ml_1()
+        .flex_1()
+        .flex()
+        .items_center()
+        .gap_2()
+        .min_w_0()
+        .child(
           div()
-            .id(SharedString::from(format!("committed-row-{}", file.path)))
-            .py_1()
-            .flex()
-            .items_center()
-            .gap_1()
-            .cursor_pointer()
-            .border_l_2()
-            .border_color(gpui::transparent_black())
-            .hover(move |s| s.bg(hover))
-            .child(
-              div()
-                .ml_1()
-                .flex_1()
-                .flex()
-                .items_center()
-                .gap_2()
-                .min_w_0()
-                .child(
-                  div()
-                    .font_weight(FontWeight::MEDIUM)
-                    .truncate()
-                    .when(dimmed, |this| this.opacity(VIEWED_OPACITY))
-                    .when(active, |this| this.text_color(p.primary))
-                    .child(name),
-                )
-                .when_some(dir, |this, dir| {
-                  this.child(
-                    ui::text(div(), TextSize::Xs)
-                      .flex_1()
-                      .truncate()
-                      .text_color(p.muted_foreground.opacity(0.6))
-                      .child(dir),
-                  )
-                }),
-            )
-            .child(div().text_color(muted).child(file.status.clone()))
-            .on_mouse_down(
-              MouseButton::Right,
-              cx.listener(move |view, e: &gpui::MouseDownEvent, _, cx| {
-                view.file_menu(&menu, false, e.position, cx);
-              }),
-            )
-            .on_click(cx.listener(move |view, _, _, cx| view.show_file(&path, cx))),
-        );
-      }
-    }
-    div()
-      .mt_4()
-      .child(
-        div()
-          .flex()
-          .items_center()
-          .justify_between()
-          .w_full()
-          .text_color(muted)
-          .child(header),
-      )
-      .when(!collapsed && !visible.is_empty(), |this| this.child(rows))
+            .min_w_0()
+            .truncate()
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(name_color)
+            .when(dimmed, |this| this.opacity(VIEWED_OPACITY))
+            .child(name),
+        )
+        .when_some(dir, |this, dir| {
+          this.child(
+            ui::text(div(), TextSize::Sm)
+              .min_w_0()
+              .flex_1()
+              .truncate()
+              .text_color(dir_color)
+              .child(dir),
+          )
+        }),
+    )
+    .trailing(actions)
+    .on_mouse_down(
+      MouseButton::Right,
+      cx.listener(move |view, e: &gpui::MouseDownEvent, _, cx| {
+        view.file_menu(&menu, !staged, e.position, cx);
+      }),
+    )
+    .on_click(cx.listener(move |view, e: &gpui::ClickEvent, _, cx| {
+      let m = e.modifiers();
+      view.click_file(list, &click, m.shift, m.platform || m.control, cx);
+    }))
   }
 
-  /// `ReviewActionBar`: for now, "Start Review" on workspaces.
+  /// `ReviewActionBar`: for now, "Start review" on workspaces.
   fn action_bar(&mut self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
     self.parent.workspace.as_ref()?;
     let bar = if self.show_review_bar() {
@@ -2342,7 +2943,11 @@ impl ChangesView {
     if let Some(err) = self.pr.as_ref().and_then(|pr| pr.error.clone()) {
       return area.child(
         ui::text(div(), TextSize::Sm)
+          .id("pr-diff-error")
           .debug_selector(|| "pr-diff-error".into())
+          .role(gpui::Role::Alert)
+          .aria_label(format!("Failed to load the PR diff: {err}"))
+          .test_support()
           .p_6()
           .text_color(p.destructive)
           .child(format!("Failed to load the PR diff: {err}")),
@@ -2381,16 +2986,13 @@ impl ChangesView {
         div()
           .size_full()
           .flex()
-          .flex_col()
           .items_center()
           .justify_center()
-          .text_color(p.muted_foreground)
-          .child(ui::icon(
-            theme::ICON_CIRCLE_CHECK,
-            48.,
-            p.muted_foreground.opacity(0.4),
-          ))
-          .child(div().mt_3().child("No changes to review")),
+          .child(
+            ui::EmptyState::new("changes-review-empty", "No changes to review", p)
+              .icon(theme::ICON_CIRCLE_CHECK)
+              .message("This workspace has no uncommitted or committed changes yet."),
+          ),
       );
     }
     if self.large_changeset_gated() {
@@ -2527,19 +3129,20 @@ impl ChangesView {
       Body::Empty => card.child(
         div()
           .debug_selector(|| "empty-diff-placeholder".into())
-          .px_3()
-          .py_6()
-          .flex()
-          .justify_center()
-          .text_color(muted)
           .child(if conflicted_file {
-            "No diff available for this conflicted file (possibly deleted)"
+            ui::EmptyState::new(
+              "empty-diff-conflicted",
+              "No diff for this conflicted file",
+              p,
+            )
+            .message("The file may have been deleted on one side of the conflict.")
           } else {
-            "No diff hunks available"
+            ui::EmptyState::new("empty-diff-none", "No diff hunks", p)
+              .message("This change has no text lines to show, such as a mode change.")
           }),
       ),
       Body::Generated => {
-        let file = path.to_string();
+        let file = path.clone();
         card.child(
           div()
             .debug_selector(|| "generated-file-placeholder".into())
@@ -2589,7 +3192,10 @@ impl ChangesView {
     .into_any_element()
   }
 
-  #[allow(clippy::too_many_arguments)]
+  #[expect(
+    clippy::too_many_arguments,
+    reason = "flat argument list kept to match callers"
+  )]
   fn file_header(
     &mut self,
     path: &str,
@@ -2612,6 +3218,8 @@ impl ChangesView {
     } else {
       div()
         .id(SharedString::from(format!("collapse-{path}")))
+        .role(gpui::Role::Button)
+        .aria_label(if shut { "Expand file" } else { "Collapse file" })
         .cursor_pointer()
         .child(ui::icon(
           if shut {
@@ -2649,36 +3257,53 @@ impl ChangesView {
           .gap_1p5()
           .child(
             ui::text(div(), TextSize::Code)
+              .id(SharedString::from(format!("file-path-{path}")))
+              .role(gpui::Role::Heading)
+              .aria_label(shown_path.clone())
               .truncate()
               .font_family(theme::MONO_FONT)
               .text_color(muted)
-              .child(shown_path),
+              .child(shown_path)
+              .test_support(),
           )
-          .child(
-            self.tip(
-              format!("copy-path-tip-{path}"),
-              "Copy file path",
-              div()
-                .id(SharedString::from(format!("copy-path-{path}")))
-                .flex_none()
-                .cursor_pointer()
-                .child(ui::icon(theme::ICON_COPY, 16., muted))
-                .on_click(cx.listener(move |view, _, _, cx| {
+          .child(self.tip(
+            format!("copy-path-tip-{path}"),
+            "Copy file path",
+            ui::copy_feedback::copyable(
+              SharedString::from(format!("copy-path-feedback-{path}")),
+              {
+                let id = SharedString::from(format!("copy-path-{path}"));
+                let success = p.success;
+                let copy = cx.listener(move |view, _, _, cx| {
                   cx.stop_propagation();
                   view.copy(copy_path.clone(), "File path copied".into(), cx);
-                })),
-              cx,
+                });
+                move |copied| {
+                  div()
+                    .id(id.clone())
+                    .role(gpui::Role::Button)
+                    .aria_label("Copy path")
+                    .flex_none()
+                    .cursor_pointer()
+                    .child(ui::copy_feedback::copy_icon(
+                      id, copied, 16., muted, success,
+                    ))
+                    .on_click(copy)
+                    .into_any_element()
+                }
+              },
             ),
-          )
-          .when(committed, |this| {
-            this.child(
-              div()
-                .debug_selector(|| "committed-file-label".into())
-                .child(badge("Committed", Tone::Primary)),
-            )
-          }),
+            cx,
+          ))
+          .children(
+            (committed
+              && self
+                .snapshot
+                .as_ref()
+                .is_some_and(|s| s.purely_committed(path)))
+            .then(|| badge("Committed", Tone::Neutral)),
+          ),
       );
-    let accent = p.accent;
     let mut right = div().flex().items_center().gap_2();
     if !committed && !self.read_only() {
       right = right.child(
@@ -2687,16 +3312,19 @@ impl ChangesView {
           "Add file comment",
           div()
             .id(SharedString::from(format!("add-file-comment-{path}")))
+            .role(gpui::Role::Button)
+            .aria_label(format!("Add file comment on {path}"))
             .debug_selector(|| "add-file-comment-button".into())
             .p_1()
             .rounded(radius::SM)
             .cursor_pointer()
-            .hover(move |s| s.bg(accent))
+            .hover(move |s| s.bg(p.hover()))
             .child(ui::icon(theme::ICON_MESSAGE_PLUS, 14., muted))
             .on_click({
               let path = path.to_string();
               cx.listener(move |view, _, _, cx| view.add_file_comment(&path, cx))
-            }),
+            })
+            .test_support(),
           cx,
         ),
       );
@@ -2710,23 +3338,15 @@ impl ChangesView {
         } else {
           "Mark as viewed"
         },
-        div()
-          .id(SharedString::from(format!("viewed-{path}")))
-          .debug_selector({
-            let id = format!("viewed-{path}");
-            move || id
-          })
-          .flex()
-          .items_center()
+        ui::Checkbox::new(format!("viewed-{path}"), p)
+          .checked(viewed)
+          .label("Viewed")
           .gap_1()
           .px_2()
           .py_0p5()
           .rounded(radius::SM)
-          .cursor_pointer()
           .text_color(muted)
-          .hover(move |s| s.bg(accent))
-          .child(ui::Checkbox::new(format!("viewed-box-{path}"), p).checked(viewed))
-          .child("Viewed")
+          .hover(move |s| s.bg(p.hover()))
           .on_click(cx.listener(move |view, _, _, cx| {
             cx.stop_propagation();
             view.toggle_viewed(&file, cx);
@@ -2757,12 +3377,12 @@ impl ChangesView {
           .font_family(theme::MONO_FONT)
           .child(
             div()
-              .text_color(Tone::GitOpen.color(p))
+              .text_color(Tone::DiffAdded.color(p))
               .child(format!("+{additions}")),
           )
           .child(
             div()
-              .text_color(Tone::GitClosed.color(p))
+              .text_color(Tone::DiffRemoved.color(p))
               .child(format!("-{deletions}")),
           ),
       );
@@ -2773,11 +3393,13 @@ impl ChangesView {
       right = right.child(
         div()
           .id(SharedString::from(key.clone()))
+          .role(gpui::Role::Button)
+          .aria_label("More actions")
           .relative()
           .p_1()
           .rounded(radius::SM)
           .cursor_pointer()
-          .hover(move |s| s.bg(accent))
+          .hover(move |s| s.bg(p.hover()))
           .child(ui::icon(theme::ICON_MORE, 12., fg))
           .child(self.anchor(key))
           .on_click(cx.listener(move |view, _, _, cx| {
@@ -2858,8 +3480,8 @@ impl ChangesView {
         continue;
       }
       let bg = match side {
-        ConflictLineRole::Left => Some(Tone::Danger.tint(p)),
-        ConflictLineRole::Right => Some(Tone::Success.tint(p)),
+        ConflictLineRole::Left => Some(Tone::DiffRemoved.tint(p)),
+        ConflictLineRole::Right => Some(Tone::DiffAdded.tint(p)),
         ConflictLineRole::Base => Some(Tone::Warning.tint(p)),
         _ => None,
       };
@@ -2868,10 +3490,12 @@ impl ChangesView {
         .flatten();
       let label_el = label.map(|label| {
         let tone = match label {
-          "Side #1" => Tone::Danger,
+          "Side #1" => Tone::DiffRemoved,
           "Base" => Tone::Warning,
-          _ => Tone::Success,
+          _ => Tone::DiffAdded,
         };
+        // Short label (['badge']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .debug_selector(move || format!("conflict-label-{label}"))
           .mr_2()
@@ -2899,11 +3523,15 @@ impl ChangesView {
             &raw,
             None,
             &[],
+            None,
           ))),
       );
       let deleted_notice = |side: &'static str, tone: Tone| {
         div()
+          .id("conflict-deleted-side")
           .debug_selector(|| "conflict-deleted-side".into())
+          .role(gpui::Role::Label)
+          .aria_label(format!("{side} deleted this file"))
           .my_1()
           .rounded(radius::MD)
           .border_1()
@@ -2914,12 +3542,13 @@ impl ChangesView {
           .font_family(theme::SANS_FONT)
           .text_color(tone.text(p))
           .child(format!("{side} deleted this file"))
+          .test_support()
       };
       if kind == ConflictLineKind::Marker && role == ConflictLineRole::Start && left_deleted {
-        pre = pre.child(deleted_notice("Side #1", Tone::Danger));
+        pre = pre.child(deleted_notice("Side #1", Tone::DiffRemoved));
       }
       if kind == ConflictLineKind::Marker && role == ConflictLineRole::Separator && right_deleted {
-        pre = pre.child(deleted_notice("Side #2", Tone::Success));
+        pre = pre.child(deleted_notice("Side #2", Tone::DiffAdded));
       }
     }
     let number = if region.total_conflicts > 0 {
@@ -2927,11 +3556,12 @@ impl ChangesView {
     } else {
       format!("Conflict {}", conflict.number)
     };
+    let card = format!("conflict-card-{}", conflict.id);
     div()
-      .debug_selector({
-        let id = format!("conflict-card-{}", conflict.id);
-        move || id
-      })
+      .id(SharedString::from(card.clone()))
+      .debug_selector(move || card)
+      .role(gpui::Role::Group)
+      .aria_label(number.clone())
       .bg(p.destructive.opacity(0.1))
       .border_y_1()
       .border_color(p.destructive.opacity(0.4))
@@ -2942,6 +3572,8 @@ impl ChangesView {
       .gap_2()
       .font_family(theme::SANS_FONT)
       .child(
+        // Short label (['line-range meta']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .flex()
           .items_center()
@@ -2957,9 +3589,10 @@ impl ChangesView {
       )
       .child(pre)
       .children(self.note_section(conflict, p, cx))
+      .test_support()
   }
 
-  fn dialog(
+  fn discard_all_dialog(
     &mut self,
     window: &mut Window,
     p: &Palette,
@@ -2977,95 +3610,28 @@ impl ChangesView {
         focus
       })
       .clone();
-    let viewport = window.viewport_size();
     let n = self.staging.unstaged(self.files()).len();
-    let panel = div()
-      .id("discard-all-dialog")
-      .debug_selector(|| "discard-all-dialog".into())
-      .track_focus(&focus)
-      .w_full()
-      .max_w(zpx(512.))
-      .p_6()
-      .rounded(radius::LG)
-      .border_1()
-      .border_color(p.border.opacity(0.5))
-      .bg(p.popover)
-      .text_color(p.popover_foreground)
-      .shadow_2xl()
-      .capture_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
-        if ui::is_escape(&e.keystroke) {
-          cx.stop_propagation();
-          view.discard_dialog = false;
-          cx.notify();
-        }
-      }))
-      .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-      .child(
-        div()
-          .flex()
-          .flex_col()
-          .gap_1p5()
-          .child(
-            ui::text(div(), TextSize::Lg)
-              .font_weight(FontWeight::SEMIBOLD)
-              .child("Discard all changes?"),
-          )
-          .child(
-            ui::text(div(), TextSize::Sm)
-              .text_color(p.muted_foreground)
-              .child(format!(
-                "This will discard all {n} unsaved {}. You can restore them from the Undo button on \
-                 the toast that follows.",
-                if n == 1 { "change" } else { "changes" }
-              )),
-          ),
-      )
-      .child(
-        div()
-          .mt_4()
-          .flex()
-          .justify_end()
-          .gap_2()
-          .child(
-            Button::new("discard-all-cancel", p)
-              .variant(Variant::Ghost)
-              .label("Cancel")
-              .on_click(cx.listener(|view, _, _, cx| {
-                view.discard_dialog = false;
-                cx.notify();
-              })),
-          )
-          .child(
-            Button::new("discard-all-confirm", p)
-              .variant(Variant::Destructive)
-              .label("Discard all changes")
-              .on_click(cx.listener(|view, _, _, cx| view.discard_all(cx))),
-          ),
-      );
+    let message = format!(
+      "This will discard all {n} unsaved {}. You can restore them from the Undo button on the \
+       toast that follows.",
+      if n == 1 { "change" } else { "changes" }
+    );
     Some(
-      deferred(
-        anchored().position(point(px(0.), px(0.))).child(
-          div()
-            .id("discard-all-backdrop")
-            .w(viewport.width)
-            .h(viewport.height)
-            .p_4()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(p.scrim())
-            .occlude()
-            .on_mouse_down(
-              MouseButton::Left,
-              cx.listener(|view, _, _, cx| {
-                view.discard_dialog = false;
-                cx.notify();
-              }),
-            )
-            .child(panel),
-        ),
+      ui::ConfirmDialog::new(
+        "discard-all-dialog",
+        "Discard all changes?",
+        "Discard all changes",
+        p,
       )
-      .with_priority(2),
+      .overlay(window.viewport_size())
+      .message(message)
+      .destructive()
+      .focus(&focus)
+      .on_cancel(ui::handler(cx, |view, _, cx| {
+        view.discard_dialog = false;
+        cx.notify();
+      }))
+      .on_confirm(ui::handler(cx, |view, _, cx| view.discard_all(cx))),
     )
   }
 }
@@ -3075,35 +3641,63 @@ fn skeleton(p: &Palette) -> Div {
   div().rounded(radius::MD).bg(p.primary.opacity(0.1))
 }
 
+/// A file row's small stage, unstage or discard button, shown on the row's
+/// hover when `hidden`.
+fn file_action(
+  id: String,
+  icon: &'static str,
+  fg: Hsla,
+  hidden: bool,
+  p: &Palette,
+) -> Stateful<Div> {
+  let selector = id.clone();
+  div()
+    .id(SharedString::from(id))
+    .debug_selector(move || selector)
+    .p_0p5()
+    .rounded(radius::SM)
+    .cursor_pointer()
+    .when(hidden, |this| {
+      this.opacity(0.).group_hover("file-row", |s| s.opacity(1.))
+    })
+    .hover(move |s| s.bg(p.hover()))
+    .child(ui::icon(icon, 12., fg))
+}
+
 /// `HunkContextLineRow`: a line read by "Show more lines".
 fn context_row(
-  n: i64,
+  selector: String,
+  (old, new): (i64, i64),
   line: &str,
   language: Option<&'static str>,
   p: &Palette,
 ) -> impl IntoElement {
-  let number = if n > 0 { n.to_string() } else { String::new() };
+  let number = |n: i64| if n > 0 { n.to_string() } else { String::new() };
   let border = p.border.opacity(0.4);
   div()
     .flex()
+    // Darker than the hunk's own lines: these were read in by an expander.
+    .bg(p.inset)
     .child(
       div()
         .w_24()
         .flex_none()
         .flex()
         .items_center()
+        // As the hunk lines' gutter spaces its numbers.
+        .gap_1()
         .border_r_1()
         .border_color(border)
         .text_color(p.muted_foreground)
+        .child(div().w_10().mr_1().flex().justify_end().child(number(old)))
         .child(
           div()
+            .debug_selector(move || selector)
             .w_10()
-            .mr_1()
             .flex()
             .justify_end()
-            .child(number.clone()),
-        )
-        .child(div().w_10().flex().justify_end().child(number)),
+            .child(number(new)),
+        ),
     )
     .child(div().w_6().flex_none())
     .child(div().w_5().flex_none())

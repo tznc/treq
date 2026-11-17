@@ -1,7 +1,7 @@
 /**
  * service-qa setup: require a live local Supabase CLI stack before any spec runs.
  */
-import { beforeAll } from "vitest";
+import { beforeAll } from "@jest/globals";
 import { assertLocalSupabaseUp } from "../scripts/service-qa/health";
 
 beforeAll(async () => {

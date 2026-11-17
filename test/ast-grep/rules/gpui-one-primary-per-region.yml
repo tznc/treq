@@ -1,0 +1,62 @@
+id: gpui-one-primary-per-region
+language: rust
+severity: error
+message: >
+  A filled button (Primary or Destructive) built once per list item puts a
+  filled button on every card. A region holds at most one; give the
+  repeated button `.variant(Variant::Outline)` (or `DestructiveOutline`).
+note: >
+  Flags a `Button::new(format!(..), ..)` (an id per item) built in a
+  closure or a `for` loop with no `.variant(..)` other than `Default` or
+  `Destructive` in its builder chain.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+  - "src-tauri/src/mobile/**/*.rs"
+ignores:
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+rule:
+  kind: call_expression
+  all:
+    - has:
+        field: function
+        regex: (^|::)Button::new$
+    - has:
+        field: arguments
+        has:
+          nthChild: 1
+          kind: macro_invocation
+          regex: ^format!
+    # Its builder chain sets no variant other than a filled one.
+    - not:
+        inside:
+          stopBy:
+            not:
+              any:
+                - kind: call_expression
+                - kind: field_expression
+          kind: call_expression
+          all:
+            - has:
+                field: function
+                kind: field_expression
+                has:
+                  field: field
+                  regex: ^variant$
+            - has:
+                field: arguments
+                not:
+                  regex: Variant::(Default|Destructive)\)$
+    # Built once per item.
+    - inside:
+        stopBy: end
+        any:
+          - kind: closure_expression
+          - kind: for_expression
+    - not:
+        inside:
+          kind: mod_item
+          has:
+            field: name
+            regex: ^tests$
+          stopBy: end

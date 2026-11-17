@@ -9,7 +9,7 @@
  * (../github.ts): local runs have no GitHub App. Pro comes from the billing
  * write functions (../billing.ts).
  */
-import { expect, it } from "vitest";
+import { expect, it } from "@jest/globals";
 import {
   PRO_REQUIRED_MESSAGES,
   userHasPro,

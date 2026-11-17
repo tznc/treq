@@ -9,9 +9,9 @@ Area guides (read the one for the area you are changing):
 
 - Use **npm** (not pnpm) for all JS commands
 - Keep `commands/*.rs` thin: no business logic there — delegate to `core/`
-- Never write commits; the user owns all VCS operations
 - Prefer **jj-lib** or **gix** over subprocess calls; never shell out to `jj` or `git` from Rust
 - `jj.rs` functions that accept a workspace path must validate the path exists and return an empty/default value on missing path rather than propagating an IO error
+- GitHub MCP tools: pass `minimal_output: true` unless you need full fields, and paginate lists 5–10 at a time
 
 ## TDD (Required)
 
@@ -38,3 +38,7 @@ Never write implementation code before the test exists. For a bug, reproduce it 
 cargo test --manifest-path src-tauri/Cargo.toml
 npm test                                     # Supabase-side unit tests
 ```
+
+### Disk space
+
+Rust's incremental cache (`target/debug/incremental`) grows by gigabytes per build and fills small disks such as cloud sessions. When a build fails with "no space left on device" or `df` shows the disk nearly full, delete it: `rm -rf target/debug/incremental` (cargo rebuilds it; the next build is slower). Setting `CARGO_INCREMENTAL=0` avoids writing it at all, as CI does. Share one `CARGO_TARGET_DIR` across git worktrees instead of building each into its own `target/`.

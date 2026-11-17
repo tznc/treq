@@ -6,7 +6,7 @@
  * has_pro, and RLS-filtered billing rows.
  */
 import { randomBytes } from "node:crypto";
-import { expect, it } from "vitest";
+import { expect, it } from "@jest/globals";
 import { getServiceClient } from "../clients";
 import { recordOutcome } from "../record";
 import {

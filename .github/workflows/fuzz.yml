@@ -1,0 +1,43 @@
+name: Fuzz
+
+defaults:
+  run:
+    shell: bash
+
+# A 30-second cargo-fuzz smoke run per parser target, when a parser changes.
+# The parsers build from their source files alone, so this skips the app build.
+on:
+  pull_request:
+    paths:
+      - "src-tauri/src/unified_patch.rs"
+      - "src-tauri/src/conflict_markers.rs"
+      - "src-tauri/src/cli/args.rs"
+      - "src-tauri/src/notify_dispatch.rs"
+      - "src-tauri/tauri.conf.json"
+      - "src-tauri/src/gpui_shell/screen/intraline.rs"
+      - "src-tauri/fuzz/**"
+      - ".github/workflows/fuzz.yml"
+  workflow_dispatch:
+
+jobs:
+  fuzz:
+    name: fuzz / ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [unified_patch, conflict_markers, cli_args, intraline]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: nightly
+
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-fuzz
+
+      - name: cargo fuzz run
+        working-directory: src-tauri/fuzz
+        run: cargo +nightly fuzz run --target x86_64-unknown-linux-gnu ${{ matrix.target }} -- -max_total_time=30

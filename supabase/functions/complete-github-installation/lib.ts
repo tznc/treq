@@ -7,7 +7,9 @@
 // adds a `code` to the redirect. The handler exchanges it for a user access
 // token and links the installation only when it is in that GitHub user's
 // GET /user/installations. Without a code it refuses, so an App configured
-// without that setting fails closed. The user token is never stored.
+// without that setting fails closed. The grant is then kept in Vault
+// (github_user_tokens) so the desktop and mobile apps can call GitHub as
+// the user through integration-proxy.
 //
 // Linking requires Pro (prds/billing-and-teams.md, "Enforcement"). The check
 // runs before the intent is consumed, so a user who upgrades can retry with
@@ -26,6 +28,7 @@ import {
 } from "../_shared/billing/entitlement.ts";
 import type { ServiceClientLike } from "../_shared/billing/store.ts";
 import { type HandlerResult, sha256Hex } from "../_shared/intent-state.ts";
+import type { UserGrant } from "../_shared/github/user-token.ts";
 
 export type GitHubInstallation = {
   id: number;
@@ -55,15 +58,18 @@ export interface InstallationLinkStore {
     installation: GitHubInstallation,
     userId: string,
   ): Promise<LinkResult>;
+  /** Keeps the user's GitHub grant in Vault, replacing any earlier one. */
+  saveUserToken(userId: string, grant: UserGrant): Promise<void>;
 }
 
 /** Every GitHub call the handler makes. service-qa stubs this. */
 export interface GitHubInstallationAccess {
   /**
    * Exchanges the OAuth code from the install redirect for a user access
-   * token. Throws when GitHub refuses the code or cannot be reached.
+   * token and its refresh token. Throws when GitHub refuses the code or
+   * cannot be reached.
    */
-  exchangeCode(code: string): Promise<string>;
+  exchangeCode(code: string): Promise<UserGrant>;
   /**
    * Whether this installation of the App is in the token user's
    * GET /user/installations. Throws when GitHub answers an error.
@@ -154,10 +160,11 @@ export async function completeInstallation(
   // Prove the signed-in user's GitHub account can access the installation.
   // The token lives only in this block.
   let accessible: boolean;
+  let grant: UserGrant;
   try {
-    const userToken = await deps.github.exchangeCode(code);
+    grant = await deps.github.exchangeCode(code);
     accessible = await deps.github.userCanAccessInstallation(
-      userToken,
+      grant.accessToken,
       installationId,
     );
   } catch (err) {
@@ -236,6 +243,17 @@ export async function completeInstallation(
     };
   }
 
+  // Without it the apps ask the user to reconnect GitHub, so a failure here
+  // does not undo the link.
+  try {
+    await deps.store.saveUserToken(deps.userId, grant);
+  } catch (err) {
+    console.error(
+      "[complete-github-installation] saving the user token failed:",
+      errorMessage(err),
+    );
+  }
+
   console.log(
     JSON.stringify({
       operation: "installation_linked",
@@ -285,6 +303,16 @@ export function installationLinkStore(
       });
       if (error) throw new Error(error.message);
       return data as LinkResult;
+    },
+    async saveUserToken(userId, grant) {
+      const { error } = await client.rpc("github_user_tokens_save", {
+        p_user_id: userId,
+        p_access_token: grant.accessToken,
+        p_refresh_token: grant.refreshToken,
+        p_expires_at: grant.expiresAt,
+        p_refresh_expires_at: grant.refreshExpiresAt,
+      });
+      if (error) throw new Error(error.message);
     },
   };
 }

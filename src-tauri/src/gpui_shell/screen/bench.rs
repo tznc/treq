@@ -3,7 +3,7 @@
 //! Not an API: the screens are private, so criterion reaches them here.
 
 pub use super::{
-  changes_review::{comments_under, line_at, line_has_comment, LineComment, Side},
+  changes_review::{comments_under, is_outdated, line_at, line_has_comment, LineComment, Side},
   changes_threads::place_threads,
   code_data::{emojify, looks_like_markdown},
   commits_data::line_numbers,

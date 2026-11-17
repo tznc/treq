@@ -6,11 +6,16 @@ use std::collections::HashMap;
 use super::{account_data::AccountHost, checklist::ToolsHost, settings::RepositoryFields};
 use crate::{
   core::{
+    agent_command::AGENT_INSTRUCTIONS_SETTING,
     app_setup_script::{self, AppSetupScriptStatus},
     feature_preview::{self, PreviewFeature},
-    skills::{self, InstalledSkill, SkillCatalogSkillView, SkillInstallScope},
+    skills::{
+      self, CustomSkill, CustomizedSkill, InstalledSkill, SkillCatalogEntry, SkillCatalogSkillView,
+      SkillInstallScope,
+    },
   },
   gpui_shell::native::{Backend, NativeEvent},
+  local_db::AgentReviewComment,
   repo_config::{self, RepoConfig},
 };
 
@@ -33,6 +38,11 @@ pub trait SettingsHost: ToolsHost + AccountHost {
   fn set_repo_settings(&self, repo_path: &str, values: &[(String, String)]) -> Result<(), String>;
   /// The skill registry, each skill with its install state (`list_skill_catalog`).
   fn skill_catalog(&self, repo_path: Option<&str>) -> Result<Vec<SkillCatalogSkillView>, String>;
+  /// The registry as of its last read, if there was one, without the
+  /// network: shown while `skill_catalog` reads it again.
+  fn skill_catalog_cached(&self, _repo_path: Option<&str>) -> Option<Vec<SkillCatalogSkillView>> {
+    None
+  }
   fn installed_skills(&self, repo_path: Option<&str>) -> Result<Vec<InstalledSkill>, String>;
   fn install_skill(
     &self,
@@ -47,6 +57,35 @@ pub trait SettingsHost: ToolsHost + AccountHost {
     scope: SkillInstallScope,
     repo_path: Option<&str>,
   ) -> Result<(), String>;
+  /// User-owned skills in the repository and the home folder.
+  fn custom_skills(&self, repo_path: Option<&str>) -> Vec<CustomSkill>;
+  /// Writes a user-owned copy of an installed skill into the repository.
+  fn customize_skill(&self, skill_id: &str, repo_path: &str) -> Result<CustomizedSkill, String>;
+  /// Downloads a registry skill not installed yet and writes it into the
+  /// repository as a user-owned copy, checked against its checksum.
+  fn customize_registry_skill(
+    &self,
+    skill_id: &str,
+    repo_path: &str,
+  ) -> Result<CustomizedSkill, String>;
+  /// Copies a skill from the home folder (`source`) into the repository.
+  fn customize_global_skill(
+    &self,
+    name: &str,
+    source: &str,
+    repo_path: &str,
+  ) -> Result<CustomizedSkill, String>;
+  /// Writes the review prompt in use (`custom`, else the built-in one) and
+  /// the review history where the tuning agent reads them; returns that
+  /// directory (`core::review_prompt::write_snapshot`).
+  fn snapshot_review_prompt(&self, repo_path: &str, custom: &str) -> Result<String, String>;
+  /// The tuning agent's proposed edits still open.
+  fn prompt_edits(&self, repo_path: &str) -> Result<Vec<AgentReviewComment>, String>;
+  /// Applies edit `id` to `custom` (else the built-in prompt), saves the
+  /// result as the repository's review prompt and returns it.
+  fn apply_prompt_edit(&self, repo_path: &str, id: &str, custom: &str) -> Result<String, String>;
+  /// Dismiss: removes edit `id` without applying it.
+  fn delete_prompt_edit(&self, repo_path: &str, id: &str) -> Result<(), String>;
   /// The bytes at `url`, for the account's avatar.
   fn fetch_image(&self, url: &str) -> Result<Vec<u8>, String>;
   fn notify(&self, event: NativeEvent);
@@ -108,9 +147,12 @@ impl SettingsHost for Backend {
   }
 
   fn skill_catalog(&self, repo_path: Option<&str>) -> Result<Vec<SkillCatalogSkillView>, String> {
-    let view =
-      tauri::async_runtime::block_on(crate::commands::skills::catalog_view(repo_path, None))?;
+    let view = crate::gpui_shell::block_on(crate::commands::skills::catalog_view(repo_path, None))?;
     Ok(view.skills)
+  }
+
+  fn skill_catalog_cached(&self, repo_path: Option<&str>) -> Option<Vec<SkillCatalogSkillView>> {
+    crate::commands::skills::cached_catalog_view(repo_path, None).map(|view| view.skills)
   }
 
   fn installed_skills(&self, repo_path: Option<&str>) -> Result<Vec<InstalledSkill>, String> {
@@ -123,7 +165,7 @@ impl SettingsHost for Backend {
     scope: SkillInstallScope,
     repo_path: Option<&str>,
   ) -> Result<(), String> {
-    tauri::async_runtime::block_on(crate::commands::skills::download_and_install(
+    crate::gpui_shell::block_on(crate::commands::skills::download_and_install(
       skill_id, scope, repo_path, None,
     ))?;
     self.with_db(skills::persist_app_index_setting)
@@ -144,8 +186,71 @@ impl SettingsHost for Backend {
     self.with_db(skills::persist_app_index_setting)
   }
 
+  fn custom_skills(&self, repo_path: Option<&str>) -> Vec<CustomSkill> {
+    let repo = repo_path.filter(|repo| self.remote_containing(repo).is_none());
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    skills::list_custom_skills(repo, home.as_deref())
+  }
+
+  fn customize_skill(&self, skill_id: &str, repo_path: &str) -> Result<CustomizedSkill, String> {
+    if self.remote_containing(repo_path).is_some() {
+      return Err(crate::gpui_shell::remote_repo::unsupported(
+        "Customizing a skill",
+      ));
+    }
+    skills::customize_skill(skill_id, repo_path)
+  }
+
+  fn customize_registry_skill(
+    &self,
+    skill_id: &str,
+    repo_path: &str,
+  ) -> Result<CustomizedSkill, String> {
+    if self.remote_containing(repo_path).is_some() {
+      return Err(crate::gpui_shell::remote_repo::unsupported(
+        "Customizing a skill",
+      ));
+    }
+    let (entry, files) =
+      crate::gpui_shell::block_on(crate::commands::skills::download_verified(skill_id, None))?;
+    skills::customize_skill_from_files(&entry.id, &entry.name, &files, repo_path)
+  }
+
+  fn customize_global_skill(
+    &self,
+    name: &str,
+    source: &str,
+    repo_path: &str,
+  ) -> Result<CustomizedSkill, String> {
+    if self.remote_containing(repo_path).is_some() {
+      return Err(crate::gpui_shell::remote_repo::unsupported(
+        "Customizing a skill",
+      ));
+    }
+    skills::customize_global_skill(name, std::path::Path::new(source), repo_path)
+  }
+
+  fn snapshot_review_prompt(&self, repo_path: &str, custom: &str) -> Result<String, String> {
+    crate::core::review_prompt::write_snapshot(repo_path, Some(custom))
+      .map(|dir| dir.display().to_string())
+  }
+
+  fn prompt_edits(&self, repo_path: &str) -> Result<Vec<AgentReviewComment>, String> {
+    crate::core::review_prompt::suggestions(repo_path)
+  }
+
+  fn apply_prompt_edit(&self, repo_path: &str, id: &str, custom: &str) -> Result<String, String> {
+    let prompt = crate::core::review_prompt::apply(repo_path, id, Some(custom))?;
+    self.set_repo_settings(repo_path, &[("review_prompt".to_string(), prompt.clone())])?;
+    Ok(prompt)
+  }
+
+  fn delete_prompt_edit(&self, repo_path: &str, id: &str) -> Result<(), String> {
+    crate::core::agent_review::delete_comment(repo_path, id)
+  }
+
   fn fetch_image(&self, url: &str) -> Result<Vec<u8>, String> {
-    tauri::async_runtime::block_on(async {
+    crate::gpui_shell::block_on(async {
       let response = reqwest::get(url)
         .await
         .and_then(reqwest::Response::error_for_status)
@@ -160,12 +265,10 @@ impl SettingsHost for Backend {
   }
 }
 
-/// `skillMatches` and `skillMatchesScope`: the skills the search and the
-/// install-level filter (`all`, `application` or `repository`) leave.
+/// `skillMatches`: the skills the search leaves.
 pub fn filter_skills<'a>(
   skills: &'a [SkillCatalogSkillView],
   query: &str,
-  scope: &str,
 ) -> Vec<&'a SkillCatalogSkillView> {
   let query = query.trim().to_lowercase();
   skills
@@ -181,15 +284,6 @@ pub fn filter_skills<'a>(
       )
       .to_lowercase();
       query.is_empty() || haystack.contains(&query)
-    })
-    .filter(|view| match scope {
-      "application" => {
-        matches!(&view.installed, Some(i) if i.scope == SkillInstallScope::Application)
-      }
-      "repository" => {
-        matches!(&view.installed, Some(i) if i.scope == SkillInstallScope::Repository)
-      }
-      _ => true,
     })
     .collect()
 }
@@ -209,10 +303,54 @@ pub fn parse_scope(value: &str) -> Option<SkillInstallScope> {
   }
 }
 
+// Matches `DEFAULT_SKILLS_CATALOG_URL`: the catalog and its pages live there.
+const SKILL_REGISTRY_ORIGIN: &str = "https://treq.dev";
+
+/// The skill's page on the treq.dev registry, or the registry itself.
+pub fn skill_registry_url(route: Option<&str>) -> String {
+  match route {
+    Some(route) if route.starts_with("/skills/") => format!("{SKILL_REGISTRY_ORIGIN}{route}"),
+    _ => format!("{SKILL_REGISTRY_ORIGIN}/skills"),
+  }
+}
+
+fn format_bytes(bytes: u64) -> String {
+  const KB: f64 = 1024.;
+  let b = bytes as f64;
+  if b < KB {
+    format!("{bytes} B")
+  } else if b < KB * KB {
+    format!("{:.1} KB", b / KB)
+  } else {
+    format!("{:.1} MB", b / (KB * KB))
+  }
+}
+
+/// The catalog metadata a link's install confirmation lists.
+pub fn skill_details(skill: &SkillCatalogEntry) -> Vec<(String, String)> {
+  let count = skill.files.len();
+  let size: u64 = skill.files.iter().map(|f| f.size).sum();
+  let files = format!(
+    "{count} {}, {}",
+    if count == 1 { "file" } else { "files" },
+    format_bytes(size)
+  );
+  [
+    ("Catalog id", Some(skill.id.clone())),
+    ("Source", Some(skill.source.clone())),
+    ("Category", skill.category.clone()),
+    ("License", skill.license.clone()),
+    ("Files", Some(files)),
+  ]
+  .into_iter()
+  .filter_map(|(label, value)| Some((label.to_string(), value.filter(|v| !v.is_empty())?)))
+  .collect()
+}
+
 pub const NOTIFY_AGENT_FINISHED: &str = "notify_agent_finished";
 
 /// Each preview feature's title and its page on the website.
-pub const PREVIEW_FEATURES: [(PreviewFeature, &str, &str); 5] = [
+pub const PREVIEW_FEATURES: [(PreviewFeature, &str, &str); 4] = [
   (
     PreviewFeature::SkillsInstallation,
     "Skills installation",
@@ -228,7 +366,6 @@ pub const PREVIEW_FEATURES: [(PreviewFeature, &str, &str); 5] = [
     "Linear integration",
     "/docs/concepts/linear-integration",
   ),
-  (PreviewFeature::Logs, "Logs", "/docs/concepts/logs"),
   (
     PreviewFeature::Devcontainers,
     "Devcontainer environments",
@@ -241,11 +378,11 @@ pub const ZOOM: (f32, f32, f32) = (50., 200., 5.);
 
 /// `FONT_SIZE_PRESETS`: size and label.
 pub const FONT_SIZES: [(u32, &str); 5] = [
-  (10, "Extra Small"),
+  (10, "Extra small"),
   (12, "Small"),
   (14, "Medium (default)"),
   (16, "Large"),
-  (18, "Extra Large"),
+  (18, "Extra large"),
 ];
 
 /// `nearestFontSizePreset`: older builds allowed any size from 8 to 32.
@@ -273,6 +410,7 @@ pub struct AppFields {
   pub default_agent: String,
   pub conflict_marker_style: String,
   pub notify_agent_finished: bool,
+  pub agent_instructions: String,
 }
 
 /// The keys the screen loads: the Application tab's and the preview flags.
@@ -285,6 +423,7 @@ pub fn app_keys() -> Vec<String> {
     "default_agent",
     "conflict_marker_style",
     NOTIFY_AGENT_FINISHED,
+    AGENT_INSTRUCTIONS_SETTING,
   ]
   .into_iter()
   .map(str::to_string)
@@ -318,6 +457,7 @@ impl AppFields {
       // On unless turned off, as the backend reads it.
       notify_agent_finished: string(values, NOTIFY_AGENT_FINISHED)
         .is_none_or(|value| value.trim() != "false"),
+      agent_instructions: string(values, AGENT_INSTRUCTIONS_SETTING).unwrap_or_default(),
     }
   }
 
@@ -331,6 +471,7 @@ impl AppFields {
         NOTIFY_AGENT_FINISHED,
         self.notify_agent_finished.to_string(),
       ),
+      (AGENT_INSTRUCTIONS_SETTING, self.agent_instructions.clone()),
       ("terminal_font_size", self.font_size.to_string()),
       ("ui_zoom", (self.zoom.round() as i64).to_string()),
     ]
@@ -355,7 +496,7 @@ pub fn preview_flags(values: &Values) -> Vec<(PreviewFeature, bool)> {
 }
 
 /// The repository settings behind each field, in the order React saves them.
-const REPO_KEYS: [&str; 8] = [
+const REPO_KEYS: [&str; 9] = [
   "branch_name_pattern",
   "included_copy_files",
   "default_model",
@@ -364,6 +505,7 @@ const REPO_KEYS: [&str; 8] = [
   "review_prompt",
   "review_agent",
   "auto_review_trigger",
+  AGENT_INSTRUCTIONS_SETTING,
 ];
 
 pub fn repo_keys() -> Vec<String> {
@@ -398,6 +540,7 @@ impl RepositoryFields {
       review_prompt: get("review_prompt").unwrap_or_default(),
       review_agent: get("review_agent").unwrap_or_default(),
       auto_review_trigger: auto_review_trigger(get("auto_review_trigger").as_deref()),
+      agent_instructions: get(AGENT_INSTRUCTIONS_SETTING).unwrap_or_default(),
     }
   }
 
@@ -411,6 +554,7 @@ impl RepositoryFields {
       self.review_prompt.clone(),
       self.review_agent.clone(),
       self.auto_review_trigger.clone(),
+      self.agent_instructions.clone(),
     ];
     REPO_KEYS
       .iter()
@@ -432,6 +576,7 @@ impl RepositoryFields {
       "reviewPrompt" => self.review_prompt = text(),
       "reviewAgent" => self.review_agent = text(),
       "autoReviewTrigger" => self.auto_review_trigger = text(),
+      "agentInstructions" => self.agent_instructions = text(),
       _ => {}
     }
   }
@@ -488,6 +633,56 @@ pub fn setup_status_text(status: &AppSetupScriptStatus) -> String {
   )
 }
 
+/// A repository's name as the Repository page titles it: its folder's.
+pub fn repo_name(path: &str) -> String {
+  let trimmed = path.trim_end_matches(['/', '\\']);
+  trimmed
+    .rsplit(['/', '\\'])
+    .next()
+    .filter(|name| !name.is_empty())
+    .unwrap_or(trimmed)
+    .to_string()
+}
+
+/// When an edited field saves itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SaveTiming {
+  /// A choice (select, switch): as soon as it is made.
+  Now,
+  /// Typed text: once typing pauses for [`SAVE_DEBOUNCE`].
+  Debounced,
+}
+
+/// How long typing must pause before a text field saves.
+pub const SAVE_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(500);
+/// How long the "Saved" tick stays next to a field's label.
+pub const SAVED_TICK: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// When `field` (a screen field id) saves, or `None` when it saves itself
+/// (theme, zoom, previews) or isn't a setting at all.
+pub fn save_timing(field: &str) -> Option<SaveTiming> {
+  match field {
+    "repo.branchNamePattern"
+    | "repo.includedFiles"
+    | "repo.reviewPrompt"
+    | "repo.agentInstructions"
+    | "app.setupScript"
+    | "app.agentInstructions" => Some(SaveTiming::Debounced),
+    "repo.defaultModel"
+    | "repo.defaultAgent"
+    | "repo.autoPush"
+    | "repo.reviewAgent"
+    | "repo.autoReviewTrigger"
+    | "app.fontSize"
+    | "app.defaultModel"
+    | "app.defaultAgent"
+    | "app.conflictMarkerStyle"
+    | "app.notifyAgentFinished"
+    | "app.setupScriptAlwaysRun" => Some(SaveTiming::Now),
+    _ => None,
+  }
+}
+
 /// `set_repo_setting` for each value.
 pub fn save_repo_settings(
   db: &crate::db::Database,
@@ -499,4 +694,65 @@ pub fn save_repo_settings(
       .map_err(|e| e.to_string())?;
   }
   Ok(())
+}
+
+#[cfg(test)]
+mod save_timing_tests {
+  use super::*;
+
+  #[test]
+  fn preview_features_omit_logs() {
+    assert!(PREVIEW_FEATURES
+      .iter()
+      .all(|(_, title, _)| *title != "Logs"));
+  }
+
+  #[test]
+  fn names_a_repository_by_its_folder() {
+    assert_eq!(repo_name("/Users/me/code/event-bus"), "event-bus");
+    assert_eq!(repo_name("/Users/me/code/event-bus/"), "event-bus");
+    assert_eq!(repo_name("C:\\code\\event-bus"), "event-bus");
+    assert_eq!(repo_name("/"), "");
+  }
+
+  #[test]
+  fn saves_typed_fields_after_a_pause_and_choices_at_once() {
+    for field in [
+      "repo.branchNamePattern",
+      "repo.includedFiles",
+      "repo.reviewPrompt",
+      "app.setupScript",
+    ] {
+      assert_eq!(save_timing(field), Some(SaveTiming::Debounced), "{field}");
+    }
+    for field in [
+      "repo.defaultModel",
+      "repo.defaultAgent",
+      "repo.autoPush",
+      "repo.reviewAgent",
+      "repo.autoReviewTrigger",
+      "app.fontSize",
+      "app.defaultModel",
+      "app.defaultAgent",
+      "app.conflictMarkerStyle",
+      "app.notifyAgentFinished",
+      "app.setupScriptAlwaysRun",
+    ] {
+      assert_eq!(save_timing(field), Some(SaveTiming::Now), "{field}");
+    }
+  }
+
+  #[test]
+  fn gives_no_timing_to_fields_that_save_themselves() {
+    // Theme, zoom and previews write on their own; tabs and searches don't save.
+    for field in [
+      "app.theme",
+      "app.zoom",
+      "settings.tab",
+      "skills.query",
+      "preview.x",
+    ] {
+      assert_eq!(save_timing(field), None, "{field}");
+    }
+  }
 }

@@ -12,10 +12,17 @@ Work through these steps in order.
    (earlier review runs), `local-human` (the user's own draft comments) and
    `github` (review threads on the pull request). Read them all.
 
-2. Read the diff yourself (for example with `treq diff` or `git diff`), then
-   look for correctness bugs, missed edge cases, unsafe error handling, and
-   clear quality problems. Skip style nits the project's formatter already
-   handles.
+2. Read the diff yourself, then look for correctness bugs, missed edge
+   cases, unsafe error handling, and clear quality problems. Skip style nits
+   the project's formatter already handles. For a workspace diff, read the
+   whole workspace (its commits and working copy) with:
+
+     treq changes workspace-diff --repo . --workspace <workspace id>
+
+   Use `jj` (`jj log`, `jj show`, `jj diff`) for anything else. Never run
+   `git`: a Treq workspace is a jj workspace that the home repository's git
+   ignores, so git shows the home repository instead, including changes
+   unrelated to this review.
 
 3. Drop any finding that a comment from step 1 already covers, whatever its
    source and whether or not it is marked resolved. Only a genuinely new

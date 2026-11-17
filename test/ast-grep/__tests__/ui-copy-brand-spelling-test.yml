@@ -1,0 +1,21 @@
+id: ui-copy-brand-spelling
+valid:
+  - |
+    fn brands() -> Div {
+      div().child(label("Open in GitHub")).child(label("GitLab, Jujutsu, JavaScript, TypeScript, macOS, iPhone"))
+    }
+  - |
+    fn type_name() -> Variant { Variant::Github }
+invalid:
+  - |
+    fn sidebar() -> Row { Row::new("gh", "Github", p) }
+  - |
+    fn others() -> &'static str { "Gitlab" }
+  - |
+    fn others() -> &'static str { "Built for Jujitsu" }
+  - |
+    fn others() -> &'static str { "Javascript and Typescript" }
+  - |
+    fn others() -> &'static str { "Runs on MacOS" }
+  - |
+    fn others() -> &'static str { "Iphone app" }

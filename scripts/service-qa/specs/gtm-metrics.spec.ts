@@ -7,7 +7,7 @@
  * present) and checks the counts move by exactly that much. The local
  * database may hold rows from other specs, so it compares before and after.
  */
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it } from "@jest/globals";
 import { getFunctionsBaseUrl, getServiceClient } from "../clients";
 import {
   createTestUser,
@@ -202,10 +202,10 @@ it("returns aggregate counts that match seeded data and nothing else", async () 
     ["from", "to", ...COUNT_KEYS].sort(),
   );
   for (const key of COUNT_KEYS) {
-    expect(
-      after[key] === null || Number.isInteger(after[key]),
-      `${key} is a count`,
-    ).toBe(true);
+    expect({
+      key,
+      isCount: after[key] === null || Number.isInteger(after[key]),
+    }).toEqual({ key, isCount: true });
   }
   const body = JSON.stringify(after);
   for (const secretish of [

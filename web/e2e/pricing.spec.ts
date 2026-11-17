@@ -15,21 +15,22 @@ test('lists Free, Pro and Team with their prices', async ({ page }) => {
   const free = plans.getByRole('article', { name: 'Free' });
   await expect(free).toContainText('$0');
   await expect(free).toContainText('gh');
-  await expect(free).toContainText('personal API key');
+  await expect(free).not.toContainText('Linear');
 
   const pro = plans.getByRole('article', { name: 'Pro' });
   await expect(pro).toContainText('$15');
   await expect(pro).toContainText('/user/month');
-  await expect(pro).toContainText('14-day free trial');
-  await expect(pro).toContainText('Managed cloud workspace');
-  await expect(pro).toContainText('Linear OAuth');
+  await expect(pro).not.toContainText(/trial/i);
+  await expect(pro).toContainText('Cloud workspaces, pay-as-you-go from US$0.20 per hour');
+  await expect(pro).toContainText('Linear integration');
   await expect(pro).not.toContainText(/mobile/i);
 
   const team = plans.getByRole('article', { name: 'Team' });
   await expect(team).toContainText('$199');
   await expect(team).toContainText('5 members included, US$8 per extra');
   await expect(team).toContainText('Everything in Pro for every member');
-  await expect(team).toContainText('Shared GitHub App installation');
+  await expect(team).toContainText('Manage team-wide integrations');
+  await expect(team).toContainText('Sandbox usage management');
 });
 
 test('points each plan at the right next step', async ({ page }) => {
@@ -38,16 +39,16 @@ test('points each plan at the right next step', async ({ page }) => {
     'href',
     'https://github.com/tznc/treq/releases/latest',
   );
-  await expect(plans.getByRole('link', { name: 'Start 14-day free trial' })).toHaveAttribute(
+  await expect(plans.getByRole('link', { name: 'Get Pro' })).toHaveAttribute(
     'href',
-    '/dashboard?tab=subscription',
+    '/dashboard/?tab=account',
   );
   await expect(plans.getByRole('link', { name: 'Set up Team' })).toHaveAttribute(
     'href',
-    '/dashboard?tab=team',
+    '/dashboard/?tab=account',
   );
 
-  // Signed out, the Team tab asks you to sign in first.
+  // Signed out, the Account page asks you to sign in first.
   await plans.getByRole('link', { name: 'Set up Team' }).click();
   await expect(page.getByRole('heading', { name: 'Sign in to Treq' })).toBeVisible();
 });
@@ -56,19 +57,17 @@ test('compares the three plans', async ({ page }) => {
   await openPricing(page);
   const table = page.getByRole('region', { name: 'Feature comparison' }).getByRole('table');
   await expect(table.getByRole('columnheader')).toHaveText(['Feature', 'Free', 'Pro', 'Team']);
-  await expect(table.getByRole('row', { name: /Free trial/ })).toContainText('14 days');
+  await expect(table).not.toContainText(/trial/i);
 });
 
-test('answers what is paid, how the trial works and how Team seats count', async ({ page }) => {
+test('answers what is paid and how Team seats count', async ({ page }) => {
   await openPricing(page);
   const faq = page.getByRole('region', { name: 'Frequently asked questions' });
 
   await faq.getByText('What is free, and what do I pay for?').click();
   await expect(faq).toContainText('servers');
 
-  await faq.getByText('How does the Pro trial work?').click();
-  await expect(faq).toContainText('card');
-  await expect(faq).toContainText('Team has no trial');
+  await expect(faq).not.toContainText(/trial/i);
 
   await faq.getByText('How do Team seats count?').click();
   await expect(faq).toContainText('Each member beyond 5 adds US$8 per month');

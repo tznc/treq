@@ -1,0 +1,32 @@
+id: no-regex-new-per-call-rust
+language: rust
+severity: error
+message: >
+  Do not compile a regex on every call. Regex::new parses and builds the
+  automaton each time it runs, which is costly in a hot path or a loop. Hoist
+  the pattern into a `static NAME: LazyLock<Regex> = LazyLock::new(|| ...)`
+  next to its use (or initialise a `OnceLock` once) and reuse it.
+files:
+  - "src-tauri/src/**/*.rs"
+ignores:
+  - "**/tests.rs"
+  - "**/tests/**"
+rule:
+  any:
+    - pattern: Regex::new($$$)
+    - pattern: regex::Regex::new($$$)
+  not:
+    any:
+      - inside:
+          kind: static_item
+          stopBy: end
+      - inside:
+          kind: call_expression
+          regex: '^(std::sync::)?(LazyLock|LazyCell)::new|\.get_or_init\('
+          stopBy: end
+      - inside:
+          kind: mod_item
+          has:
+            field: name
+            regex: '^tests?$'
+          stopBy: end

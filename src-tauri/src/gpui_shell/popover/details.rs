@@ -2,14 +2,17 @@
 //! and the prompt it started with (`ShowWorkspace`'s `PopoverContent`
 //! `w-96`).
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
+use gpui_kit::base::TestSupportExt as _;
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, ClipboardItem, Context, Div, FontWeight, SharedString,
 };
 
 use super::{data::StartingPrompt, Popover};
 use crate::gpui_shell::{
-  native::{NativeEvent, ToastTone},
+  native::NativeEvent,
   theme::{self, Palette},
   time,
   ui::{self, Button, Size, TextSize, Variant},
@@ -61,12 +64,14 @@ impl Popover {
       let prompt = cx
         .background_spawn(async move { host.starting_prompt(&repo, id) })
         .await;
-      let _ = this.update(cx, |this, cx| {
-        if let super::Content::Details(state) = &mut this.content {
-          state.prompt = prompt;
-          cx.notify();
-        }
-      });
+      this
+        .update(cx, |this, cx| {
+          if let super::Content::Details(state) = &mut this.content {
+            state.prompt = prompt;
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     }));
   }
 
@@ -79,12 +84,9 @@ impl Popover {
       return;
     };
     cx.write_to_clipboard(ClipboardItem::new_string(prompt.text.clone()));
-    self.host.notify(NativeEvent::Toast {
-      title: "Prompt copied".into(),
-      description: String::new(),
-      tone: ToastTone::Success,
-      action: None,
-    });
+    self
+      .host
+      .notify(NativeEvent::from(Toast::success("Prompt copied")));
   }
 
   /// "View full prompt": React's prompt history opens on it.
@@ -147,18 +149,24 @@ impl Popover {
       );
 
     let copy = prompt.is_some().then(|| {
-      ui::text(
-        Button::new("details-copy", &p)
-          .variant(Variant::Ghost)
-          .size(Size::Sm)
-          .h(zpx(24.))
-          .px_2()
-          .gap_1()
-          .icon(theme::ICON_COPY, 12.)
-          .label("Copy"),
-        TextSize::Xs,
-      )
-      .on_click(cx.listener(|this, _, _, cx| this.copy_prompt(cx)))
+      let copy = cx.listener(|this, _, _, cx| this.copy_prompt(cx));
+      ui::copy_feedback::copyable("details-copy-feedback", move |copied| {
+        ui::text(
+          Button::new("details-copy", &p)
+            .variant(Variant::Ghost)
+            .size(Size::Sm)
+            .h(zpx(24.))
+            .px_2()
+            .gap_1()
+            .copy_icon(copied, 12.)
+            .label("Copy"),
+          // Short label (['button label']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
+          TextSize::Xs,
+        )
+        .on_click(copy)
+        .into_any_element()
+      })
     });
     let body = match &prompt {
       Some(prompt) => div()
@@ -166,30 +174,34 @@ impl Popover {
           ui::text(div(), TextSize::Sm)
             .id("details-prompt")
             .debug_selector(|| "details-prompt".into())
+            .role(gpui::Role::Paragraph)
+            .aria_label(prompt.text.clone())
             .mt_1()
             .max_h(zpx(160.))
             .overflow_y_scroll()
             .text_color(p.muted_foreground)
-            .child(SharedString::from(prompt.text.clone())),
+            .child(SharedString::from(prompt.text.clone()))
+            .test_support(),
         )
         .child(
+          // Short label (['link label']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .id("details-view-full")
+            .role(gpui::Role::Button)
+            .aria_label("View full prompt")
             .debug_selector(|| "details-view-full".into())
             .mt_1()
             .cursor_pointer()
             .text_color(theme::palette(self.dark).primary)
             .hover(|s| s.underline())
             .child("View full prompt")
-            .on_click(cx.listener(|this, _, _, cx| this.view_full_prompt(cx))),
+            .on_click(cx.listener(|this, _, _, cx| this.view_full_prompt(cx)))
+            .test_support(),
         ),
       None => div().child(
-        ui::text(div(), TextSize::Sm)
-          .id("details-no-prompt")
-          .debug_selector(|| "details-no-prompt".into())
-          .mt_1()
-          .text_color(p.muted_foreground)
-          .child("No prompt recorded for this workspace yet."),
+        ui::EmptyState::new("details-no-prompt", "No prompt recorded", &p)
+          .message("This workspace was created without an agent prompt."),
       ),
     };
     let starting = div()

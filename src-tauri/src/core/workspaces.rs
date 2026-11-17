@@ -1,6 +1,8 @@
 use crate::lock_ext::LockExt;
+use crate::result_ext::ResultExt;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::time::Duration;
 
 use ignore::WalkBuilder;
 use serde::{Deserialize, Serialize};
@@ -31,7 +33,7 @@ pub struct WorkspaceEntry {
   #[serde(default, skip_serializing_if = "Option::is_none")]
   pub submodule_synced: Option<bool>,
   /// File status for highlighting in the Code tab file list: "conflict",
-  /// "workingCopy", or "committed". Absent means untouched. Only populated by
+  /// "workingCopy", "committed", or "untouched". Only populated by
   /// `core::files::list_workspace_files`; plain directory listings leave it unset.
   #[serde(default, skip_serializing_if = "Option::is_none")]
   pub status: Option<String>,
@@ -124,7 +126,7 @@ pub struct WorkspacePartialStatus {
   pub commits_ahead: usize,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct WorkspaceSidebarStatus {
   pub current: local_db::Workspace,
   pub has_conflicts: bool,
@@ -189,6 +191,18 @@ pub struct WorkspaceMetadata {
 /// Parse the creation metadata JSON callers send.
 /// Unknown fields are ignored; empty arrays are normalized to `None`.
 /// Invalid or missing JSON yields an all-`None` metadata.
+/// Each workspace's id, title and description: what a window shows from the
+/// database that the CLI or another window can change. `None` when it can't
+/// be read.
+pub fn workspace_texts(repo_path: &str) -> Option<Vec<(i64, String, Option<String>)>> {
+  local_db::get_workspaces(repo_path).ok().map(|list| {
+    list
+      .into_iter()
+      .map(|w| (w.id, w.title, w.description))
+      .collect()
+  })
+}
+
 pub fn parse_workspace_metadata(metadata: Option<&str>) -> WorkspaceMetadata {
   let parsed: Option<WorkspaceMetadata> = metadata.and_then(|m| serde_json::from_str(m).ok());
   let mut parsed = parsed.unwrap_or_default();
@@ -250,15 +264,17 @@ pub fn ls_workspace(
     }
 
     if let Some(name) = entry_path.file_name().and_then(|name| name.to_str()) {
-      let modified_at = std::fs::metadata(entry_path)
-        .ok()
-        .and_then(|metadata| metadata.modified().ok())
-        .map(|modified| chrono::DateTime::<chrono::Utc>::from(modified).to_rfc3339());
+      // As `list_directory`: the listing's type, a stat only for a symlink,
+      // and no times, which no caller reads.
+      let is_directory = match entry.file_type() {
+        Some(t) if !t.is_symlink() => t.is_dir(),
+        _ => entry_path.is_dir(),
+      };
       entries.push(WorkspaceEntry {
         name: name.to_string(),
         path: entry_path.to_string_lossy().to_string(),
-        is_directory: entry_path.is_dir(),
-        modified_at,
+        is_directory,
+        modified_at: None,
         submodule_pin: None,
         submodule_synced: None,
         status: None,
@@ -282,40 +298,10 @@ pub fn ls_workspace(
   Ok(entries)
 }
 
-/// Like `ls_workspace`, but also annotates each entry with its jj file
-/// status (conflict/committed/working-copy) for the Code tab's file list.
-/// This is meaningfully more expensive (three extra jj computations), so it
-/// is kept separate from the plain `ls_workspace` used by callers (e.g.
-/// `get_workspace_readme`) that don't need status.
-pub fn ls_workspace_with_status(
-  repo_path: &str,
-  workspace_id: Option<i64>,
-) -> Result<Vec<WorkspaceEntry>, String> {
-  let workspace_root = resolve_workspace_root(repo_path, workspace_id)?;
-  let mut entries = ls_workspace(repo_path, workspace_id)?;
-
-  let target_branch = match workspace_id {
-    Some(id) => local_db::get_workspace_by_id(repo_path, id)
-      .ok()
-      .flatten()
-      .and_then(|ws| ws.target_branch),
-    None => None,
-  };
-  crate::core::files::annotate_entry_statuses(
-    &workspace_root,
-    &mut entries,
-    target_branch.as_deref(),
-  );
-
-  Ok(entries)
-}
-
-pub fn get_workspace_readme(
-  repo_path: &str,
-  workspace_id: Option<i64>,
-) -> Result<Option<String>, String> {
-  let readme = ls_workspace(repo_path, workspace_id)?
-    .into_iter()
+/// The README among a workspace root's `entries`, read.
+fn read_readme(entries: &[WorkspaceEntry]) -> Result<Option<String>, String> {
+  let readme = entries
+    .iter()
     .find(|entry| !entry.is_directory && entry.name.eq_ignore_ascii_case("README.md"));
 
   match readme {
@@ -324,6 +310,17 @@ pub fn get_workspace_readme(
       .map_err(|e| format!("Failed to read workspace README '{}': {}", entry.path, e)),
     None => Ok(None),
   }
+}
+
+/// The Code tab's overview: `files::list_workspace_files` and the README it
+/// lists, from one listing of the root rather than two.
+pub fn workspace_overview(
+  repo_path: &str,
+  workspace_id: Option<i64>,
+) -> Result<(Vec<WorkspaceEntry>, Option<String>), String> {
+  let entries = crate::core::files::list_workspace_files(repo_path, workspace_id)?;
+  let readme = read_readme(&entries)?;
+  Ok((entries, readme))
 }
 
 impl WorkspaceMetadata {
@@ -367,6 +364,39 @@ pub fn merge_linear_issue_metadata(
 
   local_db::get_workspace_by_id(repo_path, workspace_id)?
     .ok_or_else(|| format!("Workspace not found after update: {workspace_id}"))
+}
+
+/// The branch to start a Linear issue's workspace on: its parent issue's
+/// workspace, when the parent has an open one, so the sub-issue stacks on it;
+/// otherwise `default`.
+pub fn linear_issue_base_branch(
+  workspaces: &[local_db::Workspace],
+  parent_identifier: Option<&str>,
+  default: &str,
+) -> String {
+  parent_identifier
+    .and_then(|parent| linear_issue_workspace_branch(workspaces, parent))
+    .unwrap_or_else(|| default.to_string())
+}
+
+/// The branch of the open workspace linked to Linear issue `identifier`.
+pub fn linear_issue_workspace_branch(
+  workspaces: &[local_db::Workspace],
+  identifier: &str,
+) -> Option<String> {
+  linear_issue_branches(workspaces).remove(identifier)
+}
+
+/// Each open workspace's branch, by the Linear issue key it is linked to.
+pub fn linear_issue_branches(workspaces: &[local_db::Workspace]) -> HashMap<String, String> {
+  workspaces
+    .iter()
+    .filter(|w| !w.archived)
+    .filter_map(|w| {
+      let key = parse_workspace_metadata(w.metadata.as_deref()).linear_issue_key?;
+      Some((key, w.branch_name.clone()))
+    })
+    .collect()
 }
 
 pub fn merge_tracker_item_metadata_json(
@@ -509,16 +539,12 @@ pub fn create_new_workspace(
     metadata.sparse_patterns,
     metadata.symlinked_dirs,
   )?;
-  if let Some(title) = metadata
+  let title = metadata
     .title
     .as_deref()
     .map(str::trim)
-    .filter(|t| !t.is_empty())
-  {
-    local_db::update_workspace_title(repo_path, workspace.id, title)?;
-  }
-  local_db::update_workspace_last_rebased_commit(repo_path, workspace.id, "")?;
-  local_db::get_workspace_by_id(repo_path, workspace.id)?
+    .filter(|t| !t.is_empty());
+  local_db::init_new_workspace_state(repo_path, workspace.id, title)?
     .ok_or_else(|| format!("Workspace not found after creation: {}", workspace.id))
 }
 
@@ -536,12 +562,14 @@ pub fn open_or_create_workspace_from_pr(
   base_branch: &str,
   title: Option<&str>,
   description: Option<&str>,
+  pr_number: Option<u64>,
 ) -> Result<(local_db::Workspace, bool), String> {
   let request = BranchWorkspaceRequest {
     head_branch: head_branch.to_string(),
     base_branch: base_branch.to_string(),
     title: title.map(str::to_string),
     description: description.map(str::to_string),
+    pr_number,
   };
   request.validate()?;
 
@@ -554,9 +582,17 @@ pub fn open_or_create_workspace_from_pr(
   }
 
   // Ensure remote bookmarks (including the PR head) are imported before create.
-  let _ = jj::jj_git_fetch(repo_path);
+  // Best effort: offline, the workspace still opens on the local bookmarks.
+  if let Err(error) = jj::jj_git_fetch(repo_path) {
+    tracing::warn!(%error, repo_path, "fetch before opening a workspace failed; using local bookmarks");
+  }
   open_or_create_synced(repo_path, &request)
 }
+
+/// How recent a fetch must be for creating or retargeting a workspace to rely
+/// on it: the New Workspaces dialog fetches when it opens, and each workspace
+/// it makes would fetch again.
+pub(super) const RECENT_FETCH: Duration = Duration::from_secs(30);
 
 /// A branch to open a workspace for, as [`open_or_create_workspaces`] takes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -566,6 +602,9 @@ pub struct BranchWorkspaceRequest {
   pub base_branch: String,
   pub title: Option<String>,
   pub description: Option<String>,
+  /// The pull request the branch is the head of; the new workspace's title
+  /// and description then follow it (`pr_sync`).
+  pub pr_number: Option<u64>,
 }
 
 impl BranchWorkspaceRequest {
@@ -580,6 +619,18 @@ impl BranchWorkspaceRequest {
   }
 }
 
+/// Tracks `branch@origin` when only the remote has `branch`, so a workspace
+/// can target a pull request's base that was never checked out locally.
+pub(crate) fn ensure_local_branch(repo_path: &str, branch: &str) -> Result<(), String> {
+  let status = jj::check_branch_exists(repo_path, branch)
+    .map_err(|e| format!("Failed to check branch '{branch}': {e}"))?;
+  if status.local_exists || !status.remote_exists {
+    return Ok(());
+  }
+  jj::jj_bookmark_track(repo_path, branch, "origin")
+    .map_err(|e| format!("Failed to track '{branch}@origin': {e}"))
+}
+
 /// [`open_or_create_workspace_from_pr`] for several branches of one
 /// repository, syncing and fetching once. Each request gets its own result,
 /// so one bad branch does not stop the others.
@@ -590,7 +641,9 @@ pub fn open_or_create_workspaces(
   if let Err(err) = sync_workspaces(repo_path) {
     return requests.iter().map(|_| Err(err.clone())).collect();
   }
-  let _ = jj::jj_git_fetch(repo_path);
+  if let Err(error) = jj::jj_git_fetch_unless_recent(repo_path, RECENT_FETCH) {
+    tracing::warn!(%error, repo_path, "fetch before opening workspaces failed; using local bookmarks");
+  }
   requests
     .iter()
     .map(|request| {
@@ -647,7 +700,8 @@ pub(crate) fn open_or_create_synced(
 
   // create_workspace may default the target to the repo default branch; retarget
   // onto the PR base so stacked rebases follow the PR's merge base.
-  apply_workspace_target_branch(repo_path, workspace.id, base_branch)?;
+  ensure_local_branch(repo_path, base_branch)?;
+  apply_workspace_target_branch_after(repo_path, workspace.id, base_branch, RECENT_FETCH)?;
 
   if let Some(title) = request
     .title
@@ -667,6 +721,9 @@ pub(crate) fn open_or_create_synced(
         workspace.id
       )
     })?;
+  if let Some(number) = request.pr_number {
+    super::pr_sync::record_created(repo_path, &updated, number)?;
+  }
 
   Ok((updated, true))
 }
@@ -747,7 +804,10 @@ pub fn validate_branch_name(name: &str) -> Result<(), String> {
 /// `symlinked_dirs` are paths relative to the repo root (e.g. `node_modules`). Each
 /// existing path is linked into the new workspace instead of being copied, so large
 /// dependency trees are shared with the home working copy.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+  clippy::too_many_arguments,
+  reason = "flat argument list kept to match callers"
+)]
 pub fn create_workspace_with_symlinked_dirs(
   repo_path: &str,
   branch_name: &str,
@@ -768,14 +828,25 @@ pub fn create_workspace_with_symlinked_dirs(
   let repo_mutation_lock = commit_lock_for_repo(repo_path);
   let _repo_mutation_guard = repo_mutation_lock.lock_or_recover();
 
-  if local_db::get_workspace_by_branch(repo_path, branch_name)
+  if let Some(existing) = local_db::get_workspace_by_branch(repo_path, branch_name)
     .map_err(|e| format!("Failed to check existing workspace: {e}"))?
-    .is_some()
   {
-    return Err(format!(
-      "Workspace '{}' is already registered; refusing to recreate it",
-      branch_name
-    ));
+    let existing_dir = Path::new(repo_path)
+      .join(".treq")
+      .join("workspaces")
+      .join(&existing.workspace_path);
+    if existing_dir.join(".jj").exists() {
+      return Err(format!(
+        "Workspace '{}' is already registered; refusing to recreate it",
+        branch_name
+      ));
+    }
+    // A create killed between reserving its row and making the dir: drop it and retry.
+    rollback_created_workspace(
+      repo_path,
+      &existing_dir.to_string_lossy(),
+      Some(existing.id),
+    );
   }
 
   // Moved files outside the sparse cone would land in the commit but be invisible on disk.
@@ -810,18 +881,16 @@ pub fn create_workspace_with_symlinked_dirs(
       .join(".treq")
       .join("workspaces")
       .join(&source_workspace.workspace_path);
-    let _ = jj::jj_get_changed_files(&source_workspace_path.to_string_lossy());
+    jj::jj_get_changed_files(&source_workspace_path.to_string_lossy())
+      .warn_on_err("jj get changed files");
   }
 
-  let branches =
-    jj::get_branches(repo_path).map_err(|e| format!("Failed to get branches: {}", e))?;
-
-  let branch_exists: bool = branches.iter().any(|b| b.name == branch_name);
-
-  // Always check if branch exists on remote
+  // One load answers the local and remote questions and reads the bookmark's
+  // commit for the rollback below.
   let remote_ref = format!("{}@origin", branch_name);
-  let branch_exists_on_remote = jj::check_remote_branch_exists(repo_path, &remote_ref)
-    .map_err(|e| format!("Failed to check remote branch: {}", e))?;
+  let existing =
+    jj::WorkspaceRepo::load(repo_path).map_err(|e| format!("Failed to get branches: {}", e))?;
+  let (branch_exists, branch_exists_on_remote) = existing.bookmark_presence(branch_name, "origin");
 
   let resolved_source_branch = if source_branch.is_none() {
     // A local tracking branch can lag its remote after fetching. In that case,
@@ -846,22 +915,42 @@ pub fn create_workspace_with_symlinked_dirs(
   };
 
   let new_branch: bool = !branch_exists || resolved_source_branch.as_deref() == Some(&remote_ref);
-  let prior_bookmark = branch_exists.then(|| jj::jj_get_commit_id(repo_path, branch_name));
-  let workspace_name = jj::create_workspace(
+  let prior_bookmark = branch_exists.then(|| existing.commit_id(branch_name));
+  drop(existing);
+
+  // The row's id prefixes the dir and jj name, so `feat/x` and `feat-x` never collide.
+  let reserved = local_db::reserve_workspace(
     repo_path,
-    branch_name,
+    branch_name.to_string(),
+    description,
+    moved_files.clone(),
+    sparse_patterns.clone(),
+    !branch_exists_on_remote,
+    &effective_target_branch,
+    |id| jj::sanitize_workspace_name(&format!("{id}-{branch_name}")),
+  )
+  .map_err(|e| format!("Failed to add workspace to db: {}", e))?;
+
+  let workspace_name = match jj::create_workspace(
+    repo_path,
+    &reserved.workspace_name,
     branch_name,
     new_branch,
     resolved_source_branch.as_deref(),
     Some(&effective_target_branch),
     sparse_patterns.as_deref(),
-  )
-  .map_err(|e| format!("Failed to create workspace: {}", e))?;
+  ) {
+    Ok(name) => name,
+    Err(e) => {
+      if let Err(error) = local_db::delete_workspace(repo_path, reserved.id) {
+        tracing::warn!(%error, id = reserved.id, "Rollback: failed to delete reserved workspace row");
+      }
+      return Err(format!("Failed to create workspace: {}", e));
+    }
+  };
 
-  // jj has registered the workspace. Any failure from here on must undo that,
-  // or the half-made workspace blocks a retry and later shows up in the
-  // sidebar through discovery without its metadata.
-  let mut registered_id: Option<i64> = None;
+  // jj has registered the workspace; any later failure undoes it and the reserved row.
+  let registered_id = Some(reserved.id);
   let result = (|| -> Result<local_db::Workspace, String> {
     // Extract just the sanitized workspace name from the full path
     let workspace_path = Path::new(&workspace_name)
@@ -911,37 +1000,7 @@ pub fn create_workspace_with_symlinked_dirs(
       .map_err(|e| format!("Failed to install library skills into workspace: {e}"))?;
     }
 
-    let workspace_id = local_db::add_workspace(
-      repo_path,
-      workspace_path.clone(),
-      workspace_path.clone(),
-      branch_name.to_string(),
-      description,
-      moved_files.clone(),
-      sparse_patterns.clone(),
-    )
-    .map_err(|e| format!("Failed to add workspace to db: {}", e))?;
-    registered_id = Some(workspace_id);
-
-    // Set not_on_remote flag if branch doesn't exist on remote
-    if !branch_exists_on_remote {
-      local_db::update_workspace_not_on_remote(repo_path, workspace_id, true)?;
-    }
-
-    local_db::update_workspace_target_branch(repo_path, workspace_id, &effective_target_branch)
-      .map_err(|e| format!("Failed to set target branch: {}", e))?;
-
-    let workspace = local_db::get_workspace_by_id(repo_path, workspace_id)
-      .map_err(|e| format!("Failed to get workspace from db: {}", e))?;
-    let workspace = match workspace {
-      Some(workspace) => workspace,
-      _ => {
-        return Err(format!(
-          "Workspace not found in database after creation: {}",
-          workspace_id
-        ))
-      }
-    };
+    let workspace = reserved;
 
     // If moved_files are specified, perform the squash operation
     if let Some(files) = moved_files.clone() {
@@ -990,12 +1049,19 @@ pub fn create_workspace_with_symlinked_dirs(
           .join(&workspace.workspace_path)
           .to_string_lossy()
           .to_string();
-        let _ = jj::update_stale_workspace(&new_workspace_path);
-        let _ = jj::update_stale_workspace(&source_workspace_path);
+        for path in [&new_workspace_path, &source_workspace_path] {
+          if let Err(error) = jj::update_stale_workspace(path) {
+            tracing::warn!(%error, workspace_path = %path, "could not update a stale working copy");
+          }
+        }
       }
     }
 
-    let _ = crate::core::submodules::populate_synced_submodules(repo_path, Some(workspace.id));
+    if let Err(error) =
+      crate::core::submodules::populate_synced_submodules(repo_path, Some(workspace.id))
+    {
+      tracing::warn!(%error, repo_path, workspace_id = workspace.id, "could not populate synced submodules");
+    }
 
     Ok(workspace)
   })();
@@ -1096,14 +1162,37 @@ pub fn archive_workspace_removing_directory_later(
   repo_path: &str,
   workspace_id: i64,
 ) -> Result<(), String> {
-  if let Some(path) = archive_workspace_leaving_directory(repo_path, &workspace_id)? {
+  remove_directory_later(archive_workspace_leaving_directory(
+    repo_path,
+    &workspace_id,
+  )?);
+  Ok(())
+}
+
+/// [`delete_workspace`] that removes the directory in the background: the
+/// checkout has already moved out of `.treq/workspaces/`, and deleting a
+/// `node_modules` takes seconds the caller need not wait for.
+pub fn delete_workspace_removing_directory_later(
+  repo_path: &str,
+  workspace_id: i64,
+) -> Result<(), String> {
+  remove_directory_later(forget_workspace_record(
+    repo_path,
+    &workspace_id,
+    RemoveWorkspaceDiskMode::JjForgetThenRemoveDir,
+    WorkspaceRecordMode::Delete,
+  )?);
+  Ok(())
+}
+
+fn remove_directory_later(leftover: Option<String>) {
+  if let Some(path) = leftover {
     std::thread::spawn(move || {
       if let Err(e) = jj::remove_workspace_directory_only(&path) {
         tracing::warn!("Background workspace directory removal failed: {}", e);
       }
     });
   }
-  Ok(())
 }
 
 #[derive(Clone, Copy)]
@@ -1143,7 +1232,10 @@ fn forget_workspace_record(
         .join(".treq")
         .join("workspaces")
         .join(&workspace.workspace_path);
-      let workspace_path_str = workspace_path.to_str().unwrap().to_string();
+      let workspace_path_str = workspace_path
+        .to_str()
+        .ok_or_else(|| "Workspace path is not valid UTF-8".to_string())?
+        .to_string();
 
       // Splice direct children onto this workspace's own target so a stack
       // stays connected when a middle workspace goes away. Children keep
@@ -1227,6 +1319,7 @@ fn move_workspace_dir_to_trash(repo_path: &str, workspace_dir: &Path, workspace_
     .map(|d| d.as_nanos())
     .unwrap_or_default();
   let target = trash_dir.join(format!("{name}-{workspace_id}-{stamp}"));
+  crate::local_db::release_connections_under(workspace_dir);
   match std::fs::rename(workspace_dir, &target) {
     Ok(()) => target.to_string_lossy().to_string(),
     Err(e) => {
@@ -1249,7 +1342,7 @@ pub fn push_workspace_to_remote(
   workspace_id: Option<i64>,
 ) -> Result<String, String> {
   // Determine the push path and target branch based on workspace_id
-  let (push_path, branch_name, target_branch) = if let Some(id) = workspace_id {
+  let (push_path, branch_name, target_branch, not_on_remote) = if let Some(id) = workspace_id {
     // For workspace, look up the path from database
     let workspace = local_db::get_workspace_by_id(repo_path, id)
       .map_err(|e| format!("Failed to get workspace: {}", e))?
@@ -1266,27 +1359,39 @@ pub fn push_workspace_to_remote(
       .target_branch
       .clone()
       .unwrap_or_else(|| "main".to_string());
-    (push_path, workspace.branch_name, target_branch)
+    (
+      push_path,
+      workspace.branch_name,
+      target_branch,
+      workspace.not_on_remote,
+    )
   } else {
     // For home repo, use repo_path directly
     let branch_name = jj::resolve_home_repo_branch(repo_path)
       .map_err(|e| format!("Failed to resolve home repo branch: {}", e))?;
     let target_branch = jj::get_default_branch(repo_path).unwrap_or_else(|_| "main".to_string());
-    (repo_path.to_string(), branch_name, target_branch)
+    (repo_path.to_string(), branch_name, target_branch, false)
   };
 
   // An ancestry-only merge cannot be abandoned cleanly while its bookmark still
   // points at it: jj preserves both parents and turns the bookmark into a conflict.
-  let _ = jj::jj_collapse_empty_merge_tip(&push_path, &branch_name);
+  jj::jj_collapse_empty_merge_tip(&push_path, &branch_name)
+    .warn_on_err("jj collapse empty merge tip");
   // Ensure no empty commits reach the remote; best-effort, never blocks the push.
-  let _ = jj::jj_abandon_empty_commits(&push_path, &target_branch);
+  jj::jj_abandon_empty_commits(&push_path, &target_branch).warn_on_err("jj abandon empty commits");
 
   // Perform the push
   let result = jj::jj_push(&push_path).map_err(|e| format!("Push failed: {}", e))?;
 
-  // Clear the not_on_remote flag after successful push (only for workspaces)
-  if let Some(id) = workspace_id {
+  // Clear the not_on_remote flag after successful push (only for workspaces).
+  // A write is a commit with fsyncs, so skip it when the flag is clear.
+  if let (Some(id), true) = (workspace_id, not_on_remote) {
     local_db::update_workspace_not_on_remote(repo_path, id, false)?;
+    // The pull request takes the title and description edited here. Best
+    // effort: the code is pushed, and the edits stay unsynced (Resync shows).
+    if let Err(err) = super::pr_sync::push_edits_to_github(repo_path, id) {
+      tracing::warn!(%err, id, "push: sending the title and description to the PR failed");
+    }
   }
 
   Ok(result)
@@ -1317,6 +1422,20 @@ pub fn list_workspaces(repo_path: &str) -> Result<Vec<local_db::Workspace>, Stri
       .filter(|w| !crate::core::resolve::is_resolve_workspace(w))
       .collect(),
   )
+}
+
+/// Every active workspace of the repo, including the ones that resolve a
+/// conflict; `list_workspaces` leaves those out.
+pub fn list_all_workspaces(repo_path: &str) -> Result<Vec<local_db::Workspace>, String> {
+  local_db::get_workspaces(repo_path)
+}
+
+/// The workspace with `workspace_id`, when the repo has one.
+pub fn find_workspace(
+  repo_path: &str,
+  workspace_id: i64,
+) -> Result<Option<local_db::Workspace>, String> {
+  local_db::get_workspace_by_id(repo_path, workspace_id)
 }
 
 /// Prunes workspaces whose `.treq/workspaces/…` directories are missing (e.g. deleted outside treq),
@@ -1483,8 +1602,7 @@ pub struct WorkspaceSummary {
 pub fn workspace_summaries(repo_path: &str) -> Result<Vec<WorkspaceSummary>, String> {
   let statuses = list_workspace_statuses(repo_path)?;
   let default_branch = jj::get_default_branch(repo_path).unwrap_or_default();
-  let sessions =
-    crate::core::pty_remote_supervisor::list_sessions(repo_path, None).unwrap_or_default();
+  let sessions = crate::core::pty_remote_supervisor::list_all_sessions(repo_path, None);
   Ok(
     statuses
       .into_iter()
@@ -1535,6 +1653,73 @@ pub fn workspace_summaries(repo_path: &str) -> Result<Vec<WorkspaceSummary>, Str
 ///
 /// # Returns
 /// Returns a WorkspaceStatus containing the current workspace, parent, children, DAG nodes, and conflicted workspace IDs.
+/// [`workspace_status`]'s `has_changes` alone, without the ahead, conflict
+/// and remote reads the full status makes.
+pub fn workspace_has_changes(repo_path: &str, workspace_id: i64) -> Result<bool, String> {
+  let workspace = local_db::get_workspace_by_id(repo_path, workspace_id)
+    .map_err(|e| format!("Failed to get workspace: {}", e))?
+    .ok_or_else(|| format!("Workspace not found: {}", workspace_id))?;
+  let workspace_path = Path::new(repo_path)
+    .join(".treq")
+    .join("workspaces")
+    .join(&workspace.workspace_path);
+  let workspace_path_str = workspace_path
+    .to_str()
+    .ok_or("Failed to convert workspace path to string")?;
+  Ok(
+    jj::jj_get_changed_files(workspace_path_str)
+      .map(|files| !files.is_empty())
+      .unwrap_or(false),
+  )
+}
+
+/// [`workspace_has_changes`] of each of `workspaces`, which snapshot their
+/// working copies a few at a time instead of one after another: a window
+/// reads every workspace's on each invalidation.
+pub fn workspaces_have_changes(
+  repo_path: &str,
+  workspaces: &[local_db::Workspace],
+) -> HashMap<i64, bool> {
+  let has_changes = |workspace: &local_db::Workspace| {
+    let path = Path::new(repo_path)
+      .join(".treq")
+      .join("workspaces")
+      .join(&workspace.workspace_path);
+    let changed = path
+      .to_str()
+      .and_then(|path| jj::jj_get_changed_files(path).ok())
+      .is_some_and(|files| !files.is_empty());
+    (workspace.id, changed)
+  };
+  let threads = std::thread::available_parallelism()
+    .map_or(1, |n| n.get())
+    .clamp(1, 4);
+  if workspaces.len() < 2 || threads == 1 {
+    return workspaces.iter().map(has_changes).collect();
+  }
+  let next = std::sync::atomic::AtomicUsize::new(0);
+  std::thread::scope(|scope| {
+    let workers: Vec<_> = (0..threads.min(workspaces.len()))
+      .map(|_| {
+        scope.spawn(|| {
+          let mut found = Vec::new();
+          loop {
+            let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let Some(workspace) = workspaces.get(index) else {
+              break found;
+            };
+            found.push(has_changes(workspace));
+          }
+        })
+      })
+      .collect();
+    workers
+      .into_iter()
+      .flat_map(|worker| worker.join().unwrap_or_default())
+      .collect()
+  })
+}
+
 pub fn workspace_status(
   repo_path: &str,
   workspace_id: Option<i64>,
@@ -1546,57 +1731,54 @@ pub fn workspace_status(
   };
 
   // Home repo case: no workspace, build a minimal status
-  let workspace_id = match workspace_id {
-    Some(id) => id,
-    None => {
-      let rs = repo_status(repo_path)?;
-      if let Some(err) = &rs.fetch_error {
-        log::warn!("Home repo fetch: {}", err);
-      }
-      let default_branch = resolve_status_default_branch();
-      let home_branch = jj::resolve_home_repo_branch(repo_path)
-        .ok()
-        .filter(|branch| !branch.is_empty() && branch != "HEAD")
-        .unwrap_or_else(|| default_branch.clone());
-
-      // Synthesize a Workspace-like entry for the home repo
-      let home_workspace = local_db::Workspace {
-        id: 0,
-        repo_path: repo_path.to_string(),
-        workspace_name: "home".to_string(),
-        workspace_path: repo_path.to_string(),
-        branch_name: home_branch.clone(),
-        created_at: String::new(),
-        refreshed_at: None,
-        metadata: None,
-        target_branch: None,
-        title: home_branch.clone(),
-        description: None,
-        moved_files: None,
-        not_on_remote: matches!(rs.remote_sync, RemoteSyncStatus::NotOnRemote),
-        sparse_patterns: None,
-        archived: false,
-      };
-
-      let conflicted_files =
-        jj::get_conflicted_files(repo_path, Some(&home_branch)).unwrap_or_default();
-
-      return Ok(WorkspaceStatus {
-        partial: WorkspacePartialStatus {
-          current: home_workspace,
-          has_conflicts: rs.has_conflicts || !conflicted_files.is_empty(),
-          has_changes: rs.has_changes,
-          commits_ahead: 0,
-        },
-        conflicted_files,
-        remote_sync: rs.remote_sync,
-        target: None,
-        children: Vec::new(),
-        dag_nodes: Vec::new(),
-        conflicted_workspace_ids: Vec::new(),
-        commits_ahead_of_target: Vec::new(),
-      });
+  let Some(workspace_id) = workspace_id else {
+    let rs = repo_status(repo_path)?;
+    if let Some(err) = &rs.fetch_error {
+      log::warn!("Home repo fetch: {}", err);
     }
+    let default_branch = resolve_status_default_branch();
+    let home_branch = jj::resolve_home_repo_branch(repo_path)
+      .ok()
+      .filter(|branch| !branch.is_empty() && branch != "HEAD")
+      .unwrap_or_else(|| default_branch.clone());
+
+    // Synthesize a Workspace-like entry for the home repo
+    let home_workspace = local_db::Workspace {
+      id: 0,
+      repo_path: repo_path.to_string(),
+      workspace_name: "home".to_string(),
+      workspace_path: repo_path.to_string(),
+      branch_name: home_branch.clone(),
+      created_at: String::new(),
+      refreshed_at: None,
+      metadata: None,
+      target_branch: None,
+      title: home_branch.clone(),
+      description: None,
+      moved_files: None,
+      not_on_remote: matches!(rs.remote_sync, RemoteSyncStatus::NotOnRemote),
+      sparse_patterns: None,
+      archived: false,
+    };
+
+    let conflicted_files =
+      jj::get_conflicted_files(repo_path, Some(&home_branch)).unwrap_or_default();
+
+    return Ok(WorkspaceStatus {
+      partial: WorkspacePartialStatus {
+        current: home_workspace,
+        has_conflicts: rs.has_conflicts || !conflicted_files.is_empty(),
+        has_changes: rs.has_changes,
+        commits_ahead: 0,
+      },
+      conflicted_files,
+      remote_sync: rs.remote_sync,
+      target: None,
+      children: Vec::new(),
+      dag_nodes: Vec::new(),
+      conflicted_workspace_ids: Vec::new(),
+      commits_ahead_of_target: Vec::new(),
+    });
   };
 
   // Workspace case: look up from DB
@@ -1637,9 +1819,17 @@ pub fn workspace_status(
   let dag_nodes = Vec::new();
   let conflicted_workspace_ids = Vec::new();
 
-  // Calculate commits ahead of target
-  let commits_ahead_of_target = if let Some(target_workspace) = &target {
-    match jj::jj_get_commits_ahead(workspace_path_str, &target_workspace.branch_name) {
+  // Commits ahead of the target branch, whether or not a workspace holds it;
+  // with no target, ahead of the repository default branch.
+  let ahead_base = current_workspace
+    .target_branch
+    .clone()
+    .filter(|target| !target.is_empty())
+    .unwrap_or_else(resolve_status_default_branch);
+  let commits_ahead_of_target = if ahead_base.is_empty() {
+    Vec::new()
+  } else {
+    match jj::jj_get_commits_ahead(workspace_path_str, &ahead_base) {
       Ok(commits_ahead) => commits_ahead
         .commits
         .iter()
@@ -1650,25 +1840,6 @@ pub fn workspace_status(
         })
         .collect(),
       Err(_) => Vec::new(),
-    }
-  } else {
-    // No target branch, commits are ahead of the repository default branch.
-    let default_branch = resolve_status_default_branch();
-    if default_branch.is_empty() {
-      Vec::new()
-    } else {
-      match jj::jj_get_commits_ahead(workspace_path_str, &default_branch) {
-        Ok(commits_ahead) => commits_ahead
-          .commits
-          .iter()
-          .map(|c| WorkspaceCommit {
-            hash: c.commit_id.clone(),
-            timestamp: c.timestamp.clone(),
-            message: c.description.clone(),
-          })
-          .collect(),
-        Err(_) => Vec::new(),
-      }
     }
   };
 
@@ -1736,13 +1907,13 @@ pub fn workspace_status(
 #[cfg(test)]
 mod tests {
   use super::{
-    merge_linear_issue_metadata_json, merge_tracker_item_metadata_json, parse_hunk_spec,
-    parse_workspace_metadata, plan_workspace_target_move,
+    diff_target_revision, merge_linear_issue_metadata_json, merge_tracker_item_metadata_json,
+    parse_hunk_spec, parse_workspace_metadata, plan_merge_landing, plan_workspace_target_move,
     resolve_workspace_diff_base_revision_from_last_rebased,
     resolve_workspace_diff_conflict_marker_style,
     resolve_workspace_diff_tip_revision_from_workspace_state,
-    resolve_workspace_diff_workspace_revision, HunkSpec, WorkspaceMetadata, WorkspaceMoveRequest,
-    WorkspaceTargetMoveStep,
+    resolve_workspace_diff_workspace_revision, retarget_child_prs, HunkSpec, MergeLandingPlan,
+    WorkspaceMetadata, WorkspaceMoveRequest, WorkspaceRetarget, WorkspaceTargetMoveStep,
   };
   use crate::jj;
   use crate::local_db::Workspace;
@@ -1784,6 +1955,137 @@ mod tests {
       sparse_patterns: None,
       archived: false,
     }
+  }
+
+  fn linear_workspace(id: i64, branch: &str, key: &str, archived: bool) -> Workspace {
+    Workspace {
+      metadata: Some(
+        merge_linear_issue_metadata_json(None, key, "https://linear.app/x", "Title")
+          .expect("metadata"),
+      ),
+      archived,
+      ..test_workspace(id, branch, Some("main"))
+    }
+  }
+
+  #[test]
+  fn workspace_texts_change_when_a_title_changes() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+    crate::local_db::init_local_db(repo_path).expect("initialize database");
+    let a = crate::local_db::add_workspace_targeting(
+      repo_path,
+      "a".into(),
+      "a".into(),
+      "a".into(),
+      None,
+      None,
+      None,
+      false,
+      "main",
+    )
+    .expect("register a");
+    let before = super::workspace_texts(repo_path);
+    assert!(before.is_some());
+    assert_eq!(super::workspace_texts(repo_path), before);
+    crate::local_db::update_workspace_title(repo_path, a.id, "Renamed").expect("rename");
+    assert_ne!(super::workspace_texts(repo_path), before);
+  }
+
+  #[test]
+  fn apply_workspace_target_branch_refuses_a_stack_cycle_before_rebasing() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+    crate::local_db::init_local_db(repo_path).expect("initialize database");
+    let a = crate::local_db::add_workspace_targeting(
+      repo_path,
+      "a".into(),
+      "a".into(),
+      "a".into(),
+      None,
+      None,
+      None,
+      false,
+      "main",
+    )
+    .expect("register a");
+    crate::local_db::add_workspace_targeting(
+      repo_path,
+      "b".into(),
+      "b".into(),
+      "b".into(),
+      None,
+      None,
+      None,
+      false,
+      "a",
+    )
+    .expect("register b");
+
+    let err = super::apply_workspace_target_branch(repo_path, a.id, "b").unwrap_err();
+
+    assert_eq!(err, "Retargeting a onto b would create a stack cycle");
+    let stored = crate::local_db::get_workspace_by_id(repo_path, a.id)
+      .expect("lookup")
+      .expect("stored");
+    assert_eq!(stored.target_branch.as_deref(), Some("main"));
+  }
+
+  #[test]
+  fn linear_issue_base_branch_stacks_on_the_parents_workspace() {
+    let workspaces = [
+      test_workspace(1, "feat/plain", Some("main")),
+      linear_workspace(2, "eng-1-parent", "ENG-1", false),
+    ];
+    assert_eq!(
+      super::linear_issue_base_branch(&workspaces, Some("ENG-1"), "main"),
+      "eng-1-parent"
+    );
+  }
+
+  #[test]
+  fn linear_issue_base_branch_defaults_without_a_parent_workspace() {
+    let workspaces = [linear_workspace(2, "eng-9-other", "ENG-9", false)];
+    assert_eq!(
+      super::linear_issue_base_branch(&workspaces, Some("ENG-1"), "main"),
+      "main"
+    );
+    assert_eq!(
+      super::linear_issue_base_branch(&workspaces, None, "main"),
+      "main"
+    );
+  }
+
+  #[test]
+  fn linear_issue_base_branch_ignores_an_archived_parent_workspace() {
+    let workspaces = [linear_workspace(2, "eng-1-parent", "ENG-1", true)];
+    assert_eq!(
+      super::linear_issue_base_branch(&workspaces, Some("ENG-1"), "main"),
+      "main"
+    );
+  }
+
+  #[test]
+  fn sub_issue_workspace_targets_the_parents_branch() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = init_workspace_creation_repo(&temp);
+    let (parent, _) =
+      super::open_or_create_workspace_from_issue(&repo_path, "eng-1-parent", "main", "P", None)
+        .expect("parent workspace");
+    super::merge_linear_issue_metadata(&repo_path, parent.id, "ENG-1", "u", "P")
+      .expect("link parent");
+
+    let base = super::linear_issue_base_branch(
+      &super::list_workspaces(&repo_path).expect("list"),
+      Some("ENG-1"),
+      "main",
+    );
+    let (child, created) =
+      super::open_or_create_workspace_from_issue(&repo_path, "eng-2-child", &base, "C", None)
+        .expect("child workspace");
+
+    assert!(created);
+    assert_eq!(child.target_branch.as_deref(), Some("eng-1-parent"));
   }
 
   fn init_workspace_creation_repo(temp: &TempDir) -> String {
@@ -1925,8 +2227,10 @@ mod tests {
     assert!(!crate::jj::list_jj_workspaces(&repo_path)
       .expect("list jj workspaces")
       .iter()
-      .any(|name| name == "fix-rollback"));
-    assert!(!temp.path().join(".treq/workspaces/fix-rollback").exists());
+      .any(|name| name.ends_with("fix-rollback")));
+    assert!(fs::read_dir(temp.path().join(".treq/workspaces"))
+      .map(|mut entries| entries.next().is_none())
+      .unwrap_or(true));
     assert!(super::list_workspaces(&repo_path)
       .expect("list workspaces")
       .is_empty());
@@ -2295,6 +2599,68 @@ mod tests {
   }
 
   #[test]
+  fn archive_keeps_workspace_bookmark() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = init_workspace_creation_repo(&temp);
+    let first = super::create_workspace(&repo_path, "fix/keep", None, None, None, None, None)
+      .expect("create workspace");
+    assert!(crate::jj::jj_get_commit_id(&repo_path, "fix/keep").is_ok());
+
+    super::archive_workspace(&repo_path, &first.id).expect("archive workspace");
+
+    // Archive keeps the branch: restoring or reopening the workspace needs it.
+    crate::jj::jj_get_commit_id(&repo_path, "fix/keep").expect("bookmark survives archive");
+  }
+
+  #[test]
+  fn archive_keeps_bookmark_on_working_copy_tip() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = init_workspace_creation_repo(&temp);
+    let ws = super::create_workspace(&repo_path, "fix/wc", None, None, None, None, None)
+      .expect("create workspace");
+    let ws_dir = temp
+      .path()
+      .join(".treq/workspaces")
+      .join(&ws.workspace_path);
+    let ws_dir = ws_dir.to_str().expect("utf-8");
+    // Workspaces made before d4a24ff, or advanced after a rebase, carry the
+    // bookmark on their (empty) working-copy commit.
+    super::advance_bookmark_to_working_copy_tip(ws_dir, "fix/wc").expect("advance bookmark");
+
+    super::archive_workspace(&repo_path, &ws.id).expect("archive workspace");
+
+    crate::jj::jj_get_commit_id(&repo_path, "fix/wc").expect("bookmark survives archive");
+  }
+
+  #[test]
+  fn workspace_branch_deleted_once_its_bookmark_is_gone() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = init_workspace_creation_repo(&temp);
+    let ws = super::create_workspace(&repo_path, "fix/merged", None, None, None, None, None)
+      .expect("create workspace");
+    assert!(!super::workspace_branch_deleted(&repo_path, ws.id));
+
+    crate::jj::jj_delete_bookmark(&repo_path, "fix/merged").expect("delete bookmark");
+
+    assert!(super::workspace_branch_deleted(&repo_path, ws.id));
+  }
+
+  #[test]
+  fn workspace_diff_tolerates_missing_workspace_bookmark() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = init_workspace_creation_repo(&temp);
+    let ws = super::create_workspace(&repo_path, "fix/gone", None, None, None, None, None)
+      .expect("create workspace");
+    let main = crate::jj::jj_get_commit_id(&repo_path, "main").expect("main commit");
+    crate::local_db::update_workspace_last_rebased_commit(&repo_path, ws.id, &main)
+      .expect("record rebase");
+    // A merged PR's bookmark is deleted by fetch while the workspace is open.
+    crate::jj::jj_delete_bookmark(&repo_path, "fix/gone").expect("delete bookmark");
+
+    super::workspace_cli_diff(&repo_path, ws.id).expect("diff without the bookmark");
+  }
+
+  #[test]
   fn archive_moves_directory_out_before_background_removal() {
     let temp = TempDir::new().expect("tempdir");
     let repo_path = init_workspace_creation_repo(&temp);
@@ -2314,12 +2680,16 @@ mod tests {
     assert!(!workspace_dir.exists());
     let second = super::create_workspace(&repo_path, "fix/race", None, None, None, None, None)
       .expect("recreate while removal is pending");
-    let marker = workspace_dir.join("keep-me.txt");
+    let marker = temp
+      .path()
+      .join(".treq/workspaces")
+      .join(&second.workspace_path)
+      .join("keep-me.txt");
     fs::write(&marker, "new work").expect("write marker");
 
     crate::jj::remove_workspace_directory_only(&leftover).expect("background removal");
 
-    assert_eq!(second.workspace_path, first.workspace_path);
+    assert_ne!(second.workspace_path, first.workspace_path);
     assert_eq!(fs::read_to_string(marker).expect("marker"), "new work");
   }
 
@@ -2332,7 +2702,7 @@ mod tests {
     super::archive_workspace(&repo_path, &first.id).expect("archive workspace");
 
     let (workspace, created) =
-      super::open_or_create_workspace_from_pr(&repo_path, "fix/pr", "main", None, None)
+      super::open_or_create_workspace_from_pr(&repo_path, "fix/pr", "main", None, None, None)
         .expect("open PR workspace");
 
     assert!(created);
@@ -2353,11 +2723,15 @@ mod tests {
     fs::remove_dir_all(&workspace_dir).expect("remove workspace directory");
 
     let (workspace, created) =
-      super::open_or_create_workspace_from_pr(&repo_path, "fix/pr", "main", None, None)
+      super::open_or_create_workspace_from_pr(&repo_path, "fix/pr", "main", None, None, None)
         .expect("open PR workspace");
 
     assert!(created);
-    assert!(workspace_dir.exists());
+    assert!(temp
+      .path()
+      .join(".treq/workspaces")
+      .join(&workspace.workspace_path)
+      .exists());
     let listed = super::list_workspace_statuses(&repo_path).expect("list statuses");
     assert!(listed.iter().any(|s| s.current.id == workspace.id));
   }
@@ -2381,6 +2755,7 @@ mod tests {
       base_branch: "main".into(),
       title: title.map(str::to_string),
       description: None,
+      pr_number: None,
     };
 
     let results = super::open_or_create_workspaces(
@@ -2420,7 +2795,7 @@ mod tests {
   }
 
   #[test]
-  fn create_workspace_recovers_orphaned_partial_directory() {
+  fn create_workspace_ignores_orphaned_partial_directory_under_the_old_name() {
     let temp = TempDir::new().expect("tempdir");
     let repo_path = init_workspace_creation_repo(&temp);
     let partial = temp.path().join(".treq/workspaces/fix-partial");
@@ -2428,10 +2803,13 @@ mod tests {
     fs::write(partial.join("partial"), "incomplete").expect("write marker");
 
     let created = super::create_workspace(&repo_path, "fix/partial", None, None, None, None, None)
-      .expect("recover partial workspace");
+      .expect("create beside the orphaned partial dir");
 
     assert_eq!(created.branch_name, "fix/partial");
-    assert!(!partial.join("partial").exists());
+    assert_eq!(
+      created.workspace_path,
+      format!("{}-fix-partial", created.id)
+    );
   }
 
   #[test]
@@ -2452,7 +2830,7 @@ mod tests {
     let created = super::create_workspace(&repo_path, "fix/killed", None, None, None, None, None)
       .expect("retry recovers the interrupted create");
 
-    assert_eq!(created.workspace_path, "fix-killed");
+    assert_eq!(created.workspace_path, format!("{}-fix-killed", created.id));
     assert!(crate::jj::jj_get_commit_id(&repo_path, "fix/killed").is_ok());
   }
 
@@ -2472,7 +2850,12 @@ mod tests {
     )
     .expect_err("missing source must fail");
 
-    assert!(!temp.path().join(".treq/workspaces/fix-bad-source").exists());
+    assert!(fs::read_dir(temp.path().join(".treq/workspaces"))
+      .map(|mut entries| entries.next().is_none())
+      .unwrap_or(true));
+    assert!(super::list_workspaces(&repo_path)
+      .expect("list workspaces")
+      .is_empty());
   }
 
   #[test]
@@ -2513,13 +2896,106 @@ mod tests {
   }
 
   #[test]
+  fn retarget_child_prs_skips_a_merge_without_children() {
+    let plan = MergeLandingPlan {
+      target_branch: "main".into(),
+      landed_branches: vec!["feat/a".into()],
+      retargeted: vec![],
+      can_rollup: false,
+    };
+    assert!(retarget_child_prs("/nonexistent", &plan).is_empty());
+  }
+
+  #[test]
+  fn plan_merge_landing_lands_workspace_into_its_target() {
+    let parent = test_workspace(1, "feat/parent", Some("main"));
+    let child = test_workspace(2, "feat/child", Some("feat/parent"));
+    let other = test_workspace(3, "feat/other", Some("main"));
+
+    let plan =
+      plan_merge_landing(&[parent, child, other], 1, "main", false).expect("plan should succeed");
+
+    assert_eq!(plan.target_branch, "main");
+    assert_eq!(plan.landed_branches, vec!["feat/parent".to_string()]);
+    assert!(!plan.can_rollup);
+    assert_eq!(
+      plan.retargeted,
+      vec![WorkspaceRetarget {
+        workspace_id: 2,
+        branch_name: "feat/child".to_string(),
+        from_branch: "feat/parent".to_string(),
+        to_branch: "main".to_string(),
+      }]
+    );
+  }
+
+  #[test]
+  fn plan_merge_landing_stacked_without_rollup_lands_into_parent() {
+    let a = test_workspace(1, "feat/a", Some("main"));
+    let b = test_workspace(2, "feat/b", Some("feat/a"));
+
+    let plan = plan_merge_landing(&[a, b], 2, "main", false).expect("plan should succeed");
+
+    assert_eq!(plan.target_branch, "feat/a");
+    assert_eq!(plan.landed_branches, vec!["feat/b".to_string()]);
+    assert!(plan.can_rollup);
+    assert!(plan.retargeted.is_empty());
+  }
+
+  #[test]
+  fn plan_merge_landing_rollup_lands_whole_stack_into_root() {
+    let a = test_workspace(1, "feat/a", Some("main"));
+    let b = test_workspace(2, "feat/b", Some("feat/a"));
+    let c = test_workspace(3, "feat/c", Some("feat/b"));
+    let sibling = test_workspace(4, "feat/sibling", Some("feat/a"));
+    let top = test_workspace(5, "feat/top", Some("feat/c"));
+
+    let plan =
+      plan_merge_landing(&[a, b, c, sibling, top], 3, "main", true).expect("plan should succeed");
+
+    assert_eq!(plan.target_branch, "main");
+    assert_eq!(
+      plan.landed_branches,
+      vec![
+        "feat/a".to_string(),
+        "feat/b".to_string(),
+        "feat/c".to_string()
+      ]
+    );
+    let moved: Vec<(&str, &str, &str)> = plan
+      .retargeted
+      .iter()
+      .map(|r| {
+        (
+          r.branch_name.as_str(),
+          r.from_branch.as_str(),
+          r.to_branch.as_str(),
+        )
+      })
+      .collect();
+    assert_eq!(
+      moved,
+      vec![
+        ("feat/sibling", "feat/a", "main"),
+        ("feat/top", "feat/c", "main")
+      ]
+    );
+  }
+
+  #[test]
+  fn plan_merge_landing_errors_for_unknown_workspace() {
+    let a = test_workspace(1, "feat/a", Some("main"));
+    assert!(plan_merge_landing(&[a], 99, "main", false).is_err());
+  }
+
+  #[test]
   fn plan_move_onto_non_descendant_is_single_step() {
     let parent = test_workspace(1, "feat/parent", Some("main"));
     let other = test_workspace(2, "feat/other", Some("main"));
     let child = test_workspace(3, "feat/child", Some("feat/parent"));
 
     let steps = plan_workspace_target_move(
-      &[parent.clone(), other, child.clone()],
+      &[parent, other, child.clone()],
       "feat/child",
       "feat/other",
       "main",
@@ -2742,6 +3218,16 @@ mod tests {
   }
 
   #[test]
+  fn diff_bases_on_origin_when_the_local_target_is_conflicted() {
+    assert_eq!(
+      diff_target_revision("main", |_| true, |_| true),
+      "main@origin"
+    );
+    assert_eq!(diff_target_revision("main", |_| false, |_| true), "main");
+    assert_eq!(diff_target_revision("main", |_| true, |_| false), "main");
+  }
+
+  #[test]
   fn resolve_workspace_diff_base_revision_falls_back_to_target_branch() {
     assert_eq!(
       resolve_workspace_diff_base_revision_from_last_rebased(None, "main"),
@@ -2922,6 +3408,356 @@ pub fn merge_workspace(
   message: &str,
   merge_strategy: MergeCommit,
 ) -> Result<(), String> {
+  merge_workspace_with_options(
+    repo_path,
+    workspace_id,
+    message,
+    merge_strategy,
+    LocalMergeOptions::default(),
+  )
+  .map(|_| ())
+}
+
+/// [`merge_workspace`] that removes the merged checkout in the background
+/// (see [`delete_workspace_removing_directory_later`]) and moves the home
+/// repository to the target branch after returning, so the caller can report
+/// the merge first. That move holds the repo's commit lock from before this
+/// returns until it is done, so reads that take the lock (the sidebar poll)
+/// wait for it instead of seeing the old checkout.
+pub fn merge_workspace_removing_directory_later(
+  repo_path: &str,
+  workspace_id: i64,
+  message: &str,
+  merge_strategy: MergeCommit,
+) -> Result<(), String> {
+  merge_workspace_with_options_removing_directory_later(
+    repo_path,
+    workspace_id,
+    message,
+    merge_strategy,
+    LocalMergeOptions::default(),
+  )
+  .map(|_| ())
+}
+
+/// A finished merge: what landed where, plus follow-up notes for the user
+/// (stacked PRs moved onto a new base, or moves that failed).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MergeResult {
+  pub plan: MergeLandingPlan,
+  pub notes: Vec<String>,
+}
+
+/// Move each retargeted child's open PR onto its new base, so stacked PRs
+/// follow their workspace once the parent lands. Best-effort: needs `gh` and
+/// a GitHub remote; returns one note per PR moved or failed.
+pub fn retarget_child_prs(repo_path: &str, plan: &MergeLandingPlan) -> Vec<String> {
+  if plan.retargeted.is_empty() {
+    return Vec::new();
+  }
+  let Some(remote) = crate::github::get_git_remote_url_impl(repo_path)
+    .ok()
+    .flatten()
+  else {
+    return Vec::new();
+  };
+  let Some(gh) =
+    crate::binary_paths::get_binary_path("gh").or_else(|| crate::binary_paths::detect_binary("gh"))
+  else {
+    return Vec::new();
+  };
+  let retargets: Vec<(String, String)> = plan
+    .retargeted
+    .iter()
+    .map(|r| (r.branch_name.clone(), r.to_branch.clone()))
+    .collect();
+  crate::github::gh_retarget_open_prs_impl(
+    &gh,
+    repo_path,
+    &remote.full_name,
+    &retargets,
+    &crate::binary_paths::get_extended_path(),
+  )
+}
+
+/// Options for a local merge beyond the strategy.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocalMergeOptions {
+  /// Land the workspace together with every workspace it is stacked on.
+  pub rollup: bool,
+  /// Push the target branch to origin once the merge lands.
+  pub push: bool,
+}
+
+/// A workspace stacked on another workspace whose target is moved onto the
+/// branch the merge landed in.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceRetarget {
+  pub workspace_id: i64,
+  pub branch_name: String,
+  pub from_branch: String,
+  pub to_branch: String,
+}
+
+/// What a merge does to the workspace stack: which branches land, where, and
+/// which remaining workspaces get retargeted because their parent landed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MergeLandingPlan {
+  pub target_branch: String,
+  /// Root-first. One entry unless the merge rolls up a stack.
+  pub landed_branches: Vec<String>,
+  pub retargeted: Vec<WorkspaceRetarget>,
+  /// The workspace targets another workspace, so its whole stack can land at once.
+  pub can_rollup: bool,
+}
+
+/// Plan a merge of `workspace_id`. With `rollup`, the workspace and every
+/// workspace it is stacked on land together in the stack's root branch.
+pub fn plan_merge_landing(
+  workspaces: &[local_db::Workspace],
+  workspace_id: i64,
+  default_branch: &str,
+  rollup: bool,
+) -> Result<MergeLandingPlan, String> {
+  let by_branch: HashMap<&str, &local_db::Workspace> = workspaces
+    .iter()
+    .map(|ws| (ws.branch_name.as_str(), ws))
+    .collect();
+  let target_of = |ws: &local_db::Workspace| {
+    ws.target_branch
+      .clone()
+      .filter(|t| !t.is_empty())
+      .unwrap_or_else(|| default_branch.to_string())
+  };
+  let workspace = workspaces
+    .iter()
+    .find(|ws| ws.id == workspace_id)
+    .ok_or("Workspace not found in database")?;
+
+  let mut target_branch = target_of(workspace);
+  let can_rollup =
+    target_branch != workspace.branch_name && by_branch.contains_key(target_branch.as_str());
+  let mut landed_branches = vec![workspace.branch_name.clone()];
+  if rollup {
+    while let Some(parent) = by_branch.get(target_branch.as_str()) {
+      if landed_branches.contains(&parent.branch_name) {
+        break;
+      }
+      landed_branches.push(parent.branch_name.clone());
+      target_branch = target_of(parent);
+    }
+    landed_branches.reverse();
+  }
+
+  let retargeted = workspaces
+    .iter()
+    .filter(|ws| !landed_branches.contains(&ws.branch_name))
+    .filter_map(|ws| {
+      let from_branch = target_of(ws);
+      landed_branches
+        .contains(&from_branch)
+        .then(|| WorkspaceRetarget {
+          workspace_id: ws.id,
+          branch_name: ws.branch_name.clone(),
+          from_branch,
+          to_branch: target_branch.clone(),
+        })
+    })
+    .collect();
+
+  Ok(MergeLandingPlan {
+    target_branch,
+    landed_branches,
+    retargeted,
+    can_rollup,
+  })
+}
+
+fn default_branch_or_main(repo_path: &str) -> String {
+  jj::get_default_branch(repo_path).unwrap_or_else(|_| "main".to_string())
+}
+
+fn load_merge_landing_plan(
+  repo_path: &str,
+  workspace_id: i64,
+  rollup: bool,
+) -> Result<MergeLandingPlan, String> {
+  let workspaces =
+    local_db::get_workspaces(repo_path).map_err(|e| format!("Failed to list workspaces: {}", e))?;
+  plan_merge_landing(
+    &workspaces,
+    workspace_id,
+    &default_branch_or_main(repo_path),
+    rollup,
+  )
+}
+
+/// Plan for the merge preview, read from the current workspace stack.
+pub fn get_merge_landing_plan(
+  repo_path: &str,
+  workspace_id: i64,
+  rollup: bool,
+) -> Result<MergeLandingPlan, String> {
+  load_merge_landing_plan(repo_path, workspace_id, rollup)
+}
+
+/// Retarget children of landed workspaces, then remove the landed workspaces.
+/// Children go first: their rebase lifts only their own commits off a parent
+/// that must still be in the database.
+fn finish_merge_landing(
+  repo_path: &str,
+  plan: &MergeLandingPlan,
+  defer_removal: bool,
+) -> Result<(), String> {
+  for retarget in &plan.retargeted {
+    apply_workspace_target_branch(repo_path, retarget.workspace_id, &retarget.to_branch).map_err(
+      |e| {
+        format!(
+          "Merged, but failed to retarget {} onto {}: {}",
+          retarget.branch_name, retarget.to_branch, e
+        )
+      },
+    )?;
+  }
+  for branch in plan.landed_branches.iter().rev() {
+    let Some(landed) = local_db::get_workspace_by_branch(repo_path, branch)
+      .map_err(|e| format!("Failed to get workspace by branch: {}", e))?
+    else {
+      continue;
+    };
+    let landed_path = Path::new(repo_path)
+      .join(".treq")
+      .join("workspaces")
+      .join(&landed.workspace_path);
+    let landed_path_str = landed_path
+      .to_str()
+      .ok_or("Failed to convert workspace path to string")?;
+    // Remove the workspace from jj and its directory from disk.
+    jj::forget_workspace(repo_path, landed_path_str)
+      .map_err(|e| format!("Failed to remove workspace from jj: {}", e))?;
+    if defer_removal {
+      remove_directory_later(Some(move_workspace_dir_to_trash(
+        repo_path,
+        &landed_path,
+        landed.id,
+      )));
+    } else {
+      jj::remove_workspace_directory_only(landed_path_str)
+        .map_err(|e| format!("Failed to remove workspace from jj: {}", e))?;
+    }
+    local_db::delete_workspace(repo_path, landed.id)
+      .map_err(|e| format!("Failed to delete workspace from db: {}", e))?;
+  }
+  Ok(())
+}
+
+/// After GitHub merged the workspace's PR: fetch, move the local target branch
+/// to the remote one, retarget stacked children, and remove the workspace.
+pub fn sync_after_remote_merge(
+  repo_path: &str,
+  workspace_id: i64,
+) -> Result<MergeLandingPlan, String> {
+  let plan = load_merge_landing_plan(repo_path, workspace_id, false)?;
+  let target_branch = plan.target_branch.as_str();
+
+  jj::jj_git_fetch(repo_path).map_err(|e| format!("Failed to fetch after merge: {}", e))?;
+  jj::jj_set_bookmark(
+    repo_path,
+    target_branch,
+    &format!("{}@origin", target_branch),
+  )
+  .map_err(|e| format!("Failed to sync {} from origin: {}", target_branch, e))?;
+  let home_branch = jj::resolve_home_repo_branch(repo_path).unwrap_or_default();
+  if home_branch == target_branch {
+    jj::jj_edit_bookmark(repo_path, target_branch)
+      .map_err(|e| format!("Failed to update home repo to target branch: {}", e))?;
+  }
+
+  finish_merge_landing(repo_path, &plan, false)?;
+  Ok(plan)
+}
+
+/// Merge the workspace's PR on GitHub, then sync the target branch and the
+/// stack locally. Nothing local changes when GitHub refuses the merge.
+#[expect(
+  clippy::too_many_arguments,
+  reason = "flat argument list kept to match callers"
+)]
+pub fn merge_workspace_on_github(
+  repo_path: &str,
+  workspace_id: i64,
+  gh_path: &str,
+  extended_path: &str,
+  repo_full_name: &str,
+  pr_number: u64,
+  method: crate::github::GhMergeMethod,
+  subject: Option<&str>,
+  body: Option<&str>,
+) -> Result<MergeLandingPlan, String> {
+  crate::github::gh_merge_pr_impl(
+    gh_path,
+    repo_full_name,
+    pr_number,
+    method,
+    subject,
+    body,
+    extended_path,
+  )?;
+  sync_after_remote_merge(repo_path, workspace_id)
+    .map_err(|e| format!("Merged on GitHub, but the local sync failed: {}", e))
+}
+
+/// Merge locally. With `rollup`, a stacked workspace lands together with every
+/// workspace it is stacked on, into the stack's root branch. With `push`, the
+/// target branch is pushed to origin before the stack is cleaned up.
+pub fn merge_workspace_with_options(
+  repo_path: &str,
+  workspace_id: i64,
+  message: &str,
+  merge_strategy: MergeCommit,
+  options: LocalMergeOptions,
+) -> Result<MergeLandingPlan, String> {
+  merge_workspace_landing(
+    repo_path,
+    workspace_id,
+    message,
+    merge_strategy,
+    options,
+    false,
+  )
+}
+
+/// [`merge_workspace_with_options`] that removes the merged checkouts in the
+/// background.
+pub fn merge_workspace_with_options_removing_directory_later(
+  repo_path: &str,
+  workspace_id: i64,
+  message: &str,
+  merge_strategy: MergeCommit,
+  options: LocalMergeOptions,
+) -> Result<MergeLandingPlan, String> {
+  merge_workspace_landing(
+    repo_path,
+    workspace_id,
+    message,
+    merge_strategy,
+    options,
+    true,
+  )
+}
+
+fn merge_workspace_landing(
+  repo_path: &str,
+  workspace_id: i64,
+  message: &str,
+  merge_strategy: MergeCommit,
+  options: LocalMergeOptions,
+  defer_removal: bool,
+) -> Result<MergeLandingPlan, String> {
+  let plan = load_merge_landing_plan(repo_path, workspace_id, options.rollup)?;
+  // Deferring the cleanup also defers moving the home checkout.
+  let defer_home_edit = defer_removal;
+
   // Get the workspace from the database
   let workspace = local_db::get_workspace_by_id(repo_path, workspace_id)
     .map_err(|e| format!("Failed to get workspace from db: {}", e))?
@@ -2936,11 +3772,11 @@ pub fn merge_workspace(
     .to_str()
     .ok_or("Failed to convert workspace path to string")?;
 
-  // Get target branch for comparison
-  let target_branch = workspace.target_branch.as_deref().unwrap_or("main");
+  let target_branch = plan.target_branch.as_str();
 
   // Abandon empty commits before merge to keep history clean
-  let _ = jj::jj_abandon_empty_commits(workspace_path_str, target_branch);
+  jj::jj_abandon_empty_commits(workspace_path_str, target_branch)
+    .warn_on_err("jj abandon empty commits");
 
   // Get commits ahead of target
   let commits_ahead = jj::jj_get_commits_ahead(workspace_path_str, target_branch)
@@ -2985,21 +3821,80 @@ pub fn merge_workspace(
     }
   }
 
-  jj::jj_edit_bookmark(repo_path, target_branch)
-    .map_err(|e| format!("Failed to update home repo to target branch: {}", e))?;
-  if workspace.branch_name == target_branch {
-    sync_home_and_workspace_for_branch(repo_path, target_branch, SyncSource::WorkspaceToHome)?;
+  // Merging the target branch into itself syncs the home checkout with the
+  // workspace's, which needs the edit first.
+  let home_edit_later = defer_home_edit && workspace.branch_name != target_branch;
+  if !home_edit_later {
+    jj::jj_edit_bookmark(repo_path, target_branch)
+      .map_err(|e| format!("Failed to update home repo to target branch: {}", e))?;
+    if workspace.branch_name == target_branch {
+      sync_home_and_workspace_for_branch(repo_path, target_branch, SyncSource::WorkspaceToHome)?;
+    }
+  }
+  if options.push {
+    jj::jj_push_bookmark(repo_path, target_branch)
+      .map_err(|e| format!("Merged, but pushing {} failed: {}", target_branch, e))?;
   }
 
-  // Remove the workspace from jj (also deletes the workspace directory)
-  jj::remove_workspace(repo_path, workspace_path_str)
-    .map_err(|e| format!("Failed to remove workspace from jj: {}", e))?;
+  finish_merge_landing(repo_path, &plan, defer_removal)?;
+  if home_edit_later {
+    edit_home_bookmark_later(repo_path, target_branch);
+  }
+  Ok(plan)
+}
 
-  // Remove from database
-  local_db::delete_workspace(repo_path, workspace_id)
-    .map_err(|e| format!("Failed to delete workspace from db: {}", e))?;
+/// Diff the merge preview shows: the workspace's own changes, or with
+/// `rollup` every change the stack lands in its root branch.
+pub fn merge_preview_diff(
+  repo_path: &str,
+  workspace_id: i64,
+  rollup: bool,
+) -> Result<jj::JjRevisionDiff, String> {
+  if !rollup {
+    return workspace_diff_with_conflict_style(
+      repo_path,
+      workspace_id,
+      super::DEFAULT_CONFLICT_MARKER_STYLE,
+    );
+  }
+  let plan = load_merge_landing_plan(repo_path, workspace_id, true)?;
+  let workspace = local_db::get_workspace_by_id(repo_path, workspace_id)
+    .map_err(|e| format!("Failed to get workspace: {}", e))?
+    .ok_or_else(|| format!("Workspace not found: {}", workspace_id))?;
+  let workspace_dir = Path::new(repo_path)
+    .join(".treq")
+    .join("workspaces")
+    .join(&workspace.workspace_path);
+  let workspace_dir_str = workspace_dir
+    .to_str()
+    .ok_or("Failed to convert workspace path to string")?;
+  if let Some(empty) = jj::revision_diff_if_workspace_missing(&workspace_dir) {
+    return Ok(empty);
+  }
+  jj::jj_get_merge_diff_between_revisions(
+    workspace_dir_str,
+    &jj::fork_point_revset(&plan.target_branch, &workspace.branch_name),
+    &workspace.branch_name,
+    super::DEFAULT_CONFLICT_MARKER_STYLE,
+  )
+  .map_err(|e| format!("Failed to get rollup diff: {}", e))
+}
 
-  Ok(())
+/// Moves the home repository to `bookmark` on a background thread, under the
+/// repo's commit lock. Returns once the thread holds the lock, so no read
+/// that takes the lock slips in before the move.
+fn edit_home_bookmark_later(repo_path: &str, bookmark: &str) {
+  let (repo_path, bookmark) = (repo_path.to_string(), bookmark.to_string());
+  let (locked, wait_for_lock) = std::sync::mpsc::channel();
+  std::thread::spawn(move || {
+    let lock = commit_lock_for_repo(&repo_path);
+    let _guard = lock.lock_or_recover();
+    locked.send(()).ignore_closed();
+    jj::jj_edit_bookmark(&repo_path, &bookmark)
+      .map_err(|e| format!("Failed to update home repo to target branch: {e}"))
+      .warn_on_err("jj edit home bookmark after merge");
+  });
+  wait_for_lock.recv().ignore_closed();
 }
 
 fn sync_home_and_workspace_for_branch(
@@ -3016,12 +3911,20 @@ fn sync_home_and_workspace_for_branch(
   if home_branch.is_empty() || home_branch == "HEAD" || home_branch != branch {
     return Ok(());
   }
+  sync_home_on_branch_and_workspace(repo_path, branch, source)
+}
 
-  let workspace = match local_db::get_workspace_by_branch(repo_path, branch)
+/// [`sync_home_and_workspace_for_branch`] for a caller that already knows
+/// the home repo is on `branch`.
+fn sync_home_on_branch_and_workspace(
+  repo_path: &str,
+  branch: &str,
+  source: SyncSource,
+) -> Result<(), String> {
+  let Some(workspace) = local_db::get_workspace_by_branch(repo_path, branch)
     .map_err(|e| format!("Failed to get workspace by branch: {}", e))?
-  {
-    Some(workspace) => workspace,
-    None => return Ok(()),
+  else {
+    return Ok(());
   };
   let workspace_path = Path::new(repo_path)
     .join(".treq")
@@ -3035,16 +3938,24 @@ fn sync_home_and_workspace_for_branch(
     SyncSource::HomeToWorkspace => repo_path,
     SyncSource::WorkspaceToHome => workspace_path_str,
   };
-  let _ = jj::jj_workspace_update_stale(source_path);
+  jj::jj_workspace_update_stale(source_path).warn_on_err("jj workspace update stale");
+  // Setting a diverged bookmark to one checkout would drop `origin`'s side; a pull heals it instead.
+  if jj::jj_is_bookmark_conflicted(source_path, branch) {
+    return Ok(());
+  }
   // Use `@-` when `@` is the empty working copy, so no empty commit gets pushed.
-  let source_tip = jj::jj_resolve_bookmark_tip(source_path)
+  let checkout_tip = jj::jj_resolve_bookmark_tip(source_path)
     .map_err(|e| format!("Failed to resolve source tip: {}", e))?;
+  // The bookmark is the branch; a checkout's working copy, dirty or not, is never moved onto it.
+  let source_tip = jj::jj_get_commit_id(source_path, branch)
+    .ok()
+    .unwrap_or(checkout_tip);
 
   let destination_path = match source {
     SyncSource::HomeToWorkspace => workspace_path_str,
     SyncSource::WorkspaceToHome => repo_path,
   };
-  let _ = jj::jj_workspace_update_stale(destination_path);
+  jj::jj_workspace_update_stale(destination_path).warn_on_err("jj workspace update stale");
   jj::jj_set_bookmark(destination_path, branch, &source_tip).map_err(|e| {
     format!(
       "Failed to force-sync destination bookmark '{}' to source tip: {}",
@@ -3059,10 +3970,10 @@ fn sync_home_and_workspace_for_branch(
           branch, e
         )
       })?;
-      let _ = jj::jj_workspace_update_stale(destination_path);
+      jj::jj_workspace_update_stale(destination_path).warn_on_err("jj workspace update stale");
     }
     SyncSource::HomeToWorkspace => {
-      let _ = jj::jj_workspace_update_stale(destination_path);
+      jj::jj_workspace_update_stale(destination_path).warn_on_err("jj workspace update stale");
       // Move @ onto the new bookmark tip so the workspace working copy stays in sync (avoids infinite auto-sync loop).
       if let Err(e) = jj::jj_sync_working_copy_if_safe(destination_path, branch) {
         log::warn!(
@@ -3190,9 +4101,27 @@ pub fn apply_workspace_target_branch(
   workspace_id: i64,
   target_branch: &str,
 ) -> Result<local_db::Workspace, String> {
+  apply_workspace_target_branch_after(repo_path, workspace_id, target_branch, Duration::ZERO)
+}
+
+/// [`apply_workspace_target_branch`] for a flow that fetched already: it
+/// fetches again only if the last fetch is older than `max_age`.
+pub(crate) fn apply_workspace_target_branch_after(
+  repo_path: &str,
+  workspace_id: i64,
+  target_branch: &str,
+  max_age: Duration,
+) -> Result<local_db::Workspace, String> {
   let workspace = local_db::get_workspace_by_id(repo_path, workspace_id)
     .map_err(|e| format!("Failed to get workspace from db: {}", e))?
     .ok_or("Workspace not found in database")?;
+  // Refuse before the rebase so a blocked retarget leaves the repo untouched.
+  crate::core::stack_cycle::ensure_no_stack_cycle(
+    &local_db::get_workspaces(repo_path)?,
+    &workspace.branch_name,
+    target_branch,
+    &crate::core::get_repo_default_branch(repo_path).unwrap_or_default(),
+  )?;
 
   let workspace_path = Path::new(repo_path)
     .join(".treq")
@@ -3202,7 +4131,7 @@ pub fn apply_workspace_target_branch(
     .to_str()
     .ok_or("Failed to convert workspace path to string")?;
 
-  let _ = jj::jj_git_fetch(repo_path);
+  jj::jj_git_fetch_unless_recent(repo_path, max_age).warn_on_err("jj git fetch unless recent");
 
   // Lifting off a parent workspace must leave that parent's commits in place.
   let parent_workspace = workspace.target_branch.as_deref().filter(|parent| {
@@ -3719,13 +4648,13 @@ pub fn move_workspace_changes(
   for (file_path, content) in &commit_moved_file_saves {
     let dest_file = std::path::Path::new(&destination_full_path_str).join(file_path);
     if let Some(parent) = dest_file.parent() {
-      let _ = std::fs::create_dir_all(parent);
+      std::fs::create_dir_all(parent).warn_on_err("create dir all");
     }
-    let _ = std::fs::write(&dest_file, content);
+    std::fs::write(&dest_file, content).warn_on_err("write");
   }
 
-  let _ = jj::update_stale_workspace(&source_full_path_str);
-  let _ = jj::update_stale_workspace(&destination_full_path_str);
+  jj::update_stale_workspace(&source_full_path_str).warn_on_err("update stale workspace");
+  jj::update_stale_workspace(&destination_full_path_str).warn_on_err("update stale workspace");
 
   Ok(result)
 }
@@ -3746,22 +4675,23 @@ pub fn pull_workspace_from_remote(
   conflict_marker_style: &str,
 ) -> Result<PullWorkspaceResult, String> {
   // When workspace_id is None, do a simple pull for the home repo
-  let workspace_id = match workspace_id {
-    Some(id) => id,
-    None => {
-      // For home repo, just fetch — do not rebase, which would detach HEAD
-      jj::jj_git_fetch(repo_path).map_err(|e| format!("Fetch failed: {}", e))?;
-      let home_branch = jj::resolve_home_repo_branch(repo_path)
-        .map_err(|e| format!("Failed to resolve home repo branch: {}", e))?;
-      sync_home_and_workspace_for_branch(repo_path, &home_branch, SyncSource::HomeToWorkspace)?;
-      return Ok(PullWorkspaceResult {
-        success: true,
-        message: "Fetched home repo".to_string(),
-        was_diverged: false,
-        commits_rebased: 0,
-        has_conflicts: false,
-      });
+  let Some(workspace_id) = workspace_id else {
+    // For home repo, just fetch — do not rebase, which would detach HEAD.
+    // Read the branch first: a fetch that moves it past the checkout leaves
+    // Git HEAD detached.
+    let home_branch = jj::resolve_home_repo_branch(repo_path)
+      .map_err(|e| format!("Failed to resolve home repo branch: {}", e))?;
+    jj::jj_git_fetch(repo_path).map_err(|e| format!("Fetch failed: {}", e))?;
+    if !home_branch.is_empty() && home_branch != "HEAD" {
+      sync_home_on_branch_and_workspace(repo_path, &home_branch, SyncSource::HomeToWorkspace)?;
     }
+    return Ok(PullWorkspaceResult {
+      success: true,
+      message: "Fetched home repo".to_string(),
+      was_diverged: false,
+      commits_rebased: 0,
+      has_conflicts: false,
+    });
   };
 
   // Look up workspace from DB
@@ -3794,8 +4724,9 @@ pub fn pull_workspace_from_remote(
 
   if !is_conflicted {
     // No divergence — try to sync working copy if safe
-    let _ = jj::jj_workspace_update_stale(full_path_str);
-    let _ = jj::jj_sync_working_copy_if_safe(full_path_str, branch_name);
+    jj::jj_workspace_update_stale(full_path_str).warn_on_err("jj workspace update stale");
+    jj::jj_sync_working_copy_if_safe(full_path_str, branch_name)
+      .warn_on_err("jj sync working copy if safe");
 
     if target_moved {
       auto_review::notify(
@@ -3818,9 +4749,19 @@ pub fn pull_workspace_from_remote(
 
   // Step 3: Diverged — capture local-only commit IDs BEFORE resolving bookmark
   let remote_ref = format!("{}@origin", branch_name);
-  let local_revset = format!("({}..@-) & mutable()", remote_ref);
+  // The local side can come from another checkout of the branch (the home repo), not only `@-`.
+  let local_revset = format!(
+    "({}..(@- | bookmarks(exact:\"{}\"))) & mutable()",
+    remote_ref, branch_name
+  );
   let local_commit_ids = jj::jj_log_revset_commit_ids(full_path_str, &local_revset)
     .map_err(|e| format!("Failed to capture local commits: {}", e))?;
+  let local_change_ids = if local_commit_ids.is_empty() {
+    Vec::new()
+  } else {
+    jj::jj_log_revset_change_ids(full_path_str, &local_commit_ids.join(" | "))
+      .map_err(|e| format!("Failed to capture local commits: {}", e))?
+  };
 
   let commits_rebased = local_commit_ids.len();
 
@@ -3845,11 +4786,20 @@ pub fn pull_workspace_from_remote(
     // Step 5b: Advance the bookmark to the rebased local tip.
     // Without this, the bookmark stays on origin and Sync reports InSync while
     // conflicted/rebased work only lives on @ — users can't resolve locally and push.
-    advance_bookmark_to_working_copy_tip(full_path_str, branch_name)?;
+    let rebased_heads = jj::jj_log_revset_commit_ids(
+      full_path_str,
+      &format!("heads({})", local_change_ids.join(" | ")),
+    )
+    .unwrap_or_default();
+    match rebased_heads.as_slice() {
+      [tip] => jj::jj_set_bookmark(full_path_str, branch_name, tip)
+        .map_err(|e| format!("Failed to advance bookmark '{branch_name}': {e}"))?,
+      _ => advance_bookmark_to_working_copy_tip(full_path_str, branch_name)?,
+    }
   }
 
   // Step 6: refresh stale working copy only; do not sync bookmark tip here.
-  let _ = jj::jj_workspace_update_stale(full_path_str);
+  jj::jj_workspace_update_stale(full_path_str).warn_on_err("jj workspace update stale");
   sync_home_and_workspace_for_branch(repo_path, branch_name, SyncSource::WorkspaceToHome)?;
 
   let has_conflicts = workspace_pull_has_conflicts(full_path_str, branch_name);
@@ -4071,7 +5021,6 @@ fn workspace_diff_with_conflict_style(
     .map_err(|e| format!("Failed to get workspace: {}", e))?
     .ok_or_else(|| format!("Workspace not found: {}", workspace_id))?;
 
-  let target_branch = workspace.target_branch.as_deref().unwrap_or("main");
   let workspace_dir = Path::new(repo_path)
     .join(".treq")
     .join("workspaces")
@@ -4082,7 +5031,9 @@ fn workspace_diff_with_conflict_style(
   if let Some(empty) = jj::revision_diff_if_workspace_missing(&workspace_dir) {
     return Ok(empty);
   }
-  let repo = jj::WorkspaceRepo::load(workspace_dir_str)
+  // One load, lock and snapshot for the whole reload; the revision queries
+  // below see the same snapshot as the uncommitted files.
+  let (repo, working_copy) = jj::WorkspaceRepo::load_working_copy(workspace_dir_str)
     .map_err(|e| format!("Failed to load workspace repo: {}", e))?;
   let base_revision = resolve_workspace_diff_base_revision(repo_path, &workspace, &repo)?;
   let tip_revision = resolve_workspace_diff_tip_revision(&workspace, &repo)?;
@@ -4099,14 +5050,22 @@ fn workspace_diff_with_conflict_style(
     .merge_diff_between_revisions(&base_revision, &tip_revision, conflict_marker_style)
     .map_err(|e| format!("Failed to get workspace diff: {}", e))?;
 
-  let uncommitted_files = jj::jj_get_changed_files(workspace_dir_str)
-    .map_err(|e| format!("Failed to get uncommitted workspace changes: {}", e))?;
+  let jj::WorkingCopyChanges {
+    files: mut uncommitted_files,
+    conflicted: conflicted_files,
+    token,
+  } = working_copy;
+  // Conflicted sides read with the marker style, so it names the hunks too.
+  for file in &mut uncommitted_files {
+    if let Some(id) = &mut file.content_id {
+      id.push(':');
+      id.push_str(conflict_marker_style);
+    }
+  }
   let uncommitted_paths: std::collections::HashSet<String> = uncommitted_files
     .iter()
     .map(|file| file.path.clone())
     .collect();
-  let conflicted_files = jj::get_conflicted_files(workspace_dir_str, Some(target_branch))
-    .map_err(|e| format!("Failed to get conflicted workspace files: {}", e))?;
   let conflicted_paths: std::collections::HashSet<String> =
     conflicted_files.iter().cloned().collect();
   // Drop clean overlap with the working copy so WC-only edits (bookmark at @)
@@ -4116,10 +5075,66 @@ fn workspace_diff_with_conflict_style(
   diff.committed_files.retain(|file| {
     !uncommitted_paths.contains(&file.path) || conflicted_paths.contains(&file.path)
   });
+  // A file both committed and dirty reviews as one diff, fork point to the
+  // working copy, not the committed half alone. Conflicted files keep their
+  // committed hunks: rebase conflicts live there.
+  let dirty_committed: std::collections::HashSet<String> = diff
+    .hunks_by_file
+    .iter()
+    .map(|f| f.path.clone())
+    .filter(|p| uncommitted_paths.contains(p) && !conflicted_paths.contains(p))
+    .collect();
+  if !dirty_committed.is_empty() && base_revision != "@" {
+    let whole = repo
+      .merge_diff_between_revisions(&base_revision, "@", conflict_marker_style)
+      .map_err(|e| format!("Failed to get workspace diff: {}", e))?;
+    let mut whole: std::collections::HashMap<String, jj::JjFileDiff> = whole
+      .hunks_by_file
+      .into_iter()
+      .filter(|f| dirty_committed.contains(&f.path))
+      .map(|f| (f.path.clone(), f))
+      .collect();
+    for file in &mut diff.hunks_by_file {
+      if dirty_committed.contains(&file.path) {
+        // Absent: the working copy reverted it back to the base.
+        *file = whole.remove(&file.path).unwrap_or_else(|| jj::JjFileDiff {
+          path: file.path.clone(),
+          hunks: Vec::new(),
+          conflict_style: Default::default(),
+          conflict_regions: Vec::new(),
+        });
+      }
+    }
+  }
   diff.uncommitted_files = uncommitted_files;
   diff.conflicted_files = conflicted_files;
+  // As `list_file_hunks_batch` names its reads, so the Changes tab can tell
+  // that hunks it read are still current.
+  diff.working_copy_token = token.map(|token| format!("{token}:{conflict_marker_style}"));
 
   Ok(diff)
+}
+
+/// The workspace's branch no longer exists locally, as after a fetch
+/// dropped a branch deleted on the remote.
+pub fn workspace_branch_deleted(repo_path: &str, workspace_id: i64) -> bool {
+  let Ok(Some(workspace)) = local_db::get_workspace_by_id(repo_path, workspace_id) else {
+    return false;
+  };
+  let workspace_dir = Path::new(repo_path)
+    .join(".treq")
+    .join("workspaces")
+    .join(&workspace.workspace_path);
+  let Some(workspace_dir) = workspace_dir.to_str().filter(|_| workspace_dir.exists()) else {
+    return false;
+  };
+  jj::WorkspaceRepo::load(workspace_dir)
+    .is_ok_and(|repo| !branch_exists(&repo, &workspace.branch_name))
+}
+
+/// A conflicted bookmark still exists, though it lists in neither side.
+fn branch_exists(repo: &jj::WorkspaceRepo, branch_name: &str) -> bool {
+  repo.bookmark_presence(branch_name, "origin").0 || repo.is_bookmark_conflicted(branch_name)
 }
 
 fn resolve_workspace_diff_base_revision(
@@ -4127,14 +5142,20 @@ fn resolve_workspace_diff_base_revision(
   workspace: &local_db::Workspace,
   repo: &jj::WorkspaceRepo,
 ) -> Result<String, String> {
-  let target_branch = workspace.target_branch.as_deref().unwrap_or("main");
+  let target_branch = diff_target_revision(
+    workspace.target_branch.as_deref().unwrap_or("main"),
+    |name| repo.is_bookmark_conflicted(name),
+    |name| repo.bookmark_presence(name, "origin").1,
+  );
+  let target_branch = target_branch.as_str();
   let last_rebased_target_commit =
     local_db::get_workspace_last_rebased_commit(repo_path, workspace.id)?;
   let base_revision = resolve_workspace_diff_base_revision_from_last_rebased(
     last_rebased_target_commit,
     target_branch,
   );
-  if base_revision != target_branch {
+  // A deleted branch has no tip to compare; the diff runs to `@`.
+  if base_revision != target_branch && branch_exists(repo, &workspace.branch_name) {
     let workspace_revision = resolve_workspace_diff_workspace_revision(
       &workspace.branch_name,
       repo.is_bookmark_conflicted(&workspace.branch_name),
@@ -4163,6 +5184,9 @@ fn resolve_workspace_diff_tip_revision(
   repo: &jj::WorkspaceRepo,
 ) -> Result<String, String> {
   let target_branch = workspace.target_branch.as_deref().unwrap_or("main");
+  if !branch_exists(repo, &workspace.branch_name) {
+    return Ok("@".to_string());
+  }
   let committed_ahead = repo
     .commits_ahead(&workspace.branch_name)
     .map_err(|e| format!("Failed to get workspace commits ahead: {}", e))?;
@@ -4200,6 +5224,20 @@ fn resolve_workspace_diff_tip_revision_from_workspace_state(
     "@-".to_string()
   } else {
     branch_name.to_string()
+  }
+}
+
+/// The revision a diff bases on for `target`. A conflicted local bookmark
+/// cannot be named in a revset, so the diff falls back to its `@origin` copy.
+fn diff_target_revision(
+  target: &str,
+  is_conflicted: impl Fn(&str) -> bool,
+  on_origin: impl Fn(&str) -> bool,
+) -> String {
+  if is_conflicted(target) && on_origin(target) {
+    format!("{target}@origin")
+  } else {
+    target.to_string()
   }
 }
 
@@ -4287,12 +5325,15 @@ pub fn check_and_rebase_workspaces(
           bookmark_conflicts: auto_result.bookmark_conflicts,
         })
       }
-      None => Ok(SingleRebaseResult {
-        rebased: false,
-        success: true,
-        message: "No rebase needed".to_string(),
-        bookmark_conflicts: Vec::new(),
-      }),
+      None => {
+        let held = crate::core::rebase_guard::hold(repo_path, id).filter(|h| h.blocks());
+        Ok(SingleRebaseResult {
+          rebased: false,
+          success: held.is_none(),
+          message: held.map_or_else(|| "No rebase needed".to_string(), |h| h.message()),
+          bookmark_conflicts: Vec::new(),
+        })
+      }
     }
   } else {
     let results = auto_rebase::check_and_rebase_all(repo_path, conflict_style)?;
@@ -4488,18 +5529,21 @@ fn commit_workspace_locked(
   let result = jj::jj_commit(&workspace_root, message)
     .map_err(|e| format!("Failed to create commit: {}", e))?;
   // Check-pass autosaves are checkpoints. Fold them away once the user commits.
-  let _ = jj::jj_drop_autosave_ancestors(&workspace_root);
+  jj::jj_drop_autosave_ancestors(&workspace_root).warn_on_err("jj drop autosave ancestors");
   // Keep branch history free of empty commits; best-effort, never fails the commit.
-  let _ = jj::jj_abandon_empty_commits(&workspace_root, &target_branch);
+  jj::jj_abandon_empty_commits(&workspace_root, &target_branch)
+    .warn_on_err("jj abandon empty commits");
   if !committed_branch.is_empty() {
     if let Some(id) = workspace_id {
       if let Ok(new_tip) = jj::jj_get_commit_id(&workspace_root, &committed_branch) {
-        let _ = local_db::update_workspace_last_rebased_commit(repo_path, id, &new_tip);
+        local_db::update_workspace_last_rebased_commit(repo_path, id, &new_tip)
+          .warn_on_err("update workspace last rebased commit");
       }
     }
   }
   if !committed_branch.is_empty() {
-    let _ = auto_rebase::rebase_after_commit(repo_path, &committed_branch);
+    auto_rebase::rebase_after_commit(repo_path, &committed_branch)
+      .warn_on_err("rebase after commit");
   }
   match workspace_id {
     Some(_) => {
@@ -4521,4 +5565,34 @@ fn commit_workspace_locked(
   }
 
   Ok(result)
+}
+
+/// Resets a workspace's branch to `origin`: fetches, then points the bookmark
+/// at `<branch>@origin` with a clean working copy. Its local-only commits and
+/// uncommitted changes are dropped (jj's operation log still holds them).
+/// Returns how many commits were dropped.
+pub fn reset_workspace_to_remote(repo_path: &str, workspace_id: i64) -> Result<usize, String> {
+  let workspace = local_db::get_workspace_by_id(repo_path, workspace_id)
+    .map_err(|e| format!("Failed to get workspace: {}", e))?
+    .ok_or_else(|| format!("Workspace not found: {}", workspace_id))?;
+  let full_path = Path::new(repo_path)
+    .join(".treq")
+    .join("workspaces")
+    .join(&workspace.workspace_path);
+  if !full_path.exists() {
+    return Err(format!(
+      "Workspace directory is missing: {}",
+      full_path.display()
+    ));
+  }
+  let full_path = full_path.to_string_lossy();
+  jj::jj_git_fetch(repo_path).map_err(|e| format!("Fetch failed: {}", e))?;
+  let dropped = jj::jj_reset_bookmark_to_remote(&full_path, &workspace.branch_name)
+    .map_err(|e| e.to_string())?;
+  sync_home_and_workspace_for_branch(
+    repo_path,
+    &workspace.branch_name,
+    SyncSource::WorkspaceToHome,
+  )?;
+  Ok(dropped)
 }

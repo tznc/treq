@@ -11,7 +11,7 @@ use tauri_plugin_gpui::gpui::App;
 
 use super::{
   menus,
-  native::{Backend, NativeEvent, OpenRequest},
+  native::{Backend, NativeEvent, OpenRequest, ToastTone},
   screen::{
     workspace_ops::{self, Removed},
     ChangesHost, WorkspaceHost,
@@ -32,9 +32,10 @@ pub fn handles(action: &SidebarAction) -> bool {
   matches!(
     action,
     SidebarAction::HomeMenu { .. }
+      | SidebarAction::ProjectMenu
       | SidebarAction::WorkspaceMenu { .. }
+      | SidebarAction::WorkspacesMenu
       | SidebarAction::RepoWorkspaceMenu { .. }
-      | SidebarAction::BulkArchive
       | SidebarAction::MoveWorkspace { .. }
   )
 }
@@ -46,13 +47,39 @@ pub fn handle(
   label: &str,
   snapshot: &SidebarSnapshot,
   action: &SidebarAction,
-  _: &mut App,
+  cx: &mut App,
 ) -> bool {
   let backend = Arc::new(Backend::new(app.clone(), label.to_string()));
   let Some(active) = snapshot.repos.iter().find(|r| r.active) else {
     return false;
   };
   match action {
+    SidebarAction::ProjectMenu => {
+      let current = super::projects::window_project(app, label).map(|p| p.id);
+      let teams = super::projects::teams(app);
+      let entries: Vec<context_menu::ProjectEntry> = super::projects::list(app)
+        .into_iter()
+        .map(|p| context_menu::ProjectEntry {
+          team: p.org_id.as_ref().map(|o| {
+            teams
+              .iter()
+              .find(|(id, _)| id == o)
+              .map_or_else(|| "Team".to_string(), |(_, n)| n.clone())
+          }),
+          id: p.id,
+          name: p.name,
+        })
+        .collect();
+      let mut items = context_menu::project_items(&entries, current.as_deref());
+      if let Some(project) = super::projects::window_project(app, label) {
+        if let Some(owner) = context_menu::project_owner_item(&teams, project.org_id.as_deref()) {
+          // Before "New Window…", the last item.
+          items.insert(items.len() - 1, owner);
+        }
+      }
+      show(app, label, backend, items);
+      true
+    }
     SidebarAction::HomeMenu { repo_path } => {
       let Some(index) = snapshot.repos.iter().position(|r| &r.path == repo_path) else {
         return false;
@@ -62,40 +89,41 @@ pub fn handle(
         missing: snapshot.repos[index].missing,
         on_screen: repo_path == &active.path,
         supporting: index > 0,
+        // Any local repository can leave; the next takes over the window,
+        // or the project shows empty. A remote window's one repository stays.
+        removable: snapshot.repos.len() > 1
+          || crate::core::projects::remote_repo(repo_path).is_none(),
       };
       let items = context_menu::home_items(&menu, editors(&*backend));
       show(app, label, backend, items);
       true
     }
     SidebarAction::WorkspaceMenu { id } => {
-      workspace_menu(app, label, backend, &active.path, *id, true)
+      workspace_menu(app, label, backend, &active.path, *id, true, cx)
     }
     SidebarAction::RepoWorkspaceMenu { repo_path, id } => {
-      workspace_menu(app, label, backend, repo_path, *id, false)
+      workspace_menu(app, label, backend, repo_path, *id, false, cx)
     }
-    SidebarAction::BulkArchive => {
-      let ids: Vec<i64> = active
-        .workspaces
-        .iter()
-        .filter(|row| row.selected)
-        .map(|row| row.id)
-        .collect();
+    SidebarAction::WorkspacesMenu => {
+      let ids = selected_ids(active);
       if ids.is_empty() {
         return false;
       }
-      let (app, repo_path) = (app.clone(), active.path.clone());
+      let (app, label, repo_path) = (app.clone(), label.to_string(), active.path.clone());
       std::thread::spawn(move || {
-        let Ok(workspaces) = workspaces(&backend, &repo_path) else {
+        let Some(workspaces) =
+          workspaces_or_toast(&backend, &repo_path, "Failed to load the workspace menu")
+        else {
           return;
         };
-        let selected: Vec<Removed> = workspaces
-          .iter()
+        let selected: Vec<Workspace> = workspaces
+          .into_iter()
           .filter(|w| ids.contains(&w.id))
-          .map(Removed::of)
           .collect();
-        for workspace in workspace_ops::archive_all(&*backend, &selected) {
-          super::close_workspace_terminals(&app, backend.label(), workspace.path);
-        }
+        super::defer_main(&app.clone(), move |app| {
+          let items = context_menu::workspaces_items(&selected, &repo_path, editors(&*backend));
+          show(app, &label, backend, items);
+        });
       });
       true
     }
@@ -109,17 +137,26 @@ pub fn handle(
         .unwrap_or_else(|| "main".into());
       let repo_path = active.path.clone();
       std::thread::spawn(move || {
-        let Ok(workspaces) = workspaces(&backend, &repo_path) else {
+        const FAILED: &str = "Failed to move workspace";
+        let Some(workspaces) = workspaces_or_toast(&backend, &repo_path, FAILED) else {
           return;
         };
         let find = |id: i64| workspaces.iter().find(|w| w.id == id).cloned();
         let Some(workspace) = find(id) else {
+          backend.toast(ToastTone::Error, FAILED, "The workspace no longer exists.");
           return;
         };
         let target = match onto {
           Some(onto) => match find(onto) {
             Some(onto) => onto.branch_name,
-            None => return,
+            None => {
+              backend.toast(
+                ToastTone::Error,
+                FAILED,
+                "The target workspace no longer exists.",
+              );
+              return;
+            }
           },
           None => home,
         };
@@ -131,6 +168,37 @@ pub fn handle(
   }
 }
 
+/// The ids of `repo`'s selected workspace rows.
+fn selected_ids(repo: &super::sidebar::RepoSection) -> Vec<i64> {
+  repo
+    .workspaces
+    .iter()
+    .filter(|row| row.selected)
+    .map(|row| row.id)
+    .collect()
+}
+
+/// Archives workspaces `ids` of `repo_path`, off the main thread, closing
+/// the terminals of each one archived.
+fn archive_all(app: &AppHandle, backend: Arc<Backend>, repo_path: String, ids: Vec<i64>) {
+  let app = app.clone();
+  std::thread::spawn(move || {
+    let Some(workspaces) =
+      workspaces_or_toast(&backend, &repo_path, "Failed to archive workspaces")
+    else {
+      return;
+    };
+    let selected: Vec<Removed> = workspaces
+      .iter()
+      .filter(|w| ids.contains(&w.id))
+      .map(Removed::of)
+      .collect();
+    for workspace in workspace_ops::archive_all(&*backend, &selected) {
+      super::close_workspace_terminals(&app, backend.label(), workspace.path);
+    }
+  });
+}
+
 /// `repo_path`'s workspaces, over SSH for the window's remote repository.
 /// Blocks.
 fn workspaces(backend: &Backend, repo_path: &str) -> Result<Vec<Workspace>, String> {
@@ -138,6 +206,31 @@ fn workspaces(backend: &Backend, repo_path: &str) -> Result<Vec<Workspace>, Stri
     Some(remote) => remote.workspaces(),
     None => core::list_workspaces(repo_path),
   }
+}
+
+/// `workspaces`, or `None` after telling the user why the list could not be
+/// read. For actions that already left the menu, so a failure has no other
+/// place to show.
+fn workspaces_or_toast(backend: &Backend, repo_path: &str, title: &str) -> Option<Vec<Workspace>> {
+  workspaces(backend, repo_path)
+    .map_err(|err| backend.toast(ToastTone::Error, title, err))
+    .ok()
+}
+
+/// Workspace `id` of `repo_path`, or `None` after a toast titled `title`.
+fn workspace_or_toast(
+  backend: &Backend,
+  repo_path: &str,
+  id: i64,
+  title: &str,
+) -> Option<Workspace> {
+  let found = workspaces_or_toast(backend, repo_path, title)?
+    .into_iter()
+    .find(|w| w.id == id);
+  if found.is_none() {
+    backend.toast(ToastTone::Error, title, "The workspace no longer exists.");
+  }
+  found
 }
 
 fn editors(host: &dyn ChangesHost) -> EditorApps {
@@ -150,9 +243,10 @@ fn editors(host: &dyn ChangesHost) -> EditorApps {
 }
 
 /// `workspaceMenuEntries` for workspace `id` of `repo_path`, which may be
-/// a repository that is not on screen (`archive` false). A remote
-/// repository's workspace is read off the main thread, and has no pull
-/// request poller.
+/// a repository that is not on screen (`archive` false). The workspace
+/// comes from what the window last read; one it has not read (and a remote
+/// repository's, which has no pull request poller) is read off the main
+/// thread, so the menu never waits on the repository or SSH.
 fn workspace_menu(
   app: &AppHandle,
   label: &str,
@@ -160,39 +254,45 @@ fn workspace_menu(
   repo_path: &str,
   id: i64,
   archive: bool,
+  cx: &App,
 ) -> bool {
-  if backend.remote(repo_path).is_some() {
-    let (app, label, repo_path) = (app.clone(), label.to_string(), repo_path.to_string());
-    std::thread::spawn(move || {
-      let Some(workspace) = workspaces(&backend, &repo_path)
-        .ok()
-        .and_then(|list| list.into_iter().find(|w| w.id == id))
-      else {
-        return;
-      };
-      super::defer_main(&app.clone(), move |app| {
-        let items =
-          context_menu::workspace_items(&workspace, &repo_path, None, editors(&*backend), archive);
-        show(app, &label, backend, items);
-      });
-    });
-    return true;
+  let remote = backend.remote(repo_path).is_some();
+  if !remote {
+    if let Some(workspace) = super::window::workspace(label, repo_path, id, cx) {
+      let pr_url = pr_url(repo_path, &workspace);
+      let items = context_menu::workspace_items(
+        &workspace,
+        repo_path,
+        pr_url.as_deref(),
+        editors(&*backend),
+        archive,
+      );
+      show(app, label, backend, items);
+      return true;
+    }
   }
-  let Some(workspace) = core::list_workspaces(repo_path)
-    .ok()
-    .and_then(|list| list.into_iter().find(|w| w.id == id))
-  else {
-    return false;
-  };
-  let pr_url = pr_url(repo_path, &workspace);
-  let items = context_menu::workspace_items(
-    &workspace,
-    repo_path,
-    pr_url.as_deref(),
-    editors(&*backend),
-    archive,
-  );
-  show(app, label, backend, items);
+  let (app, label, repo_path) = (app.clone(), label.to_string(), repo_path.to_string());
+  std::thread::spawn(move || {
+    let Some(workspace) = workspace_or_toast(
+      &backend,
+      &repo_path,
+      id,
+      "Failed to load the workspace menu",
+    ) else {
+      return;
+    };
+    let pr_url = (!remote).then(|| pr_url(&repo_path, &workspace)).flatten();
+    super::defer_main(&app.clone(), move |app| {
+      let items = context_menu::workspace_items(
+        &workspace,
+        &repo_path,
+        pr_url.as_deref(),
+        editors(&*backend),
+        archive,
+      );
+      show(app, &label, backend, items);
+    });
+  });
   true
 }
 
@@ -222,6 +322,24 @@ fn run(app: &AppHandle, backend: Arc<Backend>, action: MenuAction) {
   let open = |what| WorkspaceHost::notify(&*backend, NativeEvent::Open { what });
   match action {
     MenuAction::OpenBranchSwitcher => open(OpenRequest::BranchSwitcher),
+    MenuAction::SaveProject => open(OpenRequest::SaveProject { closing: false }),
+    MenuAction::ProjectContext => open(OpenRequest::ProjectContext),
+    MenuAction::SetProjectOwner(org_id) => {
+      if let Err(e) = super::projects::set_window_owner(app, backend.label(), org_id.as_deref()) {
+        log::warn!("moving project: {e}");
+      }
+    }
+    // A pick runs inside a GPUI update, where `run_on_main_thread` runs at
+    // once and the new window could not attach GPUI: open it after.
+    MenuAction::SwitchProject(id) => {
+      super::defer_main(app, move |app| super::projects::open_project(app, &id))
+    }
+    MenuAction::NewWindow => super::defer_main(app, |app| {
+      let label = crate::open_new_window::new_repo_window_label();
+      if let Err(err) = super::open_window(app, &label, None, "Treq") {
+        log::error!("failed to open window: {err}");
+      }
+    }),
     MenuAction::AddRepository => open(OpenRequest::AddRepository),
     MenuAction::OpenRepoSettings(repo_path) => open(OpenRequest::RepoSettings { repo_path }),
     MenuAction::LocateRepo(repo_path) => open(OpenRequest::LocateRepo { repo_path }),
@@ -239,10 +357,12 @@ fn run(app: &AppHandle, backend: Arc<Backend>, action: MenuAction) {
     } => {
       let app = app.clone();
       std::thread::spawn(move || {
-        let Some(workspace) = workspaces(&backend, &repo_path)
-          .ok()
-          .and_then(|list| list.into_iter().find(|w| w.id == workspace_id))
-        else {
+        let Some(workspace) = workspace_or_toast(
+          &backend,
+          &repo_path,
+          workspace_id,
+          "Failed to archive workspace",
+        ) else {
           return;
         };
         let workspace = Removed::of(&workspace);
@@ -251,6 +371,10 @@ fn run(app: &AppHandle, backend: Arc<Backend>, action: MenuAction) {
         }
       });
     }
+    MenuAction::ArchiveWorkspaces {
+      repo_path,
+      workspace_ids,
+    } => archive_all(app, backend, repo_path, workspace_ids),
     _ => {}
   }
 }

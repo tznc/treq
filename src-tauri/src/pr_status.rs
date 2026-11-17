@@ -10,6 +10,7 @@
 
 use crate::github::{PrCiStatus, PrInfo};
 use crate::lock_ext::LockExt;
+use crate::result_ext::ResultExt;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -24,12 +25,25 @@ pub const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(60);
 /// the background thread so the UI never blocks on `gh`.
 pub const DEFAULT_CI_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
+/// While no window is in front, both cadences are this many times slower:
+/// nobody is looking, and coming to the front polls whatever is due at once.
+pub const BACKGROUND_SLOWDOWN: u32 = 5;
+
 /// Fetch PR info for `(repo_path, branch_name)`.
 pub type PrFetchFn = Arc<dyn Fn(&str, &str) -> Result<Option<PrInfo>, String> + Send + Sync>;
 
 /// Fetch rolled-up CI status for `(repo_path, branch_name)`.
 /// Only invoked when the PR fetch returned `Some(_)`.
 pub type CiFetchFn = Arc<dyn Fn(&str, &str) -> Result<Option<PrCiStatus>, String> + Send + Sync>;
+
+/// PR info and CI rollup for each requested branch of a repo, fetched in one
+/// call. Every requested branch is a key; `None` means it has no PR.
+pub type BulkFetchResult = HashMap<String, (Option<PrInfo>, Option<PrCiStatus>)>;
+
+/// Fetch PR info and CI for all of a repo's `branches` at once. An `Err`
+/// makes the poller fall back to per-branch fetches.
+pub type BulkFetchFn =
+  Arc<dyn Fn(&str, &[String]) -> Result<BulkFetchResult, String> + Send + Sync>;
 
 /// List workspace branch names that should be polled for a repo.
 pub type BranchListFn = Arc<dyn Fn(&str) -> Result<Vec<String>, String> + Send + Sync>;
@@ -53,6 +67,7 @@ struct Inner {
   watched: Mutex<HashSet<String>>,
   fetch: PrFetchFn,
   ci_fetch: CiFetchFn,
+  bulk_fetch: Option<BulkFetchFn>,
   list_branches: BranchListFn,
   on_update: Mutex<Option<OnUpdateFn>>,
   poll_interval: Duration,
@@ -63,8 +78,28 @@ struct Inner {
   wake: (Mutex<()>, Condvar),
   /// Set while a wake should trigger an immediate poll of all watched repos.
   pending_wake: AtomicBool,
+  /// No window is in front: polls run [`BACKGROUND_SLOWDOWN`] times slower.
+  background: AtomicBool,
+  /// Set when a window comes to the front, so the loop works out again what
+  /// is due by the foreground cadence.
+  recheck: AtomicBool,
   shutdown: AtomicBool,
   loop_started: AtomicBool,
+}
+
+impl Inner {
+  /// The PR and CI cadences, slowed while in the background.
+  fn intervals(&self) -> (Duration, Duration) {
+    let slowdown = if self.background.load(Ordering::SeqCst) {
+      BACKGROUND_SLOWDOWN
+    } else {
+      1
+    };
+    (
+      self.poll_interval * slowdown,
+      self.ci_poll_interval * slowdown,
+    )
+  }
 }
 
 /// Process-wide background PR status poller + cache.
@@ -110,6 +145,7 @@ impl PrStatusManager {
         watched: Mutex::new(HashSet::new()),
         fetch,
         ci_fetch,
+        bulk_fetch: None,
         list_branches,
         on_update: Mutex::new(None),
         poll_interval,
@@ -117,6 +153,8 @@ impl PrStatusManager {
         branch_refresh_inflight: Mutex::new(HashSet::new()),
         wake: (Mutex::new(()), Condvar::new()),
         pending_wake: AtomicBool::new(false),
+        background: AtomicBool::new(false),
+        recheck: AtomicBool::new(false),
         shutdown: AtomicBool::new(false),
         loop_started: AtomicBool::new(false),
       }),
@@ -134,17 +172,32 @@ impl PrStatusManager {
     let ci_fetch = Arc::clone(&self.inner.ci_fetch);
     let list_branches = Arc::clone(&self.inner.list_branches);
     let on_update = self.inner.on_update.lock_or_recover().clone();
-    let mgr = Self::new_with_intervals(
+    let mut mgr = Self::new_with_intervals(
       fetch,
       ci_fetch,
       list_branches,
       poll_interval,
       ci_poll_interval,
     );
+    if let Some(bulk_fetch) = self.inner.bulk_fetch.clone() {
+      mgr = mgr.with_bulk_fetch(bulk_fetch);
+    }
     if let Some(cb) = on_update {
       mgr.set_on_update(cb);
     }
     mgr
+  }
+
+  /// Fetch each repo's PRs and CI in one call per poll instead of one per
+  /// branch. Call before the poller starts; per-branch fetches remain the
+  /// fallback when the bulk call fails.
+  pub fn with_bulk_fetch(mut self, bulk_fetch: BulkFetchFn) -> Self {
+    if let Some(inner) = Arc::get_mut(&mut self.inner) {
+      inner.bulk_fetch = Some(bulk_fetch);
+    } else {
+      log::warn!("pr-status: bulk fetch set after the manager was shared; ignored");
+    }
+    self
   }
 
   pub fn set_on_update(&self, cb: OnUpdateFn) {
@@ -165,7 +218,8 @@ impl PrStatusManager {
     thread::Builder::new()
       .name("pr-status-poller".into())
       .spawn(move || background_loop(inner))
-      .expect("failed to spawn pr-status-poller thread");
+      .map(drop)
+      .unwrap_or_else(|e| log::error!("pr-status: failed to spawn poller thread: {e}"));
   }
 
   /// Start watching a repo. A newly watched repo triggers an immediate
@@ -187,6 +241,16 @@ impl PrStatusManager {
   pub fn unwatch_repo(&self, repo_path: &str) {
     let mut watched = self.inner.watched.lock_or_recover();
     watched.remove(repo_path);
+  }
+
+  /// Stops watching every repo `keep` rejects, so a repo no window shows any
+  /// more costs no `gh` calls.
+  pub fn retain_watched(&self, keep: impl Fn(&str) -> bool) {
+    self
+      .inner
+      .watched
+      .lock_or_recover()
+      .retain(|repo| keep(repo));
   }
 
   /// Synchronously refresh one repo (tests + post-create-PR invalidation).
@@ -229,7 +293,8 @@ impl PrStatusManager {
         poll_one_branch(&inner, &repo_path, &branch_name);
         inner.branch_refresh_inflight.lock_or_recover().remove(&key);
       })
-      .expect("failed to spawn pr-status-branch-refresh thread");
+      .map(drop)
+      .unwrap_or_else(|e| log::error!("pr-status: failed to spawn branch refresh thread: {e}"));
   }
 
   /// Overwrite a single branch entry (e.g. after an on-demand `gh pr view`).
@@ -255,8 +320,7 @@ impl PrStatusManager {
     self
       .inner
       .cache
-      .lock()
-      .unwrap()
+      .lock_or_recover()
       .get(repo_path)
       .cloned()
       .unwrap_or_default()
@@ -267,8 +331,7 @@ impl PrStatusManager {
     self
       .inner
       .ci_cache
-      .lock()
-      .unwrap()
+      .lock_or_recover()
       .get(repo_path)
       .cloned()
       .unwrap_or_default()
@@ -280,8 +343,7 @@ impl PrStatusManager {
     self
       .inner
       .cache
-      .lock()
-      .unwrap()
+      .lock_or_recover()
       .get(repo_path)?
       .get(branch_name)
       .cloned()
@@ -293,11 +355,22 @@ impl PrStatusManager {
     self
       .inner
       .ci_cache
-      .lock()
-      .unwrap()
+      .lock_or_recover()
       .get(repo_path)?
       .get(branch_name)
       .cloned()
+  }
+
+  /// Whether any window is in front. In the background polls slow down by
+  /// [`BACKGROUND_SLOWDOWN`]; back in front, what the foreground cadence
+  /// says is due polls at once, so a returning user sees fresh statuses.
+  pub fn set_background(&self, background: bool) {
+    let was = self.inner.background.swap(background, Ordering::SeqCst);
+    if was && !background {
+      self.inner.recheck.store(true, Ordering::SeqCst);
+      let _guard = self.inner.wake.0.lock_or_recover();
+      self.inner.wake.1.notify_one();
+    }
   }
 
   fn request_wake(&self) {
@@ -332,13 +405,15 @@ fn background_loop(inner: Arc<Inner>) {
 
     let now = Instant::now();
     let wake_requested = inner.pending_wake.swap(false, Ordering::SeqCst);
+    inner.recheck.store(false, Ordering::SeqCst);
+    let (poll_interval, ci_poll_interval) = inner.intervals();
     let pr_due = wake_requested
       || last_pr
-        .map(|t| now.duration_since(t) >= inner.poll_interval)
+        .map(|t| now.duration_since(t) >= poll_interval)
         .unwrap_or(true);
     let ci_due = wake_requested
       || last_ci
-        .map(|t| now.duration_since(t) >= inner.ci_poll_interval)
+        .map(|t| now.duration_since(t) >= ci_poll_interval)
         .unwrap_or(true);
 
     if pr_due || ci_due {
@@ -369,11 +444,12 @@ fn background_loop(inner: Arc<Inner>) {
 
     // Sleep until the sooner of the next PR or CI deadline (or wake early).
     let now = Instant::now();
+    let (poll_interval, ci_poll_interval) = inner.intervals();
     let until_pr = last_pr
-      .map(|t| inner.poll_interval.saturating_sub(now.duration_since(t)))
+      .map(|t| poll_interval.saturating_sub(now.duration_since(t)))
       .unwrap_or(Duration::ZERO);
     let until_ci = last_ci
-      .map(|t| inner.ci_poll_interval.saturating_sub(now.duration_since(t)))
+      .map(|t| ci_poll_interval.saturating_sub(now.duration_since(t)))
       .unwrap_or(Duration::ZERO);
     let wait = until_pr.min(until_ci).max(Duration::from_millis(5));
 
@@ -381,9 +457,11 @@ fn background_loop(inner: Arc<Inner>) {
     let guard = lock.lock_or_recover();
     let (_guard, _timeout) = cvar
       .wait_timeout_while(guard, wait, |_| {
-        !inner.pending_wake.load(Ordering::SeqCst) && !inner.shutdown.load(Ordering::SeqCst)
+        !inner.pending_wake.load(Ordering::SeqCst)
+          && !inner.recheck.load(Ordering::SeqCst)
+          && !inner.shutdown.load(Ordering::SeqCst)
       })
-      .unwrap();
+      .unwrap_or_else(|poisoned| poisoned.into_inner());
   }
 }
 
@@ -398,7 +476,17 @@ fn poll_one_repo(inner: &Inner, repo_path: &str) {
 
   let mut next: RepoPrCache = HashMap::new();
   let mut next_ci: RepoCiCache = HashMap::new();
+  let bulk = inner.bulk_fetch.as_ref().and_then(|bulk_fetch| {
+    bulk_fetch(repo_path, &branches)
+      .inspect_err(|e| log::warn!("pr-status: bulk fetch failed for {repo_path}: {e}"))
+      .ok()
+  });
   for branch in branches {
+    if let Some((pr_info, ci)) = bulk.as_ref().and_then(|bulk| bulk.get(&branch)) {
+      next.insert(branch.clone(), pr_info.clone());
+      next_ci.insert(branch, ci.clone());
+      continue;
+    }
     let pr_info = match (inner.fetch)(repo_path, &branch) {
       Ok(info) => {
         next.insert(branch.clone(), info.clone());
@@ -410,8 +498,7 @@ fn poll_one_repo(inner: &Inner, repo_path: &str) {
         log::warn!("pr-status: fetch failed for {repo_path}#{branch}: {e}");
         if let Some(prev) = inner
           .cache
-          .lock()
-          .unwrap()
+          .lock_or_recover()
           .get(repo_path)
           .and_then(|m| m.get(&branch).cloned())
         {
@@ -445,13 +532,14 @@ fn poll_one_repo(inner: &Inner, repo_path: &str) {
 fn poll_ci_only(inner: &Inner, repo_path: &str) {
   let pr_cache = inner
     .cache
-    .lock()
-    .unwrap()
+    .lock_or_recover()
     .get(repo_path)
     .cloned()
     .unwrap_or_default();
 
-  if pr_cache.is_empty() {
+  // With the bulk call a full refresh costs one `gh` spawn, no more than the
+  // CI rollups alone would.
+  if pr_cache.is_empty() || inner.bulk_fetch.is_some() {
     poll_one_repo(inner, repo_path);
     return;
   }
@@ -482,8 +570,7 @@ fn poll_one_branch(inner: &Inner, repo_path: &str, branch_name: &str) {
       // Keep prior entry on transient failure.
       if let Some(prev) = inner
         .cache
-        .lock()
-        .unwrap()
+        .lock_or_recover()
         .get(repo_path)
         .and_then(|m| m.get(branch_name).cloned())
       {
@@ -530,15 +617,13 @@ fn poll_one_branch(inner: &Inner, repo_path: &str, branch_name: &str) {
 
   let statuses = inner
     .cache
-    .lock()
-    .unwrap()
+    .lock_or_recover()
     .get(repo_path)
     .cloned()
     .unwrap_or_default();
   let ci_statuses = inner
     .ci_cache
-    .lock()
-    .unwrap()
+    .lock_or_recover()
     .get(repo_path)
     .cloned()
     .unwrap_or_default();
@@ -569,8 +654,7 @@ fn fetch_ci_for_branch(
       log::warn!("pr-status: CI fetch failed for {repo_path}#{branch}: {e}");
       if let Some(prev) = inner
         .ci_cache
-        .lock()
-        .unwrap()
+        .lock_or_recover()
         .get(repo_path)
         .and_then(|m| m.get(branch).cloned())
       {
@@ -586,9 +670,7 @@ static GLOBAL: std::sync::OnceLock<PrStatusManager> = std::sync::OnceLock::new()
 
 fn production_fetch() -> PrFetchFn {
   Arc::new(|repo_path: &str, branch_name: &str| {
-    let gh = crate::binary_paths::get_binary_path("gh")
-      .or_else(|| crate::binary_paths::detect_binary("gh"))
-      .ok_or_else(|| "gh CLI not found".to_string())?;
+    let gh = crate::core::github_cli::gh_path()?;
     let path = crate::binary_paths::get_extended_path();
     crate::github::get_pr_info_via_gh_impl(&gh, repo_path, branch_name, &path)
   })
@@ -596,12 +678,51 @@ fn production_fetch() -> PrFetchFn {
 
 fn production_ci_fetch() -> CiFetchFn {
   Arc::new(|repo_path: &str, branch_name: &str| {
-    let gh = crate::binary_paths::get_binary_path("gh")
-      .or_else(|| crate::binary_paths::detect_binary("gh"))
-      .ok_or_else(|| "gh CLI not found".to_string())?;
+    let gh = crate::core::github_cli::gh_path()?;
     let path = crate::binary_paths::get_extended_path();
     crate::github::get_pr_checks_via_gh_impl(&gh, repo_path, branch_name, &path)
   })
+}
+
+/// One `gh pr list` per repo. Branches missing from a full page fall back to
+/// `gh pr view`/`checks`, since their PR may predate the page.
+fn production_bulk_fetch() -> BulkFetchFn {
+  Arc::new(|repo_path: &str, branches: &[String]| {
+    let gh = crate::core::github_cli::gh_path()?;
+    let path = crate::binary_paths::get_extended_path();
+    bulk_fetch_via(&gh, &path, repo_path, branches)
+  })
+}
+
+/// [`production_bulk_fetch`] with the `gh` binary and PATH it runs.
+fn bulk_fetch_via(
+  gh: &str,
+  path: &str,
+  repo_path: &str,
+  branches: &[String],
+) -> Result<BulkFetchResult, String> {
+  let mut listing = crate::github::list_prs_with_checks_via_gh_impl(gh, repo_path, path)?;
+  let mut result = BulkFetchResult::new();
+  for branch in branches {
+    let entry = match listing.by_branch.remove(branch) {
+      Some((pr, ci)) => (Some(pr), ci),
+      // Older than the page: one `gh pr list --head` brings PR and CI together.
+      None if listing.truncated => {
+        match crate::github::list_pr_for_head_via_gh_impl(gh, repo_path, branch, path) {
+          Ok(Some((pr, ci))) => (Some(pr), ci),
+          Ok(None) => (None, None),
+          // Left out, so only this branch falls back and the rest stand.
+          Err(e) => {
+            log::warn!("pr-status: head lookup failed for {repo_path}#{branch}: {e}");
+            continue;
+          }
+        }
+      }
+      None => (None, None),
+    };
+    result.insert(branch.clone(), entry);
+  }
+  Ok(result)
 }
 
 fn production_list_branches() -> BranchListFn {
@@ -619,19 +740,71 @@ pub fn global() -> &'static PrStatusManager {
       production_ci_fetch(),
       production_list_branches(),
     )
+    .with_bulk_fetch(production_bulk_fetch())
   })
+}
+
+/// The map's entries in key order, so equal caches serialize identically.
+fn statuses_sorted<V>(map: &HashMap<String, V>) -> std::collections::BTreeMap<&String, &V> {
+  map.iter().collect()
+}
+
+/// What a poll found, as a number equal for equal caches, so the emitter
+/// can tell whether anything changed since its last event.
+pub fn statuses_digest(statuses: &RepoPrCache, ci_statuses: &RepoCiCache) -> u64 {
+  use std::hash::{Hash, Hasher};
+  let mut hasher = std::collections::hash_map::DefaultHasher::new();
+  statuses_sorted(statuses).hash(&mut hasher);
+  statuses_sorted(ci_statuses).hash(&mut hasher);
+  hasher.finish()
+}
+
+/// The `pr-statuses-updated` payload. `stacks_moved` says a PR's base moved
+/// (`core::pr_stacks`); `synced` lists the workspaces whose title or
+/// description the PR just changed (`core::pr_sync`).
+fn update_payload(repo_path: &str, stacks_moved: bool, synced: &[i64]) -> serde_json::Value {
+  serde_json::json!({ "repo_path": repo_path, "stacks_moved": stacks_moved, "synced": synced })
+}
+
+/// The repository of a `pr-statuses-updated` payload whose workspaces the
+/// PR changed, so windows read them again.
+pub fn synced_repo(payload: &str) -> Option<String> {
+  let payload: serde_json::Value = serde_json::from_str(payload).ok()?;
+  let synced = payload["synced"].as_array()?;
+  if synced.is_empty() {
+    return None;
+  }
+  payload["repo_path"].as_str().map(str::to_string)
 }
 
 /// Attach a Tauri event emitter so cache refreshes notify the frontend.
 pub fn set_app_handle(app: tauri::AppHandle) {
   use tauri::Emitter;
+  // Listeners re-read the cache, so the event carries only which repo changed,
+  // and only when what the poll found differs from the last event.
+  let last_emitted: Mutex<HashMap<String, u64>> = Mutex::new(HashMap::new());
   global().set_on_update(Arc::new(move |repo_path, statuses, ci_statuses| {
-    let payload = serde_json::json!({
-        "repo_path": repo_path,
-        "statuses": statuses,
-        "ci_statuses": ci_statuses,
+    // Follow GitHub retargets and merged bases before the UI rereads stacks.
+    let stacks_moved = crate::core::pr_stacks::sync_pr_bases(repo_path, statuses);
+    // Before the event, so windows re-reading on it see the PR's text.
+    let synced = crate::core::pr_sync::sync_repo(repo_path, statuses).unwrap_or_else(|err| {
+      log::warn!("pr-status: syncing PR text into {repo_path}: {err}");
+      Vec::new()
     });
-    let _ = app.emit("pr-statuses-updated", payload);
+    let digest = statuses_digest(statuses, ci_statuses);
+    let unchanged = last_emitted
+      .lock_or_recover()
+      .insert(repo_path.to_string(), digest)
+      == Some(digest);
+    if unchanged && !stacks_moved && synced.is_empty() {
+      return;
+    }
+    app
+      .emit(
+        "pr-statuses-updated",
+        update_payload(repo_path, stacks_moved, &synced),
+      )
+      .ignore_closed();
   }));
   global().ensure_started();
 }
@@ -651,6 +824,7 @@ mod tests {
       base_ref_name: "main".into(),
       merge_state_status: Some("CLEAN".into()),
       is_draft: false,
+      body: String::new(),
     }
   }
 
@@ -1018,6 +1192,129 @@ mod tests {
     assert_eq!(count.load(Ordering::SeqCst), 1);
   }
 
+  /// A `gh` that logs each call to `calls.log` beside it: a full page of
+  /// other repos' PRs for the bulk list, and one PR for any branch asked
+  /// about by name. Asking about `bad` fails.
+  fn fake_gh(dir: &std::path::Path) -> String {
+    let script = dir.join("gh");
+    let log = dir.join("calls.log");
+    let pr = |head: &str| {
+      format!(
+        r#"{{"number":1,"title":"t","state":"OPEN","url":"u","headRefName":"{head}","baseRefName":"main","mergeStateStatus":"CLEAN","isDraft":false,"isCrossRepository":false,"statusCheckRollup":[],"body":""}}"#
+      )
+    };
+    let page: Vec<String> = (0..100).map(|i| pr(&format!("old/{i}"))).collect();
+    std::fs::write(
+      &script,
+      format!(
+        r#"#!/bin/sh
+echo "$*" >> '{log}'
+last=""; for a in "$@"; do prev="$last"; last="$a"; done
+case "$*" in
+  *bad*) echo "boom" >&2; exit 1 ;;
+  "pr list --state all --limit 100 "*) echo '[{page}]' ;;
+  "pr list --head="*) echo "[{one}]" | sed "s|HEAD|${{3#--head=}}|" ;;
+  "pr view "*) echo "{one}" | sed "s|HEAD|$last|" ;;
+  "pr checks "*) echo '[]' ;;
+esac
+"#,
+        log = log.display(),
+        page = page.join(","),
+        one = pr("HEAD").replace('"', "\\\""),
+      ),
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    script.to_string_lossy().to_string()
+  }
+
+  fn gh_calls(dir: &std::path::Path) -> usize {
+    std::fs::read_to_string(dir.join("calls.log"))
+      .unwrap_or_default()
+      .lines()
+      .count()
+  }
+
+  #[test]
+  fn a_truncated_page_costs_one_gh_call_per_missing_branch() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let gh = fake_gh(dir.path());
+    let branches: Vec<String> = (0..20).map(|i| format!("feat/{i}")).collect();
+    let path = std::env::var("PATH").unwrap();
+    let result = bulk_fetch_via(&gh, &path, dir.path().to_str().unwrap(), &branches).unwrap();
+    assert_eq!(result.len(), 20);
+    assert!(result.values().all(|(pr, _)| pr.is_some()));
+    assert_eq!(
+      gh_calls(dir.path()),
+      1 + 20,
+      "one list, then one call per branch"
+    );
+  }
+
+  /// `cargo test --lib bulk_fetch_wall_time -- --ignored --nocapture`
+  #[test]
+  #[ignore = "measurement"]
+  fn bulk_fetch_wall_time() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let gh = fake_gh(dir.path());
+    let path = std::env::var("PATH").unwrap();
+    for count in [10, 50] {
+      let branches: Vec<String> = (0..count).map(|i| format!("feat/{i}")).collect();
+      let _ = std::fs::remove_file(dir.path().join("calls.log"));
+      let mut times: Vec<_> = (0..5)
+        .map(|_| {
+          let start = std::time::Instant::now();
+          let _ = bulk_fetch_via(&gh, &path, dir.path().to_str().unwrap(), &branches);
+          start.elapsed()
+        })
+        .collect();
+      times.sort();
+      println!(
+        "{count} missing branches: {} gh calls/poll, median {:?}",
+        gh_calls(dir.path()) / 5,
+        times[2]
+      );
+    }
+  }
+
+  #[test]
+  fn a_gh_error_on_one_branch_keeps_the_others() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let gh = fake_gh(dir.path());
+    let branches = vec![
+      "feat/a".to_string(),
+      "bad".to_string(),
+      "feat/b".to_string(),
+    ];
+    let path = std::env::var("PATH").unwrap();
+    let result = bulk_fetch_via(&gh, &path, dir.path().to_str().unwrap(), &branches).unwrap();
+    assert!(result.contains_key("feat/a") && result.contains_key("feat/b"));
+    assert!(
+      !result.contains_key("bad"),
+      "left for the per-branch fallback"
+    );
+  }
+
+  #[test]
+  fn statuses_digest_ignores_order_and_sees_any_field_change() {
+    let mut a = RepoPrCache::new();
+    let mut b = RepoPrCache::new();
+    for branch in ["x", "y", "z"] {
+      a.insert(branch.into(), Some(sample_pr(1, branch)));
+    }
+    for branch in ["z", "y", "x"] {
+      b.insert(branch.into(), Some(sample_pr(1, branch)));
+    }
+    let ci = RepoCiCache::from([("x".to_string(), Some(sample_ci("success")))]);
+    assert_eq!(statuses_digest(&a, &ci), statuses_digest(&b, &ci));
+
+    b.get_mut("y").unwrap().as_mut().unwrap().is_draft = true;
+    assert_ne!(statuses_digest(&a, &ci), statuses_digest(&b, &ci));
+    let failing = RepoCiCache::from([("x".to_string(), Some(sample_ci("failure")))]);
+    assert_ne!(statuses_digest(&a, &ci), statuses_digest(&a, &failing));
+  }
+
   #[test]
   fn get_cached_distinguishes_missing_vs_no_pr() {
     let fetch: PrFetchFn = Arc::new(|_, branch| {
@@ -1094,6 +1391,19 @@ mod tests {
   }
 
   #[test]
+  fn retain_watched_drops_repos_no_window_shows() {
+    let fetch: PrFetchFn = Arc::new(|_, _| Ok(None));
+    let (mgr, _) = manager_with(fetch, vec!["feat".into()]);
+
+    mgr.watch_repo("/tmp/shown");
+    mgr.watch_repo("/tmp/closed");
+    mgr.retain_watched(|repo| repo == "/tmp/shown");
+    assert!(mgr.is_watching("/tmp/shown"));
+    assert!(!mgr.is_watching("/tmp/closed"));
+    mgr.shutdown();
+  }
+
+  #[test]
   fn rewatching_a_repo_does_not_force_a_poll() {
     use std::sync::atomic::AtomicUsize;
     let calls = Arc::new(AtomicUsize::new(0));
@@ -1120,6 +1430,54 @@ mod tests {
     thread::sleep(Duration::from_millis(200));
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     mgr.shutdown();
+  }
+
+  #[test]
+  fn polls_slow_down_in_the_background_and_catch_up_in_front() {
+    use std::sync::atomic::AtomicUsize;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let calls_fetch = Arc::clone(&calls);
+    let fetch: PrFetchFn = Arc::new(move |_, _| {
+      calls_fetch.fetch_add(1, Ordering::SeqCst);
+      Ok(None)
+    });
+    let list: BranchListFn = Arc::new(|_| Ok(vec!["feat".into()]));
+    let every = Duration::from_millis(100);
+    let mgr = PrStatusManager::new(fetch, list).with_intervals(every, every);
+    mgr.set_background(true);
+
+    mgr.watch_repo("/tmp/background");
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    while calls.load(Ordering::SeqCst) == 0 {
+      assert!(std::time::Instant::now() < deadline, "first poll never ran");
+      thread::sleep(Duration::from_millis(10));
+    }
+    // Several foreground intervals, well inside one background interval.
+    thread::sleep(every * 3);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    mgr.set_background(false);
+    let deadline = std::time::Instant::now() + every;
+    while calls.load(Ordering::SeqCst) == 1 {
+      assert!(
+        std::time::Instant::now() < deadline,
+        "coming to the front polls what is due"
+      );
+      thread::sleep(Duration::from_millis(5));
+    }
+    mgr.shutdown();
+  }
+
+  #[test]
+  fn synced_repo_names_repo_when_workspaces_changed() {
+    let payload = update_payload("/r", false, &[3]);
+    assert_eq!(synced_repo(&payload.to_string()).as_deref(), Some("/r"));
+  }
+
+  #[test]
+  fn synced_repo_is_none_when_nothing_synced() {
+    let payload = update_payload("/r", false, &[]);
+    assert_eq!(synced_repo(&payload.to_string()), None);
   }
 
   #[test]
@@ -1175,5 +1533,72 @@ mod tests {
       42
     );
     mgr.shutdown();
+  }
+
+  #[test]
+  fn bulk_fetch_replaces_per_branch_fetches() {
+    let fetch: PrFetchFn = Arc::new(|_, _| panic!("per-branch fetch must not run"));
+    let ci_fetch: CiFetchFn = Arc::new(|_, _| panic!("per-branch CI fetch must not run"));
+    let list: BranchListFn = Arc::new(|_| Ok(vec!["feat/open".into(), "feat/none".into()]));
+    let bulk: BulkFetchFn = Arc::new(|_, branches| {
+      Ok(
+        branches
+          .iter()
+          .map(|b| {
+            let entry = if b == "feat/open" {
+              (Some(sample_pr(5, b)), Some(sample_ci("success")))
+            } else {
+              (None, None)
+            };
+            (b.clone(), entry)
+          })
+          .collect(),
+      )
+    });
+    let mgr = PrStatusManager::new_with_ci(fetch, ci_fetch, list).with_bulk_fetch(bulk);
+
+    poll_one_repo(&mgr.inner, "/tmp/repo");
+
+    assert_eq!(
+      mgr
+        .get_cached("/tmp/repo", "feat/open")
+        .unwrap()
+        .unwrap()
+        .number,
+      5
+    );
+    assert_eq!(mgr.get_cached("/tmp/repo", "feat/none"), Some(None));
+    assert_eq!(
+      mgr
+        .get_cached_ci("/tmp/repo", "feat/open")
+        .unwrap()
+        .unwrap()
+        .state,
+      "success"
+    );
+  }
+
+  #[test]
+  fn failed_bulk_fetch_falls_back_to_per_branch_fetches() {
+    let fetch: PrFetchFn = Arc::new(|_, b| Ok(Some(sample_pr(8, b))));
+    let ci_fetch: CiFetchFn = Arc::new(|_, _| Ok(Some(sample_ci("pending"))));
+    let list: BranchListFn = Arc::new(|_| Ok(vec!["feat".into()]));
+    let bulk: BulkFetchFn = Arc::new(|_, _| Err("gh pr list failed".into()));
+    let mgr = PrStatusManager::new_with_ci(fetch, ci_fetch, list).with_bulk_fetch(bulk);
+
+    poll_one_repo(&mgr.inner, "/tmp/repo");
+
+    assert_eq!(
+      mgr.get_cached("/tmp/repo", "feat").unwrap().unwrap().number,
+      8
+    );
+    assert_eq!(
+      mgr
+        .get_cached_ci("/tmp/repo", "feat")
+        .unwrap()
+        .unwrap()
+        .state,
+      "pending"
+    );
   }
 }

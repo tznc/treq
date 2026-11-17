@@ -1,19 +1,21 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import type React from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Layout from "@theme/Layout";
 import Head from "@docusaurus/Head";
 import BrowserOnly from "@docusaurus/BrowserOnly";
+import Link from "@docusaurus/Link";
 import useDocusaurusContext from "@docusaurus/useDocusaurusContext";
-import type { StripeEmbeddedCheckout } from "@stripe/stripe-js";
-import { loadStripe } from "@stripe/stripe-js/pure";
 import { supabase } from "../lib/supabase";
+import { checkoutReturnPlan } from "../lib/checkoutReturn";
 import { proRequiredMessage } from "../lib/pro-required";
+import { confirmsAccountDeletion, deleteAccount } from "../lib/account";
 import {
   GITHUB_APP_INSTALL_URL,
   STRIPE_PUBLISHABLE_KEY,
 } from "../lib/constants";
 import {
   fetchBillingPortalUrl,
-  fetchCheckoutClientSecret,
+  fetchCheckoutUrl,
   functionErrorMessage,
 } from "../lib/billing";
 import {
@@ -27,7 +29,6 @@ import {
   extraSeats,
   forgetPendingInvite,
   invitePage,
-  inviteTokenFromInput,
   pendingInviteToken,
   stashInviteForSignIn,
   TEAM_EXTRA_SEAT_USD,
@@ -35,6 +36,7 @@ import {
   type OrganizationAction,
 } from "../lib/teams";
 import type { User, Session } from "@supabase/supabase-js";
+import MachinesTab from "../components/MachinesTab";
 
 interface GithubRepo {
   id: number;
@@ -46,45 +48,16 @@ interface GithubRepo {
   installation_id: number;
 }
 
-interface MergeQueueConfig {
-  id?: string;
-  repo_id: number;
-  target_branch: string;
-  required_checks: string[];
-  max_parallel_queues: number;
-  batch_size: number;
-  merge_method: "merge" | "squash" | "rebase";
-  queue_trigger_label: string;
-  delete_branch_on_merge: boolean;
-  enabled: boolean;
+type Tab = "account" | "integrations" | "machines";
+
+// Older links (pricing, invite emails, GitHub callback) still say
+// ?tab=subscription or ?tab=team. Both now live on Account.
+function tabFromSearch(search: string): Tab {
+  const tab = new URLSearchParams(search).get("tab");
+  return tab === "integrations" || tab === "machines" ? tab : "account";
 }
 
-interface QueueStatus {
-  queue_id: string;
-  target_branch: string;
-  queued_count: number;
-  testing_count: number;
-  paused: boolean;
-  bisect_mode: boolean;
-}
-
-type Tab = "subscription" | "integrations" | "team";
-
-function defaultConfig(repoId: number, defaultBranch: string): MergeQueueConfig {
-  return {
-    repo_id: repoId,
-    target_branch: defaultBranch,
-    required_checks: [],
-    max_parallel_queues: 1,
-    batch_size: 5,
-    merge_method: "squash",
-    queue_trigger_label: "merge-queue",
-    delete_branch_on_merge: true,
-    enabled: true,
-  };
-}
-
-// ── Repo config panel ────────────────────────────────────────────────────────
+// ── Repo row ─────────────────────────────────────────────────────────────────
 
 function RepoRow({ repo }: { repo: GithubRepo }) {
   return (
@@ -99,251 +72,14 @@ function RepoRow({ repo }: { repo: GithubRepo }) {
   );
 }
 
-function RepoConfigPanel({
-  repo,
-  onSave,
-}: {
-  repo: GithubRepo;
-  onSave?: () => void;
-}) {
-  const [config, setConfig] = useState<MergeQueueConfig>(
-    defaultConfig(repo.id, repo.default_branch)
-  );
-  const [queueStatus, setQueueStatus] = useState<QueueStatus[]>([]);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [expanded, setExpanded] = useState(false);
-
-  useEffect(() => {
-    supabase
-      .from("merge_queue_configs")
-      .select("*")
-      .eq("repo_id", repo.id)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (data) setConfig(data as MergeQueueConfig);
-      });
-
-    supabase
-      .rpc("get_repo_queue_status", { p_repo_id: repo.id })
-      .then(({ data }) => {
-        if (data) setQueueStatus(data as QueueStatus[]);
-      });
-  }, [repo.id]);
-
-  const handleSave = async () => {
-    setSaving(true);
-    await supabase.from("merge_queue_configs").upsert(
-      {
-        ...config,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "repo_id,target_branch" }
-    );
-    setSaving(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-    onSave?.();
-  };
-
-  const totalQueued = queueStatus.reduce((s, q) => s + Number(q.queued_count), 0);
-  const totalTesting = queueStatus.reduce((s, q) => s + Number(q.testing_count), 0);
-
-  return (
-    <div style={styles.repoCard}>
-      <div
-        style={styles.repoHeader}
-        onClick={() => setExpanded((e) => !e)}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => e.key === "Enter" && setExpanded((x) => !x)}
-      >
-        <div style={styles.repoMeta}>
-          <span style={styles.repoName}>{repo.full_name}</span>
-          {repo.private && <span style={styles.privateBadge}>private</span>}
-        </div>
-        <div style={styles.repoStats}>
-          {totalQueued > 0 && (
-            <span style={styles.statBadge}>
-              {totalQueued} queued
-            </span>
-          )}
-          {totalTesting > 0 && (
-            <span style={{ ...styles.statBadge, background: "rgba(245,158,11,0.12)", color: "#f59e0b" }}>
-              {totalTesting} testing
-            </span>
-          )}
-          <span style={styles.chevron}>{expanded ? "▲" : "▼"}</span>
-        </div>
-      </div>
-
-      {expanded && (
-        <div style={styles.configBody}>
-          {/* Queue status */}
-          {queueStatus.length > 0 && (
-            <div style={styles.configSection}>
-              <div style={styles.configLabel}>Active queues</div>
-              {queueStatus.map((q) => (
-                <div key={q.queue_id} style={styles.queueStatusRow}>
-                  <span style={styles.branchPill}>→ {q.target_branch}</span>
-                  <span style={styles.queueStatusText}>
-                    {q.queued_count} queued · {q.testing_count} testing
-                    {q.paused && " · paused"}
-                    {q.bisect_mode && " · bisecting"}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Config form */}
-          <div style={styles.configSection}>
-            <div style={styles.configRow}>
-              <label style={styles.configLabel}>Target branch</label>
-              <input
-                style={styles.input}
-                value={config.target_branch}
-                onChange={(e) =>
-                  setConfig((c) => ({ ...c, target_branch: e.target.value }))
-                }
-                placeholder="main"
-              />
-            </div>
-
-            <div style={styles.configRow}>
-              <label style={styles.configLabel}>Trigger label</label>
-              <input
-                style={styles.input}
-                value={config.queue_trigger_label}
-                onChange={(e) =>
-                  setConfig((c) => ({ ...c, queue_trigger_label: e.target.value }))
-                }
-                placeholder="merge-queue"
-              />
-            </div>
-
-            <div style={styles.configRow}>
-              <label style={styles.configLabel}>Required CI checks</label>
-              <input
-                style={styles.input}
-                value={config.required_checks.join(", ")}
-                onChange={(e) =>
-                  setConfig((c) => ({
-                    ...c,
-                    required_checks: e.target.value
-                      .split(",")
-                      .map((s) => s.trim())
-                      .filter(Boolean),
-                  }))
-                }
-                placeholder="ci / test, ci / lint"
-              />
-              <div style={styles.inputHint}>Comma-separated check names</div>
-            </div>
-
-            <div style={styles.configRowInline}>
-              <div style={{ flex: 1 }}>
-                <label style={styles.configLabel}>Max parallel lanes</label>
-                <input
-                  style={{ ...styles.input, width: "80px" }}
-                  type="number"
-                  min={1}
-                  max={10}
-                  value={config.max_parallel_queues}
-                  onChange={(e) =>
-                    setConfig((c) => ({
-                      ...c,
-                      max_parallel_queues: Math.max(1, Math.min(10, parseInt(e.target.value) || 1)),
-                    }))
-                  }
-                />
-              </div>
-              <div style={{ flex: 1 }}>
-                <label style={styles.configLabel}>Batch size</label>
-                <input
-                  style={{ ...styles.input, width: "80px" }}
-                  type="number"
-                  min={1}
-                  max={20}
-                  value={config.batch_size}
-                  onChange={(e) =>
-                    setConfig((c) => ({
-                      ...c,
-                      batch_size: Math.max(1, Math.min(20, parseInt(e.target.value) || 1)),
-                    }))
-                  }
-                />
-              </div>
-            </div>
-
-            <div style={styles.configRow}>
-              <label style={styles.configLabel}>Merge method</label>
-              <select
-                style={styles.select}
-                value={config.merge_method}
-                onChange={(e) =>
-                  setConfig((c) => ({
-                    ...c,
-                    merge_method: e.target.value as "merge" | "squash" | "rebase",
-                  }))
-                }
-              >
-                <option value="squash">Squash and merge</option>
-                <option value="merge">Merge commit</option>
-                <option value="rebase">Rebase and merge</option>
-              </select>
-            </div>
-
-            <div style={styles.configRowInline}>
-              <label style={styles.checkboxLabel}>
-                <input
-                  type="checkbox"
-                  checked={config.delete_branch_on_merge}
-                  onChange={(e) =>
-                    setConfig((c) => ({ ...c, delete_branch_on_merge: e.target.checked }))
-                  }
-                  style={{ marginRight: "0.5rem" }}
-                />
-                Delete branch after merge
-              </label>
-              <label style={styles.checkboxLabel}>
-                <input
-                  type="checkbox"
-                  checked={config.enabled}
-                  onChange={(e) =>
-                    setConfig((c) => ({ ...c, enabled: e.target.checked }))
-                  }
-                  style={{ marginRight: "0.5rem" }}
-                />
-                Queue enabled
-              </label>
-            </div>
-          </div>
-
-          <div style={styles.configActions}>
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              style={styles.saveButton}
-            >
-              {saving ? "Saving…" : saved ? "Saved ✓" : "Save config"}
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ── Integrations tab ─────────────────────────────────────────────────────────
 
 function IntegrationsTab({ onUpgrade }: { onUpgrade: () => void }) {
   const { siteConfig } = useDocusaurusContext();
   const flags = siteConfig.customFields?.featureFlags as
-    | { githubApp?: boolean; mergeQueue?: boolean }
+    | { githubApp?: boolean }
     | undefined;
   const githubAppEnabled = Boolean(flags?.githubApp);
-  const mergeQueueEnabled = Boolean(flags?.mergeQueue);
 
   const [repos, setRepos] = useState<GithubRepo[]>([]);
   const [loadingRepos, setLoadingRepos] = useState(true);
@@ -395,7 +131,7 @@ function IntegrationsTab({ onUpgrade }: { onUpgrade: () => void }) {
 
       {/* GitHub App */}
       <div style={styles.card}>
-        <div style={styles.integrationHeader}>
+        <div className="dashboard-integration-header" style={styles.integrationHeader}>
           <div style={styles.integrationInfo}>
             <div style={styles.integrationIcon}>
               <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
@@ -480,14 +216,14 @@ function IntegrationsTab({ onUpgrade }: { onUpgrade: () => void }) {
 
         {isConnected && (
           <div style={styles.repoSection}>
-            <div style={styles.repoSectionHeader}>
+            <div className="dashboard-row" style={styles.repoSectionHeader}>
               <span style={styles.repoSectionTitle}>
                 {repos.length} {repos.length === 1 ? "repository" : "repositories"}
               </span>
               {githubAppEnabled && (
                 <a
                   href={GITHUB_APP_INSTALL_URL}
-                  style={styles.manageLink}
+                  className="dashboard-link-button" style={styles.manageLink}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -498,18 +234,33 @@ function IntegrationsTab({ onUpgrade }: { onUpgrade: () => void }) {
             {loadingRepos ? (
               <div style={styles.loadingText}>Loading repositories…</div>
             ) : (
-              repos.map((repo) =>
-                mergeQueueEnabled ? (
-                  <RepoConfigPanel key={repo.id} repo={repo} />
-                ) : (
-                  <RepoRow key={repo.id} repo={repo} />
-                )
-              )
+              repos.map((repo) => <RepoRow key={repo.id} repo={repo} />)
             )}
           </div>
         )}
       </div>
     </div>
+  );
+}
+
+// Lucide "credit-card", sized to sit before a button label.
+function CreditCardIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ verticalAlign: "-3px", marginRight: "0.4rem" }}
+    >
+      <rect width="20" height="14" x="2" y="5" rx="2" />
+      <line x1="2" x2="22" y1="10" y2="10" />
+    </svg>
   );
 }
 
@@ -522,47 +273,32 @@ const CHECKOUT_RETURN_MAX_POLLS = 15;
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div role="group" aria-label={label} style={styles.field}>
+    <div role="group" aria-label={label} className="dashboard-field" style={styles.field}>
       <span style={styles.fieldLabel}>{label}</span>
       <div style={styles.fieldValue}>{children}</div>
     </div>
   );
 }
 
-// Mounts Stripe's embedded Checkout. Stripe.js loads only here, and asks
-// billing-checkout for the session's client secret itself: Pro for the
-// user, or Team when an organization id is given.
-function EmbeddedCheckoutPanel({
+// Sends the browser to Stripe-hosted Checkout. billing-checkout opens the
+// session: Pro for the user, or Team when an organization id is given.
+// Stripe returns to the dashboard with ?session_id when payment completes.
+function CheckoutRedirect({
   onError,
   organizationId,
 }: {
   onError: (message: string) => void;
   organizationId?: string;
 }) {
-  const container = useRef<HTMLDivElement>(null);
-
   useEffect(() => {
     let cancelled = false;
-    let checkout: StripeEmbeddedCheckout | null = null;
-    loadStripe(STRIPE_PUBLISHABLE_KEY)
-      .then((stripe) => {
-        if (!stripe) throw new Error("Stripe failed to load");
-        return stripe.initEmbeddedCheckout({
-          fetchClientSecret: () =>
-            fetchCheckoutClientSecret(
-              organizationId
-                ? { plan: "team", organization_id: organizationId }
-                : { plan: "pro" },
-            ),
-        });
-      })
-      .then((instance) => {
-        if (cancelled) {
-          instance.destroy();
-          return;
-        }
-        checkout = instance;
-        if (container.current) instance.mount(container.current);
+    fetchCheckoutUrl(
+      organizationId
+        ? { plan: "team", organization_id: organizationId }
+        : { plan: "pro" },
+    )
+      .then((url) => {
+        if (!cancelled) window.location.assign(url);
       })
       .catch((err: unknown) => {
         if (!cancelled) {
@@ -571,31 +307,26 @@ function EmbeddedCheckoutPanel({
       });
     return () => {
       cancelled = true;
-      checkout?.destroy();
     };
   }, [onError, organizationId]);
 
   return (
-    <div
-      ref={container}
-      data-testid="stripe-embedded-checkout"
-      style={{ marginTop: "1.5rem" }}
-    />
+    <div role="status" style={{ marginTop: "1rem" }}>
+      Opening Stripe Checkout…
+    </div>
   );
 }
 
 function SubscriptionTab({
   subscription,
   reloadSubscription,
-  stripePaymentsEnabled,
 }: {
   subscription: Subscription | null;
   reloadSubscription: () => Promise<Subscription | null>;
-  stripePaymentsEnabled: boolean;
 }) {
   const isPro = isProSubscription(subscription);
   // Production builds open Checkout only once the live key is filled in.
-  const checkoutAvailable = stripePaymentsEnabled && STRIPE_PUBLISHABLE_KEY !== "";
+  const checkoutAvailable = STRIPE_PUBLISHABLE_KEY !== "";
 
   const [billingCustomer, setBillingCustomer] = useState<
     { trial_used_at: string | null } | null | undefined
@@ -604,9 +335,7 @@ function SubscriptionTab({
   const [checkoutReturn, setCheckoutReturn] = useState<
     "waiting" | "timed_out" | null
   >(() =>
-    new URLSearchParams(window.location.search).has("session_id")
-      ? "waiting"
-      : null,
+    checkoutReturnPlan(window.location.search) === "pro" ? "waiting" : null,
   );
   const [portalPending, setPortalPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -664,14 +393,13 @@ function SubscriptionTab({
     }
   };
 
-  const trialEligible = !billingCustomer?.trial_used_at;
   const status = subscription?.status;
   const periodEnd = subscription?.current_period_end;
 
   return (
     <section aria-labelledby="subscription-heading">
       <h2 id="subscription-heading" style={styles.sectionTitle}>
-        Subscription
+        Personal
       </h2>
       <div style={styles.card}>
         {checkoutReturn === "waiting" && (
@@ -722,14 +450,14 @@ function SubscriptionTab({
         )}
         {isPro && billingCustomer === null && (
           <p style={styles.billingNote}>
-            Your Pro comes from a team. Its owners manage billing on the Team
-            tab.
+            Your Pro comes from a team. Its owners manage billing in the Teams
+            section below.
           </p>
         )}
 
-        <div style={styles.billingActions}>
+        <div style={{ ...styles.billingActions, justifyContent: "flex-end" }}>
           {!isPro && !checkoutOpen && (
-            <div>
+            <div style={{ textAlign: "right" }}>
               <span
                 title={!checkoutAvailable ? "Coming Soon" : undefined}
                 style={
@@ -750,7 +478,8 @@ function SubscriptionTab({
                     ...(!checkoutAvailable ? styles.primaryButtonDisabled : {}),
                   }}
                 >
-                  {trialEligible ? "Start 14-day free trial" : "Upgrade to Pro"}
+                  <CreditCardIcon />
+                  Upgrade to Pro
                 </button>
               </span>
               {!checkoutAvailable && (
@@ -758,7 +487,7 @@ function SubscriptionTab({
               )}
             </div>
           )}
-          {billingCustomer && (
+          {isPro && billingCustomer && (
             <button
               type="button"
               onClick={openPortal}
@@ -776,11 +505,20 @@ function SubscriptionTab({
           </div>
         )}
 
-        {checkoutOpen && <EmbeddedCheckoutPanel onError={onCheckoutError} />}
+        {checkoutOpen && <CheckoutRedirect onError={onCheckoutError} />}
       </div>
     </section>
   );
 }
+
+// The Team plan's features, as the pricing page lists them.
+const TEAM_PERKS = [
+  "Everything in Pro for every member",
+  "Manage team-wide integrations",
+  "Sandbox usage management",
+  "Projects shared with every member",
+  "One bill for the whole team",
+];
 
 // ── Team tab ─────────────────────────────────────────────────────────────────
 //
@@ -788,10 +526,16 @@ function SubscriptionTab({
 // seats"). Reads go through RLS. Every change goes through the organizations
 // Edge Function, whose SQL enforces the rules; this tab only shows them.
 
+function roleLabel(role: OrgMembership["role"] | undefined): string {
+  if (role === "owner") return "Owner";
+  if (role === "admin") return "Admin";
+  return "Member";
+}
+
 interface OrgMembership {
   org_id: string;
   user_id: string;
-  role: "owner" | "member";
+  role: "owner" | "admin" | "member";
   created_at: string;
   organizations: { id: string; name: string } | null;
 }
@@ -909,7 +653,10 @@ function OrganizationCard({
   onChanged: () => Promise<unknown>;
 }) {
   const members = data.memberships.filter((m) => m.org_id === org.id);
-  const isOwner = members.some((m) => m.user_id === userId && m.role === "owner");
+  const myRole = members.find((m) => m.user_id === userId)?.role;
+  const isOwner = myRole === "owner";
+  // Owners and admins manage the team's billing account and its invites.
+  const isManager = isOwner || myRole === "admin";
   const ownerCount = members.filter((m) => m.role === "owner").length;
   const invites = data.invites.filter((i) => i.org_id === org.id);
   const subscription = data.subscriptions.find((s) => s.owner_id === org.id);
@@ -971,7 +718,7 @@ function OrganizationCard({
   return (
     <section aria-label={org.name} style={styles.orgCard}>
       <div style={styles.orgName}>{org.name}</div>
-      <Field label="Your role">{isOwner ? "Owner" : "Member"}</Field>
+      <Field label="Your role">{roleLabel(myRole)}</Field>
       <Field label="Plan">
         {subscription ? (
           <span>
@@ -991,7 +738,7 @@ function OrganizationCard({
           {formatPeriodEnd(subscription.current_period_end)}
         </Field>
       )}
-      {isOwner ? (
+      {isManager ? (
         <Field label="Seats">
           {members.length} of {TEAM_INCLUDED_SEATS} included
           {extraSeats(members.length) > 0 &&
@@ -1001,7 +748,7 @@ function OrganizationCard({
         <Field label="Members">{members.length}</Field>
       )}
 
-      {isOwner && (
+      {isManager && (
         <div style={styles.billingActions}>
           {!subscription && !checkoutOpen && (
             <div>
@@ -1048,7 +795,7 @@ function OrganizationCard({
         </div>
       )}
       {checkoutOpen && (
-        <EmbeddedCheckoutPanel organizationId={org.id} onError={onCheckoutError} />
+        <CheckoutRedirect organizationId={org.id} onError={onCheckoutError} />
       )}
 
       {error && (
@@ -1062,7 +809,7 @@ function OrganizationCard({
         {members.map((m) => {
           const name = memberName(data.profiles.get(m.user_id));
           return (
-            <li key={m.user_id} style={styles.teamRow}>
+            <li key={m.user_id} className="dashboard-row" style={styles.teamRow}>
               <span>
                 {name}
                 {m.user_id === userId ? " (you)" : ""}
@@ -1071,16 +818,40 @@ function OrganizationCard({
                   {data.profiles.get(m.user_id)?.email ?? ""}
                 </span>
               </span>
-              <span style={styles.teamRowActions}>
+              <span className="dashboard-row-actions" style={styles.teamRowActions}>
                 <span style={styles.teamMuted}>
-                  {m.role === "owner" ? "Owner" : "Member"}
+                  {roleLabel(m.role)}
                 </span>
-                {isOwner && m.user_id !== userId && m.role === "member" && (
+                {isManager && m.user_id !== userId && m.role !== "owner" && (
+                  <button
+                    type="button"
+                    aria-label={
+                      m.role === "admin"
+                        ? `Remove admin from ${name}`
+                        : `Make ${name} an admin`
+                    }
+                    disabled={pending}
+                    className="dashboard-link-button" style={styles.linkButton}
+                    onClick={() =>
+                      void run(() =>
+                        organizationsRequest({
+                          action: "set_role",
+                          organization_id: org.id,
+                          user_id: m.user_id,
+                          role: m.role === "admin" ? "member" : "admin",
+                        }),
+                      )
+                    }
+                  >
+                    {m.role === "admin" ? "Remove admin" : "Make admin"}
+                  </button>
+                )}
+                {isOwner && m.user_id !== userId && m.role !== "owner" && (
                   <button
                     type="button"
                     aria-label={`Make ${name} an owner`}
                     disabled={pending}
-                    style={styles.linkButton}
+                    className="dashboard-link-button" style={styles.linkButton}
                     onClick={() => {
                       if (
                         window.confirm(
@@ -1105,7 +876,7 @@ function OrganizationCard({
                     type="button"
                     aria-label={`Make ${name} a member`}
                     disabled={pending}
-                    style={styles.linkButton}
+                    className="dashboard-link-button" style={styles.linkButton}
                     onClick={() => {
                       if (window.confirm(`Make ${name} a member of ${org.name} instead of an owner?`)) {
                         void run(() =>
@@ -1126,7 +897,7 @@ function OrganizationCard({
                     type="button"
                     aria-label={`Remove ${name}`}
                     disabled={pending}
-                    style={styles.linkButton}
+                    className="dashboard-link-button" style={styles.linkButton}
                     onClick={() => {
                       if (
                         window.confirm(
@@ -1152,7 +923,7 @@ function OrganizationCard({
         })}
       </ul>
 
-      {isOwner && (
+      {isManager && (
         <>
           <div style={styles.teamSubheading}>Pending invites</div>
           {invites.length === 0 ? (
@@ -1162,30 +933,31 @@ function OrganizationCard({
               {invites.map((i) => (
                 <li key={i.id} style={styles.teamInvite}>
                   <div style={styles.teamRow}>
-                    <span>
-                      {i.email}
-                      <span style={styles.teamMuted}>
-                        {" "}
-                        expires {formatPeriodEnd(i.expires_at)}
+                    <span style={styles.inviteEmail}>
+                      <span>{i.email}</span>
+                      <span style={styles.inviteExpiry}>
+                        Expires {shortDate(i.expires_at)}
                       </span>
                     </span>
-                    <span style={styles.teamRowActions}>
+                    <span className="dashboard-row-actions" style={styles.teamRowActions}>
                       {!links[i.id] && (
                         <button
                           type="button"
                           aria-label={`New link for ${i.email}`}
                           disabled={pending}
-                          style={styles.linkButton}
+                          className="dashboard-link-button" style={styles.linkButton}
                           onClick={() => void invite(i.email)}
                         >
                           New link
                         </button>
                       )}
+                      <span className="dashboard-tooltip-anchor">
                       <button
                         type="button"
                         aria-label={`Revoke invite for ${i.email}`}
+                        aria-describedby={`revoke-tip-${i.id}`}
                         disabled={pending}
-                        style={styles.linkButton}
+                        style={styles.iconButton}
                         onClick={() =>
                           void run(() =>
                             organizationsRequest({
@@ -1195,12 +967,22 @@ function OrganizationCard({
                           )
                         }
                       >
-                        Revoke
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4M6.75 6.5v4.5M9.25 6.5v4.5" />
+                        </svg>
                       </button>
+                      <span
+                        role="tooltip"
+                        id={`revoke-tip-${i.id}`}
+                        className="dashboard-tooltip"
+                      >
+                        Revoke invite
+                      </span>
+                      </span>
                     </span>
                   </div>
                   {links[i.id] && (
-                    <div style={styles.teamLinkRow}>
+                    <div className="dashboard-form" style={styles.teamLinkRow}>
                       <input
                         readOnly
                         aria-label={`Invite link for ${i.email}`}
@@ -1222,7 +1004,7 @@ function OrganizationCard({
             </ul>
           )}
           <form
-            style={styles.teamForm}
+            className="dashboard-form" style={styles.teamForm}
             onSubmit={(e) => {
               e.preventDefault();
               void invite(inviteEmail);
@@ -1238,13 +1020,13 @@ function OrganizationCard({
               style={styles.input}
             />
             <button type="submit" disabled={pending} style={styles.saveButton}>
-              Invite
+              Generate invite link
             </button>
           </form>
           <p style={styles.inputHint}>
-            Treq does not send invite emails yet. Copy the link and send it to
-            your teammate. A link works once, for any Treq account, and expires
-            after 7 days. New link replaces the old one. Team includes{" "}
+            Enter your teammate's email, generate a link, then copy it and
+            send it to them. A link works once, for any Treq account, and
+            expires after 24 hours. New link replaces the old one. Team includes{" "}
             {TEAM_INCLUDED_SEATS} members. Each member who joins beyond that
             adds US${TEAM_EXTRA_SEAT_USD} per month, prorated.
           </p>
@@ -1257,7 +1039,7 @@ function OrganizationCard({
       ) : (
         <ul aria-label="GitHub App installations" style={styles.teamList}>
           {attached.map((i) => (
-            <li key={i.id} style={styles.teamRow}>
+            <li key={i.id} className="dashboard-row" style={styles.teamRow}>
               <span style={styles.repoName}>{i.account_login}</span>
               <span style={styles.teamMuted}>{i.account_type}</span>
             </li>
@@ -1268,8 +1050,7 @@ function OrganizationCard({
         <div>
           <p style={styles.inputHint}>
             Attach an installation you linked. Members can then see its
-            repositories, its merge queue runs on this organization&apos;s Team,
-            and only owners of {org.name} can relink it.
+            repositories, it runs on this organization&apos;s Team, and only owners of {org.name} can relink it.
           </p>
           <div style={styles.billingActions}>
             {attachable.map((i) => (
@@ -1347,6 +1128,108 @@ function OrganizationCard({
   );
 }
 
+// Free and Pro users see this in place of the create form. Get Team creates
+// the organization, then opens Team checkout for it, so nobody is left with
+// an organization that has no Team.
+function GetTeamCard({
+  checkoutAvailable,
+  onCreated,
+}: {
+  checkoutAvailable: boolean;
+  onCreated: () => Promise<unknown>;
+}) {
+  const [name, setName] = useState("");
+  const [orgId, setOrgId] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const onCheckoutError = useCallback((message: string) => {
+    setError(message);
+  }, []);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!checkoutAvailable) return;
+    setPending(true);
+    setError(null);
+    try {
+      const created = await organizationsRequest<{ organization: { id: string } }>({
+        action: "create",
+        name,
+      });
+      setOrgId(created.organization.id);
+      await onCreated();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <section aria-label="Get Team" style={styles.orgCard}>
+      <div style={styles.orgName}>Get Team</div>
+      <p style={styles.teamPrice}>
+        <span style={styles.teamPriceAmount}>US$199</span> per month
+      </p>
+      <p style={styles.billingNote}>
+        {TEAM_INCLUDED_SEATS} members included, US${TEAM_EXTRA_SEAT_USD} per extra
+        member
+      </p>
+      {orgId ? (
+        <CheckoutRedirect organizationId={orgId} onError={onCheckoutError} />
+      ) : (
+        <form style={styles.teamCreateForm} onSubmit={submit}>
+          <label htmlFor="team-name" style={styles.fieldLabel}>
+            Team name
+          </label>
+          <input
+            id="team-name"
+            required
+            maxLength={100}
+            placeholder="Acme"
+            value={name}
+            disabled={!checkoutAvailable}
+            onChange={(e) => setName(e.target.value)}
+            style={styles.input}
+          />
+          <button
+            type="submit"
+            disabled={!checkoutAvailable || pending}
+            style={{
+              ...styles.primaryButton,
+              alignSelf: "flex-end",
+              marginTop: "0.5rem",
+              ...(!checkoutAvailable ? styles.primaryButtonDisabled : {}),
+            }}
+          >
+            <CreditCardIcon />
+            Start a team
+          </button>
+        </form>
+      )}
+      {!checkoutAvailable && (
+        <div style={{ ...styles.comingSoonSubtext, textAlign: "right" }}>Coming Soon</div>
+      )}
+      {error && (
+        <div role="alert" style={styles.errorText}>
+          {error}
+        </div>
+      )}
+    </section>
+  );
+}
+
+// "Nov 14, 2026": pending invites show a short expiry date.
+function shortDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
 function clearSearchParams(...names: string[]) {
   const url = new URL(window.location.href);
   for (const name of names) url.searchParams.delete(name);
@@ -1356,25 +1239,22 @@ function clearSearchParams(...names: string[]) {
 function TeamTab({
   userId,
   reloadSubscription,
-  stripePaymentsEnabled,
 }: {
   userId: string;
   reloadSubscription: () => Promise<Subscription | null>;
-  stripePaymentsEnabled: boolean;
 }) {
-  const checkoutAvailable = stripePaymentsEnabled && STRIPE_PUBLISHABLE_KEY !== "";
+  const checkoutAvailable = STRIPE_PUBLISHABLE_KEY !== "";
   const [data, setData] = useState<TeamData | null>(null);
   // From the invite link's #invite= fragment, or stashed before sign-in.
   const [inviteToken, setInviteToken] = useState<string | null>(() =>
     pendingInviteToken(invitePage()),
   );
-  const [inviteLink, setInviteLink] = useState("");
   const [orgName, setOrgName] = useState("");
   const [pending, setPending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [checkoutReturn, setCheckoutReturn] = useState<"waiting" | "timed_out" | null>(
-    () => (new URLSearchParams(window.location.search).has("session_id") ? "waiting" : null),
+    () => (checkoutReturnPlan(window.location.search) === "team" ? "waiting" : null),
   );
 
   const reload = useCallback(async () => {
@@ -1402,7 +1282,7 @@ function TeamTab({
       latest.memberships.some(
         (m) =>
           m.user_id === userId &&
-          m.role === "owner" &&
+          (m.role === "owner" || m.role === "admin") &&
           latest.subscriptions.some((s) => s.owner_id === m.org_id),
       );
     const finish = (outcome: "timed_out" | null) => {
@@ -1448,12 +1328,18 @@ function TeamTab({
         result: string;
       }>({ action: "accept", token });
       setInviteToken(null);
-      setInviteLink("");
       return joined.result === "already_member"
         ? `You are already a member of ${joined.organization.name}.`
         : `You joined ${joined.organization.name}. Every member of a team with Team has Pro.`;
     });
 
+  // Free and Pro users get Team by creating an organization and paying in
+  // one step. Members of a team that already has Team create more directly.
+  const hasTeam = (data?.memberships ?? []).some(
+    (m) =>
+      m.user_id === userId &&
+      (data?.subscriptions ?? []).some((s) => s.owner_id === m.org_id),
+  );
   const orgs = new Map<string, { id: string; name: string }>();
   for (const m of data?.memberships ?? []) {
     if (m.user_id === userId && m.organizations) orgs.set(m.org_id, m.organizations);
@@ -1461,9 +1347,35 @@ function TeamTab({
 
   return (
     <section aria-labelledby="team-heading">
-      <h2 id="team-heading" style={styles.sectionTitle}>
-        Team
-      </h2>
+      <div style={styles.sectionHeader}>
+        <h2 id="team-heading" style={{ ...styles.sectionTitle, marginBottom: 0 }}>
+          Teams
+        </h2>
+        <Link to="/pricing#feature-comparison" style={styles.comparisonLink}>
+          View full comparison
+        </Link>
+      </div>
+      <ul aria-label="Team plan" style={styles.teamPerks}>
+        {TEAM_PERKS.map((perk) => (
+          <li key={perk} style={styles.teamPerk}>
+            <svg
+              aria-hidden="true"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#10b981"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{ flexShrink: 0 }}
+            >
+              <path d="M20 6 9 17l-5-5" />
+            </svg>
+            {perk}
+          </li>
+        ))}
+      </ul>
 
       {checkoutReturn === "waiting" && (
         <div role="status" style={styles.notice}>
@@ -1531,70 +1443,222 @@ function TeamTab({
         ))
       )}
 
-      <div style={styles.orgCard}>
-        <div style={styles.orgName}>Join a team</div>
-        <form
-          style={styles.teamForm}
-          onSubmit={(e) => {
-            e.preventDefault();
-            const token = inviteTokenFromInput(inviteLink);
-            if (!token) {
-              setNotice(null);
-              setError("That is not an invite link. Paste the whole link you were sent.");
-              return;
-            }
-            void accept(token);
-          }}
-        >
-          <input
-            aria-label="Invite link"
-            placeholder="https://treq.dev/dashboard?tab=team#invite=…"
-            value={inviteLink}
-            onChange={(e) => setInviteLink(e.target.value)}
-            style={styles.input}
+      {data !== null &&
+        (hasTeam ? (
+          <div style={styles.orgCard}>
+            <div style={styles.orgName}>Create an organization</div>
+            <p style={styles.billingNote}>
+              An organization holds a Team subscription: US$199 per month for{" "}
+              {TEAM_INCLUDED_SEATS} members, then US${TEAM_EXTRA_SEAT_USD} per extra
+              member, each with everything in Pro. It can also own
+              a shared GitHub App installation.
+            </p>
+            <form
+              className="dashboard-form" style={styles.teamForm}
+              onSubmit={(e) => {
+                e.preventDefault();
+                void run(async () => {
+                  const created = await organizationsRequest<{
+                    organization: { name: string };
+                  }>({ action: "create", name: orgName });
+                  setOrgName("");
+                  return `Created ${created.organization.name}.`;
+                });
+              }}
+            >
+              <input
+                required
+                maxLength={100}
+                aria-label="Organization name"
+                placeholder="Acme"
+                value={orgName}
+                onChange={(e) => setOrgName(e.target.value)}
+                style={styles.input}
+              />
+              <button type="submit" disabled={pending} style={styles.saveButton}>
+                Create organization
+              </button>
+            </form>
+          </div>
+        ) : (
+          <GetTeamCard
+            checkoutAvailable={checkoutAvailable}
+            onCreated={async () => {
+              await reload();
+            }}
           />
-          <button type="submit" disabled={pending} style={styles.saveButton}>
-            Join
-          </button>
-        </form>
-      </div>
+        ))}
+    </section>
+  );
+}
 
-      <div style={styles.orgCard}>
-        <div style={styles.orgName}>Create an organization</div>
+// ── Delete account ───────────────────────────────────────────────────────────
+//
+// The delete-account Edge Function cancels the subscription, destroys the
+// Treq Cloud machines and deletes the account. The user types their email
+// first. A refusal (the user is the last owner of an organization) shows the
+// server's sentence.
+
+function DeleteAccountSection({ email }: { email: string }) {
+  const [open, setOpen] = useState(false);
+  const [typed, setTyped] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const confirmable = !pending && confirmsAccountDeletion(typed, email);
+
+  const close = () => {
+    setOpen(false);
+    setTyped("");
+    setError(null);
+  };
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!confirmable) return;
+    setPending(true);
+    setError(null);
+    try {
+      await deleteAccount();
+      await supabase.auth.signOut({ scope: "local" });
+      window.location.href = "/";
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Your account could not be deleted.",
+      );
+      setPending(false);
+    }
+  };
+
+  return (
+    <section aria-labelledby="delete-account-heading" style={styles.dangerSection}>
+      <h2 id="delete-account-heading" style={styles.sectionTitle}>
+        Delete account
+      </h2>
+      <div style={{ ...styles.card, ...styles.dangerCard }}>
         <p style={styles.billingNote}>
-          An organization holds a Team subscription: US$199 per month for{" "}
-          {TEAM_INCLUDED_SEATS} members, then US${TEAM_EXTRA_SEAT_USD} per extra
-          member, each with everything in Pro. It can also own
-          a shared GitHub App installation.
+          Your Pro subscription is cancelled at once, without a refund, and
+          your Treq Cloud machines and their disks are deleted. Billing records
+          are kept. Repositories and workspaces on your computer are not
+          touched. If you are the last owner of an organization, make another
+          member an owner or delete the organization first.
         </p>
-        <form
-          style={styles.teamForm}
-          onSubmit={(e) => {
-            e.preventDefault();
-            void run(async () => {
-              const created = await organizationsRequest<{
-                organization: { name: string };
-              }>({ action: "create", name: orgName });
-              setOrgName("");
-              return `Created ${created.organization.name}.`;
-            });
-          }}
-        >
-          <input
-            required
-            maxLength={100}
-            aria-label="Organization name"
-            placeholder="Acme"
-            value={orgName}
-            onChange={(e) => setOrgName(e.target.value)}
-            style={styles.input}
-          />
-          <button type="submit" disabled={pending} style={styles.saveButton}>
-            Create organization
-          </button>
-        </form>
+        {!open ? (
+          <div style={styles.billingActions}>
+            <button
+              type="button"
+              onClick={() => setOpen(true)}
+              style={styles.dangerButton}
+            >
+              Delete account…
+            </button>
+          </div>
+        ) : (
+          <form onSubmit={submit}>
+            <label htmlFor="delete-account-email" style={styles.dangerLabel}>
+              Type {email} to confirm
+            </label>
+            <input
+              id="delete-account-email"
+              type="email"
+              autoComplete="off"
+              value={typed}
+              disabled={pending}
+              placeholder={email}
+              onChange={(event) => {
+                setTyped(event.target.value);
+                setError(null);
+              }}
+              style={styles.input}
+            />
+            <div style={styles.billingActions}>
+              <button
+                type="button"
+                onClick={close}
+                disabled={pending}
+                style={styles.secondaryButton}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={!confirmable}
+                style={{
+                  ...styles.dangerButton,
+                  ...(!confirmable ? styles.primaryButtonDisabled : {}),
+                }}
+              >
+                {pending ? "Deleting…" : "Delete account"}
+              </button>
+            </div>
+          </form>
+        )}
+        {error && (
+          <div role="alert" style={styles.errorText}>
+            {error}
+          </div>
+        )}
       </div>
     </section>
+  );
+}
+
+// ── More menu (phones) ───────────────────────────────────────────────────────
+//
+// Under 768px the sidebar is a top bar with no room for Sign Out, so it moves
+// behind a ⋮ button. CSS shows this menu or the plain button, never both.
+
+function MoreMenu({ onSignOut }: { onSignOut: () => void }) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    const onPointer = (e: PointerEvent) => {
+      if (!root.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", onPointer);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onPointer);
+    };
+  }, [open]);
+
+  return (
+    <div ref={root} className="dashboard-more">
+      <button
+        type="button"
+        aria-label="More options"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        style={styles.moreButton}
+      >
+        <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <circle cx="8" cy="3" r="1.5" />
+          <circle cx="8" cy="8" r="1.5" />
+          <circle cx="8" cy="13" r="1.5" />
+        </svg>
+      </button>
+      {open && (
+        <div role="menu" style={styles.moreMenu}>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              onSignOut();
+            }}
+            style={styles.moreMenuItem}
+          >
+            Sign out
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1603,21 +1667,16 @@ function TeamTab({
 function DashboardContent() {
   const { siteConfig } = useDocusaurusContext();
   const flags = siteConfig.customFields?.featureFlags as
-    | { pro?: boolean; stripePayments?: boolean }
+    | { pro?: boolean }
     | undefined;
-  const stripePaymentsEnabled = Boolean(flags?.stripePayments);
 
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [subscription, setSubscription] = useState<Subscription | null>(null);
-  const [activeTab, setActiveTab] = useState<Tab>(() => {
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      return (params.get("tab") as Tab) ?? "subscription";
-    }
-    return "subscription";
-  });
+  const [activeTab, setActiveTab] = useState<Tab>(() =>
+    typeof window !== "undefined" ? tabFromSearch(window.location.search) : "account",
+  );
 
   useEffect(() => {
     // Sign-in brings the user back here, so an invite link opened while
@@ -1682,8 +1741,8 @@ function DashboardContent() {
     user.user_metadata?.full_name || user.user_metadata?.name || "User";
   return (
     <div className="dashboard-page" style={styles.container}>
-      <div style={styles.sidebar}>
-        <div style={styles.sidebarHeader}>
+      <div className="dashboard-sidebar" style={styles.sidebar}>
+        <div className="dashboard-sidebar-header" style={styles.sidebarHeader}>
           {avatarUrl ? (
             <img src={avatarUrl} alt={fullName} style={styles.avatar} />
           ) : (
@@ -1695,59 +1754,64 @@ function DashboardContent() {
           </div>
         </div>
 
-        <nav style={styles.nav}>
-          <button
-            onClick={() => setActiveTab("subscription")}
-            style={{
-              ...styles.navItem,
-              ...(activeTab === "subscription" ? styles.navItemActive : {}),
-            }}
-          >
-            Subscription
-          </button>
-          <button
-            onClick={() => setActiveTab("integrations")}
-            style={{
-              ...styles.navItem,
-              ...(activeTab === "integrations" ? styles.navItemActive : {}),
-            }}
-          >
-            Integrations
-          </button>
-          <button
-            onClick={() => setActiveTab("team")}
-            style={{
-              ...styles.navItem,
-              ...(activeTab === "team" ? styles.navItemActive : {}),
-            }}
-          >
-            Team
-          </button>
+        <nav aria-label="Dashboard" className="dashboard-nav" style={styles.nav}>
+          {(
+            [
+              ["account", "Account"],
+              ["integrations", "Integrations"],
+              ["machines", "Machines"],
+            ] as const
+          ).map(([tab, label]) => (
+            <button
+              key={tab}
+              type="button"
+              aria-current={activeTab === tab ? "page" : undefined}
+              onClick={() => setActiveTab(tab)}
+              className="dashboard-nav-item"
+              style={{
+                ...styles.navItem,
+                ...(activeTab === tab ? styles.navItemActive : {}),
+              }}
+            >
+              {label}
+            </button>
+          ))}
         </nav>
 
-        <button onClick={handleSignOut} style={styles.signOutButton}>
+        <button type="button" onClick={handleSignOut} className="dashboard-signout" style={styles.signOutButton}>
           Sign Out
         </button>
+
+        <MoreMenu onSignOut={handleSignOut} />
       </div>
 
-      <div style={styles.content}>
-        {activeTab === "subscription" && (
-          <SubscriptionTab
-            subscription={subscription}
-            reloadSubscription={loadSubscription}
-            stripePaymentsEnabled={stripePaymentsEnabled}
-          />
+      <div className="dashboard-content" style={styles.content}>
+        {activeTab === "account" && (
+          <>
+            <h1 style={styles.pageTitle}>Account</h1>
+            <SubscriptionTab
+              subscription={subscription}
+              reloadSubscription={loadSubscription}
+            />
+            <div style={styles.accountSection}>
+              <TeamTab
+                userId={user.id}
+                reloadSubscription={loadSubscription}
+              />
+            </div>
+            <DeleteAccountSection email={user.email ?? ""} />
+          </>
         )}
 
         {activeTab === "integrations" && (
-          <IntegrationsTab onUpgrade={() => setActiveTab("subscription")} />
+          <IntegrationsTab onUpgrade={() => setActiveTab("account")} />
         )}
 
-        {activeTab === "team" && (
-          <TeamTab
-            userId={user.id}
-            reloadSubscription={loadSubscription}
-            stripePaymentsEnabled={stripePaymentsEnabled}
+        {activeTab === "machines" && (
+          <MachinesTab
+            isPro={isProSubscription(subscription)}
+            onUpgrade={() => setActiveTab("account")}
+            styles={styles}
           />
         )}
       </div>
@@ -1774,7 +1838,8 @@ const styles: Record<string, React.CSSProperties> = {
   },
   container: {
     display: "flex",
-    width: "960px",
+    width: "100%",
+    maxWidth: "960px",
     margin: "0 auto",
     padding: "2rem 1rem",
     gap: "2rem",
@@ -1809,7 +1874,7 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: "1.1rem",
   },
   userName: { fontWeight: 600, fontSize: "0.9rem" },
-  userEmail: { fontSize: "0.75rem", color: "var(--ifm-color-emphasis-500)" },
+  userEmail: { fontSize: "0.75rem", color: "var(--dashboard-text-muted)" },
   nav: { display: "flex", flexDirection: "column", gap: "0.25rem" },
   navItem: {
     display: "block",
@@ -1841,8 +1906,55 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
     marginTop: "auto",
   },
-  content: { flex: 1, minWidth: 0 },
+  moreButton: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "44px",
+    height: "44px",
+    borderRadius: "6px",
+    border: "none",
+    backgroundColor: "transparent",
+    color: "var(--ifm-font-color-base)",
+    cursor: "pointer",
+  },
+  moreMenu: {
+    position: "absolute",
+    right: 0,
+    top: "calc(100% + 4px)",
+    minWidth: "10rem",
+    padding: "0.25rem",
+    borderRadius: "8px",
+    border: "1px solid var(--ifm-color-emphasis-200)",
+    backgroundColor: "var(--ifm-background-color)",
+    boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+    zIndex: 10,
+  },
+  moreMenuItem: {
+    display: "block",
+    width: "100%",
+    minHeight: "44px",
+    padding: "0 0.75rem",
+    textAlign: "left",
+    border: "none",
+    borderRadius: "6px",
+    backgroundColor: "transparent",
+    color: "#ef4444",
+    fontSize: "0.9rem",
+    cursor: "pointer",
+  },
+  content: { flex: 1, minWidth: 0, overflowWrap: "anywhere" },
+  pageTitle: { fontSize: "1.5rem", fontWeight: 700, marginBottom: "1.25rem" },
+  accountSection: { marginTop: "2.5rem" },
   sectionTitle: { fontSize: "1.25rem", fontWeight: 700, marginBottom: "1rem" },
+  sectionHeader: {
+    display: "flex",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    gap: "1rem",
+    marginBottom: "1rem",
+  },
+  comparisonLink: { fontSize: "0.85rem", fontWeight: 600 },
   card: {
     padding: "1.5rem",
     borderRadius: "10px",
@@ -1858,7 +1970,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   fieldLabel: {
     fontSize: "0.85rem",
-    color: "var(--ifm-color-emphasis-600)",
+    color: "var(--dashboard-text-subtle)",
     fontWeight: 500,
   },
   fieldValue: { fontSize: "0.9rem", fontWeight: 500 },
@@ -1874,7 +1986,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "0.2rem 0.6rem",
     borderRadius: "12px",
     backgroundColor: "var(--ifm-color-emphasis-100)",
-    color: "var(--ifm-color-emphasis-600)",
+    color: "var(--dashboard-text-subtle)",
     fontSize: "0.8rem",
     fontWeight: 600,
   },
@@ -1929,10 +2041,13 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: "0.85rem",
   },
   errorText: { color: "#ef4444", fontSize: "0.85rem", marginTop: "0.75rem" },
+  dangerSection: { marginTop: "2.5rem" },
+  dangerCard: { borderColor: "rgba(239,68,68,0.4)" },
+  dangerLabel: { display: "block", fontSize: "0.85rem", marginBottom: "0.4rem" },
   comingSoonSubtext: {
     marginTop: "0.5rem",
     fontSize: "0.8rem",
-    color: "var(--ifm-color-emphasis-500)",
+    color: "var(--dashboard-text-muted)",
   },
   // Integrations tab
   integrationHeader: {
@@ -1960,12 +2075,12 @@ const styles: Record<string, React.CSSProperties> = {
     flexShrink: 0,
   },
   integrationName: { fontWeight: 600, fontSize: "0.9rem", marginBottom: "0.15rem" },
-  integrationDesc: { fontSize: "0.8rem", color: "var(--ifm-color-emphasis-500)" },
+  integrationDesc: { fontSize: "0.8rem", color: "var(--dashboard-text-muted)" },
   integrationFeatureList: {
     margin: "0.4rem 0 0",
     paddingLeft: "1.1rem",
     fontSize: "0.8rem",
-    color: "var(--ifm-color-emphasis-600)",
+    color: "var(--dashboard-text-subtle)",
     lineHeight: 1.55,
   },
   featureProBadge: {
@@ -1975,7 +2090,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: "4px",
     backgroundColor: "rgba(16,185,129,0.12)",
     color: "#10b981",
-    fontSize: "0.65rem",
+    fontSize: "0.7rem",
     fontWeight: 700,
     letterSpacing: "0.04em",
     verticalAlign: "middle",
@@ -2003,7 +2118,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   loadingText: {
     fontSize: "0.85rem",
-    color: "var(--ifm-color-emphasis-500)",
+    color: "var(--dashboard-text-muted)",
     padding: "0.5rem 0",
   },
   // Repo config panel
@@ -2024,43 +2139,11 @@ const styles: Record<string, React.CSSProperties> = {
   repoMeta: { display: "flex", alignItems: "center", gap: "0.5rem" },
   repoName: { fontSize: "0.875rem", fontWeight: 600, fontFamily: "monospace" },
   privateBadge: {
-    fontSize: "0.7rem",
+    fontSize: "0.75rem",
     padding: "0.1rem 0.4rem",
     borderRadius: "4px",
     backgroundColor: "var(--ifm-color-emphasis-100)",
-    color: "var(--ifm-color-emphasis-600)",
-  },
-  repoStats: { display: "flex", alignItems: "center", gap: "0.5rem" },
-  statBadge: {
-    fontSize: "0.75rem",
-    padding: "0.15rem 0.5rem",
-    borderRadius: "10px",
-    background: "rgba(16,185,129,0.1)",
-    color: "#10b981",
-    fontWeight: 500,
-  },
-  chevron: { fontSize: "0.7rem", color: "var(--ifm-color-emphasis-400)" },
-  configBody: {
-    borderTop: "1px solid var(--ifm-color-emphasis-100)",
-    padding: "1rem",
-    backgroundColor: "var(--ifm-background-surface-color)",
-  },
-  configSection: { marginBottom: "1rem" },
-  configRow: { marginBottom: "0.75rem" },
-  configRowInline: {
-    display: "flex",
-    gap: "1.5rem",
-    marginBottom: "0.75rem",
-    flexWrap: "wrap",
-  },
-  configLabel: {
-    display: "block",
-    fontSize: "0.78rem",
-    fontWeight: 600,
-    color: "var(--ifm-color-emphasis-600)",
-    marginBottom: "0.3rem",
-    textTransform: "uppercase",
-    letterSpacing: "0.03em",
+    color: "var(--dashboard-text-subtle)",
   },
   input: {
     width: "100%",
@@ -2072,43 +2155,11 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: "0.85rem",
     outline: "none",
   },
-  select: {
-    width: "100%",
-    padding: "0.4rem 0.6rem",
-    borderRadius: "6px",
-    border: "1px solid var(--ifm-color-emphasis-200)",
-    backgroundColor: "var(--ifm-background-color)",
-    color: "var(--ifm-font-color-base)",
-    fontSize: "0.85rem",
-    outline: "none",
-  },
   inputHint: {
-    fontSize: "0.73rem",
-    color: "var(--ifm-color-emphasis-400)",
+    fontSize: "0.8rem",
+    color: "var(--dashboard-text-subtle)",
     marginTop: "0.2rem",
   },
-  checkboxLabel: {
-    display: "flex",
-    alignItems: "center",
-    fontSize: "0.85rem",
-    cursor: "pointer",
-  },
-  queueStatusRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: "0.75rem",
-    padding: "0.4rem 0",
-    fontSize: "0.82rem",
-  },
-  branchPill: {
-    fontFamily: "monospace",
-    fontSize: "0.8rem",
-    padding: "0.1rem 0.4rem",
-    borderRadius: "4px",
-    backgroundColor: "var(--ifm-color-emphasis-100)",
-  },
-  queueStatusText: { color: "var(--ifm-color-emphasis-600)" },
-  configActions: { display: "flex", justifyContent: "flex-end" },
   // Team tab
   orgCard: {
     padding: "1.5rem",
@@ -2123,7 +2174,7 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: "0.4rem",
     fontSize: "0.78rem",
     fontWeight: 600,
-    color: "var(--ifm-color-emphasis-600)",
+    color: "var(--dashboard-text-subtle)",
     textTransform: "uppercase",
     letterSpacing: "0.03em",
   },
@@ -2136,11 +2187,45 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "0.4rem 0",
     fontSize: "0.85rem",
   },
-  teamRowActions: { display: "flex", alignItems: "center", gap: "0.75rem" },
+  teamRowActions: { display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" },
   teamInvite: { borderBottom: "1px solid var(--ifm-color-emphasis-100)" },
   teamLinkRow: { display: "flex", gap: "0.5rem", paddingBottom: "0.6rem" },
-  teamMuted: { fontSize: "0.8rem", color: "var(--ifm-color-emphasis-500)" },
+  teamMuted: { fontSize: "0.8rem", color: "var(--dashboard-text-muted)" },
   teamForm: { display: "flex", gap: "0.5rem", marginTop: "0.75rem" },
+  teamPerks: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "0.5rem 1.5rem",
+    listStyle: "none",
+    padding: 0,
+    margin: "0 0 1rem",
+    fontSize: "0.9rem",
+  },
+  teamPerk: { display: "flex", alignItems: "center", gap: "0.4rem" },
+  teamPrice: { margin: "0.5rem 0 0", fontSize: "0.9rem" },
+  teamPriceAmount: { fontSize: "1.75rem", fontWeight: 700 },
+  teamCreateForm: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "0.4rem",
+    marginTop: "1rem",
+  },
+  inviteEmail: { flex: 1, minWidth: 0, display: "flex", flexDirection: "column" },
+  inviteExpiry: { fontSize: "0.8rem", color: "var(--dashboard-text-subtle)" },
+  iconButton: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+    width: "32px",
+    height: "32px",
+    padding: 0,
+    borderRadius: "6px",
+    border: "none",
+    backgroundColor: "transparent",
+    color: "#ef4444",
+    cursor: "pointer",
+  },
   linkButton: {
     border: "none",
     background: "none",
@@ -2176,7 +2261,7 @@ const styles: Record<string, React.CSSProperties> = {
 export default function DashboardPage(): React.ReactNode {
   const { siteConfig } = useDocusaurusContext();
   const flags = siteConfig.customFields?.featureFlags as
-    | { pro?: boolean; stripePayments?: boolean }
+    | { pro?: boolean }
     | undefined;
 
   if (!flags?.pro) {

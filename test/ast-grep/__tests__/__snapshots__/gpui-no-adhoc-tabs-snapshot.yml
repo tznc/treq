@@ -1,0 +1,121 @@
+id: gpui-no-adhoc-tabs
+snapshots:
+  ? |
+    fn f(p: &Palette) -> Div {
+      div().child(div().id("a").role(gpui::Role::Tab).aria_label("Code"))
+    }
+  : labels:
+    - source: div().id("a").role(gpui::Role::Tab)
+      style: primary
+      start: 41
+      end: 76
+    - source: role
+      style: secondary
+      start: 55
+      end: 59
+    - source: div().id("a").role
+      style: secondary
+      start: 41
+      end: 59
+    - source: gpui::Role::Tab
+      style: secondary
+      start: 60
+      end: 75
+    - source: gpui::Role::Tab
+      style: secondary
+      start: 60
+      end: 75
+  ? |
+    fn f(p: &Palette) {
+      let tab = |id: &'static str, active: bool| div().id(id);
+    }
+  : labels:
+    - source: 'let tab = |id: &''static str, active: bool| div().id(id);'
+      style: primary
+      start: 22
+      end: 78
+    - source: tab
+      style: secondary
+      start: 26
+      end: 29
+    - source: '|id: &''static str, active: bool| div().id(id)'
+      style: secondary
+      start: 32
+      end: 77
+  ? |
+    fn f(p: &Palette) {
+      let tab_trigger = |id: &'static str| div().id(id);
+    }
+  : labels:
+    - source: 'let tab_trigger = |id: &''static str| div().id(id);'
+      style: primary
+      start: 22
+      end: 72
+    - source: tab_trigger
+      style: secondary
+      start: 26
+      end: 37
+    - source: '|id: &''static str| div().id(id)'
+      style: secondary
+      start: 40
+      end: 71
+  ? |
+    fn tab_row(&self, row: &TabRow, p: &Palette) -> Div {
+      div().bg(p.muted)
+    }
+  : labels:
+    - source: |-
+        fn tab_row(&self, row: &TabRow, p: &Palette) -> Div {
+          div().bg(p.muted)
+        }
+      style: primary
+      start: 0
+      end: 75
+    - source: tab_row
+      style: secondary
+      start: 3
+      end: 10
+    - source: Div
+      style: secondary
+      start: 48
+      end: 51
+  ? |
+    fn view_tabs(&self, p: &Palette) -> Stateful<Div> {
+      div().id("t")
+    }
+  : labels:
+    - source: |-
+        fn view_tabs(&self, p: &Palette) -> Stateful<Div> {
+          div().id("t")
+        }
+      style: primary
+      start: 0
+      end: 69
+    - source: view_tabs
+      style: secondary
+      start: 3
+      end: 12
+    - source: Stateful<Div>
+      style: secondary
+      start: 36
+      end: 49
+  ? |
+    fn workspace_tabs(&self, p: &Palette) -> gpui::Div {
+      div()
+    }
+  : labels:
+    - source: |-
+        fn workspace_tabs(&self, p: &Palette) -> gpui::Div {
+          div()
+        }
+      style: primary
+      start: 0
+      end: 62
+    - source: workspace_tabs
+      style: secondary
+      start: 3
+      end: 17
+    - source: gpui::Div
+      style: secondary
+      start: 41
+      end: 50

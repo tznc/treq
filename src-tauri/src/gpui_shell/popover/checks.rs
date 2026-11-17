@@ -9,6 +9,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use gpui_kit::base::TestSupportExt as _;
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, AnyElement, Context, Div, FontWeight, Hsla, SharedString,
 };
@@ -38,7 +39,7 @@ pub struct Input {
   pub running_workflows: Vec<String>,
   /// The setup script is being re-run from this window.
   pub setup_rerunning: bool,
-  /// "View logs" is offered (the Logs preview is on).
+  /// "View logs" is offered.
   pub logs: bool,
 }
 
@@ -61,6 +62,7 @@ pub fn ci_state(bucket: &str) -> &'static str {
   match bucket {
     "pass" | "skipping" => "success",
     "fail" | "cancel" => "failure",
+    crate::github::INACTIVE => "inactive",
     _ => "pending",
   }
 }
@@ -70,6 +72,7 @@ fn severity(check: &PrCheckEntry) -> u8 {
   match ci_state(&check.bucket) {
     "failure" => 0,
     "pending" => 1,
+    "inactive" => 3,
     _ => 2,
   }
 }
@@ -153,6 +156,8 @@ impl Popover {
     let setup_running = data.setup_running();
 
     let title = |text: String| {
+      // Short label (['section heading']): 11px is fine.
+      // ast-grep-ignore: gpui-text-xs-short-label-only
       ui::text(div(), TextSize::Xs)
         .px_2()
         .pb_1()
@@ -164,8 +169,12 @@ impl Popover {
     let mut panel = self.panel("checks-popover", WIDTH, 8., &p);
     if has_treq {
       let logs = input.logs.then(|| {
+        // Short label (['link label']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .id("checks-view-logs")
+          .role(gpui::Role::Button)
+          .aria_label("View logs")
           .debug_selector(|| "checks-view-logs".into())
           .px_2()
           .pb_1()
@@ -174,6 +183,7 @@ impl Popover {
           .hover(|s| s.underline())
           .child("View logs")
           .on_click(cx.listener(|this, _, _, cx| this.view_logs(cx)))
+          .test_support()
       });
       let mut section = div()
         .child(
@@ -262,7 +272,7 @@ impl Popover {
             .border_color(amber_border)
             .text_color(amber)
             .child(ui::icon(theme::ICON_SHIELD_CHECK, 12., amber))
-            .label("Trust Repository")
+            .label("Trust repository")
             .on_click(cx.listener(|this, _, _, cx| this.trust_repo(cx))),
         );
       }
@@ -323,7 +333,10 @@ impl Popover {
     let rows = checks.into_iter().enumerate().map(|(i, check)| {
       let state = ci_state(&check.bucket);
       let color = ci_color(state, &p);
-      let icon = if state == "pending" {
+      let inactive = state == "inactive";
+      let icon = if inactive {
+        ui::icon(theme::ICON_MINUS, 16., p.muted_foreground).into_any_element()
+      } else if state == "pending" {
         ui::spinner(SharedString::from(format!("ci-spin-{i}")), 16., color).into_any_element()
       } else {
         ui::icon(
@@ -342,6 +355,9 @@ impl Popover {
       let selector = id.to_string();
       ui::text(div(), TextSize::Sm)
         .id(id)
+        .when(link.is_some(), |el| {
+          el.role(gpui::Role::Link).aria_label(check.name.clone())
+        })
         .debug_selector(move || selector)
         .w_full()
         .flex()
@@ -356,9 +372,24 @@ impl Popover {
             .flex_1()
             .min_w_0()
             .truncate()
+            .when(inactive, |d| d.text_color(p.muted_foreground))
             .child(check.name.clone()),
         )
-        .children(check.duration_secs.map(|secs| {
+        .when(inactive, |row| {
+          let selector = format!("ci-inactive-{i}");
+          row.child(
+            div()
+              .id(SharedString::from(selector.clone()))
+              .debug_selector(move || selector)
+              .role(gpui::Role::Label)
+              .aria_label(format!("{} inactive", check.name))
+              .flex_none()
+              .text_color(p.muted_foreground)
+              .child("inactive")
+              .test_support(),
+          )
+        })
+        .children(check.duration_secs.filter(|_| !inactive).map(|secs| {
           div()
             .flex_none()
             .text_color(p.muted_foreground)
@@ -367,7 +398,7 @@ impl Popover {
         .when_some(link, |this, link| {
           this
             .cursor_pointer()
-            .hover(|s| s.bg(p.muted.opacity(0.5)))
+            .hover(|s| s.bg(p.hover()))
             .on_click(cx.listener(move |this, _, _, _| this.host.open_url(&link)))
         })
     });
@@ -377,12 +408,18 @@ impl Popover {
         this.mt_2().border_t_1().border_color(p.border).pt_2()
       })
       .child(
+        // Short label (['section heading with count']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
+          .id("checks-github-heading")
+          .role(gpui::Role::Heading)
+          .aria_label(format!("GitHub checks · {}/{}", ci.passed, ci.total))
           .px_2()
           .pb_1()
           .font_weight(FontWeight::MEDIUM)
           .text_color(p.muted_foreground)
-          .child(format!("GitHub checks · {}/{}", ci.passed, ci.total)),
+          .child(format!("GitHub checks · {}/{}", ci.passed, ci.total))
+          .test_support(),
       )
       .child(
         div()

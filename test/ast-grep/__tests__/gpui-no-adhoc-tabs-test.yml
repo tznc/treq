@@ -1,0 +1,45 @@
+id: gpui-no-adhoc-tabs
+valid:
+  - |
+    fn view_tabs(&self, p: &Palette) -> impl IntoElement {
+      ui::Tabs::segmented("views", p).tab(ui::Tab::new("code", "Code"))
+    }
+  - |
+    fn tab_strip(p: &Palette) -> ui::Tabs {
+      ui::Tabs::new("t", p)
+    }
+  - |
+    fn nav(p: &Palette) -> ui::Row {
+      ui::Row::new("settings-tab-skills", p).role(gpui::Role::Tab)
+    }
+  - |
+    fn tabs_count() -> usize { 3 }
+  - |
+    mod tests {
+      fn workspace_tabs() -> Div { div() }
+    }
+invalid:
+  - |
+    fn tab_row(&self, row: &TabRow, p: &Palette) -> Div {
+      div().bg(p.muted)
+    }
+  - |
+    fn workspace_tabs(&self, p: &Palette) -> gpui::Div {
+      div()
+    }
+  - |
+    fn view_tabs(&self, p: &Palette) -> Stateful<Div> {
+      div().id("t")
+    }
+  - |
+    fn f(p: &Palette) -> Div {
+      div().child(div().id("a").role(gpui::Role::Tab).aria_label("Code"))
+    }
+  - |
+    fn f(p: &Palette) {
+      let tab_trigger = |id: &'static str| div().id(id);
+    }
+  - |
+    fn f(p: &Palette) {
+      let tab = |id: &'static str, active: bool| div().id(id);
+    }

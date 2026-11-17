@@ -1,0 +1,57 @@
+id: gpui-row-selected-token
+valid:
+  - |
+    fn f(p: &Palette, selected: bool) -> Div {
+      div().when(selected, |this| this.bg(p.selected()))
+    }
+  - |
+    fn f(palette: &Palette, row: &Row) -> Div {
+      div().when(row.selected, |this| this.bg(palette.selected()))
+    }
+  - |
+    fn f(p: &Palette, selected: bool) -> Div {
+      div().bg(if selected { p.selected() } else { p.background })
+    }
+  - |
+    fn f(p: &Palette, open: bool) -> Div {
+      div().when(open, |this| this.bg(p.muted))
+    }
+  - |
+    fn f(p: &Palette, active: bool) -> Div {
+      div().text_color(if active { p.foreground } else { p.muted_foreground })
+    }
+  - |
+    mod tests {
+      fn f(p: &Palette, selected: bool) -> Div {
+        div().when(selected, |this| this.bg(p.muted))
+      }
+    }
+invalid:
+  - |
+    fn f(p: &Palette, selected: bool) -> Div {
+      div().when(selected, |this| this.bg(p.menu_accent.opacity(0.5)))
+    }
+  - |
+    fn f(p: &Palette, active: bool) -> Div {
+      div().when(active, |this| this.bg(p.menu_accent))
+    }
+  - |
+    fn f(p: &Palette, i: usize, selected: usize) -> Div {
+      div().when(i == selected, |this| this.bg(p.accent.opacity(0.5)))
+    }
+  - |
+    fn f(p: &Palette, highlighted: bool, hover_bg: Hsla) -> Div {
+      div().when(highlighted, |this| this.bg(hover_bg))
+    }
+  - |
+    fn f(p: &Palette, active: bool) -> Div {
+      div().when(active, |this| this.bg(p.background).shadow_sm())
+    }
+  - |
+    fn f(p: &Palette, selected: bool, active: bool, tint: Hsla) -> Div {
+      div().when(selected || active, |this| this.bg(tint))
+    }
+  - |
+    fn f(p: &Palette, selected: bool) -> Div {
+      div().bg(if selected { p.muted } else { p.background })
+    }

@@ -3,26 +3,28 @@
 //! conflicts, the pending review the backend keeps, and sending it to an
 //! agent through React.
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
+use gpui_kit::base::TestSupportExt as _;
 use std::{ops::Range, time::Duration};
 
 use super::*;
+use crate::core::review::{selected_range, selected_row, selected_text, word_at, TextPoint};
 use crate::gpui_shell::screen::{
   changes_review::{
-    commented_text, comments_under, count_label, is_outdated, line_has_comment, line_location,
-    outdated_label, outdated_markdown, parse_suggestion, pending_for_line, pending_for_selection,
-    review_markdown, stale_names, suggestion_block, ConflictNote, LineComment, Pending, Side,
-    Stored, FILE_HUNK,
+    commented_text, comments_under, compose_suggestion_comment, count_label, is_outdated,
+    line_has_comment, line_location, number_and_side, outdated_label, outdated_markdown,
+    parse_suggestion, pending_for_line, pending_for_selection, review_markdown, stale_names,
+    suggestion_lines, ConflictNote, LineComment, Pending, Side, Stored, FILE_HUNK,
   },
-  commits_data::{line_number, selection, LineRef},
+  commits_data::{selection, LineRef},
 };
-use gpui::{MouseDownEvent, MouseMoveEvent, Task};
+use gpui::{MouseDownEvent, MouseMoveEvent, Point, Task, TextLayout};
 
 /// How long edits wait before the review is written (`useDebounce(…, 500)`).
 const SAVE_DELAY: Duration = Duration::from_millis(500);
-/// How long "Copied" shows on the review popover's Copy button.
-const COPIED_FOR: Duration = Duration::from_millis(2000);
 
 /// A diff line as drawn: its file, place and bounds.
 pub(in crate::gpui_shell::screen) type DrawnLine = (String, LineRef, Bounds<Pixels>);
@@ -38,6 +40,20 @@ pub(in crate::gpui_shell::screen) struct LineSelection {
   pub dragging: bool,
 }
 
+/// Code picked by dragging over the diff's text, apart from the gutter's
+/// line range: what Copy takes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::gpui_shell::screen) struct TextSelection {
+  pub path: String,
+  pub anchor: TextPoint,
+  pub head: TextPoint,
+  pub dragging: bool,
+}
+
+/// Each drawn line's text layout, for finding the character under the mouse.
+pub(in crate::gpui_shell::screen) type Layouts =
+  Rc<RefCell<HashMap<(String, LineRef), TextLayout>>>;
+
 /// A text box and the subscription that keeps its text.
 pub(in crate::gpui_shell::screen) struct Input {
   pub state: Entity<TextareaState>,
@@ -51,11 +67,18 @@ enum Field {
   Edit,
   Note,
   Summary,
+  Suggestion,
 }
 
 #[derive(Default)]
 pub(in crate::gpui_shell::screen) struct Review {
   pub selection: Option<LineSelection>,
+  pub text: Option<TextSelection>,
+  pub(super) layouts: Layouts,
+  /// Where the pointer is during a drag, wherever it is in the window.
+  pub(super) pointer: Option<Point<Pixels>>,
+  /// Scrolls the diff while a drag holds the pointer at or past its edge.
+  pub(super) autoscroll: Option<Task<()>>,
   /// Scroll the selection's head into view, within this many frames.
   pub reveal: u8,
   /// Where the selection's head was last drawn.
@@ -66,10 +89,17 @@ pub(in crate::gpui_shell::screen) struct Review {
   /// checkout, which must not wait behind the stale banner.
   pub apply_next: bool,
   pub comments: Vec<LineComment>,
+  /// Whether each comment is outdated, as of the layout it was worked out
+  /// at: by id, with the lines it covers.
+  outdated: RefCell<HashMap<String, (u64, u32, u32, bool)>>,
   /// Where the comment box is open.
   pub draft: Option<Pending>,
   pub draft_text: String,
   pub(super) draft_input: Option<Input>,
+  /// "Suggest change"'s lines, as edited; the comment takes them as a
+  /// suggestion block when it is added.
+  pub suggestion_text: Option<String>,
+  pub(super) suggestion_input: Option<Input>,
   /// The comment, or the conflict's note, being edited.
   pub editing: Option<String>,
   pub edit_text: String,
@@ -84,7 +114,6 @@ pub(in crate::gpui_shell::screen) struct Review {
   pub finish_open: bool,
   pub use_idle: bool,
   pub sending: bool,
-  pub copied: bool,
   pub discard_dialog: bool,
   /// `hasUserAddedComments`.
   pub user_added: bool,
@@ -97,7 +126,6 @@ pub(in crate::gpui_shell::screen) struct Review {
   /// The workspace whose kept review was read.
   hydrated: Option<(String, i64)>,
   save: Option<Task<()>>,
-  copied_reset: Option<Task<()>>,
 }
 
 impl Review {
@@ -180,32 +208,35 @@ impl ChangesView {
     }
     self.review.save = Some(cx.spawn(async move |this, cx| {
       cx.background_executor().timer(SAVE_DELAY).await;
-      let _ = this.update(cx, |view, cx| {
-        let (comments, summary, notes) = stored.to_save();
-        view.run(
-          move |host, parent| {
-            host.save_review(
-              &parent.repo_path,
-              id,
-              &comments,
-              summary.as_deref(),
-              notes.as_deref(),
-            )
-          },
-          |_, result, _| {
-            if let Err(err) = result {
-              log::warn!("Failed to save pending review: {err}");
-            }
-          },
-          cx,
-        );
-      });
+      this
+        .update(cx, |view, cx| {
+          let (comments, summary, notes) = stored.to_save();
+          view.run(
+            move |host, parent| {
+              host.save_review(
+                &parent.repo_path,
+                id,
+                &comments,
+                summary.as_deref(),
+                notes.as_deref(),
+              )
+            },
+            |_, result, _| {
+              if let Err(err) = result {
+                log::warn!("Failed to save pending review: {err}");
+              }
+            },
+            cx,
+          );
+        })
+        .ignore_closed();
     }));
   }
 
   // Line selection.
 
   pub(super) fn press_line(&mut self, path: &str, at: LineRef, cx: &mut Context<Self>) {
+    self.review.text = None;
     self.review.selection = Some(LineSelection {
       path: path.into(),
       anchor: at,
@@ -214,6 +245,16 @@ impl ChangesView {
       dragging: true,
     });
     cx.notify();
+  }
+
+  /// Shift-click: moves the selection's head to `at`, keeping its anchor, and
+  /// keeps dragging from there. Without a selection in `path`, a plain press.
+  pub(super) fn extend_line(&mut self, path: &str, at: LineRef, cx: &mut Context<Self>) {
+    match self.review.selection.as_mut().filter(|s| s.path == path) {
+      Some(s) => s.dragging = true,
+      None => return self.press_line(path, at, cx),
+    }
+    self.drag_line(path, at, cx);
   }
 
   pub(super) fn drag_line(&mut self, path: &str, at: LineRef, cx: &mut Context<Self>) {
@@ -238,16 +279,180 @@ impl ChangesView {
   }
 
   pub(super) fn end_drag(&mut self, cx: &mut Context<Self>) {
+    self.review.pointer = None;
+    self.review.autoscroll = None;
     if let Some(s) = self.review.selection.as_mut().filter(|s| s.dragging) {
       s.dragging = false;
+      cx.notify();
+    }
+    if let Some(t) = self.review.text.as_mut().filter(|t| t.dragging) {
+      t.dragging = false;
       cx.notify();
     }
   }
 
   pub(super) fn clear_selection(&mut self, cx: &mut Context<Self>) {
-    if self.review.selection.take().is_some() {
+    let had = self.review.selection.take().is_some() | self.review.text.take().is_some();
+    if had {
       cx.notify();
     }
+  }
+
+  // Text selection.
+
+  /// The byte of `at`'s code under `position`, once the line was drawn.
+  fn text_index(&self, path: &str, at: LineRef, position: Point<Pixels>) -> Option<usize> {
+    let layouts = self.review.layouts.borrow();
+    let layout = layouts.get(&(path.to_string(), at))?;
+    Some(layout.index_for_position(position).unwrap_or_else(|i| i))
+  }
+
+  /// A press on the code: one click starts a text selection, two pick the
+  /// word and three the line.
+  pub(super) fn press_text(
+    &mut self,
+    path: &str,
+    at: LineRef,
+    position: Point<Pixels>,
+    clicks: usize,
+    cx: &mut Context<Self>,
+  ) {
+    let Some(i) = self.text_index(path, at, position) else {
+      return;
+    };
+    let code = self
+      .file_hunks(path)
+      .and_then(|d| d.hunks.get(at.0)?.lines.get(at.1).cloned())
+      .map(|t| t.get(1..).unwrap_or("").to_string())
+      .unwrap_or_default();
+    let (from, to) = match clicks {
+      2 => {
+        let w = word_at(&code, i);
+        (w.start, w.end)
+      }
+      n if n >= 3 => (0, code.len()),
+      _ => (i, i),
+    };
+    self.review.selection = None;
+    self.review.text = Some(TextSelection {
+      path: path.into(),
+      anchor: (at, from),
+      head: (at, to),
+      dragging: clicks <= 1,
+    });
+    cx.notify();
+  }
+
+  pub(super) fn drag_text(
+    &mut self,
+    path: &str,
+    at: LineRef,
+    position: Point<Pixels>,
+    cx: &mut Context<Self>,
+  ) {
+    if !self
+      .review
+      .text
+      .as_ref()
+      .is_some_and(|t| t.dragging && t.path == path)
+    {
+      return;
+    }
+    let Some(i) = self.text_index(path, at, position) else {
+      return;
+    };
+    if let Some(t) = self.review.text.as_mut() {
+      if t.head != (at, i) {
+        t.head = (at, i);
+        cx.notify();
+      }
+    }
+  }
+
+  /// Whether a line or text selection is being dragged.
+  pub(super) fn dragging(&self) -> bool {
+    self.review.selection.as_ref().is_some_and(|s| s.dragging)
+      || self.review.text.as_ref().is_some_and(|t| t.dragging)
+  }
+
+  /// The pointer moved during a drag: keeps where it is, and scrolls the diff
+  /// while it is at or past the diff's top or bottom.
+  pub(super) fn drag_pointer(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+    if !self.dragging() {
+      return;
+    }
+    self.review.pointer = Some(position);
+    if self.review.autoscroll.is_some()
+      || super::keys::autoscroll_step(position.y, self.diff.list.viewport_bounds()) == px(0.)
+    {
+      return;
+    }
+    self.review.autoscroll = Some(cx.spawn(async move |this, cx| loop {
+      cx.background_executor()
+        .timer(Duration::from_millis(16))
+        .await;
+      let more = this
+        .update(cx, |view, cx| view.autoscroll_tick(cx))
+        .unwrap_or(false);
+      if !more {
+        break;
+      }
+    }));
+  }
+
+  /// One step of a drag's scroll: moves the drag to the line now under the
+  /// pointer, then scrolls on. `false` once there is nothing more to do.
+  fn autoscroll_tick(&mut self, cx: &mut Context<Self>) -> bool {
+    let Some(pointer) = self.review.pointer.filter(|_| self.dragging()) else {
+      self.review.autoscroll = None;
+      return false;
+    };
+    let path = match (&self.review.selection, &self.review.text) {
+      (Some(s), _) if s.dragging => s.path.clone(),
+      (_, Some(t)) => t.path.clone(),
+      _ => return false,
+    };
+    if let Some(at) = self.line_under(&path, pointer.y) {
+      self.drag_line(&path, at, cx);
+      self.drag_text(&path, at, pointer, cx);
+    }
+    let step = super::keys::autoscroll_step(pointer.y, self.diff.list.viewport_bounds());
+    if step == px(0.) {
+      self.review.autoscroll = None;
+      return false;
+    }
+    self.diff.list.scroll_by(step);
+    cx.notify();
+    true
+  }
+
+  /// The drawn line of `path` nearest `y`, as of the last frame.
+  fn line_under(&self, path: &str, y: Pixels) -> Option<LineRef> {
+    let layouts = self.review.layouts.borrow();
+    layouts
+      .iter()
+      .filter(|((p, _), _)| p == path)
+      .map(|((_, at), layout)| {
+        let b = layout.bounds();
+        let off = if y < b.top() {
+          b.top() - y
+        } else if y > b.bottom() {
+          y - b.bottom()
+        } else {
+          px(0.)
+        };
+        (off, *at)
+      })
+      .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
+      .map(|(_, at)| at)
+  }
+
+  /// The selected code, as Copy takes it; `None` when nothing is selected.
+  pub(super) fn selected_code(&self) -> Option<String> {
+    let t = self.review.text.as_ref()?;
+    let hunks = self.file_hunks(&t.path)?.hunks;
+    let text = selected_text(&hunks, t.anchor, t.head);
+    (!text.is_empty()).then_some(text)
   }
 
   /// The selection's comment target, `None` when it mixes sides.
@@ -294,10 +499,15 @@ impl ChangesView {
   }
 
   fn submit_draft(&mut self, cx: &mut Context<Self>) {
-    let text = self.review.draft_text.trim().to_string();
+    let text = compose_suggestion_comment(
+      &self.review.draft_text,
+      self.review.suggestion_text.as_deref(),
+    );
     if text.is_empty() {
       return;
     }
+    self.review.suggestion_text = None;
+    self.review.suggestion_input = None;
     if self.read_only() {
       if let Some(draft) = self.review.draft.clone() {
         self.submit_pr_draft(draft, text, cx);
@@ -320,25 +530,22 @@ impl ChangesView {
     cx.notify();
   }
 
-  /// "Suggest change": the commented lines as a suggestion block, at the
-  /// cursor, to edit into what they should read.
+  /// "Suggest change": opens a code editor with the commented lines, to edit
+  /// into what they should read; pressed again, drops the suggestion.
   fn suggest_change(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-    let Some(block) = self.review.draft.as_ref().and_then(suggestion_block) else {
+    if self.review.suggestion_text.take().is_some() {
+      self.review.suggestion_input = None;
+      if let Some(input) = &self.review.draft_input {
+        input.state.update(cx, |s, cx| s.focus(window, cx));
+      }
+      cx.notify();
+      return;
+    }
+    let Some(lines) = self.review.draft.as_ref().and_then(suggestion_lines) else {
       return;
     };
-    let Some(input) = self.review.draft_input.as_ref().map(|i| i.state.clone()) else {
-      return;
-    };
-    let lead = if self.review.draft_text.is_empty() || self.review.draft_text.ends_with('\n') {
-      ""
-    } else {
-      "\n"
-    };
-    input.update(cx, |s, cx| {
-      s.insert(format!("{lead}{block}"), window, cx);
-      s.focus(window, cx);
-    });
-    self.review.draft_text = input.read(cx).value().to_string();
+    self.review.suggestion_text = Some(lines);
+    self.input_for(Field::Suggestion, window, cx);
     cx.notify();
   }
 
@@ -367,11 +574,19 @@ impl ChangesView {
       move |view, result, cx| match result {
         Ok(()) => {
           view.delete_comment(&id, cx);
-          view.toast(ToastTone::Success, "Suggestion applied", "");
+          super::tell(
+            view.host.as_ref(),
+            Toast::success("Suggestion applied").into(),
+          );
           view.review.apply_next = true;
           view.load(cx);
         }
-        Err(err) => view.toast(ToastTone::Error, "Could not apply suggestion", err),
+        Err(err) => super::tell(
+          view.host.as_ref(),
+          Toast::error("Could not apply suggestion")
+            .description(err)
+            .into(),
+        ),
       },
       cx,
     );
@@ -382,6 +597,8 @@ impl ChangesView {
     self.review.draft = None;
     self.review.draft_input = None;
     self.review.draft_text.clear();
+    self.review.suggestion_text = None;
+    self.review.suggestion_input = None;
     cx.notify();
   }
 
@@ -401,7 +618,7 @@ impl ChangesView {
     cx.notify();
   }
 
-  fn start_edit(&mut self, id: &str, text: &str, cx: &mut Context<Self>) {
+  pub(super) fn start_edit(&mut self, id: &str, text: &str, cx: &mut Context<Self>) {
     self.review.editing = Some(id.into());
     self.review.edit_text = text.into();
     self.review.edit_input = None;
@@ -534,15 +751,6 @@ impl ChangesView {
 
   fn copy_review(&mut self, cx: &mut Context<Self>) {
     cx.write_to_clipboard(ClipboardItem::new_string(self.markdown()));
-    self.review.copied = true;
-    self.review.copied_reset = Some(cx.spawn(async move |this, cx| {
-      cx.background_executor().timer(COPIED_FOR).await;
-      let _ = this.update(cx, |view, cx| {
-        view.review.copied = false;
-        cx.notify();
-      });
-    }));
-    cx.notify();
   }
 
   /// Plan or Edit: React starts the agent with the review.
@@ -581,7 +789,7 @@ impl ChangesView {
 
   fn discard_review(&mut self, cx: &mut Context<Self>) {
     self.reset_review(cx);
-    self.toast(ToastTone::Success, "Review canceled", "");
+    super::tell(self.host.as_ref(), Toast::success("Review canceled").into());
   }
 
   /// A refreshed list that adds, removes or changes a file waits while a
@@ -620,9 +828,31 @@ impl ChangesView {
   /// diffs are read aside, and files whose diff changed (an agent edited
   /// them) wait behind the stale banner like added or removed ones.
   pub(super) fn recheck(&mut self, snapshot: Snapshot, cx: &mut Context<Self>) {
-    let paths: Vec<String> = snapshot.files.iter().map(|f| f.path.clone()).collect();
+    // A file whose content id held shows the hunks it would read.
+    let paths: Vec<String> = snapshot
+      .files
+      .iter()
+      .filter(|f| draws_hunks(&f.path, &f.status))
+      .map(|f| &f.path)
+      .filter(|path| {
+        let id = snapshot.content_ids.get(*path);
+        id.is_none() || self.hunks.get(*path).and_then(|d| d.content_id.as_ref()) != id
+      })
+      .cloned()
+      .collect();
+    if paths.is_empty() {
+      return;
+    }
+    let token = snapshot.token.clone();
     self.run(
-      move |host, parent| host.file_hunks(&parent.repo_path, parent.workspace_id(), paths),
+      move |host, parent| {
+        host.file_hunks(
+          &parent.repo_path,
+          parent.workspace_id(),
+          paths,
+          token.as_deref(),
+        )
+      },
       move |view, result, cx| {
         let read = match result {
           Ok(read) => read,
@@ -678,13 +908,14 @@ impl ChangesView {
     });
     let dropped = before - self.review.comments.len();
     if dropped > 0 {
-      self.toast(
-        ToastTone::Warning,
-        "Comments discarded",
-        format!(
-          "{} discarded (lines changed)",
-          count_label(dropped, "outdated comment")
-        ),
+      super::tell(
+        self.host.as_ref(),
+        Toast::warning("Comments discarded")
+          .description(format!(
+            "{} discarded (lines changed)",
+            count_label(dropped, "outdated comment")
+          ))
+          .into(),
       );
       self.save_review(cx);
     }
@@ -718,10 +949,13 @@ impl ChangesView {
       })
       .collect();
     cx.write_to_clipboard(ClipboardItem::new_string(outdated_markdown(&all)));
-    self.toast(
-      ToastTone::Success,
-      &format!("{} copied", count_label(all.len(), "outdated comment")),
-      "",
+    super::tell(
+      self.host.as_ref(),
+      Toast::success(format!(
+        "{} copied",
+        count_label(all.len(), "outdated comment")
+      ))
+      .into(),
     );
   }
 
@@ -734,7 +968,9 @@ impl ChangesView {
     let add = {
       let (entity, target) = (entity.clone(), target.clone());
       move |cx: &mut App| {
-        let _ = entity.update(cx, |view, cx| view.open_draft(target.clone(), cx));
+        entity
+          .update(cx, |view, cx| view.open_draft(target.clone(), cx))
+          .ignore_closed();
       }
     };
     let location = line_location(&target);
@@ -742,9 +978,11 @@ impl ChangesView {
     let copy = |text: String, description: &'static str| {
       let entity = entity.clone();
       move |cx: &mut App| {
-        let _ = entity.update(cx, |view, cx| {
-          view.copy(text.clone(), description.into(), cx)
-        });
+        entity
+          .update(cx, |view, cx| {
+            view.copy(text.clone(), description.into(), cx)
+          })
+          .ignore_closed();
       }
     };
     let items = vec![
@@ -775,7 +1013,7 @@ impl ChangesView {
       Field::Draft if self.review.draft.is_some() => (
         &self.review.draft_input,
         self.review.draft_text.clone(),
-        "Add a comment...",
+        "Add a comment…",
         3,
       ),
       Field::Edit if self.review.editing.is_some() => (
@@ -787,15 +1025,24 @@ impl ChangesView {
       Field::Note if self.review.note_open.is_some() => (
         &self.review.note_input,
         self.review.note_text.clone(),
-        "Add a comment...",
+        "Add a comment…",
         3,
       ),
       Field::Summary if self.review.finish_open => (
         &self.review.summary_input,
         self.review.summary.clone(),
-        "Add a summary comment (optional)...",
+        "Add a summary comment (optional)…",
         3,
       ),
+      Field::Suggestion => {
+        let lines = self.review.suggestion_text.as_ref()?;
+        (
+          &self.review.suggestion_input,
+          lines.clone(),
+          "Suggested lines",
+          lines.lines().count().max(1),
+        )
+      }
       _ => return None,
     };
     if let Some(input) = slot {
@@ -818,6 +1065,7 @@ impl ChangesView {
             view.review.summary = value;
             view.save_review(cx);
           }
+          Field::Suggestion => view.review.suggestion_text = Some(value),
         }
         cx.notify();
       }
@@ -834,14 +1082,24 @@ impl ChangesView {
       Field::Edit => self.review.edit_input = Some(input),
       Field::Note => self.review.note_input = Some(input),
       Field::Summary => self.review.summary_input = Some(input),
+      Field::Suggestion => self.review.suggestion_input = Some(input),
     }
     Some(state)
   }
 
   /// Builds the boxes that are open, so render can draw them.
   pub(super) fn ensure_review_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-    for field in [Field::Draft, Field::Edit, Field::Note, Field::Summary] {
+    for field in [
+      Field::Draft,
+      Field::Edit,
+      Field::Note,
+      Field::Summary,
+      Field::Suggestion,
+    ] {
       self.input_for(field, window, cx);
+    }
+    if self.review.suggestion_text.is_none() {
+      self.review.suggestion_input = None;
     }
     if !self.review.finish_open {
       self.review.summary_input = None;
@@ -850,14 +1108,38 @@ impl ChangesView {
 
   // Drawing.
 
+  /// [`is_outdated`] for `comment` against `hunks`, worked out once per
+  /// layout: it reads the hunk's lines, and every row it could sit under
+  /// asks.
+  pub(super) fn is_outdated_in(&self, comment: &LineComment, hunks: &[JjDiffHunk]) -> bool {
+    let known = (self.layout_gen, comment.start_line, comment.end_line);
+    let cached = self.review.outdated.borrow().get(&comment.id).copied();
+    if let Some((generation, start, end, outdated)) = cached {
+      if (generation, start, end) == known {
+        return outdated;
+      }
+    }
+    let outdated = is_outdated(comment, Some(hunks));
+    self
+      .review
+      .outdated
+      .borrow_mut()
+      .insert(comment.id.clone(), (known.0, known.1, known.2, outdated));
+    outdated
+  }
+
   /// `HunkDiffLine`'s row.
-  #[allow(clippy::too_many_arguments)]
+  #[expect(
+    clippy::too_many_arguments,
+    reason = "flat argument list kept to match callers"
+  )]
   pub(super) fn diff_line(
     &self,
     path: &str,
     hunks: &[JjDiffHunk],
     h: usize,
     l: usize,
+    numbers: (Option<u32>, Option<u32>),
     changed: &[Range<usize>],
     language: Option<&'static str>,
     conflicted: bool,
@@ -866,7 +1148,7 @@ impl ChangesView {
   ) -> Stateful<Div> {
     let hunk = &hunks[h];
     let line = &hunk.lines[l];
-    let (old, new) = line_number(hunk, l);
+    let (old, new) = numbers;
     let selected = self
       .review
       .selection
@@ -878,22 +1160,40 @@ impl ChangesView {
       .as_ref()
       .is_some_and(|s| s.path == path && s.head == (h, l));
     let kind = line_kind(line);
-    let bg = if selected {
-      Some(p.selected())
-    } else {
-      match kind {
-        LineKind::Added => Some(Tone::GitOpen.tint(p)),
-        LineKind::Removed => Some(Tone::GitClosed.tint(p)),
-        LineKind::Context => None,
-      }
-    };
+    let has_comment = line_has_comment(
+      &self.review.comments,
+      path,
+      hunk,
+      number_and_side(numbers, l),
+      &|c| self.is_outdated_in(c, hunks),
+    );
+    // A text drag across lines fills whole rows, empty ones included.
+    let text_row = self
+      .review
+      .text
+      .as_ref()
+      .filter(|t| t.path == path)
+      .is_some_and(|t| selected_row(hunks, t.anchor, t.head, (h, l)));
+    let bg = row_fill(selected || text_row, has_comment, kind, p);
     // The characters this line changed against its pair, a shade deeper.
     let mark = match kind {
-      LineKind::Removed => Tone::GitClosed.color(p),
-      _ => Tone::GitOpen.color(p),
+      LineKind::Removed => Tone::DiffRemoved.color(p),
+      _ => Tone::DiffAdded.color(p),
     }
     .opacity(0.45);
-    let changed: Vec<(Range<usize>, Hsla)> = changed.iter().map(|r| (r.clone(), mark)).collect();
+    // The text selection first: where it overlaps a changed run, it shows.
+    let picked = self
+      .review
+      .text
+      .as_ref()
+      .filter(|t| t.path == path)
+      .and_then(|t| selected_range(hunks, t.anchor, t.head, (h, l)))
+      .filter(|r| !text_row && !r.is_empty());
+    let changed: Vec<(Range<usize>, Hsla)> = picked
+      .map(|r| (r, p.selected()))
+      .into_iter()
+      .chain(changed.iter().map(|r| (r.clone(), mark)))
+      .collect();
     let marker = match kind {
       LineKind::Added => "+",
       LineKind::Removed => "-",
@@ -904,16 +1204,17 @@ impl ChangesView {
       .selection
       .as_ref()
       .is_some_and(|s| s.lines.len() > 1);
-    let has_comment = line_has_comment(&self.review.comments, path, hunk, l, hunks);
     let border = p.border.opacity(0.4);
-    let gutter_hover = p.muted.opacity(0.5);
     let text = line.get(1..).filter(|t| !t.is_empty()).unwrap_or(" ");
     let at = (h, l);
     let (press, drag, add) = (path.to_string(), path.to_string(), path.to_string());
-    let primary = p.primary;
+    let (code_path, layout_path) = (path.to_string(), path.to_string());
+    let layouts = self.review.layouts.clone();
     let head_drawn = head.then(|| (self.review.head_drawn.clone(), path.to_string()));
     div()
       .id(SharedString::from(format!("diff-line-{path}-{h}-{l}")))
+      .role(gpui::Role::Row)
+      .aria_label(line.clone())
       .group("diff-line")
       .relative()
       .flex()
@@ -933,13 +1234,16 @@ impl ChangesView {
       })
       .when_some(bg, |this, bg| this.bg(bg))
       .when(!conflicted, |this| {
-        this.on_mouse_move(cx.listener(move |view, _: &MouseMoveEvent, _, cx| {
+        this.on_mouse_move(cx.listener(move |view, e: &MouseMoveEvent, _, cx| {
           view.drag_line(&drag, at, cx);
+          view.drag_text(&drag, at, e.position, cx);
         }))
       })
       .child(
         div()
           .id(SharedString::from(format!("gutter-{path}-{h}-{l}")))
+          .role(gpui::Role::Button)
+          .aria_label(format!("Line {}", l + 1))
           .debug_selector({
             let id = format!("gutter-{path}-{h}-{l}");
             move || id
@@ -953,22 +1257,18 @@ impl ChangesView {
           .border_color(border)
           .text_color(p.muted_foreground)
           .cursor_pointer()
-          .hover(move |s| s.bg(gutter_hover))
           .when(!conflicted, |this| {
             this.on_mouse_down(
               MouseButton::Left,
-              cx.listener(move |view, _: &MouseDownEvent, window, cx| {
+              cx.listener(move |view, e: &MouseDownEvent, window, cx| {
                 cx.stop_propagation();
                 window.focus(&view.focus, cx);
-                view.press_line(&press, at, cx);
+                if e.modifiers.shift {
+                  view.extend_line(&press, at, cx);
+                } else {
+                  view.press_line(&press, at, cx);
+                }
               }),
-            )
-          })
-          .when(has_comment, |this| {
-            this.child(
-              div()
-                .ml_1()
-                .child(ui::icon(theme::ICON_MESSAGE, 12., primary)),
             )
           })
           .child(
@@ -981,6 +1281,10 @@ impl ChangesView {
           )
           .child(
             div()
+              .debug_selector({
+                let id = format!("line-new-{path}-{h}-{l}");
+                move || id
+              })
               .w_10()
               .flex()
               .justify_end()
@@ -993,7 +1297,8 @@ impl ChangesView {
           .flex_none()
           .flex()
           .items_center()
-          .justify_center()
+          .justify_end()
+          .pr_0p5()
           .when(!conflicted, |this| {
             this.child(
               self.tip(
@@ -1009,13 +1314,19 @@ impl ChangesView {
                     let id = format!("add-comment-{path}-{h}-{l}");
                     move || id
                   })
-                  .p_0p5()
+                  .role(gpui::Role::Button)
+                  .aria_label(format!(
+                    "Add comment on {path} line {}",
+                    new.or(old).unwrap_or_default()
+                  ))
+                  .test_support()
+                  .p_px()
                   .rounded(radius::SM)
                   .bg(p.primary)
                   .cursor_pointer()
                   .opacity(0.)
                   .group_hover("diff-line", |s| s.opacity(1.))
-                  .child(ui::icon(theme::ICON_PLUS, 12., p.primary_foreground))
+                  .child(ui::icon(theme::ICON_PLUS, 10., p.primary_foreground))
                   .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                   .on_click(cx.listener(move |view, _, _, cx| {
                     cx.stop_propagation();
@@ -1036,34 +1347,65 @@ impl ChangesView {
       )
       .child(
         div()
+          .id(SharedString::from(format!("code-{path}-{h}-{l}")))
+          .debug_selector({
+            let id = format!("code-{path}-{h}-{l}");
+            move || id
+          })
           .flex_1()
           .min_w_0()
           .px_2()
           .py_0p5()
+          .cursor_text()
+          .when(!conflicted, |this| {
+            this.on_mouse_down(
+              MouseButton::Left,
+              cx.listener(move |view, e: &MouseDownEvent, window, cx| {
+                window.focus(&view.focus, cx);
+                view.press_text(&code_path, at, e.position, e.click_count, cx);
+              }),
+            )
+          })
           .child(self.marked_text(
             super::search::MatchKey::Line(path.to_string(), h, l),
             text,
             language,
             &changed,
+            Some(Rc::new(move |layout| {
+              layouts
+                .borrow_mut()
+                .insert((layout_path.clone(), at), layout);
+            })),
           )),
       )
   }
 
   /// What follows a diff line: its comments and the comment box.
+  #[expect(
+    clippy::too_many_arguments,
+    reason = "flat argument list kept to match callers"
+  )]
   pub(super) fn line_extras(
     &self,
     path: &str,
     hunks: &[JjDiffHunk],
     h: usize,
     l: usize,
+    numbers: (Option<u32>, Option<u32>),
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> Vec<gpui::AnyElement> {
     let mut out = Vec::new();
-    let under = comments_under(&self.review.comments, path, &hunks[h], l, hunks);
+    let under = comments_under(
+      &self.review.comments,
+      path,
+      &hunks[h],
+      number_and_side(numbers, l),
+      &|c| self.is_outdated_in(c, hunks),
+    );
     if !under.is_empty() {
       let mut list = div()
-        .bg(p.muted.opacity(0.6))
+        .bg(comment_strip_fill(p))
         .border_y_1()
         .border_color(p.border.opacity(0.4))
         .px_4()
@@ -1077,7 +1419,7 @@ impl ChangesView {
       }
       out.push(list.into_any_element());
     }
-    out.extend(self.line_threads(path, hunks, h, l, p, cx));
+    out.extend(self.line_threads(path, hunks, h, l, numbers, p, cx));
     let here = self
       .review
       .draft
@@ -1098,9 +1440,9 @@ impl ChangesView {
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> gpui::AnyElement {
+    // Comment text reads at the diff's code size, so it follows zoom with it.
     let box_ = || {
-      div()
-        .bg(p.background)
+      ui::text(div(), TextSize::Code)
         .rounded(radius::MD)
         .p_3()
         .border_1()
@@ -1109,6 +1451,7 @@ impl ChangesView {
     if self.review.editing.as_deref() == Some(id) {
       let discard = id.to_string();
       return box_()
+        .bg(p.background)
         .child(self.edit_box(
           p,
           cx.listener(move |view, _, _, cx| {
@@ -1124,13 +1467,14 @@ impl ChangesView {
     }
     let (edit, delete, body) = (id.to_string(), id.to_string(), text.to_string());
     let muted = p.muted_foreground;
-    let accent = p.accent;
     let card = box_()
       .id(SharedString::from(format!("comment-{id}")))
       .debug_selector(move || selector.into())
-      .group("comment-card")
+      .role(gpui::Role::Button)
+      .aria_label("Edit comment")
+      .test_support()
       .cursor_pointer()
-      .hover(|s| s.shadow_md())
+      .hover(|s| s.bg(p.hover()))
       .on_click(cx.listener(move |view, _, _, cx| view.start_edit(&edit, &body, cx)))
       .child(
         div()
@@ -1139,25 +1483,28 @@ impl ChangesView {
           .gap_2()
           .child(
             div()
-              .mt_0p5()
-              .flex_none()
-              .opacity(0.)
-              .group_hover("comment-card", |s| s.opacity(1.))
-              .child(ui::icon(theme::ICON_PENCIL, 12., muted)),
+              .flex_1()
+              .min_w_0()
+              .flex()
+              .flex_col()
+              .gap_1p5()
+              .children(self.agent_tag(id, p))
+              .child(self.comment_body(id, text, p, cx)),
           )
-          .child(self.comment_body(id, text, p, cx))
           .child(
             self.tip(
               format!("delete-comment-tip-{id}"),
               "Delete comment",
               div()
                 .id(SharedString::from(format!("delete-comment-{id}")))
+                .role(gpui::Role::Button)
+                .aria_label("Delete comment")
                 .debug_selector(|| "delete-comment".into())
                 .flex_none()
                 .p_1()
                 .rounded(radius::SM)
                 .cursor_pointer()
-                .hover(move |s| s.bg(accent))
+                .hover(move |s| s.bg(p.hover()))
                 .child(ui::icon(theme::ICON_X, 12., muted))
                 .on_click(cx.listener(move |view, _, _, cx| {
                   cx.stop_propagation();
@@ -1174,6 +1521,33 @@ impl ChangesView {
     self
       .tip(format!("edit-comment-tip-{id}"), "Click to edit", card, cx)
       .into_any_element()
+  }
+
+  /// The bot tag on a draft the review agent wrote, as its local cards have.
+  fn agent_tag(&self, id: &str, p: &Palette) -> Option<impl IntoElement> {
+    let by_agent = self.review.comments.iter().any(|c| {
+      c.id == id && c.source.as_deref() == Some(crate::review_aggregate::SOURCE_LOCAL_AGENT)
+    });
+    by_agent.then(|| {
+      div()
+        .id("agent-comment-tag")
+        .debug_selector(|| "agent-comment-tag".into())
+        .role(gpui::Role::Label)
+        .aria_label("Agent")
+        .test_support()
+        .flex()
+        .items_center()
+        .gap_1p5()
+        .child(ui::icon(theme::ICON_BOT, 12., Tone::GitMerged.color(p)))
+        .child(
+          // Short label (tag): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
+          ui::text(div(), TextSize::Xs)
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(Tone::GitMerged.text(p))
+            .child("Agent"),
+        )
+    })
   }
 
   /// A comment's text, with its suggestion drawn as a diff against the
@@ -1250,13 +1624,12 @@ impl ChangesView {
           view.save_edit(cx);
         }
       }))
-      .children(
-        self
-          .review
-          .edit_input
-          .as_ref()
-          .map(|i| Textarea::new(&i.state)),
-      )
+      .children(self.review.edit_input.as_ref().map(|i| {
+        ui::text(
+          Textarea::new(&i.state).aria_label("Comment"),
+          TextSize::Code,
+        )
+      }))
       .child(
         div()
           .flex()
@@ -1294,14 +1667,15 @@ impl ChangesView {
 
   /// `CommentInput`.
   pub(super) fn comment_input(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
-    let empty = self.review.draft_text.trim().is_empty();
+    let suggesting = self.review.suggestion_text.is_some();
+    let empty = self.review.draft_text.trim().is_empty() && !suggesting;
     let label = self.review.draft.as_ref().and_then(|d| d.label());
     let can_suggest = self
       .review
       .draft
       .as_ref()
-      .is_some_and(|d| suggestion_block(d).is_some());
-    div()
+      .is_some_and(|d| suggestion_lines(d).is_some());
+    ui::text(div(), TextSize::Code)
       .debug_selector(|| "comment-input".into())
       .bg(p.muted)
       .border_1()
@@ -1338,7 +1712,7 @@ impl ChangesView {
             .italic()
             .text_color(p.muted_foreground)
             .child(
-              ui::text(div(), TextSize::Xs)
+              ui::text(div(), TextSize::Sm)
                 .font_weight(FontWeight::MEDIUM)
                 .not_italic()
                 .mb_0p5()
@@ -1347,13 +1721,12 @@ impl ChangesView {
             .child(d.line_content.join(" ")),
         )
       }))
-      .children(
-        self
-          .review
-          .draft_input
-          .as_ref()
-          .map(|i| div().mb_2().child(Textarea::new(&i.state))),
-      )
+      .children(self.review.draft_input.as_ref().map(|i| {
+        div()
+          .mb_2()
+          .child(ui::text(Textarea::new(&i.state), TextSize::Code))
+      }))
+      .children(self.suggestion_editor(p))
       .child(
         div()
           .flex()
@@ -1365,7 +1738,11 @@ impl ChangesView {
                 Button::new("suggest-change", p)
                   .variant(Variant::Ghost)
                   .icon(theme::ICON_FILE_DIFF, 14.)
-                  .label("Suggest change")
+                  .label(if suggesting {
+                    "Remove suggestion"
+                  } else {
+                    "Suggest change"
+                  })
                   .on_click(cx.listener(|view, _, window, cx| view.suggest_change(window, cx))),
               )
               .child(div().flex_1())
@@ -1379,10 +1756,77 @@ impl ChangesView {
           .child(
             Button::new("comment-submit", p)
               .disabled(empty)
-              .label("Add Comment")
+              .label("Add comment")
               .on_click(cx.listener(|view, _, _, cx| view.submit_draft(cx))),
           ),
       )
+  }
+
+  /// "Suggest change"'s editor: the lines in a code field, and below it a
+  /// preview of what changes against the lines as they are.
+  fn suggestion_editor(&self, p: &Palette) -> Option<impl IntoElement> {
+    let input = self.review.suggestion_input.as_ref()?;
+    let suggested = self.review.suggestion_text.as_deref()?;
+    let original = commented_text(&self.review.draft.as_ref()?.line_content);
+    let line = |marker: &'static str, text: String, tone: Tone| {
+      div()
+        .flex()
+        .gap_2()
+        .px_2()
+        .bg(tone.tint(p))
+        .whitespace_nowrap()
+        .child(div().flex_none().text_color(tone.text(p)).child(marker))
+        .child(text)
+    };
+    let preview = div()
+      .debug_selector(|| "suggestion-preview".into())
+      .rounded(radius::SM)
+      .border_1()
+      .border_color(p.border)
+      .overflow_hidden()
+      .font_family(theme::MONO_FONT)
+      .children(
+        original
+          .into_iter()
+          .map(|l| line("-", l, Tone::DiffRemoved))
+          .chain(
+            suggested
+              .split('\n')
+              .map(|l| line("+", l.to_string(), Tone::DiffAdded)),
+          ),
+      );
+    Some(
+      div()
+        .debug_selector(|| "suggestion-editor".into())
+        .mb_2()
+        .flex()
+        .flex_col()
+        .gap_1p5()
+        .child(
+          // Short label (['section heading']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
+          ui::text(div(), TextSize::Xs)
+            .text_color(p.muted_foreground)
+            .child("Suggested change"),
+        )
+        .child(
+          div()
+            .rounded(radius::SM)
+            .border_1()
+            .border_color(p.border)
+            .bg(p.background)
+            .font_family(theme::MONO_FONT)
+            .child(ui::text(Textarea::new(&input.state), TextSize::Code)),
+        )
+        .child(
+          // Short label (['section heading']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
+          ui::text(div(), TextSize::Xs)
+            .text_color(p.muted_foreground)
+            .child("Preview"),
+        )
+        .child(ui::text(preview, TextSize::Code)),
+    )
   }
 
   /// Whether `path` shows its file comments section.
@@ -1451,7 +1895,11 @@ impl ChangesView {
     }
     let tone = Tone::Warning;
     let mut section = div()
+      .id("outdated-comments")
       .debug_selector(|| "outdated-comments".into())
+      .role(gpui::Role::Group)
+      .aria_label("Outdated comments")
+      .test_support()
       .border_b_1()
       .border_color(tone.border(p))
       .bg(tone.tint(p))
@@ -1460,7 +1908,6 @@ impl ChangesView {
       .flex()
       .flex_col()
       .gap_3();
-    let accent = p.accent;
     for c in outdated {
       let id = c.id.clone();
       section = section.child(
@@ -1483,6 +1930,8 @@ impl ChangesView {
                   .items_center()
                   .gap_2()
                   .child(
+                    // Short label (['badge']): 11px is fine.
+                    // ast-grep-ignore: gpui-text-xs-short-label-only
                     ui::text(div(), TextSize::Xs)
                       .px_1p5()
                       .py_0p5()
@@ -1493,6 +1942,8 @@ impl ChangesView {
                       .child("Outdated"),
                   )
                   .child(
+                    // Short label (['status label']): 11px is fine.
+                    // ast-grep-ignore: gpui-text-xs-short-label-only
                     ui::text(div(), TextSize::Xs)
                       .text_color(p.muted_foreground)
                       .child(outdated_label(c)),
@@ -1501,17 +1952,19 @@ impl ChangesView {
               .child(
                 div()
                   .id(SharedString::from(format!("delete-outdated-{id}")))
+                  .role(gpui::Role::Button)
+                  .aria_label("Delete comment")
                   .p_1()
                   .rounded(radius::SM)
                   .cursor_pointer()
-                  .hover(move |s| s.bg(accent))
+                  .hover(move |s| s.bg(p.hover()))
                   .child(ui::icon(theme::ICON_X, 12., p.muted_foreground))
                   .on_click(cx.listener(move |view, _, _, cx| view.delete_comment(&id, cx))),
               ),
           )
           .when(!c.line_content.is_empty(), |this| {
             this.child(
-              ui::text(div(), TextSize::Xs)
+              ui::text(div(), TextSize::Sm)
                 .bg(p.muted.opacity(0.6))
                 .rounded(radius::SM)
                 .px_2()
@@ -1597,13 +2050,11 @@ impl ChangesView {
           .py_3()
           .font_family(theme::SANS_FONT)
           .child(div().mb_2().text_color(p.muted_foreground).child(label))
-          .children(
-            self
-              .review
-              .note_input
-              .as_ref()
-              .map(|i| div().mb_2().child(Textarea::new(&i.state))),
-          )
+          .children(self.review.note_input.as_ref().map(|i| {
+            div()
+              .mb_2()
+              .child(ui::text(Textarea::new(&i.state), TextSize::Code))
+          }))
           .child(
             div()
               .flex()
@@ -1620,7 +2071,7 @@ impl ChangesView {
                 Button::new("conflict-comment-save", p)
                   .size(Size::Sm)
                   .disabled(empty)
-                  .label("Add Comment")
+                  .label("Add comment")
                   .on_click(cx.listener(move |view, _, _, cx| view.save_note(&save, cx))),
               ),
           )
@@ -1673,7 +2124,7 @@ impl ChangesView {
             Button::new("discard-review", p)
               .variant(Variant::Outline)
               .size(Size::Sm)
-              .label(if conflicts { "Reset" } else { "Discard" })
+              .label("Discard pending comments…")
               .on_click(cx.listener(|view, _, _, cx| {
                 view.review.discard_dialog = true;
                 cx.notify();
@@ -1689,7 +2140,7 @@ impl ChangesView {
                   .bg(send_bg)
                   .icon(theme::ICON_SEND, 12.)
                   .label(if conflicts {
-                    "Resolve conflicts..."
+                    "Resolve conflicts…"
                   } else {
                     "Finish review"
                   })
@@ -1710,7 +2161,7 @@ impl ChangesView {
       .gap_2()
       .disabled(self.starting_review)
       .icon(theme::ICON_BOT, 12.)
-      .label("Start Review")
+      .label("Start review")
       .on_click(cx.listener(|view, _, _, cx| view.start_review(cx)))
   }
 
@@ -1784,14 +2235,21 @@ impl ChangesView {
             .items_center()
             .gap_2()
             .when(outdated > 0, |this| {
-              this.child(
-                button(
-                  "copy-outdated",
-                  theme::ICON_COPY,
-                  format!("Copy Outdated ({outdated})"),
-                )
-                .on_click(cx.listener(|view, _, _, cx| view.copy_outdated(cx))),
-              )
+              this.child(ui::copy_feedback::copyable("copy-outdated-feedback", {
+                let (p, copy) = (*p, cx.listener(|view, _, _, cx| view.copy_outdated(cx)));
+                move |copied| {
+                  Button::new("copy-outdated", &p)
+                    .variant(Variant::Outline)
+                    .size(Size::Sm)
+                    .gap_1p5()
+                    .border_color(tone.border(&p))
+                    .text_color(fg)
+                    .copy_icon(copied, 12.)
+                    .label(format!("Copy Outdated ({outdated})"))
+                    .on_click(copy)
+                    .into_any_element()
+                }
+              }))
             })
             .child(
               button("reload-stale", theme::ICON_REFRESH, "Reload".into())
@@ -1820,6 +2278,8 @@ impl ChangesView {
       let checked = self.review.use_idle;
       div()
         .id("use-idle-agent")
+        .role(gpui::Role::CheckBox)
+        .aria_label("Use an idle agent")
         .debug_selector(|| "use-idle-agent".into())
         .flex()
         .items_center()
@@ -1840,7 +2300,7 @@ impl ChangesView {
             }),
         )
         .child(
-          ui::text(div(), TextSize::Xs)
+          ui::text(div(), TextSize::Sm)
             .text_color(p.muted_foreground)
             .child("Send to idle agent if one is available"),
         )
@@ -1917,21 +2377,21 @@ impl ChangesView {
               .justify_between()
               .gap_2()
               .child(
-                Button::new("copy-review", p)
-                  .variant(Variant::Outline)
-                  .size(Size::Sm)
-                  .gap_2()
-                  .disabled(sending)
-                  .icon(
-                    if self.review.copied {
-                      theme::ICON_CHECK
-                    } else {
-                      theme::ICON_COPY
-                    },
-                    12.,
-                  )
-                  .label(if self.review.copied { "Copied" } else { "Copy" })
-                  .on_click(cx.listener(|view, _, _, cx| view.copy_review(cx))),
+                ui::copy_feedback::copyable("copy-review-feedback", {
+                  let (p, copy) = (*p, cx.listener(|view, _, _, cx| view.copy_review(cx)));
+                  move |copied| {
+                    Button::new("copy-review", &p)
+                      .variant(Variant::Outline)
+                      .size(Size::Sm)
+                      .gap_2()
+                      .disabled(sending)
+                      .copy_icon(copied, 12.)
+                      .label(if copied.copied { "Copied" } else { "Copy" })
+                      .on_click(copy)
+                      .into_any_element()
+                  }
+                })
+                .disabled(sending),
               )
               .child(
                 div()
@@ -1968,90 +2428,115 @@ impl ChangesView {
     if !self.review.discard_dialog {
       return None;
     }
-    let viewport = window.viewport_size();
     let n = self.review.comments.len();
     let close = |view: &mut Self, cx: &mut Context<Self>| {
       view.review.discard_dialog = false;
       cx.notify();
     };
-    let panel = div()
-      .id("discard-review-dialog")
-      .debug_selector(|| "discard-review-dialog".into())
-      .w_full()
-      .max_w(zpx(512.))
-      .p_6()
-      .rounded(radius::LG)
-      .border_1()
-      .border_color(p.border.opacity(0.5))
-      .bg(p.popover)
-      .text_color(p.popover_foreground)
-      .shadow_2xl()
-      .capture_key_down(cx.listener(move |view, e: &KeyDownEvent, _, cx| {
-        if ui::is_escape(&e.keystroke) {
-          cx.stop_propagation();
-          close(view, cx);
-        }
-      }))
-      .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-      .child(
-        div()
-          .flex()
-          .flex_col()
-          .gap_1p5()
-          .child(
-            ui::text(div(), TextSize::Lg)
-              .font_weight(FontWeight::SEMIBOLD)
-              .child("Discard review?"),
-          )
-          .child(
-            ui::text(div(), TextSize::Sm)
-              .text_color(p.muted_foreground)
-              .child(format!(
-                "This will discard all {n} pending {}. This action cannot be undone.",
-                if n == 1 { "comment" } else { "comments" }
-              )),
-          ),
-      )
-      .child(
-        div()
-          .mt_4()
-          .flex()
-          .justify_end()
-          .gap_2()
-          .child(
-            Button::new("keep-reviewing", p)
-              .variant(Variant::Ghost)
-              .label("Keep reviewing")
-              .on_click(cx.listener(move |view, _, _, cx| close(view, cx))),
-          )
-          .child(
-            Button::new("confirm-discard-review", p)
-              .variant(Variant::Destructive)
-              .label("Discard")
-              .on_click(cx.listener(|view, _, _, cx| view.discard_review(cx))),
-          ),
-      );
     Some(
-      deferred(
-        anchored().position(point(px(0.), px(0.))).child(
-          div()
-            .id("discard-review-backdrop")
-            .w(viewport.width)
-            .h(viewport.height)
-            .p_4()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(p.scrim())
-            .occlude()
-            .on_mouse_down(
-              MouseButton::Left,
-              cx.listener(move |view, _, _, cx| close(view, cx)),
-            )
-            .child(panel),
-        ),
-      )
-      .with_priority(2),
+      ui::Dialog::new("discard-review-dialog", p)
+        .overlay(window.viewport_size())
+        .width(512.)
+        .title(format!(
+          "Discard {n} pending {}?",
+          if n == 1 { "comment" } else { "comments" }
+        ))
+        .description("They are deleted from this machine. This can't be undone.")
+        .on_close(ui::handler(cx, move |view, _, cx| close(view, cx)))
+        .on_primary(ui::handler(cx, |view, _, cx| view.discard_review(cx)))
+        .confirm()
+        .footer([
+          Button::new("keep-reviewing", p)
+            .variant(Variant::Outline)
+            .label("Cancel")
+            .on_click(cx.listener(move |view, _, _, cx| close(view, cx)))
+            .into_any_element(),
+          Button::new("confirm-discard-review", p)
+            .variant(Variant::Destructive)
+            .label("Discard comments")
+            .on_click(cx.listener(|view, _, _, cx| view.discard_review(cx)))
+            .into_any_element(),
+        ]),
     )
+  }
+}
+
+/// A diff row's fill. Selection wins, so a multi-line selection reads as one
+/// band; then a comment's amber, marking its lines like GitHub; then the
+/// add/remove tint.
+pub(super) fn row_fill(
+  selected: bool,
+  commented: bool,
+  kind: LineKind,
+  p: &Palette,
+) -> Option<Hsla> {
+  if selected {
+    return Some(p.selected());
+  }
+  if commented {
+    return Some(p.commented());
+  }
+  match kind {
+    LineKind::Added => Some(Tone::DiffAdded.tint(p)),
+    LineKind::Removed => Some(Tone::DiffRemoved.tint(p)),
+    LineKind::Context => None,
+  }
+}
+
+/// Behind the comments under a line: the plain background, so the row's
+/// highlight stops at the row and does not wash over the comments.
+pub(super) fn comment_strip_fill(p: &Palette) -> Hsla {
+  p.background
+}
+
+#[cfg(test)]
+mod row_paint_tests {
+  use super::*;
+
+  #[test]
+  fn selection_beats_diff_tint_on_every_kind() {
+    let p = theme::palette(true);
+    for kind in [LineKind::Added, LineKind::Removed, LineKind::Context] {
+      assert_eq!(row_fill(true, false, kind, &p), Some(p.selected()));
+    }
+  }
+
+  #[test]
+  fn unselected_rows_keep_their_diff_tint() {
+    let p = theme::palette(true);
+    assert_eq!(
+      row_fill(false, false, LineKind::Added, &p),
+      Some(Tone::DiffAdded.tint(&p))
+    );
+    assert_eq!(
+      row_fill(false, false, LineKind::Removed, &p),
+      Some(Tone::DiffRemoved.tint(&p))
+    );
+    assert_eq!(row_fill(false, false, LineKind::Context, &p), None);
+  }
+
+  #[test]
+  fn a_commented_row_is_tinted_over_its_diff_colour() {
+    let p = theme::palette(true);
+    for kind in [LineKind::Added, LineKind::Removed, LineKind::Context] {
+      assert_eq!(row_fill(false, true, kind, &p), Some(p.commented()));
+    }
+  }
+
+  #[test]
+  fn the_comment_strip_is_not_tinted_like_its_rows() {
+    for dark in [true, false] {
+      let p = theme::palette(dark);
+      assert_eq!(comment_strip_fill(&p), p.background);
+    }
+  }
+
+  #[test]
+  fn selection_beats_the_comment_tint() {
+    let p = theme::palette(true);
+    assert_eq!(
+      row_fill(true, true, LineKind::Added, &p),
+      Some(p.selected())
+    );
   }
 }

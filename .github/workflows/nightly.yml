@@ -6,7 +6,7 @@ defaults:
 
 on:
   schedule:
-    - cron: "0 9 * * *" # 09:00 UTC daily
+    - cron: "17 3 * * *" # 03:17 UTC daily, off the hour to avoid schedule delays
   workflow_dispatch:
 
 jobs:
@@ -15,7 +15,7 @@ jobs:
     outputs:
       should_run: ${{ steps.check.outputs.should_run }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Skip if main hasn't changed since last nightly
         id: check
@@ -82,20 +82,21 @@ jobs:
           - platform: "windows-latest"
             target: "x86_64-pc-windows-msvc"
             args: "--target x86_64-pc-windows-msvc"
+            linker: "rust-lld.exe"
     runs-on: ${{ matrix.platform }}
-    timeout-minutes: 20
+    timeout-minutes: 45
     environment: prod
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: lts/*
           cache: "npm"
 
       - name: install Rust stable
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
@@ -108,10 +109,31 @@ jobs:
             libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libwayland-dev libx11-xcb-dev \
             libfontconfig-dev libfreetype-dev libgbm-dev libegl-dev libxdo-dev
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # No sccache here: a nightly only runs after main changed, so the treq
+      # crates always miss (0% hits on every desktop run), and each run wrote
+      # hundreds of entries that pushed the rust-cache entries out of the
+      # repo's 10 GB cache. rust-cache keeps the third-party crates.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-on-failure: true
+          # Without its own key this job shares release.yml's `release` cache
+          # (fat LTO), restores it as an exact hit and never saves its own.
+          # The target is in the key since both macOS builds share a runner.
+          # Bump the version when the build env changes: an exact hit on a
+          # stale entry rebuilds everything and never saves.
+          key: nightly-desktop-v2-${{ matrix.target }}
           workspaces: ". -> target"
+
+      # rustc only sets up the MSVC library paths (LIB) for link.exe, so
+      # rust-lld needs the Visual Studio developer environment exported.
+      - name: Export MSVC environment for rust-lld (windows only)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          cmd /c "`"$vs\VC\Auxiliary\Build\vcvars64.bat`" >nul && set" |
+            Where-Object { $_ -match '^(LIB|LIBPATH|INCLUDE)=' } |
+            Add-Content $env:GITHUB_ENV
 
       - name: Install dependencies
         run: npm ci
@@ -125,19 +147,17 @@ jobs:
           grep -qx 'crate-type = \["rlib"\]' src-tauri/Cargo.toml
           rm src-tauri/Cargo.toml.bak
 
-      # tauri-action finds the app by globbing for tauri.conf.json and takes
-      # the first match, which is mobile-gpui/ (sorted before src-tauri/).
-      # It then looks for the desktop bundles under mobile-gpui/target.
-      - name: Hide the mobile-gpui Tauri config from tauri-action
-        run: rm mobile-gpui/tauri.conf.json
-
-      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
+      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
         env:
           # Nightlies trade a slightly larger binary for a much faster link.
           # Cargo.toml's release profile (fat LTO, 1 codegen unit) is kept
           # for tagged releases.
-          CARGO_PROFILE_RELEASE_LTO: "thin"
+          # LTO is off: thin LTO alone took ~6m of the Windows link.
+          CARGO_PROFILE_RELEASE_LTO: "off"
           CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+          # rust-lld links much faster than MSVC link.exe. Empty elsewhere, and
+          # the variable only applies to the Windows target anyway.
+          CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: ${{ matrix.linker }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -159,28 +179,36 @@ jobs:
         if: runner.os == 'macOS'
         run: bash scripts/verify-macos-bundle.sh "${{ matrix.app_bundle }}"
 
-  # Unsigned debug builds of the GPUI mobile app (mobile-gpui/), rendered
-  # through tauri-plugin-gpui. They only run nightly (not on every PR) since
-  # the Android/iOS toolchains are slow. mobile-gpui.yml builds and
-  # smoke-tests the same app per push.
+  # Release builds of the GPUI mobile app (src-tauri with the `mobile-ui`
+  # feature), rendered through tauri-plugin-gpui. They only run nightly (not on every PR) since the
+  # Android/iOS toolchains are slow. mobile-gpui.yml builds and smoke-tests
+  # the same app per push.
   #
-  # Nightlies track tauri-gpui main: each job bumps the locked plugin commit
-  # to main's head before building, without committing the lockfile.
+  # Signed when the signing secrets exist: Android attaches a signed APK to the
+  # nightly release (plus a signed AAB artifact for Play), iOS uploads to
+  # TestFlight. Without them both fall back to the unsigned debug builds.
+  # The run number is the build number, so every nightly upgrades in place.
   android:
-    name: android build (gpui, unsigned debug)
-    # After release, so the nightly release exists to attach the APK to.
-    needs: [check, release]
-    # Still build if one desktop target fails; the release exists either way.
-    if: ${{ !cancelled() && needs.check.outputs.should_run == 'true' }}
-    permissions:
-      contents: write
+    name: android build (gpui)
+    # Runs alongside the desktop builds; mobile-assets attaches the APK once
+    # the nightly release exists.
+    needs: check
+    if: needs.check.outputs.should_run == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    # The signing secrets live in the prod environment, as for the desktop
+    # release job.
+    environment: prod
     env:
       CARGO_INCREMENTAL: 0
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
+      CARGO_PROFILE_RELEASE_LTO: "thin"
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
       NDK_VERSION: 27.0.12077973
+      SIGNED: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Free disk space
         run: |
@@ -188,25 +216,29 @@ jobs:
           df -h /
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: stable
           targets: aarch64-linux-android
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # rust-cache only keeps third-party crates; sccache also caches the
+      # treq crates, which are most of each build.
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-on-failure: true
           key: nightly-android
-          workspaces: ./mobile-gpui -> target
+          workspaces: ". -> target"
 
       - name: Setup Java
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
         with:
           packages: platform-tools
 
@@ -216,225 +248,231 @@ jobs:
           echo "NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
 
-      - name: Track tauri-gpui main
-        working-directory: mobile-gpui
-        run: cargo update -p tauri-plugin-gpui
-
       # arm64 only: phones. The generated Gradle project calls back into the
       # Tauri CLI, so it is a local npm install.
-      - name: Build debug APK
-        working-directory: mobile-gpui
+      - name: Generate the Android project
         run: |
-          npm install --no-audit --no-fund
+          npm ci --no-audit --no-fund
           npm run tauri -- android init --ci
-          scripts/apply-icons.sh
-          npm run tauri -- android build --debug --apk --target aarch64 --ci
-          apk=$(find gen/android/app/build/outputs/apk -name '*.apk' | head -n1)
+          scripts/mobile/apply-icons.sh
+          scripts/mobile/android-compile-sdk.sh
+          # `android init` regenerates gen/android without the plugin entries;
+          # only treq's build script adds them back (tauri-plugin-gpui's
+          # GpuiView), and a warm Rust cache skips it. Force it to rerun.
+          cargo clean -p treq --target aarch64-linux-android
+
+      - name: Add release signing
+        if: env.SIGNED == 'true'
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: scripts/mobile/android-signing.sh
+
+      - name: Build APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          config='{"bundle":{"android":{"versionCode":${{ github.run_number }}}}}'
+          if [ "$SIGNED" = true ]; then
+            # `--apk --aab` runs Gradle's Rust build once per output. Build
+            # the AAB only and derive a signed universal APK from it.
+            npm run tauri -- android build --features mobile-ui --aab --target aarch64 --ci --config "$config"
+            aab=$(find src-tauri/gen/android/app/build/outputs/bundle -name '*-release.aab' | head -n1)
+            test -n "$aab"
+            cp "$aab" "$GITHUB_WORKSPACE/treq-nightly-android.aab"
+            curl -fsSL -o "$RUNNER_TEMP/bundletool.jar" \
+              https://github.com/google/bundletool/releases/download/1.18.1/bundletool-all-1.18.1.jar
+            # bundletool takes only `pass:` or `file:` passwords; a file keeps
+            # the secret out of the process arguments.
+            ks_pass=$RUNNER_TEMP/ks-pass
+            (umask 077; printf '%s' "$ANDROID_KEYSTORE_PASSWORD" > "$ks_pass")
+            trap 'rm -f "$ks_pass"' EXIT
+            java -jar "$RUNNER_TEMP/bundletool.jar" build-apks --mode=universal \
+              --bundle="$aab" --output="$RUNNER_TEMP/treq.apks" \
+              --ks=src-tauri/gen/android/upload.jks --ks-key-alias="$ANDROID_KEY_ALIAS" \
+              --ks-pass="file:$ks_pass" --key-pass="file:$ks_pass"
+            rm -f "$ks_pass"
+            unzip -o -q "$RUNNER_TEMP/treq.apks" universal.apk -d "$RUNNER_TEMP"
+            apk=$RUNNER_TEMP/universal.apk
+          else
+            npm run tauri -- android build --features mobile-ui --debug --apk --target aarch64 --ci --config "$config"
+            apk=$(find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' | head -n1)
+          fi
           test -n "$apk"
           ls -la "$apk"
           cp "$apk" "$GITHUB_WORKSPACE/treq-nightly-android-arm64.apk"
 
       - name: Upload APK
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
-          name: android-debug-apk
-          path: treq-nightly-android-arm64.apk
+          name: android-apk
+          path: |
+            treq-nightly-android-arm64.apk
+            treq-nightly-android.aab
           if-no-files-found: error
           retention-days: 7
 
-      - name: Attach APK to nightly release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload nightly treq-nightly-android-arm64.apk --clobber
-
   ios:
-    name: ios build (gpui, unsigned debug)
-    # After release, so the nightly release exists to attach the app to.
-    needs: [check, release]
-    if: ${{ !cancelled() && needs.check.outputs.should_run == 'true' }}
-    permissions:
-      contents: write
-    runs-on: macos-15
-    timeout-minutes: 60
+    name: ios build (gpui)
+    needs: check
+    if: needs.check.outputs.should_run == 'true'
+    # App Store Connect only accepts builds from the iOS 26 SDK (Xcode 26).
+    runs-on: macos-26
+    timeout-minutes: 90
+    # The signing secrets live in the prod environment, as for the desktop
+    # release job.
+    environment: prod
     env:
       CARGO_INCREMENTAL: 0
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
+      CARGO_PROFILE_RELEASE_LTO: "thin"
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+      SIGNED: ${{ secrets.IOS_CERTIFICATE_P12 != '' && secrets.IOS_MOBILE_PROVISION != '' && secrets.APPLE_API_KEY_P8 != '' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: stable
           targets: aarch64-apple-ios,aarch64-apple-ios-sim
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # rust-cache only keeps third-party crates; sccache also caches the
+      # treq crates, which are most of each build.
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-on-failure: true
           key: nightly-ios
-          workspaces: ./mobile-gpui -> target
+          workspaces: ". -> target"
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
 
-      # - Track tauri-gpui main, as the Android job does.
-      # - libc 0.2.190 made the `_dyld_*` functions macOS-only, which breaks
-      #   `backtrace` (and with it GPUI) on iOS. tauri-gpui's README pins 0.2.189.
-      # - No `cdylib` on iOS: GPUI's core-video dependency asks rustc to link
-      #   the OpenGL framework, which iOS lacks. Xcode links the staticlib.
+      # No `cdylib` on iOS: GPUI's core-video dependency asks rustc to link
+      # the OpenGL framework, which iOS lacks. Xcode links the staticlib.
+      # (The lockfile keeps libc at 0.2.189: 0.2.190 made the `_dyld_*`
+      # functions macOS-only, which breaks `backtrace`, and GPUI, on iOS.)
       - name: Prepare the crate for iOS
-        working-directory: mobile-gpui
         run: |
-          cargo update -p tauri-plugin-gpui
-          cargo update -p libc --precise 0.2.189
-          sed -i.bak 's/^crate-type = .*/crate-type = ["staticlib", "rlib"]/' Cargo.toml
-          grep -qx 'crate-type = \["staticlib", "rlib"\]' Cargo.toml
-          rm Cargo.toml.bak
+          sed -i.bak 's/^crate-type = .*/crate-type = ["staticlib", "rlib"]/' src-tauri/Cargo.toml
+          grep -qx 'crate-type = \["staticlib", "rlib"\]' src-tauri/Cargo.toml
+          rm src-tauri/Cargo.toml.bak
 
-      # Simulator build: device builds need a development team (see PR #495).
-      - name: Build debug app bundle (simulator)
-        working-directory: mobile-gpui
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Generate the Xcode project
+        env:
+          APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          # An empty team fails `ios init`; unset it for the unsigned build.
+          [ -n "$APPLE_DEVELOPMENT_TEAM" ] || unset APPLE_DEVELOPMENT_TEAM
           command -v xcodegen >/dev/null || brew install xcodegen
-          npm install --no-audit --no-fund
+          npm ci --no-audit --no-fund
           npm run tauri -- ios init --ci
-          scripts/apply-icons.sh
-          npm run tauri -- ios build --debug --target aarch64-sim --no-sign --ci
-          app=$(find gen/apple/build -name '*.app' -path '*arm64-sim*' -maxdepth 3 | head -n 1)
+          scripts/mobile/apply-icons.sh
+
+      # The Tauri CLI imports IOS_CERTIFICATE into a temporary keychain and
+      # signs with the App Store profile in IOS_MOBILE_PROVISION; it ignores
+      # the certificate without the profile.
+      - name: Build signed .ipa
+        if: env.SIGNED == 'true'
+        env:
+          APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          IOS_CERTIFICATE: ${{ secrets.IOS_CERTIFICATE_P12 }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_MOBILE_PROVISION: ${{ secrets.IOS_MOBILE_PROVISION }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          keydir="$HOME/.appstoreconnect/private_keys"
+          mkdir -p "$keydir"
+          printf '%s' "$APPLE_API_KEY_P8" > "$keydir/AuthKey_$APPLE_API_KEY.p8"
+          export APPLE_API_KEY_PATH="$keydir/AuthKey_$APPLE_API_KEY.p8"
+          config='{"bundle":{"iOS":{"bundleVersion":"${{ github.run_number }}"}}}'
+          npm run tauri -- ios build --features mobile-ui --target aarch64 --export-method app-store-connect --ci --config "$config"
+          ipa=$(find src-tauri/gen/apple/build -name '*.ipa' | head -n 1)
+          test -n "$ipa"
+          # App Store Connect rejects an .ipa without its profile.
+          unzip -Z1 "$ipa" | grep 'Payload/.*\.app/embedded\.mobileprovision$' >/dev/null \
+            || { echo "::error::$ipa has no embedded.mobileprovision"; exit 1; }
+          cp "$ipa" "$RUNNER_TEMP/treq.ipa"
+
+      - name: Upload to TestFlight
+        if: env.SIGNED == 'true'
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          xcrun altool --upload-app --type ios --file "$RUNNER_TEMP/treq.ipa" \
+            --apiKey "$APPLE_API_KEY" --apiIssuer "$APPLE_API_ISSUER"
+
+      - name: Remove the API key
+        if: always()
+        run: rm -rf "$HOME/.appstoreconnect"
+
+      # Without signing secrets: simulator build, since device builds need a
+      # development team and certificate.
+      - name: Build debug app bundle (simulator)
+        if: env.SIGNED != 'true'
+        run: |
+          npm run tauri -- ios build --features mobile-ui --debug --target aarch64-sim --no-sign --ci
+          app=$(find src-tauri/gen/apple/build -name '*.app' -path '*arm64-sim*' -maxdepth 3 | head -n 1)
           test -n "$app"
-          ditto "$app" "$RUNNER_TEMP/app/$(basename "$app")"
           # Simulator only: unzip, then `xcrun simctl install booted <app>`.
           ditto -c -k --keepParent "$app" "$GITHUB_WORKSPACE/treq-nightly-ios-simulator-arm64.zip"
 
       - name: Upload app bundle
-        uses: actions/upload-artifact@v6
+        if: env.SIGNED != 'true'
+        uses: actions/upload-artifact@v7
         with:
-          name: ios-debug-app
-          path: ${{ runner.temp }}/app
+          name: ios-simulator-app
+          path: treq-nightly-ios-simulator-arm64.zip
           if-no-files-found: error
           retention-days: 7
 
-      - name: Attach simulator app to nightly release
+  # Attaches the mobile builds to the nightly release, which the release job
+  # recreates. Still runs if a desktop target fails; the release exists
+  # either way.
+  # Base sandbox image tagged nightly (sandbox-image/), on GHCR.
+  sandbox-image:
+    needs: [check, release]
+    if: needs.check.outputs.should_run == 'true'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/sandbox-image.yml
+    with:
+      channel: nightly
+
+  mobile-assets:
+    name: attach mobile builds
+    needs: [check, release, android, ios]
+    if: ${{ !cancelled() && needs.check.outputs.should_run == 'true' }}
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: "{android-apk,ios-simulator-app}"
+          merge-multiple: true
+      - name: Attach to nightly release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload nightly treq-nightly-ios-simulator-arm64.zip --clobber
-
-  # Windows tests run nightly instead of on PRs: they are slow and only ever
-  # catch bugs in code that branches on the Windows target.
-  windows-rust-tests:
-    needs: check
-    if: needs.check.outputs.should_run == 'true'
-    name: rust / test / windows-latest
-    runs-on: windows-latest
-    timeout-minutes: 45
-    env:
-      CARGO_INCREMENTAL: 0
-      CARGO_PROFILE_TEST_DEBUG: 0
-    steps:
-      # Windows Defender's real-time scanning intercepts every process spawn
-      # and file write; this job spawns hundreds of jj/git subprocesses per
-      # test run, so this materially cuts wall time. Exclude the workspace
-      # before checkout writes anything into it.
-      - name: Disable Defender scanning
-        shell: pwsh
-        run: Add-MpPreference -ExclusionPath "${{ github.workspace }}"
-
-      - uses: actions/checkout@v5
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
-        with:
-          components: rustfmt
-          toolchain: stable
-
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
-        with:
-          tool: cargo-nextest
-
-      # windows-latest runners ship LLVM (lld-link.exe) but link.exe from MSVC
-      # is the default; switch to lld for a much faster linker on Windows.
-      - name: Use lld linker
         run: |
-          echo "RUSTFLAGS=-C linker=lld-link" >> "$GITHUB_ENV"
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Configure sccache
-        run: |
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
-
-      # Runners already ship git + gh. Only jj needs installing; cache the
-      # release binary.
-      - name: Resolve jj release tag
-        id: jj
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          tag=$(curl -fsSL \
-            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/jj-vcs/jj/releases/latest | jq -r .tag_name)
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-
-      - name: Restore jj CLI cache
-        id: jj-cache
-        uses: actions/cache/restore@v5
-        with:
-          path: .ci-bin
-          key: jj-${{ runner.os }}-${{ runner.arch }}-${{ steps.jj.outputs.tag }}
-
-      - name: Install jj CLI
-        if: steps.jj-cache.outputs.cache-hit != 'true'
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          JJ_TAG: ${{ steps.jj.outputs.tag }}
-        run: |
-          set -euo pipefail
-          mkdir -p .ci-bin
-          asset="jj-${JJ_TAG}-x86_64-pc-windows-msvc.zip"
-          tmp=$(mktemp -d)
-          curl -fsSL \
-            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            -L "https://github.com/jj-vcs/jj/releases/download/${JJ_TAG}/${asset}" \
-            -o "$tmp/jj.zip"
-          unzip -q "$tmp/jj.zip" -d "$tmp"
-          jj_bin=$(find "$tmp" -type f -name jj.exe | head -n 1)
-          test -n "$jj_bin"
-          install -m 755 "$jj_bin" .ci-bin/jj.exe
-
-      - name: Save jj CLI cache
-        if: steps.jj-cache.outputs.cache-hit != 'true'
-        continue-on-error: true
-        uses: actions/cache/save@v5
-        with:
-          path: .ci-bin
-          key: ${{ steps.jj-cache.outputs.cache-primary-key }}
-
-      - name: Add jj to PATH
-        run: echo "$GITHUB_WORKSPACE/.ci-bin" >> "$GITHUB_PATH"
-
-      - name: Verify tool versions
-        run: |
-          git --version
-          jj --version
-          gh --version
-
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          cache-on-failure: true
-          workspaces: |
-            . -> target
-
-      - name: Run Rust task
-        working-directory: src-tauri
-        env:
-          RUST_BACKTRACE: 1
-        run: cargo nextest run --locked --profile ci
+          files=$(ls treq-nightly-android-arm64.apk treq-nightly-ios-simulator-arm64.zip 2>/dev/null || true)
+          test -n "$files" || { echo "no mobile builds to attach"; exit 0; }
+          gh release upload nightly $files --clobber --repo "${{ github.repository }}"

@@ -8,7 +8,7 @@
  * Entitlement comes from signed webhook events posted with ../stripe.ts.
  */
 import { randomBytes } from "node:crypto";
-import { expect, it } from "vitest";
+import { expect, it } from "@jest/globals";
 import { billingStoreFor } from "../../../supabase/functions/_shared/billing/store";
 import type {
   StripeClient,
@@ -38,7 +38,19 @@ function stubStripe(customerId: string): {
     request: async (method: string, path: string, params?: StripeParams) => {
       calls.push({ method, path, params });
       if (path === "/v1/customers") return { id: customerId };
-      if (path === "/v1/prices") return { data: [{ id: "price_sqa_pro" }] };
+      // Checkout looks prices up by key: the plan and the metered usage price.
+      if (path === "/v1/prices") {
+        return {
+          data: [
+            { id: "price_sqa_pro", lookup_key: "treq_pro_monthly" },
+            { id: "price_sqa_usage", lookup_key: "treq_sandbox_usage" },
+          ],
+        };
+      }
+      if (method === "GET" && path === "/v1/subscriptions") return { data: [] };
+      if (method === "GET" && path === "/v1/checkout/sessions") {
+        return { data: [] };
+      }
       if (path === "/v1/checkout/sessions") {
         return { id: "cs_sqa", client_secret: "cs_sqa_secret" };
       }
@@ -52,7 +64,9 @@ function stubStripe(customerId: string): {
 }
 
 function sessionParams(calls: StripeCall[]): StripeParams | undefined {
-  return calls.find((c) => c.path === "/v1/checkout/sessions")?.params;
+  return calls.find(
+    (c) => c.method === "POST" && c.path === "/v1/checkout/sessions",
+  )?.params;
 }
 
 function event(type: string, object: Record<string, unknown>) {
@@ -65,7 +79,7 @@ function event(type: string, object: Record<string, unknown>) {
   };
 }
 
-it("opens checkout with one trial per user and a portal for the customer", async () => {
+it("opens checkout with no trial and a portal for the customer", async () => {
   const admin = getServiceClient();
   const buyer = await createTestUser();
   const stranger = await createTestUser();
@@ -76,7 +90,7 @@ it("opens checkout with one trial per user and a portal for the customer", async
     const store = billingStoreFor(admin, buyer.user.id);
     const user = { id: buyer.user.id, email: buyer.email };
 
-    // ── First checkout: customer created, recorded, trial offered ────────
+    // ── First checkout: customer created, recorded, no trial ────────
     const first = stubStripe(customerId);
     const opened = await createCheckout(
       { plan: "pro" },
@@ -88,6 +102,8 @@ it("opens checkout with one trial per user and a portal for the customer", async
     });
     expect(first.calls.map((c) => c.path)).toEqual([
       "/v1/customers",
+      "/v1/subscriptions",
+      "/v1/checkout/sessions",
       "/v1/prices",
       "/v1/checkout/sessions",
     ]);
@@ -95,8 +111,10 @@ it("opens checkout with one trial per user and a portal for the customer", async
       customer: customerId,
       client_reference_id: buyer.user.id,
       "metadata[owner_id]": buyer.user.id,
-      "subscription_data[trial_period_days]": 14,
     });
+    expect(sessionParams(first.calls)).not.toHaveProperty(
+      "subscription_data[trial_period_days]",
+    );
 
     const { client: buyerClient } = await signInWithEmailPassword(
       buyer.email,
@@ -115,14 +133,16 @@ it("opens checkout with one trial per user and a portal for the customer", async
       { user, store, stripe: second.stripe, webUrl: WEB_URL },
     );
     expect(second.calls.map((c) => c.path)).toEqual([
+      "/v1/subscriptions",
+      "/v1/checkout/sessions",
       "/v1/prices",
       "/v1/checkout/sessions",
     ]);
     expect(sessionParams(second.calls)?.customer).toBe(customerId);
 
-    await recordOutcome("billing-checkout-01-customer-and-trial", {
+    await recordOutcome("billing-checkout-01-customer-no-trial", {
       expectations: [
-        "The first checkout creates a Stripe customer, records it in billing_customers through billing_attach_customer, and opens an embedded session with a 14-day trial.",
+        "The first checkout creates a Stripe customer, records it in billing_customers through billing_attach_customer, and opens an embedded session with no trial.",
         "A second checkout reuses the recorded customer instead of creating another.",
         "The buyer reads their own billing_customers row through RLS.",
       ],
@@ -134,18 +154,18 @@ it("opens checkout with one trial per user and a portal for the customer", async
     });
 
     // ── The webhook makes the buyer Pro, so checkout refuses ─────────────
-    const trialEnd = Math.floor(Date.now() / 1000) + 14 * 86_400;
+    const periodEnd = Math.floor(Date.now() / 1000) + 30 * 86_400;
     const subscription = {
       id: subscriptionId,
       object: "subscription",
       customer: customerId,
-      status: "trialing",
+      status: "active",
       cancel_at_period_end: false,
-      trial_end: trialEnd,
+      trial_end: null,
       items: {
         data: [
           {
-            current_period_end: trialEnd,
+            current_period_end: periodEnd,
             price: { id: "price_sqa_pro", lookup_key: "treq_pro_monthly" },
           },
         ],
@@ -207,7 +227,7 @@ it("opens checkout with one trial per user and a portal for the customer", async
       details: { refused, portalResult, strangerPortal },
     });
 
-    // ── After the trial subscription ends, no second trial ──────────────
+    // ── After the subscription ends, checkout reopens with no trial ──────────────
     const ended = await postStripeEvent(
       event("customer.subscription.deleted", {
         ...subscription,
@@ -227,9 +247,9 @@ it("opens checkout with one trial per user and a portal for the customer", async
     );
     expect(sessionParams(again.calls)?.customer).toBe(customerId);
 
-    await recordOutcome("billing-checkout-03-one-trial", {
+    await recordOutcome("billing-checkout-03-reopen-no-trial", {
       expectations: [
-        "After the trialing subscription is deleted, checkout opens again on the same customer without trial_period_days.",
+        "After the subscription is deleted, checkout opens again on the same customer without trial_period_days.",
       ],
       details: { reopenedParams: sessionParams(again.calls) },
     });

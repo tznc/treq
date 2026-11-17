@@ -4,9 +4,10 @@
 //! session (`startAgentTask`, in `core::agent_launch`): it opens the issue's
 //! workspaces, records the prompt and tells React which session to show.
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
-use std::time::Duration;
+use crate::result_ext::ResultExt;
 
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::{
@@ -21,15 +22,15 @@ use tauri_plugin_gpui::gpui::{
   Subscription, Task, Window,
 };
 
-use super::{dialog, fuzzy_matches, overlay, title, Env};
+use super::{fuzzy_matches, Env};
 use crate::core::agent_launch::{self as launch, IssueAttachment, TaskRequest};
 use crate::gpui_shell::{
-  native::{NativeEvent, ToastTone},
+  native::NativeEvent,
   popup::{Side, TooltipContent},
   screen::{
     code::{agent_icon, menu_panel},
     code_data::{
-      self, insert_at, mention_at, task_settings, Agent, Environment, TaskSettings,
+      self, insert_at, mention_at, replace_range, task_settings, Agent, Environment, TaskSettings,
       ENVIRONMENT_SETTING,
     },
     environment,
@@ -39,9 +40,6 @@ use crate::gpui_shell::{
   tooltips::{HasTooltips, Tooltips},
   ui::{self, Button, Size, TextSize, Variant},
 };
-
-/// `useDebounce(mentionQuery, 150)`.
-const MENTION_DEBOUNCE: Duration = Duration::from_millis(150);
 
 /// A workspace the prompt can run in.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -128,7 +126,6 @@ pub struct Route {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Menu {
   Add,
-  Plan,
   Agent,
   Environment,
 }
@@ -203,10 +200,12 @@ macro_rules! read {
             $read
           })
           .await;
-        let _ = this.update(cx, |$view, $cx2| {
-          $apply;
-          $cx2.notify();
-        });
+        this
+          .update(cx, |$view, $cx2| {
+            $apply;
+            $cx2.notify();
+          })
+          .ignore_closed();
       })
       .detach();
   }};
@@ -286,7 +285,28 @@ impl AgentPromptView {
       self,
       cx,
       |host, route| task_settings(host.as_ref(), &route.repo_path),
-      |view, settings, _cx| view.settings = Some(settings)
+      |view, settings, cx| {
+        let environment = settings.environment.is_some();
+        view.settings = Some(settings);
+        if environment {
+          view.load_environment_status(cx);
+        }
+      }
+    );
+  }
+
+  /// Whether the repository's devcontainer runs (a `docker ps`), read after
+  /// the settings so the default agent shows without waiting for it.
+  fn load_environment_status(&mut self, cx: &mut Context<Self>) {
+    read!(
+      self,
+      cx,
+      |host, route| host.devcontainer_status(&route.repo_path),
+      |view, status, _cx| {
+        if let Some(env) = view.settings.as_mut().and_then(|s| s.environment.as_mut()) {
+          env.status = Some(status);
+        }
+      }
     );
   }
 
@@ -333,10 +353,6 @@ impl AgentPromptView {
 
   fn close(&self, cx: &mut Context<Self>) {
     self.env.press("agentPrompt.close", cx);
-  }
-
-  fn toast(&self, tone: ToastTone, title: &str, description: impl Into<String>) {
-    self.env.toast(tone, title, description);
   }
 
   // The workspace combobox.
@@ -387,7 +403,7 @@ impl AgentPromptView {
     if self.close_picker(window, cx) {
       return;
     }
-    let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search workspaces..."));
+    let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search workspaces…"));
     input.update(cx, |input, cx| input.focus(window, cx));
     let subscription = cx.subscribe_in(
       &input,
@@ -460,7 +476,7 @@ impl AgentPromptView {
     let text = self.task_text.clone();
     let task = cx.new(|cx| {
       TextareaState::new(window, cx)
-        .placeholder("Describe a task...")
+        .placeholder("Describe a task…")
         .auto_grow(1, 9)
         .default_value(text)
     });
@@ -516,21 +532,26 @@ impl AgentPromptView {
 
   fn search_mentions(&mut self, query: String, cx: &mut Context<Self>) {
     let (host, repo) = (self.env.host.clone(), self.route.repo_path.clone());
+    let delay = host.file_search_delay(&repo);
     let (workspace_id, path) = (self.selected, self.working_directory());
     self._mention_search = Some(cx.spawn(async move |this, cx| {
-      cx.background_executor().timer(MENTION_DEBOUNCE).await;
+      if !delay.is_zero() {
+        cx.background_executor().timer(delay).await;
+      }
       let search = query.clone();
       let results = cx
         .background_spawn(async move { host.search_files(&repo, workspace_id, &path, &search, 4) })
         .await
         .unwrap_or_default();
-      let _ = this.update(cx, |view, cx| {
-        if let Some(mention) = view.mention.as_mut().filter(|m| m.query == query) {
-          mention.results = results;
-          mention.index = 0;
-          cx.notify();
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          if let Some(mention) = view.mention.as_mut().filter(|m| m.query == query) {
+            mention.results = results;
+            mention.index = 0;
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     }));
   }
 
@@ -564,11 +585,7 @@ impl AgentPromptView {
       .as_ref()
       .map_or(self.task_text.len(), |t| t.read(cx).cursor());
     let inserted = format!("@{path} ");
-    let text = format!(
-      "{}{inserted}{}",
-      &self.task_text[..mention.anchor.min(self.task_text.len())],
-      &self.task_text[cursor.min(self.task_text.len())..]
-    );
+    let text = replace_range(&self.task_text, mention.anchor, cursor, &inserted);
     self.set_task_text(text, mention.anchor + inserted.len(), window, cx);
   }
 
@@ -606,6 +623,7 @@ impl AgentPromptView {
       repo_path: self.route.repo_path.clone(),
       workspace_id: self.selected,
       workspace_path: self.working_directory(),
+      query: String::new(),
     };
     let host: std::sync::Arc<dyn code_data::CodeHost> = self.env.host.clone();
     let dark = self.dark;
@@ -640,10 +658,12 @@ impl AgentPromptView {
           .collect::<Vec<_>>()
           .join(" ")
       );
-      let _ = this.update(cx, |view, cx| {
-        view.insert = Some(insertion);
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.insert = Some(insertion);
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -685,7 +705,11 @@ impl AgentPromptView {
       ),
       |view, result, cx| {
         if let Err(err) = result {
-          view.toast(ToastTone::Error, "Failed to save setting", err);
+          view.env.notify(
+            Toast::error("Failed to save setting")
+              .description(err)
+              .into(),
+          );
         } else {
           view.env.notify(NativeEvent::RepoSettingsChanged {
             repo_path: view.route.repo_path.clone(),
@@ -718,7 +742,11 @@ impl AgentPromptView {
               env.status = Some(status);
             }
           }
-          Err(err) => view.toast(ToastTone::Error, "Devcontainer did not start", err),
+          Err(err) => view.env.notify(
+            Toast::error("Devcontainer did not start")
+              .description(err)
+              .into(),
+          ),
         }
       }
     );
@@ -726,7 +754,7 @@ impl AgentPromptView {
 
   /// `submitTask`: the backend starts the session, and the dialog closes
   /// once it has.
-  pub(in crate::gpui_shell::screen) fn submit(&mut self, plan: bool, cx: &mut Context<Self>) {
+  pub(in crate::gpui_shell::screen) fn submit(&mut self, cx: &mut Context<Self>) {
     if self.submitting() || (self.task_text.trim().is_empty() && self.issue.is_none()) {
       return;
     }
@@ -740,7 +768,7 @@ impl AgentPromptView {
       text: self.task_text.clone(),
       issue: self.issue.as_ref().map(Issue::attachment),
       agent: agent.id().into(),
-      mode: if plan { "plan" } else { "acceptEdits" }.into(),
+      mode: "acceptEdits".into(),
       save_as_repo_default: self.save_default && agent != configured,
     };
     read!(
@@ -752,9 +780,11 @@ impl AgentPromptView {
         Ok(false) => view.submitted = false,
         Err(err) => {
           view.submitted = false;
-          view
-            .env
-            .toast(ToastTone::Error, "Failed to create task", err);
+          view.env.notify(
+            Toast::error("Failed to create task")
+              .description(err)
+              .into(),
+          );
         }
       }
     );
@@ -805,11 +835,8 @@ impl AgentPromptView {
       let accent = p.menu_accent;
       let index = picker.index;
       let list = if rows.is_empty() {
-        ui::text(div(), TextSize::Sm)
-          .p_4()
-          .text_center()
-          .text_color(p.muted_foreground)
-          .child("No workspaces found")
+        ui::EmptyState::new("agent-prompt-no-workspaces", "No workspaces match", p)
+          .message("Try another workspace name.")
           .into_any_element()
       } else {
         div()
@@ -820,6 +847,8 @@ impl AgentPromptView {
             let selector = SharedString::from(format!("agent-prompt-workspace-{}", label));
             ui::text(div(), TextSize::Sm)
               .id(selector.clone())
+              .role(gpui::Role::MenuItemCheckBox)
+              .aria_label(label.clone())
               .debug_selector(move || selector.to_string())
               .flex()
               .items_center()
@@ -921,6 +950,8 @@ impl AgentPromptView {
       .px_3()
       .pt_3()
       .child(
+        // Short label (['chip']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .debug_selector(|| "issue-chip".into())
           .flex()
@@ -941,6 +972,8 @@ impl AgentPromptView {
           .child(
             div()
               .id("issue-chip-remove")
+              .role(gpui::Role::Button)
+              .aria_label("Remove issue")
               .debug_selector(|| "issue-chip-remove".into())
               .ml_0p5()
               .p_0p5()
@@ -972,8 +1005,6 @@ impl AgentPromptView {
     div()
       .debug_selector(|| "agent-task-input".into())
       .w_full()
-      .max_w(zpx(672.))
-      .mx_auto()
       .child(
         div()
           .id("task-card")
@@ -1003,8 +1034,15 @@ impl AgentPromptView {
               let index = view.mention.as_ref().map_or(0, |m| m.index);
               view.select_mention(index, window, cx);
               cx.stop_propagation();
-            } else if action.secondary && !action.shift {
-              view.submit(false, cx);
+            }
+          }))
+          // ⌘/Ctrl+Enter is unbound in inputs (treq-ui `init`), so it
+          // arrives as a key, not an `Enter` action.
+          .capture_key_down(cx.listener(|view, e: &gpui::KeyDownEvent, _, cx| {
+            let k = &e.keystroke;
+            let held = crate::gpui_shell::keys::held(k.modifiers);
+            if k.key == "enter" && (held.platform || held.control) && !held.shift {
+              view.submit(cx);
               cx.stop_propagation();
             }
           }))
@@ -1047,7 +1085,6 @@ impl AgentPromptView {
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
-    let accent = p.accent;
     div()
       .debug_selector(|| "task-mentions".into())
       .mx_2()
@@ -1058,6 +1095,8 @@ impl AgentPromptView {
       .bg(p.muted.opacity(0.5))
       .overflow_hidden()
       .child(
+        // Short label (['section heading']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .px_3()
           .py_1()
@@ -1069,25 +1108,17 @@ impl AgentPromptView {
       )
       .children(mention.results.iter().enumerate().map(|(i, path)| {
         let id = SharedString::from(format!("task-mention-{i}"));
-        let selector = id.to_string();
         let selected = i == mention.index;
-        div()
-          .id(id)
-          .debug_selector(move || selector)
+        ui::Row::new(id, p)
+          .role(gpui::Role::ListBoxOption)
+          .label(path.clone())
+          .selected(selected)
           .w_full()
           .px_3()
-          .py_1p5()
-          .flex()
-          .items_center()
-          .gap_2()
-          .cursor_pointer()
-          .when(selected, |this| this.bg(accent.opacity(0.5)))
-          .when(!selected, |this| {
-            this.hover(move |s| s.bg(accent.opacity(0.3)))
-          })
-          .child(ui::icon(theme::ICON_FILE_TEXT, 16., p.muted_foreground))
+          .rounded_none()
+          .leading(ui::icon(theme::ICON_FILE_TEXT, 16., p.muted_foreground))
           .child(
-            ui::text(div(), TextSize::Xs)
+            ui::text(div(), TextSize::Sm)
               .font_family(theme::MONO_FONT)
               .min_w_0()
               .truncate()
@@ -1107,7 +1138,6 @@ impl AgentPromptView {
   fn toolbar(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     let (configured, agent) = self.agents();
     let empty = self.task_text.trim().is_empty() && self.issue.is_none();
-    let plan = agent.has_plan_mode();
     let small = |b: Button| b.size(Size::Sm).h(zpx(28.));
     let submitting = self.submitting();
 
@@ -1119,6 +1149,8 @@ impl AgentPromptView {
           .px_2()
           .gap_1()
           .child(
+            // Short label (['button label']): 11px is fine.
+            // ast-grep-ignore: gpui-text-xs-short-label-only
             ui::text(div(), TextSize::Xs)
               .flex()
               .items_center()
@@ -1143,7 +1175,7 @@ impl AgentPromptView {
     if self.show_save_default && agent != configured {
       let checked = self.save_default;
       right = right.child(
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
           .id("task-save-default")
           .role(gpui::Role::CheckBox)
           .aria_label("Set as default for this repo")
@@ -1185,6 +1217,7 @@ impl AgentPromptView {
             .aria_value(agent.label())
             .aria_expanded(self.menu == Some(Menu::Agent))
             .test_support()
+            .cursor_pointer()
             .child(
               ui::Picker::new("task-agent-picker", p)
                 .placement(ui::PickerPlacement::Toolbar)
@@ -1200,50 +1233,19 @@ impl AgentPromptView {
     );
 
     let disabled = empty || submitting;
-    let label = if submitting {
-      "Starting…"
-    } else if agent == Agent::Claude {
-      "Edit"
-    } else {
-      "Run"
-    };
-    let submit = small(Button::new("task-submit", p))
-      .px_3()
+    let send = ui::IconButton::new("task-submit", theme::ICON_SEND, "Send", p)
+      .primary()
       .disabled(disabled)
-      .when(plan, |b| b.rounded_r_none())
-      .when(submitting, |b| {
-        b.child(ui::spinner("task-starting", 14., p.primary_foreground))
-      })
-      .aria_label(label)
-      .child(ui::text(div(), TextSize::Xs).child(label))
-      .on_click(cx.listener(|view, _, _, cx| view.submit(false, cx)));
-    let submit = self.tips.wrap(
+      .on_click(cx.listener(|view, _, _, cx| view.submit(cx)));
+    let buttons = self.tips.wrap(
       "task-submit",
       Side::Top,
       Some(TooltipContent::Text(
         crate::gpui_shell::keys::hint("⌘ + Enter").into(),
       )),
-      submit,
+      send,
       cx,
     );
-    let mut buttons = div().relative().flex().items_center().child(submit);
-    if plan {
-      buttons = buttons
-        .child(
-          small(Button::new("task-submit-menu", p))
-            .aria_label("More submit options")
-            .disabled(disabled)
-            .rounded_l_none()
-            .border_l_1()
-            .border_color(p.primary_foreground.opacity(0.2))
-            .px_1p5()
-            .icon(theme::ICON_CHEVRON_DOWN, 14.)
-            .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Plan, cx))),
-        )
-        .when(self.menu == Some(Menu::Plan) && !disabled, |this| {
-          this.child(self.plan_menu(p, cx))
-        });
-    }
     right = right.child(buttons);
 
     div()
@@ -1286,19 +1288,6 @@ impl AgentPromptView {
         ui::MenuItem::new("task-add-attach", "Attach", p)
           .icon(theme::ICON_PAPERCLIP)
           .on_click(cx.listener(|view, _, _, cx| view.attach(cx))),
-      );
-    deferred(self.close_menu_on_outside(panel, cx)).with_priority(3)
-  }
-
-  fn plan_menu(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
-    let panel = menu_panel("task-plan-menu", p)
-      .top(zpx(32.))
-      .right_0()
-      .w(zpx(224.))
-      .child(
-        ui::MenuItem::new("task-plan", "Plan", p)
-          .description("Plan the change first, without editing files")
-          .on_click(cx.listener(|view, _, _, cx| view.submit(true, cx))),
       );
     deferred(self.close_menu_on_outside(panel, cx)).with_priority(3)
   }
@@ -1371,20 +1360,14 @@ impl Render for AgentPromptView {
       self.insert_text(&insertion, window, cx);
     }
     let viewport = window.viewport_size();
-    let (backdrop, panel) = dialog(
-      "agent-prompt-dialog",
-      viewport.width * 0.4,
-      None,
-      viewport,
-      &p,
-    );
     let card = self.task_card(&p, window, cx);
     let picker = self.workspace_picker(&p, cx);
-    let keys = cx.listener(|view, e: &gpui::KeyDownEvent, window, cx| {
-      if !ui::is_escape(&e.keystroke) || view.file_picker.is_some() {
+    // Escape closes the open menu, picker or mention list first; the file
+    // picker hears its own.
+    let close = ui::handler(cx, |view, window, cx| {
+      if view.file_picker.is_some() {
         return;
       }
-      cx.stop_propagation();
       if view.menu.take().is_some()
         || view.close_picker(window, cx)
         || view.mention.take().is_some()
@@ -1394,24 +1377,15 @@ impl Render for AgentPromptView {
         view.close(cx);
       }
     });
-    overlay(
-      backdrop
-        .on_mouse_down(
-          gpui::MouseButton::Left,
-          cx.listener(|view, _, _, cx| view.close(cx)),
-        )
-        .children(self.file_picker.clone()),
-      panel
-        .id("agent-prompt-panel")
-        .role(gpui::Role::Dialog)
-        .aria_label("Start a new agent session")
-        .test_support()
-        .track_focus(&self.focus)
-        .capture_key_down(keys)
-        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-        .child(title("Start a new agent session").text_color(p.popover_foreground))
-        .child(picker)
-        .child(card),
-    )
+    ui::Dialog::new("agent-prompt-dialog", &p)
+      .overlay(viewport)
+      // 672px of content plus the dialog's p_5 padding.
+      .width(712.)
+      .title("Start a new agent session")
+      .focus(&self.focus)
+      .on_close(close)
+      .child(picker)
+      .child(card)
+      .children(self.file_picker.clone())
   }
 }

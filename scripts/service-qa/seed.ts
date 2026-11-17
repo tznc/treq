@@ -159,59 +159,6 @@ export async function linkGithubRepo(
 }
 
 /**
- * Ensure a merge_queues row exists and insert a queued entry for a branch.
- * Used to exercise desktop status RPCs without calling GitHub.
- */
-export async function enqueueBranch(
-  admin: SupabaseClient,
-  opts: {
-    repoId: number;
-    branchName: string;
-    prNumber: number;
-    prSha: string;
-    position: number;
-    targetBranch: string;
-  },
-): Promise<{ queueId: string; entryId: string }> {
-  const { data: queue, error: queueError } = await admin
-    .from("merge_queues")
-    .upsert(
-      {
-        repo_id: opts.repoId,
-        target_branch: opts.targetBranch,
-        paused: false,
-        bisect_mode: false,
-      },
-      { onConflict: "repo_id,target_branch" },
-    )
-    .select("id")
-    .single();
-  if (queueError || !queue) {
-    throw new Error(`enqueueBranch queue: ${queueError?.message ?? "no row"}`);
-  }
-
-  const { data: entry, error: entryError } = await admin
-    .from("merge_queue_entries")
-    .insert({
-      queue_id: queue.id,
-      pr_number: opts.prNumber,
-      pr_sha: opts.prSha,
-      pr_title: `service-qa ${opts.branchName}`,
-      pr_author: "service-qa",
-      position: opts.position,
-      status: "queued",
-      branch_name: opts.branchName,
-    })
-    .select("id")
-    .single();
-  if (entryError || !entry) {
-    throw new Error(`enqueueBranch entry: ${entryError?.message ?? "no row"}`);
-  }
-
-  return { queueId: queue.id as string, entryId: entry.id as string };
-}
-
-/**
  * Call create_desktop_token as the signed-in user (RLS / auth.uid() path the
  * web auth callback uses).
  */

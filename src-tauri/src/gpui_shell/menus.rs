@@ -24,6 +24,7 @@ fn icon(icon: context_menu::MenuIcon) -> MenuIcon {
     context_menu::MenuIcon::GitBranch => MenuIcon::GitBranch,
     context_menu::MenuIcon::Link => MenuIcon::Link,
     context_menu::MenuIcon::Pencil => MenuIcon::Pencil,
+    context_menu::MenuIcon::RotateCcw => MenuIcon::RotateCcw,
     context_menu::MenuIcon::Settings => MenuIcon::Settings,
     context_menu::MenuIcon::Trash => MenuIcon::Trash2,
   }
@@ -77,6 +78,15 @@ pub fn run_common(action: MenuAction, host: &dyn ChangesHost, cx: &mut App) -> O
     MenuAction::Copy(text) => cx.write_to_clipboard(ClipboardItem::new_string(text)),
     MenuAction::Reveal(path) => host.reveal(&path),
     MenuAction::OpenUrl(url) => host.open_url(&url),
+    MenuAction::Each(actions) => {
+      let rest: Vec<MenuAction> = actions
+        .into_iter()
+        .filter_map(|action| run_common(action, host, cx))
+        .collect();
+      if !rest.is_empty() {
+        return Some(MenuAction::Each(rest));
+      }
+    }
     action => return Some(action),
   }
   None

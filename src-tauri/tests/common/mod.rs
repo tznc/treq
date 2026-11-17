@@ -7,7 +7,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tempfile::TempDir;
 
-#[allow(dead_code)]
+#[expect(
+  clippy::allow_attributes,
+  reason = "dead in only some of the binaries that share this file"
+)]
+#[allow(dead_code, reason = "each test binary uses a subset of the fixtures")]
 pub const PASSING_WORKFLOW: &str = "
 name: Passing CI
 on:
@@ -22,7 +26,11 @@ jobs:
         run: echo world
 ";
 
-#[allow(dead_code)]
+#[expect(
+  clippy::allow_attributes,
+  reason = "dead in only some of the binaries that share this file"
+)]
+#[allow(dead_code, reason = "each test binary uses a subset of the fixtures")]
 pub const FAILING_WORKFLOW: &str = "
 name: Failing CI
 on:
@@ -53,15 +61,37 @@ fn random_default_branch_name() -> String {
   format!("branch-{nanos}-{seq}")
 }
 
-#[allow(dead_code)]
+/// The repo's `TempDir`. Closes the pooled SQLite connections to databases
+/// in it first, since Windows cannot delete files that are still open.
+pub struct RepoTempDir(TempDir);
+
+impl std::ops::Deref for RepoTempDir {
+  type Target = TempDir;
+
+  fn deref(&self) -> &TempDir {
+    &self.0
+  }
+}
+
+impl Drop for RepoTempDir {
+  fn drop(&mut self) {
+    treq_lib::local_db::release_connections_under(self.0.path());
+  }
+}
+
+#[expect(
+  clippy::allow_attributes,
+  reason = "dead in only some of the binaries that share this file"
+)]
+#[allow(dead_code, reason = "each test binary uses a subset of the fixtures")]
 pub struct TestRepo {
-  pub temp_dir: TempDir,
+  pub temp_dir: RepoTempDir,
   pub repo_path: String,
   default_branch: String,
   remote_temp_dir: Option<TempDir>,
 }
 
-#[allow(dead_code)]
+#[expect(dead_code, reason = "each test binary uses a subset of the fixtures")]
 impl TestRepo {
   /// Creates a new temporary Git repository for testing.
   /// Simulates cloning a git repo by initializing with proper git config.
@@ -117,7 +147,7 @@ impl TestRepo {
     }
 
     Ok(TestRepo {
-      temp_dir,
+      temp_dir: RepoTempDir(temp_dir),
       repo_path,
       default_branch,
       remote_temp_dir: None,
@@ -313,7 +343,11 @@ impl TestRepo {
   /// helpers below against the actual CLI on platforms where it's reliably
   /// available (see that file for why Windows is excluded). Test bodies
   /// themselves should use the jj-lib wrappers, not this.
-  #[allow(dead_code)]
+  #[expect(
+    clippy::allow_attributes,
+    reason = "dead in only some of the binaries that share this file"
+  )]
+  #[allow(dead_code, reason = "each test binary uses a subset of the fixtures")]
   pub fn run_jj_cli(cwd: &str, args: &[&str]) -> Result<String, String> {
     let jj_binary = treq_lib::binary_paths::detect_binary("jj").unwrap_or_else(|| "jj".to_string());
     let output = Command::new(jj_binary)
@@ -770,7 +804,7 @@ impl TestRepo {
   /// filesystem, so writing straight into their object database and refs via gix
   /// is equivalent to — and far cheaper than — cloning, checking out, editing,
   /// and pushing through real git subprocesses.
-  fn gix_commit_file_on_ref(
+  pub fn gix_commit_file_on_ref(
     repo_path: &str,
     branch: &str,
     relative_path: &str,
@@ -1039,6 +1073,53 @@ impl TestRepo {
     Self::run_git(&clone_path_str, &["rev-parse", "HEAD"])
   }
 
+  /// Pushes `branch_name` to the remote, one commit adding `relative_path`
+  /// on top of `base_branch`, from a throwaway clone. The local repo only
+  /// sees the branch after a fetch, and never gets a local bookmark for it.
+  pub fn remote_branch_on(
+    &self,
+    branch_name: &str,
+    base_branch: &str,
+    relative_path: &str,
+    content: &str,
+  ) -> Result<(), String> {
+    let remote_fixture_dir = self.remote_fixture_dir();
+    let remote_path = self.remote_path();
+    let clone_path = unique_remote_clone_path(&remote_fixture_dir, "remote_clone_branch");
+    let clone_path_str = clone_path.to_string_lossy().to_string();
+
+    Self::run_git(
+      &remote_fixture_dir.to_string_lossy(),
+      &[
+        "clone",
+        remote_path.to_str().unwrap(),
+        clone_path.to_str().unwrap(),
+      ],
+    )?;
+    Self::run_git(
+      &clone_path_str,
+      &["config", "user.email", "test@example.com"],
+    )?;
+    Self::run_git(&clone_path_str, &["config", "user.name", "Test User"])?;
+    Self::run_git(
+      &clone_path_str,
+      &[
+        "checkout",
+        "-b",
+        branch_name,
+        &format!("origin/{base_branch}"),
+      ],
+    )?;
+    Self::write_file_at_path(clone_path.join(relative_path), content, false)?;
+    Self::run_git(&clone_path_str, &["add", "-A"])?;
+    Self::run_git(
+      &clone_path_str,
+      &["commit", "-m", &format!("Add {relative_path}")],
+    )?;
+    Self::run_git(&clone_path_str, &["push", "origin", branch_name])?;
+    Ok(())
+  }
+
   /// Get the path to the .treq directory.
   pub fn treq_dir(&self) -> PathBuf {
     Path::new(&self.repo_path).join(".treq")
@@ -1088,7 +1169,7 @@ impl TestRepo {
   }
 }
 
-#[allow(dead_code)]
+#[expect(dead_code, reason = "each test binary uses a subset of the fixtures")]
 pub fn create_test_repo(with_remote: bool) -> Result<TestRepo, String> {
   if with_remote {
     TestRepo::with_remote()
@@ -1097,7 +1178,7 @@ pub fn create_test_repo(with_remote: bool) -> Result<TestRepo, String> {
   }
 }
 
-#[allow(dead_code)]
+#[expect(dead_code, reason = "each test binary uses a subset of the fixtures")]
 pub fn write_test_file(
   base_path: &str,
   relative_path: &str,
@@ -1115,7 +1196,11 @@ pub fn write_test_file(
 /// Helpers for verifying jj state
 pub struct JjVerifier;
 
-#[allow(dead_code)]
+#[expect(
+  clippy::allow_attributes,
+  reason = "dead in only some of the binaries that share this file"
+)]
+#[allow(dead_code, reason = "each test binary uses a subset of the fixtures")]
 impl JjVerifier {
   /// Get list of jj workspaces, including `default` (equivalent to `jj workspace list`,
   /// name column only). Not `list_jj_workspaces`, which filters `default` out for
@@ -1176,5 +1261,25 @@ impl JjVerifier {
   /// Check if a file exists in the jj working copy
   pub fn file_exists_in_workspace(workspace_path: &str, file_path: &str) -> bool {
     Path::new(workspace_path).join(file_path).exists()
+  }
+}
+
+/// Property-test config shared by the proptests: a fixed seed and `cases`
+/// cases, so CI runs the same inputs every time. Set `PROPTEST_CASES` for a
+/// longer run, and `PROPTEST_SEED` to explore other inputs.
+#[expect(
+  clippy::allow_attributes,
+  reason = "dead in only some of the binaries that share this file"
+)]
+#[allow(dead_code, reason = "each test binary uses a subset of the fixtures")]
+pub fn proptest_config(cases: u32) -> proptest::test_runner::Config {
+  let env_u64 = |name: &str| std::env::var(name).ok().and_then(|v| v.parse::<u64>().ok());
+  proptest::test_runner::Config {
+    cases: env_u64("PROPTEST_CASES").map_or(cases, |n| n as u32),
+    rng_seed: proptest::test_runner::RngSeed::Fixed(
+      env_u64("PROPTEST_SEED").unwrap_or(0x7265_7121),
+    ),
+    failure_persistence: None,
+    ..proptest::test_runner::Config::default()
   }
 }

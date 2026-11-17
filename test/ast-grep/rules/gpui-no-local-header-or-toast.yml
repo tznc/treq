@@ -1,0 +1,44 @@
+id: gpui-no-local-header-or-toast
+language: rust
+severity: error
+message: >
+  Do not hand-roll a section heading or a toast wrapper. A local `*_header`,
+  `*_heading`, `header`, `heading` or `section` function that puts its title
+  in capitals is a second section heading: build it with `ui::SectionHeader`.
+  A local `fn toast` is a second toast entry point: build a
+  `native::Toast` (`Toast::success("Pushed")`) and send it as the event.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+ignores:
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+  # The shared toast entry point: `Toast` and `Backend::toast`.
+  - "src-tauri/src/gpui_shell/native.rs"
+utils:
+  body-uppercases:
+    has:
+      field: body
+      stopBy: end
+      kind: field_expression
+      has:
+        field: field
+        regex: ^to_uppercase$
+rule:
+  kind: function_item
+  all:
+    - any:
+        - has:
+            field: name
+            regex: ^toast$
+        - all:
+            - has:
+                field: name
+                regex: ^(header|heading|section|.*_header|.*_heading)$
+            - matches: body-uppercases
+    - not:
+        inside:
+          stopBy: end
+          kind: mod_item
+          has:
+            field: name
+            regex: tests$

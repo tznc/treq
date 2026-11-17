@@ -1,11 +1,16 @@
+#![expect(
+  clippy::print_stdout,
+  clippy::print_stderr,
+  reason = "the CLI writes to the terminal"
+)]
+
+use crate::result_ext::ResultExt;
 use args::{Matches, SubcommandMatches};
 use serde::Serialize;
-use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
 
 use crate::agent_dispatch;
-use crate::binary_paths;
 use crate::core;
 use crate::db::Database;
 use crate::local_db;
@@ -67,14 +72,35 @@ pub(super) fn workspace_dir_name_from_cwd(cwd: &Path) -> Option<String> {
 /// Repository a workspace command acts on: the repository containing the
 /// current directory or, with `-r <repo>`, one of its supporting repositories.
 pub(super) fn resolve_command_repo(matches: &Matches) -> Result<String, String> {
+  let spec = match required_repo_arg(matches) {
+    Ok(spec) => Some(spec),
+    Err(error) if error.starts_with("invalid_arguments:") => return Err(error),
+    Err(_) => None,
+  };
   let repo_path = detect_repo_path()?;
-  match get_arg_value(matches, "repo") {
+  match spec {
     None => Ok(repo_path),
     Some(spec) => {
       let cwd = std::env::current_dir().map_err(|e| format!("Failed to get CWD: {}", e))?;
-      core::supporting_repos::resolve(&repo_path, &spec, &cwd)
+      core::supporting_repos::resolve(&repos_alongside(&repo_path), &spec, &cwd)
     }
   }
+}
+
+/// The repositories `-r` may name: those sharing a project with
+/// `repo_path`, then any its `.treq/local.db` still links from before projects.
+fn repos_alongside(repo_path: &str) -> Vec<String> {
+  let mut paths = crate::db::Database::new(core::resolve_app_db_path(repo_path))
+    .ok()
+    .filter(|db| db.init().is_ok())
+    .and_then(|db| core::projects::repos_alongside(db.conn(), repo_path).ok())
+    .unwrap_or_default();
+  for legacy in local_db::list_supporting_repo_paths(repo_path).unwrap_or_default() {
+    if !paths.contains(&legacy) {
+      paths.push(legacy);
+    }
+  }
+  paths
 }
 
 pub(super) fn lookup_workspace_from_cwd(repo_path: &str) -> Option<local_db::Workspace> {
@@ -90,15 +116,21 @@ pub(super) fn lookup_workspace_from_cwd(repo_path: &str) -> Option<local_db::Wor
     .flatten()
 }
 
-/// Initialize binary paths cache for CLI mode (no database needed).
-pub fn init_cli_binary_paths() {
-  let mut paths = HashMap::new();
-  for name in ["jj", "git"] {
-    if let Some(path) = binary_paths::detect_binary(name) {
-      paths.insert(name.to_string(), path);
-    }
+/// Without `--repo`, the repository `cwd` is in (a workspace's home repo).
+pub(super) fn fill_repo_from_cwd(matches: &mut Matches, cwd: &Path) {
+  if get_arg_value(matches, "repo").is_some() {
+    return;
   }
-  binary_paths::init_binary_paths_cache(paths);
+  let Some(root) = find_repo_root(cwd) else {
+    return;
+  };
+  matches.args.insert(
+    "repo".into(),
+    args::ArgData {
+      value: serde_json::Value::String(normalize_repo_path(&root)),
+      occurrences: 1,
+    },
+  );
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -142,7 +174,7 @@ fn write_json_error(out: &mut dyn std::io::Write, code: &str, message: &str) {
     },
   };
   if let Ok(json) = serde_json::to_string(&body) {
-    let _ = writeln!(out, "{json}");
+    writeln!(out, "{json}").best_effort();
   }
 }
 
@@ -159,7 +191,7 @@ pub(super) fn run_structured_command(
   let format = match OutputFormat::parse(get_arg_value(matches, "format").as_deref()) {
     Ok(format) => format,
     Err(error) => {
-      let _ = writeln!(err, "Error: {error}");
+      writeln!(err, "Error: {error}").best_effort();
       return false;
     }
   };
@@ -169,7 +201,7 @@ pub(super) fn run_structured_command(
       match format {
         OutputFormat::Json => write_json_error(out, classify_cli_error(&error), &error),
         OutputFormat::Human => {
-          let _ = writeln!(err, "Error: {error}");
+          writeln!(err, "Error: {error}").best_effort();
         }
       }
       false
@@ -236,7 +268,7 @@ pub(super) fn classify_cli_error(message: &str) -> &'static str {
 fn handle_repo_command(matches: &Matches, format: OutputFormat) -> Result<(), String> {
   let action =
     get_arg_value(matches, "action").ok_or_else(|| "repo action is required".to_string())?;
-  let repo_path = get_arg_value(matches, "repo").ok_or_else(|| "--repo is required".to_string())?;
+  let repo_path = required_repo_arg(matches)?;
 
   match action.as_str() {
     "inspect" => {
@@ -258,8 +290,8 @@ fn handle_repo_command(matches: &Matches, format: OutputFormat) -> Result<(), St
         }
       }
     }
-    "status" | "branches" | "probe" | "init" | "clone" | "usage" | "host-check"
-    | "switch-branch" => handle_remote_review_command("repo", matches, format),
+    "status" | "branches" | "probe" | "init" | "clone" | "usage" | "tools" | "dirs"
+    | "host-check" | "switch-branch" => handle_remote_review_command("repo", matches, format),
     other => Err(format!("unknown repo action '{other}'")),
   }
 }
@@ -312,7 +344,22 @@ fn require_idempotency_key(key: Option<String>) -> Result<String, String> {
 /// resolved lexically. Symlinks are kept, so an already-absolute path, and the
 /// DB keys stored under it, stay as they are. Remote commands run without a
 /// shell, so nothing else expands a `~` a phone sends.
-fn absolute_repo_arg(repo: &str) -> String {
+/// The raw `--repo` value; a given but empty or blank value is an error, not
+/// the current directory.
+fn required_repo_arg(matches: &Matches) -> Result<String, String> {
+  match matches.args.get("repo").and_then(|arg| arg.value.as_str()) {
+    Some(repo) if repo.trim().is_empty() => {
+      Err("invalid_arguments: --repo must not be empty".to_string())
+    }
+    Some(repo) => Ok(repo.to_string()),
+    None => Err("--repo is required".to_string()),
+  }
+}
+
+fn absolute_repo_arg(repo: &str) -> Result<String, String> {
+  if repo.trim().is_empty() {
+    return Err("invalid_arguments: --repo must not be empty".to_string());
+  }
   let repo = crate::core::remote::expand_home(repo, std::env::var("HOME").ok().as_deref());
   let absolute = std::path::absolute(&repo).unwrap_or_else(|_| repo.clone().into());
   let mut normalized = std::path::PathBuf::new();
@@ -325,7 +372,7 @@ fn absolute_repo_arg(repo: &str) -> String {
       other => normalized.push(other),
     }
   }
-  normalized.to_string_lossy().to_string()
+  Ok(normalized.to_string_lossy().to_string())
 }
 
 /// Validates `--metadata` as a JSON object and folds `--title` into it.
@@ -336,9 +383,9 @@ fn create_workspace_metadata(
   let Some(raw) = metadata.as_deref() else {
     return Ok(title.map(|title| serde_json::json!({ "title": title }).to_string()));
   };
-  let mut object = match serde_json::from_str::<serde_json::Value>(raw) {
-    Ok(serde_json::Value::Object(object)) => object,
-    _ => return Err("invalid_arguments: --metadata must be a JSON object".to_string()),
+  let Ok(serde_json::Value::Object(mut object)) = serde_json::from_str::<serde_json::Value>(raw)
+  else {
+    return Err("invalid_arguments: --metadata must be a JSON object".to_string());
   };
   let Some(title) = title else {
     return Ok(metadata);
@@ -354,12 +401,13 @@ pub(crate) fn parse_remote_command_request(
   use crate::core::remote::{FileRevision, TreqCommandRequest};
   let action =
     get_arg_value(matches, "action").ok_or_else(|| format!("{command} action is required"))?;
-  let repo = absolute_repo_arg(
-    &get_arg_value(matches, "repo").ok_or_else(|| "--repo is required".to_string())?,
-  );
+  let raw_repo = required_repo_arg(matches)?;
+  let repo = absolute_repo_arg(&raw_repo)?;
   // A workspace path means its home repo (no stray local.db in the workspace).
   let repo = match (command, action.as_str()) {
-    ("repo", "init" | "clone" | "usage") => repo,
+    // `~` is the host's home, which only the listing resolves.
+    ("repo", "dirs") => raw_repo,
+    ("repo", "init" | "clone" | "usage" | "tools") => repo,
     _ => crate::jj::derive_repo_path_from_workspace(&repo).unwrap_or(repo),
   };
   let workspace = get_arg_value(matches, "workspace");
@@ -400,6 +448,8 @@ pub(crate) fn parse_remote_command_request(
     ("repo", "branches") => Ok(TreqCommandRequest::ListBranches { repo }),
     ("repo", "probe") => Ok(TreqCommandRequest::ProbeRepo { repo }),
     ("repo", "usage") => Ok(TreqCommandRequest::MachineUsage { root: repo }),
+    ("repo", "tools") => Ok(TreqCommandRequest::MachineTools { root: repo }),
+    ("repo", "dirs") => Ok(TreqCommandRequest::ListDirectories { path: repo }),
     ("repo", "host-check") => Ok(TreqCommandRequest::HostCheck { root: repo }),
     ("repo", "switch-branch") => Ok(TreqCommandRequest::SwitchRepoBranch {
       repo,
@@ -485,6 +535,23 @@ pub(crate) fn parse_remote_command_request(
       snapshot_id: require_target("snapshot id")?,
     }),
     ("changes", "list") => Ok(TreqCommandRequest::ListChanges { repo, workspace }),
+    ("changes", "review") => Ok(TreqCommandRequest::ReviewLoad {
+      repo,
+      workspace: require_workspace()?,
+      scope: core::remote::ReviewScope::parse(&require_target("review scope")?)?,
+    }),
+    ("changes", "review-save") => Ok(TreqCommandRequest::ReviewSave {
+      repo,
+      workspace: require_workspace()?,
+      scope: core::remote::ReviewScope::parse(&require_target("review scope")?)?,
+      review: serde_json::from_str(&require_value("review JSON")?)
+        .map_err(|e| format!("invalid_arguments: --value must be a review: {e}"))?,
+    }),
+    ("changes", "review-clear") => Ok(TreqCommandRequest::ReviewClear {
+      repo,
+      workspace: require_workspace()?,
+      scope: core::remote::ReviewScope::parse(&require_target("review scope")?)?,
+    }),
     ("changes", "workspace-diff") => Ok(TreqCommandRequest::WorkspaceDiff {
       repo,
       workspace: require_workspace()?,
@@ -506,10 +573,24 @@ pub(crate) fn parse_remote_command_request(
       query: value.unwrap_or_default(),
       limit: optional_usize(matches, "limit")?,
     }),
+    ("file", "list") => Ok(TreqCommandRequest::ListFiles {
+      repo,
+      workspace,
+      path: path.unwrap_or_default(),
+    }),
     ("changes", "diff") => Ok(TreqCommandRequest::DiffFile {
       repo,
       workspace,
       path: path.ok_or_else(|| "--path is required".to_string())?,
+    }),
+    ("changes", "diff-files") => Ok(TreqCommandRequest::DiffFiles {
+      repo,
+      workspace,
+      paths: serde_json::from_str(
+        &get_arg_value(matches, "paths").ok_or_else(|| "--paths is required".to_string())?,
+      )
+      .map_err(|e| format!("invalid_arguments: --paths must be a JSON list of paths: {e}"))?,
+      token: get_arg_value(matches, "token"),
     }),
     ("file", "read") => Ok(TreqCommandRequest::ReadFile {
       repo,
@@ -597,6 +678,10 @@ pub(crate) fn parse_remote_command_request(
     }),
     ("conflicts", "list") => Ok(TreqCommandRequest::ListConflicts { repo, workspace }),
     ("workspace", "marker") => Ok(TreqCommandRequest::WorkspaceChangeMarker { repo, workspace }),
+    ("workspace", "branch-deleted") => Ok(TreqCommandRequest::WorkspaceBranchDeleted {
+      repo,
+      workspace: require_workspace()?,
+    }),
     ("conflicts", "resolve") => Ok(TreqCommandRequest::ResolveConflict {
       repo,
       revision: require_target("revision")?,
@@ -614,6 +699,29 @@ pub(crate) fn parse_remote_command_request(
     ("git", "push") => Ok(TreqCommandRequest::GitPush {
       repo,
       workspace,
+      idempotency_key: require_idempotency_key(idempotency_key)?,
+    }),
+    ("git", "pr") => Ok(TreqCommandRequest::WorkspacePullRequest {
+      repo,
+      workspace: require_workspace()?,
+    }),
+    ("git", "pr-create") => Ok(TreqCommandRequest::CreatePullRequest {
+      repo,
+      workspace: require_workspace()?,
+      title: get_arg_value(matches, "title").ok_or("--title is required")?,
+      body: value.unwrap_or_default(),
+      draft: get_arg_value(matches, "draft").as_deref() == Some("true"),
+      idempotency_key: require_idempotency_key(idempotency_key)?,
+    }),
+    ("git", "github-read") => Ok(TreqCommandRequest::GithubRead {
+      repo,
+      query: serde_json::from_str(&require_value("GitHub query JSON")?)
+        .map_err(|e| format!("invalid GitHub query: {e}"))?,
+    }),
+    ("git", "github-write") => Ok(TreqCommandRequest::GithubWrite {
+      repo,
+      action: serde_json::from_str(&require_value("GitHub action JSON")?)
+        .map_err(|e| format!("invalid GitHub action: {e}"))?,
       idempotency_key: require_idempotency_key(idempotency_key)?,
     }),
     ("agent-remote", "start") => Ok(TreqCommandRequest::AgentStart {
@@ -642,8 +750,10 @@ pub(crate) fn parse_remote_command_request(
       workspace: require_workspace()?,
     }),
     ("pty-remote", "start") => {
+      let backend = pty_backend(matches)?;
       let payload = core::remote::parse_pty_launch_payload(&require_value("pty launch payload")?)?;
       Ok(TreqCommandRequest::PtyStart {
+        backend,
         repo,
         workspace: require_workspace()?,
         label: require_target("session label")?,
@@ -654,15 +764,57 @@ pub(crate) fn parse_remote_command_request(
         idempotency_key: require_idempotency_key(idempotency_key)?,
       })
     }
-    ("pty-remote", "list") => Ok(TreqCommandRequest::PtyList { repo, workspace }),
+    ("pty-remote", "list") => Ok(TreqCommandRequest::PtyList {
+      backend: pty_backend(matches)?,
+      repo,
+      workspace,
+    }),
+    ("pty-remote", "status") => Ok(TreqCommandRequest::PtyStatus),
+    ("pty-remote", "reset") => Ok(TreqCommandRequest::PtyReset {
+      backend: pty_backend(matches)?,
+    }),
+    ("pty-remote", "paste") => Ok(TreqCommandRequest::PtyPaste {
+      backend: pty_backend(matches)?,
+      repo,
+      workspace: require_workspace()?,
+      label: require_target("session label")?,
+      text: require_value("text to paste")?,
+      submit: get_arg_value(matches, "submit").as_deref() == Some("true"),
+      idempotency_key: require_idempotency_key(idempotency_key)?,
+    }),
+    ("pty-remote", "msg-deliver") => Ok(TreqCommandRequest::PtyMsgDeliver {
+      repo,
+      workspace: require_workspace()?,
+      label: require_target("session label")?,
+      envelope: require_value("message")?,
+    }),
+    ("pty-remote", "msg-poll") => Ok(TreqCommandRequest::PtyMsgPoll {
+      repo,
+      workspace: require_workspace()?,
+      label: require_target("session label")?,
+      since: require_value("event number")?
+        .parse()
+        .map_err(|_| "msg-poll needs a whole number of events".to_string())?,
+    }),
     ("pty-remote", "stop") => Ok(TreqCommandRequest::PtyStop {
+      backend: pty_backend(matches)?,
       repo,
       workspace: require_workspace()?,
       label: require_target("session label")?,
     }),
+    ("pty-remote", "rename") => Ok(TreqCommandRequest::PtyRename {
+      backend: pty_backend(matches)?,
+      repo,
+      workspace: require_workspace()?,
+      label: require_target("session label")?,
+      // An empty or missing value clears the title.
+      title: value.clone().unwrap_or_default(),
+    }),
     ("pty-remote", "attach-command") => {
+      let backend = pty_backend(matches)?;
       let payload = core::remote::parse_pty_launch_payload(&require_value("pty launch payload")?)?;
       Ok(TreqCommandRequest::PtyAttachCommand {
+        backend,
         repo,
         workspace: require_workspace()?,
         label: require_target("session label")?,
@@ -676,15 +828,71 @@ pub(crate) fn parse_remote_command_request(
   }
 }
 
+fn pty_backend(matches: &Matches) -> Result<core::pty_remote_supervisor::PtyBackend, String> {
+  core::pty_remote_supervisor::PtyBackend::parse(get_arg_value(matches, "backend").as_deref())
+}
+
+/// `pty-remote` actions that hold the terminal instead of printing a
+/// result: `daemon` (serves until reset or idle) and `attach` (what an SSH
+/// PTY channel runs, from `attach-command`).
+fn interactive_pty_action(matches: &Matches) -> Option<String> {
+  get_arg_value(matches, "action").filter(|action| action == "daemon" || action == "attach")
+}
+
+fn handle_interactive_pty(action: &str, matches: &Matches) -> bool {
+  let result = match action {
+    "daemon" => core::pty_remote_supervisor::run_daemon(),
+    _ => run_pty_attach(matches),
+  };
+  match result {
+    Ok(()) => true,
+    Err(error) => {
+      eprintln!("treq pty-remote {action}: {error}");
+      false
+    }
+  }
+}
+
+fn run_pty_attach(matches: &Matches) -> Result<(), String> {
+  let required = |name: &str, what: &str| {
+    get_arg_value(matches, name).ok_or_else(|| format!("invalid_arguments: {what} is required"))
+  };
+  let repo = required("repo", "repo")?;
+  let workspace = required("workspace", "workspace")?;
+  let label = required("target", "session label")?;
+  let payload = core::remote::parse_pty_launch_payload(&required("value", "pty launch payload")?)?;
+  core::pty_remote_supervisor::run_daemon_attach(
+    &repo,
+    &payload.remote_dir,
+    &workspace,
+    &label,
+    &payload.launch,
+    payload.cols,
+    payload.rows,
+  )
+}
+
 fn handle_remote_review_command(
   command: &str,
   matches: &Matches,
   format: OutputFormat,
 ) -> Result<(), String> {
+  let mut matches = matches.clone();
+  if let Ok(cwd) = std::env::current_dir() {
+    fill_repo_from_cwd(&mut matches, &cwd);
+  }
+  let matches = &matches;
   let request = parse_remote_command_request(command, matches)?;
+  let status = matches!(request, core::remote::TreqCommandRequest::PtyStatus);
   let value = crate::core::remote::execute_local_request(request)?;
   match format {
     OutputFormat::Json => print_json(&value),
+    OutputFormat::Human if status => {
+      let status: core::pty_remote_supervisor::TerminalStatus =
+        serde_json::from_value(value).map_err(|e| e.to_string())?;
+      println!("{}", core::pty_remote_supervisor::describe_status(&status));
+      Ok(())
+    }
     OutputFormat::Human => {
       println!("{value:#}");
       Ok(())
@@ -695,6 +903,22 @@ fn handle_remote_review_command(
 /// Top-level CLI dispatch. Returns the process exit code if the subcommand was
 /// recognized, or `None` if it was not (caller should print usage and exit).
 pub fn handle_cli_command(subcommand: &SubcommandMatches) -> Option<i32> {
+  if subcommand.name == "agent" {
+    if let Some(msg) = subcommand
+      .matches
+      .subcommand
+      .as_deref()
+      .filter(|sub| sub.name == "msg")
+    {
+      return Some(agent_msg_handlers::handle(&msg.matches));
+    }
+  }
+  if subcommand.name == "github" {
+    return Some(run_github(&subcommand.matches).unwrap_or_else(|error| {
+      eprintln!("treq github: {error}");
+      1
+    }));
+  }
   let success = match subcommand.name.as_str() {
     "add" => workspace_handlers::handle_workspace_add(&subcommand.matches),
     "set" => workspace_handlers::handle_workspace_set(&subcommand.matches),
@@ -706,12 +930,26 @@ pub fn handle_cli_command(subcommand: &SubcommandMatches) -> Option<i32> {
     "resolve" => workspace_handlers::handle_resolve(&subcommand.matches),
     "send" => workspace_handlers::handle_send(&subcommand.matches),
     "notify" => workspace_handlers::handle_notify(&subcommand.matches),
+    "project" => run_structured(&subcommand.matches, |format| {
+      project_handlers::handle_project_command(&subcommand.matches, format)
+    }),
     "repo" => run_structured(&subcommand.matches, |format| {
       handle_repo_command(&subcommand.matches, format)
     }),
     "agent-review" => run_structured(&subcommand.matches, |format| {
       agent_review_handlers::handle_agent_review_command(&subcommand.matches, format)
     }),
+    "gateway" => match run_gateway(&subcommand.matches) {
+      Ok(()) => true,
+      Err(error) => {
+        eprintln!("treq gateway: {error}");
+        false
+      }
+    },
+    "pty-remote" if interactive_pty_action(&subcommand.matches).is_some() => {
+      let action = interactive_pty_action(&subcommand.matches).unwrap_or_default();
+      handle_interactive_pty(&action, &subcommand.matches)
+    }
     "workspace" | "changes" | "file" | "commits" | "conflicts" | "git" | "agent-remote"
     | "pty-remote" => run_structured(&subcommand.matches, |format| {
       handle_remote_review_command(&subcommand.name, &subcommand.matches, format)
@@ -719,6 +957,187 @@ pub fn handle_cli_command(subcommand: &SubcommandMatches) -> Option<i32> {
     _ => return None,
   };
   Some(if success { 0 } else { 1 })
+}
+
+/// `treq github …`: GitHub tokens for agents in a cloud sandbox.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum GithubCommand {
+  Token { repository: String },
+  Credential { operation: String },
+  Gh { args: Vec<String> },
+}
+
+pub(super) fn parse_github_command(matches: &Matches) -> Result<GithubCommand, String> {
+  let sub = matches
+    .subcommand
+    .as_deref()
+    .ok_or_else(|| "invalid_arguments: treq github needs token, credential or gh".to_string())?;
+  let value = |name: &str| get_arg_value(&sub.matches, name);
+  match sub.name.as_str() {
+    "token" => Ok(GithubCommand::Token {
+      repository: value("repository")
+        .ok_or_else(|| "invalid_arguments: a repository is required".to_string())?,
+    }),
+    "credential" => Ok(GithubCommand::Credential {
+      operation: value("operation")
+        .ok_or_else(|| "invalid_arguments: an operation is required".to_string())?,
+    }),
+    "gh" => Ok(GithubCommand::Gh {
+      args: sub
+        .matches
+        .args
+        .get("args")
+        .and_then(|arg| arg.value.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str().map(String::from))
+        .collect(),
+    }),
+    other => Err(format!(
+      "invalid_arguments: unknown treq github command {other}"
+    )),
+  }
+}
+
+fn github_cache_path() -> std::path::PathBuf {
+  std::env::var_os("XDG_CACHE_HOME")
+    .map(std::path::PathBuf::from)
+    .or_else(|| std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".cache")))
+    .unwrap_or_else(std::env::temp_dir)
+    .join("treq")
+    .join("github-tokens.json")
+}
+
+fn github_token(repository: &str) -> Result<String, String> {
+  let config = std::env::var_os("TREQ_INTEGRATION_CONFIG_FILE")
+    .map(std::path::PathBuf::from)
+    .unwrap_or_else(|| crate::integration::CONFIG_FILE.into());
+  let runtime = tokio::runtime::Builder::new_current_thread()
+    .enable_all()
+    .build()
+    .map_err(|e| e.to_string())?;
+  runtime.block_on(crate::integration::token_for(
+    &reqwest::Client::new(),
+    &config,
+    &github_cache_path(),
+    repository,
+    chrono::Utc::now().timestamp(),
+  ))
+}
+
+/// `treq github …`; its exit code (gh's own, for `treq github gh`).
+fn run_github(matches: &Matches) -> Result<i32, String> {
+  use std::io::Read as _;
+  match parse_github_command(matches)? {
+    GithubCommand::Token { repository } => {
+      println!("{}", github_token(&repository)?);
+      Ok(0)
+    }
+    // git also calls helpers with store and erase; there is nothing to keep.
+    GithubCommand::Credential { operation } if operation != "get" => Ok(0),
+    GithubCommand::Credential { .. } => {
+      let mut request = String::new();
+      std::io::stdin()
+        .read_to_string(&mut request)
+        .map_err(|e| e.to_string())?;
+      // Not a github.com repository: say nothing, so git asks elsewhere.
+      if let Some(repository) = crate::integration::credential_repository(&request) {
+        print!(
+          "{}",
+          crate::integration::credential_answer(&github_token(&repository)?)
+        );
+      }
+      Ok(0)
+    }
+    GithubCommand::Gh { args } => {
+      let repository = crate::integration::gh_repo_flag(&args).or_else(|| {
+        let cwd = std::env::current_dir().ok()?;
+        crate::github::get_git_remote_url_impl(&cwd.to_string_lossy())
+          .ok()
+          .flatten()
+          .map(|remote| remote.full_name)
+      });
+      let gh = std::env::var("TREQ_REAL_GH").unwrap_or_else(|_| "/usr/bin/gh".to_string());
+      let mut command = std::process::Command::new(gh);
+      command.args(&args);
+      if let Some(repository) = repository {
+        command.env("GH_TOKEN", github_token(&repository)?);
+      }
+      let status = command
+        .status()
+        .map_err(|e| format!("cannot run gh: {e}"))?;
+      Ok(status.code().unwrap_or(1))
+    }
+  }
+}
+
+/// `treq gateway` flags.
+#[derive(Debug)]
+pub(super) struct GatewayArgs {
+  pub placement_id: String,
+  pub secret_file: String,
+  pub listen: String,
+  pub allow: Vec<(String, u16)>,
+}
+
+pub(super) fn parse_gateway_args(matches: &Matches) -> Result<GatewayArgs, String> {
+  let placement_id = get_arg_value(matches, "placement-id")
+    .ok_or_else(|| "invalid_arguments: --placement-id is required".to_string())?;
+  let allow = matches
+    .args
+    .get("allow")
+    .and_then(|arg| arg.value.as_array())
+    .into_iter()
+    .flatten()
+    .filter_map(|v| v.as_str())
+    .map(|v| {
+      let (host, port) = v
+        .rsplit_once(':')
+        .ok_or_else(|| format!("invalid_arguments: --allow {v} is not host:port"))?;
+      let port = port
+        .parse()
+        .map_err(|_| format!("invalid_arguments: --allow {v} has a bad port"))?;
+      Ok((host.to_string(), port))
+    })
+    .collect::<Result<_, String>>()?;
+  Ok(GatewayArgs {
+    placement_id,
+    secret_file: get_arg_value(matches, "secret-file")
+      .unwrap_or_else(|| "/etc/treq/gateway.secret".to_string()),
+    listen: get_arg_value(matches, "listen")
+      .unwrap_or_else(|| format!("127.0.0.1:{}", treq_gateway::DEFAULT_LISTEN_PORT)),
+    allow,
+  })
+}
+
+/// `treq gateway`: serves until killed.
+fn run_gateway(matches: &Matches) -> Result<(), String> {
+  let args = parse_gateway_args(matches)?;
+  let secret = std::fs::read_to_string(&args.secret_file)
+    .map_err(|e| format!("cannot read {}: {e}", args.secret_file))?
+    .trim_end()
+    .as_bytes()
+    .to_vec();
+  if secret.is_empty() {
+    return Err(format!("{} is empty", args.secret_file));
+  }
+  let mut config = treq_gateway::Config::new(args.placement_id, secret);
+  if !args.allow.is_empty() {
+    config.allow = args.allow;
+  }
+  let runtime = tokio::runtime::Builder::new_multi_thread()
+    .enable_all()
+    .build()
+    .map_err(|e| e.to_string())?;
+  runtime.block_on(async move {
+    let listener = tokio::net::TcpListener::bind(&args.listen)
+      .await
+      .map_err(|e| format!("cannot listen on {}: {e}", args.listen))?;
+    eprintln!("treq gateway: listening on {}", args.listen);
+    treq_gateway::serve(listener, std::sync::Arc::new(config))
+      .await
+      .map_err(|e| e.to_string())
+  })
 }
 
 /// How long a command waits for piped stdin it did not explicitly ask for.
@@ -735,6 +1154,8 @@ pub(super) fn fd_has_input(fd: std::os::unix::io::RawFd, timeout: Duration) -> b
     revents: 0,
   };
   let timeout_ms = timeout.as_millis().min(i32::MAX as u128) as i32;
+  // SAFETY: `poll_fd` is a live, initialised `pollfd` and the count is 1, so
+  // `poll` reads and writes only that one struct.
   let ready = unsafe { libc::poll(&mut poll_fd, 1, timeout_ms) };
   ready > 0 && poll_fd.revents & (libc::POLLIN | libc::POLLHUP) != 0
 }
@@ -768,6 +1189,8 @@ pub(super) fn is_supported_cli_command(name: &str) -> bool {
   matches!(
     name,
     "add"
+      | "gateway"
+      | "github"
       | "set"
       | "st"
       | "diff"
@@ -877,21 +1300,27 @@ pub(super) fn dispatch_agent_request(
   ))
 }
 
+/// The running Treq instance that has `repo` open.
+pub(super) fn repo_instance(repo: &str) -> Result<agent_dispatch::RegisteredInstance, String> {
+  let now = agent_dispatch::now_millis();
+  local_db::prune_stale_instance_registry(repo, now, agent_dispatch::HEARTBEAT_TIMEOUT_MS)?;
+  let instances = local_db::list_instance_registry(repo)?;
+  agent_dispatch::resolve_target_instance(&instances, repo)
+    .cloned()
+    .ok_or_else(|| {
+      format!(
+        "No running Treq instance has repo '{}'. Open this repo in Treq first.",
+        repo
+      )
+    })
+}
+
 /// Sends a JSON IPC request to the Treq instance that has `repo` open.
 fn dispatch_to_repo_instance<T: serde::Serialize>(
   repo: &str,
   request: &T,
 ) -> Result<(String, agent_dispatch::AgentDispatchResponse), String> {
-  let now = agent_dispatch::now_millis();
-  local_db::prune_stale_instance_registry(repo, now, agent_dispatch::HEARTBEAT_TIMEOUT_MS)?;
-  let instances = local_db::list_instance_registry(repo)?;
-
-  let instance = agent_dispatch::resolve_target_instance(&instances, repo).ok_or_else(|| {
-    format!(
-      "No running Treq instance has repo '{}'. Open this repo in Treq first.",
-      repo
-    )
-  })?;
+  let instance = repo_instance(repo)?;
 
   let response = send_json_dispatch_request(
     &instance.endpoint,
@@ -899,7 +1328,7 @@ fn dispatch_to_repo_instance<T: serde::Serialize>(
     Duration::from_millis(250),
     Duration::from_millis(600),
   )?;
-  Ok((instance.instance_id.clone(), response))
+  Ok((instance.instance_id, response))
 }
 
 pub(super) fn dispatch_send_request(
@@ -978,10 +1407,14 @@ fn send_json_dispatch_request<T: serde::Serialize>(
 }
 
 pub mod args;
+mod project_handlers;
 mod workspace_handlers;
 
+mod agent_msg_handlers;
 mod agent_review_handlers;
 mod status_output;
 
+#[cfg(test)]
+mod proptests;
 #[cfg(test)]
 mod tests;

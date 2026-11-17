@@ -1,4 +1,5 @@
 use crate::lock_ext::LockExt;
+use crate::result_ext::ResultExt;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
@@ -7,6 +8,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
 use std::thread;
+
+/// Receives each chunk of a session's output, as the bytes read.
+pub type PtyOutput = Box<dyn Fn(&[u8]) + Send + 'static>;
 
 /// Process a chunk of bytes, handling incomplete UTF-8 sequences at boundaries.
 ///
@@ -55,6 +59,11 @@ impl Utf8StreamDecoder {
     output
   }
 
+  /// Whether a character is waiting for its remaining bytes.
+  pub(crate) fn has_pending(&self) -> bool {
+    !self.pending.is_empty()
+  }
+
   pub(crate) fn finish(&mut self) -> String {
     let output = String::from_utf8_lossy(&self.pending).into_owned();
     self.pending.clear();
@@ -63,12 +72,13 @@ impl Utf8StreamDecoder {
 }
 
 /// Strip ANSI escape sequences from a string.
+#[expect(clippy::expect_used, reason = "constant pattern")]
 pub fn strip_ansi_codes(s: &str) -> String {
   // Match CSI sequences (including private modes like ?1h), OSC sequences, and charset designations
   static ANSI_RE: OnceLock<Regex> = OnceLock::new();
   let re = ANSI_RE.get_or_init(|| {
     Regex::new(r"\x1b\[[\x20-\x3f]*[\x30-\x3f]*[\x40-\x7e]|\x1b\][^\x07]*\x07|\x1b\([A-Z]|\x1b[=>]")
-      .unwrap()
+      .expect("ANSI pattern is a valid regex")
   });
   re.replace_all(s, "").to_string()
 }
@@ -229,19 +239,23 @@ fn terminate_process_tree(root: u32, child: &mut Box<dyn Child + Send>) {
 
   fn signal_all(pids: &[u32], root: u32, signal: libc::c_int) {
     for &pid in pids {
+      // SAFETY: `kill` takes plain integers and touches no Rust memory; a
+      // pid that already exited only makes it return an error, which is ignored.
       unsafe {
         libc::kill(pid as libc::pid_t, signal);
       }
     }
+    // SAFETY: as above.
     unsafe {
       libc::kill(root as libc::pid_t, signal);
     }
   }
 
   fn any_alive(pids: &[u32]) -> bool {
-    pids
-      .iter()
-      .any(|&pid| unsafe { libc::kill(pid as libc::pid_t, 0) } == 0)
+    pids.iter().any(|&pid| {
+      // SAFETY: signal 0 only checks existence; `kill` touches no Rust memory.
+      unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+    })
   }
 
   let descendants = descendant_pids(root);
@@ -361,7 +375,10 @@ pub struct PtyManager {
 }
 
 impl PtyManager {
-  #[allow(clippy::new_without_default)]
+  #[expect(
+    clippy::new_without_default,
+    reason = "constructed once at startup; a Default impl would add nothing"
+  )]
   pub fn new() -> Self {
     PtyManager {
       sessions: Arc::new(Mutex::new(HashMap::new())),
@@ -370,7 +387,10 @@ impl PtyManager {
     }
   }
 
-  #[allow(clippy::too_many_arguments)]
+  #[expect(
+    clippy::too_many_arguments,
+    reason = "flat argument list kept to match callers"
+  )]
   pub fn create_session(
     &self,
     session_id: String,
@@ -380,7 +400,7 @@ impl PtyManager {
     shell_args: Vec<String>,
     initial_command: Option<String>,
     suppress_echo_for: Option<String>,
-    callback: Box<dyn Fn(String) + Send + 'static>,
+    callback: PtyOutput,
   ) -> Result<(), String> {
     {
       let mut creating = self.creating.lock_or_recover();
@@ -404,7 +424,10 @@ impl PtyManager {
     result
   }
 
-  #[allow(clippy::too_many_arguments)]
+  #[expect(
+    clippy::too_many_arguments,
+    reason = "flat argument list kept to match callers"
+  )]
   fn create_session_inner(
     &self,
     session_id: String,
@@ -414,7 +437,7 @@ impl PtyManager {
     shell_args: Vec<String>,
     initial_command: Option<String>,
     suppress_echo_for: Option<String>,
-    callback: Box<dyn Fn(String) + Send + 'static>,
+    callback: PtyOutput,
   ) -> Result<(), String> {
     let stale = {
       let mut sessions = self.sessions.lock_or_recover();
@@ -471,16 +494,16 @@ impl PtyManager {
     let mut reader = match pair.master.try_clone_reader() {
       Ok(value) => value,
       Err(error) => {
-        let _ = child.kill();
-        let _ = child.wait();
+        child.kill().best_effort();
+        child.wait().best_effort();
         return Err(error.to_string());
       }
     };
     let writer = match pair.master.take_writer() {
       Ok(value) => value,
       Err(error) => {
-        let _ = child.kill();
-        let _ = child.wait();
+        child.kill().best_effort();
+        child.wait().best_effort();
         return Err(error.to_string());
       }
     };
@@ -529,11 +552,20 @@ impl PtyManager {
             }
             // Flush remaining line buffer
             if !line_buffer.is_empty() {
-              callback(line_buffer);
+              callback(line_buffer.as_bytes());
             }
             break;
           }
           Ok(n) => {
+            // Output nothing reads or rewrites goes on as the bytes read; the
+            // emulator takes a character split between reads in stride.
+            if !cfg!(windows)
+              && !utf8_decoder.has_pending()
+              && auto_command_reader.lock_or_recover().is_none()
+            {
+              callback(&buffer[..n]);
+              continue;
+            }
             let mut data = utf8_decoder.push(&buffer[..n]);
             if data.is_empty() {
               continue;
@@ -548,7 +580,7 @@ impl PtyManager {
             if cfg!(windows) && data.contains(CURSOR_POS_QUERY) {
               let mut sessions = reader_sessions.lock_or_recover();
               if let Some(session) = sessions.get_mut(&reader_session_id) {
-                let _ = session.write(b"\x1b[1;1R");
+                session.write(b"\x1b[1;1R").best_effort();
               }
               drop(sessions);
               data = data.replace(CURSOR_POS_QUERY, "");
@@ -563,13 +595,11 @@ impl PtyManager {
               guard.clone()
             };
 
-            if filter_cmd.is_none() {
+            let Some(filter_cmd) = filter_cmd else {
               // No filter active, pass through directly
-              callback(data);
+              callback(data.as_bytes());
               continue;
-            }
-
-            let filter_cmd = filter_cmd.unwrap();
+            };
             let filter = match echo_filter.as_mut() {
               Some(filter) if filter.is_for(&filter_cmd) => filter,
               _ => echo_filter.insert(EchoFilter::new(&filter_cmd)),
@@ -582,7 +612,7 @@ impl PtyManager {
               if suppressed_tail.len() > MAX_FILTER_BUFFER {
                 let start = suppressed_tail.len() - MAX_FILTER_BUFFER;
                 let start = suppressed_tail.ceil_char_boundary(start);
-                callback(suppressed_tail[start..].to_string());
+                callback(suppressed_tail.split_off(start).as_bytes());
                 suppressed_tail.clear();
                 line_buffer.clear();
                 *auto_command_reader.lock_or_recover() = None;
@@ -592,11 +622,10 @@ impl PtyManager {
             }
 
             while let Some(newline_pos) = line_buffer.find('\n') {
-              let line = line_buffer[..=newline_pos].to_string();
-              line_buffer = line_buffer[newline_pos + 1..].to_string();
+              let line: String = line_buffer.drain(..=newline_pos).collect();
 
               if filter.show(&strip_ansi_codes(&line)) {
-                callback(line);
+                callback(line.as_bytes());
               }
               if filter.seen_echo() {
                 suppressed_tail.clear();
@@ -605,7 +634,7 @@ impl PtyManager {
               if filter.is_done() {
                 *auto_command_reader.lock_or_recover() = None;
                 if !line_buffer.is_empty() {
-                  callback(std::mem::take(&mut line_buffer));
+                  callback(std::mem::take(&mut line_buffer).as_bytes());
                 }
                 break;
               }
@@ -626,7 +655,7 @@ impl PtyManager {
         }
       };
       if let Some(mut session) = removed {
-        let _ = session.shutdown();
+        session.shutdown().best_effort();
       }
     });
 
@@ -635,8 +664,9 @@ impl PtyManager {
       let initial_session_id = session_id;
       thread::spawn(move || {
         thread::sleep(std::time::Duration::from_millis(100));
-        let _ =
-          manager.write_to_generation(&initial_session_id, generation, &format!("{command}\n"));
+        manager
+          .write_to_generation(&initial_session_id, generation, &format!("{command}\n"))
+          .ignore_closed();
       });
     }
 
@@ -695,11 +725,11 @@ impl PtyManager {
   /// (dashboard teardown, native "Close Window", full app quit).
   pub fn close_all(&self) {
     let drained: Vec<PtySession> = {
-      let mut sessions = self.sessions.lock().unwrap();
+      let mut sessions = self.sessions.lock_or_recover();
       sessions.drain().map(|(_, session)| session).collect()
     };
     for mut session in drained {
-      let _ = session.shutdown();
+      session.shutdown().best_effort();
     }
   }
 
@@ -709,7 +739,11 @@ impl PtyManager {
   /// match and are never closed by this.
   pub fn close_all_for_window(&self, window_label: &str) {
     let drained: Vec<PtySession> = {
-      let mut sessions = self.sessions.lock().unwrap();
+      let mut sessions = self.sessions.lock_or_recover();
+      #[expect(
+        clippy::needless_collect,
+        reason = "ends the shared borrow before removing"
+      )]
       let ids: Vec<String> = sessions
         .iter()
         .filter(|(_, session)| session.window_label.as_deref() == Some(window_label))
@@ -721,7 +755,7 @@ impl PtyManager {
         .collect()
     };
     for mut session in drained {
-      let _ = session.shutdown();
+      session.shutdown().best_effort();
     }
   }
 
@@ -733,6 +767,25 @@ impl PtyManager {
       Ok(())
     } else {
       Err("Session not found".to_string())
+    }
+  }
+
+  /// Whether a command the shell started holds the terminal: its
+  /// foreground process group is not the shell's. `None` for no session, or
+  /// where the platform cannot tell.
+  pub fn runs_command(&self, session_id: &str) -> Option<bool> {
+    #[cfg(unix)]
+    {
+      let sessions = self.sessions.lock_or_recover();
+      let session = sessions.get(session_id)?;
+      let shell = session.child.process_id()?;
+      let foreground = session.master.process_group_leader()?;
+      Some(foreground as u32 != shell)
+    }
+    #[cfg(not(unix))]
+    {
+      let _ = session_id;
+      None
     }
   }
 
@@ -748,7 +801,7 @@ impl PtyManager {
       }
     };
     if let Some(mut session) = stale {
-      let _ = session.shutdown();
+      session.shutdown().best_effort();
     }
     false
   }
@@ -891,6 +944,36 @@ mod tests {
     manager.close_session("duplicate").unwrap();
   }
 
+  /// The foreground process tells whether the typed command started.
+  #[cfg(unix)]
+  #[test]
+  fn runs_command_once_the_shell_hands_over_the_terminal() {
+    let manager = PtyManager::new();
+    manager
+      .create_session(
+        "fg".into(),
+        None,
+        None,
+        shell(),
+        vec!["-i".into()],
+        None,
+        None,
+        Box::new(|_| {}),
+      )
+      .unwrap();
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(manager.runs_command("fg"), Some(false));
+
+    manager.write_to_session("fg", "sleep 5\r").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while manager.runs_command("fg") != Some(true) && Instant::now() < deadline {
+      thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(manager.runs_command("fg"), Some(true));
+    assert_eq!(manager.runs_command("missing"), None);
+    manager.close_session("fg").unwrap();
+  }
+
   #[test]
   fn removes_session_after_child_eof() {
     let manager = PtyManager::new();
@@ -1014,7 +1097,7 @@ mod tests {
         Some("sleep 30 & echo GRANDCHILD_PID:$!".into()),
         None,
         Box::new(move |chunk| {
-          let _ = tx.send(chunk);
+          let _ = tx.send(String::from_utf8_lossy(chunk).into_owned());
         }),
       )
       .unwrap();
@@ -1040,6 +1123,7 @@ mod tests {
     let grandchild_pid = grandchild_pid.expect("shell printed its background pid");
 
     // Alive prior to close: kill(pid, 0) checks existence without signaling.
+    // SAFETY: signal 0 only checks existence; `kill` touches no Rust memory.
     assert_eq!(unsafe { libc::kill(grandchild_pid, 0) }, 0);
 
     manager.close_session("descendant").unwrap();
@@ -1047,6 +1131,7 @@ mod tests {
     let deadline = Instant::now() + Duration::from_secs(2);
     let mut still_alive = true;
     while Instant::now() < deadline {
+      // SAFETY: signal 0 only checks existence; `kill` touches no Rust memory.
       if unsafe { libc::kill(grandchild_pid, 0) } != 0 {
         still_alive = false;
         break;
@@ -1105,7 +1190,7 @@ mod tests {
         Some(command),
         Some("echo-that-will-never-appear-0123456789".into()),
         Box::new(move |chunk| {
-          let _ = tx.send(chunk);
+          let _ = tx.send(String::from_utf8_lossy(chunk).into_owned());
         }),
       )
       .unwrap();

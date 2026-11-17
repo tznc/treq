@@ -13,6 +13,7 @@ import {
 } from "../_shared/billing/checkout.ts";
 import {
   type BillingPlan,
+  DEFAULT_USAGE_PRICE_LOOKUP_KEY,
   LOOKUP_KEY_BY_PLAN,
 } from "../_shared/billing/plans.ts";
 import type {
@@ -34,7 +35,21 @@ export type CheckoutDeps = {
   organizations?: OrganizationBilling;
   stripe: StripeClient;
   webUrl: string;
+  /** Lookup key of the metered usage price Pro carries. */
+  usagePriceLookupKey?: string;
+  /**
+   * Internal test accounts: when the signed-in user's email equals one of
+   * `emails` exactly, checkout applies `couponId` (a 100%-off coupon) so plans can be
+   * tested in production without charges.
+   */
+  testCoupon?: { emails: string[]; couponId: string };
 };
+
+function testCouponFor(deps: CheckoutDeps): string | undefined {
+  const t = deps.testCoupon;
+  if (!t?.couponId || !deps.user.email) return undefined;
+  return t.emails.includes(deps.user.email) ? t.couponId : undefined;
+}
 
 export type CheckoutResult = { status: number; body: Record<string, unknown> };
 
@@ -61,7 +76,10 @@ async function customerFor(owner: Owner, deps: CheckoutDeps) {
 
   const params: StripeParams = {};
   // The email is for Stripe receipts only. Ownership never depends on it.
-  if (deps.user.email) params.email = deps.user.email;
+  // An organization's customer is the team's billing account, shared by all
+  // its owners, so the buyer's personal email stays off it: Checkout asks for
+  // a billing email, and any owner changes it in Manage billing.
+  if (owner.type === "user" && deps.user.email) params.email = deps.user.email;
   params["metadata[owner_type]"] = owner.type;
   params["metadata[owner_id]"] = owner.id;
   const created = await deps.stripe.request<{ id: string }>(
@@ -76,6 +94,62 @@ async function customerFor(owner: Owner, deps: CheckoutDeps) {
   return recorded;
 }
 
+// Stripe statuses that mean the customer already has, or is about to have,
+// this plan. The webhook may not have recorded it yet, so hasPro() alone
+// lets two tabs each start a paid subscription.
+const LIVE_STATUSES: ReadonlySet<string> = new Set([
+  "trialing",
+  "active",
+  "past_due",
+  "incomplete",
+  "unpaid",
+  "paused",
+]);
+
+type StripeList<T> = { data?: T[] };
+type StripeSubscription = {
+  status?: string;
+  items?: { data?: { price?: { lookup_key?: string | null } }[] };
+};
+
+async function hasLiveSubscription(
+  customerId: string,
+  plan: BillingPlan,
+  stripe: StripeClient,
+): Promise<boolean> {
+  const subscriptions = await stripe.request<StripeList<StripeSubscription>>(
+    "GET",
+    "/v1/subscriptions",
+    { customer: customerId, status: "all", limit: 100 },
+  );
+  return (subscriptions.data ?? []).some(
+    (sub) =>
+      LIVE_STATUSES.has(sub.status ?? "") &&
+      (sub.items?.data ?? []).some(
+        (item) => item.price?.lookup_key === LOOKUP_KEY_BY_PLAN[plan],
+      ),
+  );
+}
+
+// Only one checkout per customer stays payable: the newest. An older tab
+// that is completed after this would otherwise start a second subscription.
+async function expireOpenSessions(
+  customerId: string,
+  stripe: StripeClient,
+): Promise<void> {
+  const sessions = await stripe.request<StripeList<{ id: string }>>(
+    "GET",
+    "/v1/checkout/sessions",
+    { customer: customerId, status: "open", limit: 100 },
+  );
+  for (const session of sessions.data ?? []) {
+    await stripe.request(
+      "POST",
+      `/v1/checkout/sessions/${encodeURIComponent(session.id)}/expire`,
+    );
+  }
+}
+
 async function openSession(
   plan: BillingPlan,
   owner: Owner,
@@ -84,16 +158,41 @@ async function openSession(
   try {
     const customer = await customerFor(owner, deps);
 
-    const prices = await deps.stripe.request<{ data: { id: string }[] }>(
-      "GET",
-      "/v1/prices",
-      {
-        "lookup_keys[0]": LOOKUP_KEY_BY_PLAN[plan],
-        active: true,
-        limit: 1,
-      },
-    );
-    const priceId = prices.data[0]?.id;
+    if (
+      await hasLiveSubscription(customer.stripe_customer_id, plan, deps.stripe)
+    ) {
+      return {
+        status: 409,
+        body: {
+          error: `A ${PLAN_NAMES[plan]} subscription is already being set up. Refresh in a minute, or use Manage billing.`,
+        },
+      };
+    }
+    await expireOpenSessions(customer.stripe_customer_id, deps.stripe);
+
+    // Pro and Team both carry the metered usage price for cloud workspaces:
+    // Team members' usage on the organization profile bills the organization.
+    const usageKey = deps.usagePriceLookupKey ?? DEFAULT_USAGE_PRICE_LOOKUP_KEY;
+    const query: StripeParams = { "lookup_keys[0]": LOOKUP_KEY_BY_PLAN[plan] };
+    if (usageKey) query["lookup_keys[1]"] = usageKey;
+    query.active = true;
+    query.limit = usageKey ? 2 : 1;
+    const prices = await deps.stripe.request<{
+      data: { id: string; lookup_key?: string | null }[];
+    }>("GET", "/v1/prices", query);
+    const priceId = usageKey
+      ? prices.data.find((p) => p.lookup_key === LOOKUP_KEY_BY_PLAN[plan])?.id
+      : prices.data[0]?.id;
+    const usagePriceId = usageKey
+      ? prices.data.find((p) => p.lookup_key === usageKey)?.id
+      : undefined;
+    if (usageKey && !usagePriceId) {
+      // Checkout still works. scripts/stripe/setup-usage-meter.ts adds the
+      // price to subscriptions that lack it once the price exists.
+      console.warn(
+        `[billing-checkout] usage price '${usageKey}' is not configured`,
+      );
+    }
     if (!priceId) {
       return {
         status: 500,
@@ -101,7 +200,7 @@ async function openSession(
       };
     }
 
-    const session = await deps.stripe.request<{ client_secret: string }>(
+    const session = await deps.stripe.request<{ url: string }>(
       "POST",
       "/v1/checkout/sessions",
       buildCheckoutSessionParams({
@@ -109,12 +208,13 @@ async function openSession(
         priceId,
         ownerId: owner.id,
         ownerType: owner.type,
-        trialEligible: plan === "pro" && customer.trial_used_at === null,
         webUrl: deps.webUrl,
         quantity: owner.quantity,
+        usagePriceId,
+        couponId: testCouponFor(deps),
       }),
     );
-    return { status: 200, body: { client_secret: session.client_secret } };
+    return { status: 200, body: { url: session.url } };
   } catch (err) {
     if (err instanceof StripeApiError) {
       console.error(`[billing-checkout] Stripe ${err.status}: ${err.message}`);
@@ -135,10 +235,10 @@ export async function createCheckout(
   if (parsed.plan === "team") {
     if (!deps.organizations)
       throw new Error("organization billing is not configured");
-    if (!(await deps.organizations.isOwner(parsed.organizationId))) {
+    if (!(await deps.organizations.canManageBilling(parsed.organizationId))) {
       return {
         status: 403,
-        body: { error: "Only an owner of this organization can buy Team." },
+        body: { error: "Only an owner or admin of this organization can buy Team." },
       };
     }
     const store = deps.organizations.store(parsed.organizationId);
@@ -167,8 +267,7 @@ export async function createCheckout(
     );
   }
 
-  // One Pro subscription per user. A second one would bill twice, and a
-  // second trial would stack on the first.
+  // One Pro subscription per user. A second one would bill twice.
   if (await deps.store.hasPro()) {
     return {
       status: 409,

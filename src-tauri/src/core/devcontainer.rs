@@ -261,6 +261,70 @@ fn docker(args: &[&str]) -> Result<String, String> {
   Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
+/// A container Treq started for a repository, as `docker ps -a` lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TreqContainer {
+  pub id: String,
+  /// The repository it was started for (its `treq.repo` label).
+  pub repo_path: String,
+  pub running: bool,
+}
+
+/// Every container Treq started, running or not, newest first. Empty when
+/// Docker is missing or not running.
+pub fn containers() -> Vec<TreqContainer> {
+  let format = format!("{{{{.ID}}}}\t{{{{.Label \"{ID_LABEL_KEY}\"}}}}\t{{{{.State}}}}");
+  let filter = format!("label={ID_LABEL_KEY}");
+  docker(&["ps", "-a", "--filter", &filter, "--format", &format])
+    .map(|out| parse_containers(&out))
+    .unwrap_or_default()
+}
+
+fn parse_containers(out: &str) -> Vec<TreqContainer> {
+  out
+    .lines()
+    .filter_map(|line| {
+      let mut parts = line.split('\t');
+      let id = parts.next()?.trim();
+      let repo_path = parts.next()?.trim();
+      let state = parts.next().unwrap_or_default().trim();
+      (!id.is_empty() && !repo_path.is_empty()).then(|| TreqContainer {
+        id: id.to_string(),
+        repo_path: repo_path.to_string(),
+        running: state == "running",
+      })
+    })
+    .collect()
+}
+
+/// [`crate::core::prerequisites::HOST_BINARIES`] inside a running
+/// container, looked up by its login shell.
+pub fn container_tools(container_id: &str) -> Result<Vec<crate::core::PrerequisiteStatus>, String> {
+  let binaries = crate::core::prerequisites::HOST_BINARIES;
+  let script = binaries
+    .iter()
+    .map(|b| format!("command -v {b} >/dev/null 2>&1 && echo {b}"))
+    .collect::<Vec<_>>()
+    .join("; ");
+  let found = docker(&[
+    "exec",
+    container_id,
+    "sh",
+    "-lc",
+    &format!("{script}; true"),
+  ])?;
+  let found: Vec<&str> = found.lines().map(str::trim).collect();
+  Ok(
+    binaries
+      .iter()
+      .map(|binary| crate::core::PrerequisiteStatus {
+        binary: binary.to_string(),
+        installed: found.contains(binary),
+      })
+      .collect(),
+  )
+}
+
 /// Puts the `treq` CLI matching this app's version on the container's PATH,
 /// so agents in it can call `treq` like they do on the host. Skips the
 /// download when the container already has that version.
@@ -447,13 +511,33 @@ fn up_failure_message(stdout: &[u8], stderr: &[u8]) -> String {
     return format!("Devcontainer failed to start: {message}");
   }
   let stderr = String::from_utf8_lossy(stderr);
-  let tail: Vec<&str> = stderr.lines().rev().take(5).collect();
-  let tail: Vec<&str> = tail.into_iter().rev().collect();
+  let mut tail: Vec<&str> = stderr.lines().rev().take(5).collect();
+  tail.reverse();
   format!("Devcontainer failed to start: {}", tail.join("\n"))
 }
 
 #[cfg(test)]
 mod tests {
+  #[test]
+  fn lists_treq_containers_from_docker_ps() {
+    let out = "abc123\t/home/me/app\trunning\ndef456\t/home/me/lib\texited\n\tbroken\t\n";
+    assert_eq!(
+      parse_containers(out),
+      vec![
+        TreqContainer {
+          id: "abc123".into(),
+          repo_path: "/home/me/app".into(),
+          running: true,
+        },
+        TreqContainer {
+          id: "def456".into(),
+          repo_path: "/home/me/lib".into(),
+          running: false,
+        },
+      ]
+    );
+  }
+
   use super::*;
   use tempfile::TempDir;
 

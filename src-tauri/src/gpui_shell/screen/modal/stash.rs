@@ -1,8 +1,11 @@
 //! `StashModal`: the repository's stashed changes, each one's diff, and
 //! applying, copying and deleting them.
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::input::{Escape, InputEvent, InputState, MoveDown, MoveUp};
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
@@ -10,10 +13,9 @@ use tauri_plugin_gpui::gpui::{
   Subscription, Window,
 };
 
-use super::{dialog, message, overlay, title, Env};
+use super::Env;
 use crate::{
   gpui_shell::{
-    native::ToastTone,
     screen::{code::menu_panel, rows::Rows},
     theme::{self, Palette},
     time,
@@ -93,11 +95,7 @@ fn line_prefix(line: &str) -> &'static str {
 
 /// A diff line without its `+`, `-` or space marker.
 fn line_text(line: &str) -> &str {
-  if line.starts_with(['+', '-', ' ']) {
-    &line[1..]
-  } else {
-    line
-  }
+  line.strip_prefix(['+', '-', ' ']).unwrap_or(line)
 }
 
 /// `files_changed.length` as the list writes it.
@@ -156,18 +154,20 @@ impl StashView {
           log::warn!("Failed to list stashes: {err}");
           Vec::new()
         });
-      let _ = this.update(cx, |view, cx| {
-        if view.route.repo_path != key {
-          return;
-        }
-        let selected_exists = entries.iter().any(|e| Some(e.id) == view.selected);
-        if view.selected.is_none() || !selected_exists {
-          view.selected = entries.first().map(|e| e.id);
-        }
-        view.entries = Some(entries);
-        view.load_diff(cx);
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.route.repo_path != key {
+            return;
+          }
+          let selected_exists = entries.iter().any(|e| Some(e.id) == view.selected);
+          if view.selected.is_none() || !selected_exists {
+            view.selected = entries.first().map(|e| e.id);
+          }
+          view.entries = Some(entries);
+          view.load_diff(cx);
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -189,13 +189,15 @@ impl StashView {
         .await
         .map_err(|err| log::warn!("Failed to load the stash diff: {err}"))
         .ok();
-      let _ = this.update(cx, |view, cx| {
-        if view.selected == Some(id) {
-          view.rows = Rows::default();
-          view.diff = Some(LoadedDiff { id, diff });
-          cx.notify();
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.selected == Some(id) {
+            view.rows = Rows::default();
+            view.diff = Some(LoadedDiff { id, diff });
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -261,7 +263,7 @@ impl StashView {
 
   fn open_apply(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     self.more_open = false;
-    let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search workspaces..."));
+    let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search workspaces…"));
     input.update(cx, |input, cx| input.focus(window, cx));
     self._apply_subscription = Some(cx.subscribe_in(
       &input,
@@ -293,7 +295,7 @@ impl StashView {
   }
 
   fn step_apply(&mut self, delta: isize, cx: &mut Context<Self>) {
-    // The filtered rows, then "New workspace...".
+    // The filtered rows, then "New workspace…".
     let len = self.filtered_targets().len() as isize + 1;
     self.apply_index = (self.apply_index as isize + delta).rem_euclid(len) as usize;
     cx.notify();
@@ -319,19 +321,21 @@ impl StashView {
       let patch = cx
         .background_spawn(async move { host.stash_patch(&repo, id) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        view.pending = None;
-        match patch {
-          Ok(patch) => {
-            cx.write_to_clipboard(ClipboardItem::new_string(patch));
-            view.env.toast(ToastTone::Success, "Patch copied", "");
+      this
+        .update(cx, |view, cx| {
+          view.pending = None;
+          match patch {
+            Ok(patch) => {
+              cx.write_to_clipboard(ClipboardItem::new_string(patch));
+              view.env.notify(Toast::success("Patch copied").into());
+            }
+            Err(err) => view
+              .env
+              .notify(Toast::error("Failed to copy patch").description(err).into()),
           }
-          Err(err) => view
-            .env
-            .toast(ToastTone::Error, "Failed to copy patch", err),
-        }
-        cx.notify();
-      });
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -351,24 +355,28 @@ impl StashView {
           async move { host.delete_stash(&repo, id) }
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        view.pending = None;
-        match result {
-          Ok(()) => {
-            if view.selected == Some(id) {
-              view.selected = None;
-              view.diff = None;
+      this
+        .update(cx, |view, cx| {
+          view.pending = None;
+          match result {
+            Ok(()) => {
+              if view.selected == Some(id) {
+                view.selected = None;
+                view.diff = None;
+              }
+              view.env.workspace_changed(&repo);
+              view.load(cx);
+              view.env.notify(Toast::success("Stash deleted").into());
             }
-            view.env.workspace_changed(&repo);
-            view.load(cx);
-            view.env.toast(ToastTone::Success, "Stash deleted", "");
+            Err(err) => view.env.notify(
+              Toast::error("Failed to delete stash")
+                .description(err)
+                .into(),
+            ),
           }
-          Err(err) => view
-            .env
-            .toast(ToastTone::Error, "Failed to delete stash", err),
-        }
-        cx.notify();
-      });
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -390,19 +398,23 @@ impl StashView {
           async move { host.apply_stash(&repo, id, &target) }
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        view.pending = None;
-        match result {
-          Ok(()) => {
-            view.env.workspace_changed(&repo);
-            view.env.toast(ToastTone::Success, "Stash applied", "");
+      this
+        .update(cx, |view, cx| {
+          view.pending = None;
+          match result {
+            Ok(()) => {
+              view.env.workspace_changed(&repo);
+              view.env.notify(Toast::success("Stash applied").into());
+            }
+            Err(err) => view.env.notify(
+              Toast::error("Failed to apply stash")
+                .description(err)
+                .into(),
+            ),
           }
-          Err(err) => view
-            .env
-            .toast(ToastTone::Error, "Failed to apply stash", err),
-        }
-        cx.notify();
-      });
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -420,7 +432,7 @@ impl StashView {
 
 impl StashView {
   fn list(&self, entries: &[StashEntry], p: &Palette, cx: &mut Context<Self>) -> gpui::Div {
-    let (selected_bg, hover_bg, muted) = (p.selected(), p.hover(), p.muted_foreground);
+    let muted = p.muted_foreground;
     div()
       .debug_selector(|| "stash-list".into())
       .w(zpx(288.))
@@ -441,61 +453,62 @@ impl StashView {
             let id = entry.id;
             let selected = self.selected == Some(id);
             let selector = format!("stash-list-item-{i}");
-            ui::text(div(), TextSize::Xs)
-              .id(SharedString::from(selector.clone()))
-              .debug_selector(move || selector)
-              .w_full()
-              .flex_none()
-              .px_2()
-              .py_2()
-              .rounded(radius::MD)
-              .cursor_pointer()
-              .when(selected, |this| this.bg(selected_bg))
-              .when(!selected, |this| this.hover(move |s| s.bg(hover_bg)))
-              .child(
-                div()
-                  .font_family(theme::MONO_FONT)
-                  .font_weight(FontWeight::MEDIUM)
-                  .truncate()
-                  .child(entry.workspace_label.clone()),
-              )
-              .child(
-                div()
-                  .mt_0p5()
-                  .flex()
-                  .items_center()
-                  .gap_2()
-                  .text_color(muted)
-                  .child(
-                    div()
-                      .font_family(theme::MONO_FONT)
-                      .child(entry.short_commit_id.clone()),
-                  )
-                  .child(time::locale(&entry.created_at)),
-              )
-              .child(
-                div()
-                  .mt_1()
-                  .flex()
-                  .items_center()
-                  .gap_2()
-                  .child(
-                    div()
-                      .text_color(ui::Tone::GitOpen.text(p))
-                      .child(format!("+{}", entry.additions)),
-                  )
-                  .child(
-                    div()
-                      .text_color(ui::Tone::GitClosed.text(p))
-                      .child(format!("-{}", entry.deletions)),
-                  )
-                  .child(
-                    div()
-                      .text_color(muted)
-                      .child(files_label(entry.files_changed.len())),
-                  ),
-              )
-              .on_click(cx.listener(move |view, _, _, cx| view.select(id, cx)))
+            ui::text(
+              ui::Row::new(SharedString::from(selector), p)
+                .density(ui::RowDensity::TwoLine)
+                .label(entry.workspace_label.clone())
+                .selected(selected),
+              TextSize::Sm,
+            )
+            .w_full()
+            .flex_none()
+            .py_2()
+            .rounded(radius::MD)
+            .items_start()
+            .child(
+              div()
+                .font_family(theme::MONO_FONT)
+                .font_weight(FontWeight::MEDIUM)
+                .truncate()
+                .child(entry.workspace_label.clone()),
+            )
+            .child(
+              div()
+                .mt_0p5()
+                .flex()
+                .items_center()
+                .gap_2()
+                .text_color(muted)
+                .child(
+                  div()
+                    .font_family(theme::MONO_FONT)
+                    .child(entry.short_commit_id.clone()),
+                )
+                .child(time::locale(&entry.created_at)),
+            )
+            .child(
+              div()
+                .mt_1()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(
+                  div()
+                    .text_color(ui::Tone::DiffAdded.text(p))
+                    .child(format!("+{}", entry.additions)),
+                )
+                .child(
+                  div()
+                    .text_color(ui::Tone::DiffRemoved.text(p))
+                    .child(format!("-{}", entry.deletions)),
+                )
+                .child(
+                  div()
+                    .text_color(muted)
+                    .child(files_label(entry.files_changed.len())),
+                ),
+            )
+            .on_click(cx.listener(move |view, _, _, cx| view.select(id, cx)))
           })),
       )
   }
@@ -509,11 +522,10 @@ impl StashView {
       .flex()
       .flex_col();
     let Some(entry) = self.selected_entry() else {
-      return pane.child(message(
-        "stash-select",
-        "Select a stash to view its changes.",
-        p,
-      ));
+      return pane.child(
+        ui::EmptyState::new("stash-select", "No stash selected", p)
+          .message("Select a stash to view its changes."),
+      );
     };
     let busy = self.pending.is_some();
     let applying = self
@@ -524,10 +536,10 @@ impl StashView {
       .pending
       .as_deref()
       .is_some_and(|a| !a.starts_with("apply-"));
-    let green = ui::Tone::GitOpen.text(p);
-    let red = ui::Tone::GitClosed.text(p);
+    let green = ui::Tone::DiffAdded.text(p);
+    let red = ui::Tone::DiffRemoved.text(p);
 
-    let info = ui::text(div(), TextSize::Xs)
+    let info = ui::text(div(), TextSize::Sm)
       .min_w_0()
       .flex()
       .flex_col()
@@ -567,7 +579,7 @@ impl StashView {
       );
 
     let apply = Button::new("stash-apply-button", p)
-      .aria_label("Apply...")
+      .aria_label("Apply…")
       .size(Size::Sm)
       .h(zpx(28.))
       .px_2()
@@ -577,7 +589,7 @@ impl StashView {
       } else {
         ui::icon(theme::ICON_UPLOAD, 14., p.primary_foreground).into_any_element()
       })
-      .child(div().ml_1().child("Apply..."))
+      .child(div().ml_1().child("Apply…"))
       .child(
         ui::icon(theme::ICON_CHEVRONS_UP_DOWN, 12., p.primary_foreground)
           .ml_1()
@@ -639,7 +651,13 @@ impl StashView {
         Some(diff) => self.diff_pane(diff, p, cx),
         None => div().into_any_element(),
       },
-      _ => message("stash-diff-loading", "Loading diff...", p).into_any_element(),
+      _ => ui::delayed(
+        "stash-diff-loading",
+        div()
+          .py_8()
+          .child(ui::Loading::new("stash-diff-loading", p).label("Loading diff…")),
+      )
+      .into_any_element(),
     };
     pane.gap_3().child(header).child(
       // The diff's list scrolls itself.
@@ -683,32 +701,25 @@ impl StashView {
     };
     let filtered = self.filtered_targets();
     let selected = self.apply_index;
-    let accent = p.menu_accent;
-    let row = |id: SharedString, active: bool| {
-      let selector = id.to_string();
-      ui::text(div(), TextSize::Xs)
-        .id(id)
-        .debug_selector(move || selector)
-        .flex()
-        .items_center()
-        .gap_2()
-        .px_2()
-        .py_1p5()
-        .rounded(radius::MD)
-        .cursor_pointer()
-        .when(active, |this| this.bg(accent))
+    let row = |id: SharedString, label: SharedString, active: bool| {
+      ui::text(
+        ui::Row::new(id, p)
+          .role(gpui::Role::ListBoxOption)
+          .label(label)
+          .selected(active),
+        TextSize::Sm,
+      )
+      .rounded(radius::MD)
     };
     let list = if filtered.is_empty() {
-      ui::text(div(), TextSize::Xs)
-        .debug_selector(|| "stash-apply-empty".into())
-        .p_3()
-        .text_center()
-        .text_color(p.muted_foreground)
-        .child("No workspaces found")
+      ui::EmptyState::new("stash-apply-empty", "No workspaces match", p)
+        .message("Try another workspace name.")
         .into_any_element()
     } else {
       div()
         .child(
+          // Short label (['section heading']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .px_2()
             .py_1p5()
@@ -720,6 +731,7 @@ impl StashView {
           let (entry, branch) = (entry.clone(), target.branch.clone());
           row(
             SharedString::from(format!("stash-apply-option-{}", target.branch)),
+            SharedString::from(target.label.clone()),
             i == selected,
           )
           .child(div().truncate().child(target.label.clone()))
@@ -757,7 +769,7 @@ impl StashView {
       }))
       .on_mouse_down_out(cx.listener(|view, _, _, cx| view.close_apply(cx)))
       .child(
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
           .flex()
           .items_center()
           .h(zpx(36.))
@@ -785,12 +797,16 @@ impl StashView {
               .border_t_1()
               .border_color(p.border)
               .child(
-                row(SharedString::from("stash-apply-new-workspace"), new_active)
-                  .child(ui::icon(theme::ICON_PLUS, 14., p.popover_foreground))
-                  .child("New workspace...")
-                  .on_click(cx.listener(move |view, _, window, cx| {
-                    view.apply_to_new(&new_entry, window, cx)
-                  })),
+                row(
+                  SharedString::from("stash-apply-new-workspace"),
+                  SharedString::from("New workspace…"),
+                  new_active,
+                )
+                .child(ui::icon(theme::ICON_PLUS, 14., p.popover_foreground))
+                .child("New workspace…")
+                .on_click(
+                  cx.listener(move |view, _, window, cx| view.apply_to_new(&new_entry, window, cx)),
+                ),
               ),
           ),
       );
@@ -828,18 +844,19 @@ impl StashView {
     cx: &mut Context<Self>,
   ) -> gpui::AnyElement {
     if diff.too_large_to_render {
-      return message(
-        "stash-diff-too-large",
-        diff
-          .render_block_reason
-          .clone()
-          .unwrap_or_else(|| "Diff is too large to render.".into()),
-        p,
-      )
-      .into_any_element();
+      return ui::EmptyState::new("stash-diff-too-large", "Diff too large to show", p)
+        .message(
+          diff
+            .render_block_reason
+            .clone()
+            .unwrap_or_else(|| "Diff is too large to render.".into()),
+        )
+        .into_any_element();
     }
     if diff.hunks_by_file.is_empty() {
-      return message("stash-diff-empty", "No file changes in this stash.", p).into_any_element();
+      return ui::EmptyState::new("stash-diff-empty", "No file changes", p)
+        .message("This stash holds no file changes.")
+        .into_any_element();
     }
     div()
       .debug_selector(|| "stash-diff-pane".into())
@@ -864,10 +881,13 @@ impl StashView {
     };
     let files = &diff.hunks_by_file;
     let hunk = |f: usize, h: usize| files.get(f).and_then(|file| file.hunks.get(h));
-    let text = ui::text(div(), TextSize::Xs).font_family(theme::MONO_FONT);
+    let text = ui::text(div(), TextSize::Sm).font_family(theme::MONO_FONT);
     match row {
       Row::File(f) => text
+        .id(("stash-diff-file", f))
         .debug_selector(move || format!("stash-diff-file-{f}"))
+        .role(gpui::Role::Heading)
+        .aria_label(files.get(f).map(|f| f.path.clone()).unwrap_or_default())
         .when(f > 0, |this| this.pt_4())
         .child(
           div()
@@ -879,6 +899,7 @@ impl StashView {
             .font_weight(FontWeight::MEDIUM)
             .child(files.get(f).map(|f| f.path.clone()).unwrap_or_default()),
         )
+        .test_support()
         .into_any_element(),
       Row::HunkHeader(f, h) => text
         .px_2()
@@ -898,10 +919,10 @@ impl StashView {
           .whitespace_nowrap()
           .overflow_hidden()
           .when(line.starts_with('+'), |this| {
-            this.bg(ui::Tone::GitOpen.tint(&p))
+            this.bg(ui::Tone::DiffAdded.tint(&p))
           })
           .when(line.starts_with('-'), |this| {
-            this.bg(ui::Tone::GitClosed.tint(&p))
+            this.bg(ui::Tone::DiffRemoved.tint(&p))
           })
           .child(
             div()
@@ -932,37 +953,28 @@ impl Render for StashView {
       .entries
       .as_ref()
       .is_some_and(|entries| entries.is_empty());
-    let (backdrop, panel) = if empty {
-      dialog("stash-modal", zpx(512.), None, viewport, &p)
-    } else {
-      dialog(
-        "stash-modal",
-        viewport.width * 0.75,
-        Some(viewport.height * 0.80),
-        viewport,
-        &p,
-      )
-    };
-    let header = div().flex_none().child(
-      title(
-        div()
-          .flex()
-          .items_center()
-          .gap_2()
-          .child(ui::icon(theme::ICON_ARCHIVE, 16., p.popover_foreground))
-          .child("Stashed Changes"),
-      )
-      .text_color(p.popover_foreground),
-    );
+    let header = ui::text(div(), TextSize::Lg)
+      .font_weight(FontWeight::SEMIBOLD)
+      .flex()
+      .items_center()
+      .gap_2()
+      .child(ui::icon(theme::ICON_ARCHIVE, 16., p.popover_foreground))
+      .child("Stashed changes");
     let entries = self.entries.clone();
     let body = match &entries {
-      None => message("stash-loading", "Loading stashes...", &p).into_any_element(),
-      Some(entries) if entries.is_empty() => message(
-        "stash-empty",
-        "No stashed changes yet. Stash working-copy changes from the Changes panel to save them here.",
-        &p,
+      None => ui::delayed(
+        "stash-loading",
+        div()
+          .py_8()
+          .child(ui::Loading::new("stash-loading", &p).label("Loading stashes…")),
       )
       .into_any_element(),
+      Some(entries) if entries.is_empty() => {
+        ui::EmptyState::new("stash-empty", "No stashed changes yet", &p)
+          .icon(theme::ICON_ARCHIVE)
+          .message("Stash working-copy changes from the Changes panel to save them here.")
+          .into_any_element()
+      }
       Some(entries) => div()
         .flex_1()
         .min_h_0()
@@ -973,29 +985,28 @@ impl Render for StashView {
         .child(self.detail(&p, cx))
         .into_any_element(),
     };
-    let keys = cx.listener(|view, e: &gpui::KeyDownEvent, _, cx| {
-      if ui::is_escape(&e.keystroke) {
-        cx.stop_propagation();
-        if view.apply.is_some() || view.more_open {
-          view.close_menus(cx);
-        } else {
-          view.close(cx);
-        }
+    // Escape closes an open menu first.
+    let close = ui::handler(cx, |view, _, cx| {
+      if view.apply.is_some() || view.more_open {
+        view.close_menus(cx);
+      } else {
+        view.close(cx);
       }
     });
-    overlay(
-      backdrop.on_mouse_down(
-        gpui::MouseButton::Left,
-        cx.listener(|view, _, _, cx| view.close(cx)),
-      ),
-      panel
-        .id("stash-panel")
-        .track_focus(&self.focus)
-        .capture_key_down(keys)
-        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-        .child(header)
-        .child(body),
-    )
+    ui::Dialog::new("stash-modal", &p)
+      .overlay(viewport)
+      .map(|d| {
+        if empty {
+          d.width(512.)
+        } else {
+          d.relative_size(0.75, Some(0.8))
+        }
+      })
+      .title("Stashed changes")
+      .header(header)
+      .focus(&self.focus)
+      .on_close(close)
+      .child(body)
   }
 }
 

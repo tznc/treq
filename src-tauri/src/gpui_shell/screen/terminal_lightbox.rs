@@ -3,8 +3,12 @@
 //! highlighted regions (`ImageHighlightLayer`), text files line comments
 //! (`TextAssetLineReview`).
 
+use crate::core::review::parse_suggestion;
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
+use gpui_kit::base::TestSupportExt as _;
 use std::{
   cell::Cell,
   collections::{HashMap, HashSet},
@@ -20,15 +24,16 @@ use tauri_plugin_gpui::gpui::{
 };
 
 use super::{
+  changes::threads::suggestion_box,
   rows::Rows,
   terminal_data::Host,
   terminal_send::{
-    fitted_size, has_unsent, highlighted_png, image_size, rect_from_drag, review_prompt,
-    shell_quote, text_lines, Highlight, LineComment, Rect, Review, SendAsset,
+    block_at_or_before, fitted_size, has_unsent, highlighted_png, image_size, markdown_blocks,
+    rect_from_drag, renders_markdown, resolve_relative_links, review_prompt, shell_quote,
+    suggestion_for, text_lines, text_panel_dark, Highlight, LineComment, Rect, Review, SendAsset,
   },
 };
 use crate::gpui_shell::{
-  native::ToastTone,
   theme::{self, Palette},
   ui::{self, Button, TextSize, Variant},
 };
@@ -43,11 +48,7 @@ pub enum LightboxEvent {
   Close,
   /// The review, to type into the agent.
   SendReview(String),
-  Toast {
-    title: String,
-    description: String,
-    tone: ToastTone,
-  },
+  Toast(crate::gpui_shell::native::Toast),
 }
 
 /// The line range being commented on, before its comment is added.
@@ -94,8 +95,17 @@ pub struct Lightbox {
   focus_composer: bool,
   /// The line a drag across lines started on.
   anchor: Option<usize>,
+  /// The rendered Markdown's blocks as source line ranges, and the block a
+  /// drag across blocks started on.
+  blocks: Vec<(usize, usize)>,
+  block_anchor: Option<(usize, usize)>,
   /// Text attachments' contents, once read, line by line.
   texts: HashMap<String, Rc<Vec<String>>>,
+  /// The app's theme. The lightbox is dark, but rendered Markdown follows
+  /// the app, as gpui-kit's Markdown view does.
+  dark: bool,
+  /// Markdown attachments, by id, switched to their Markdown (source) tab.
+  source: HashSet<String>,
   /// The shown text's rows, by the asset's index.
   text_rows: Rows<(usize, TextRow)>,
   reading: HashSet<String>,
@@ -117,8 +127,76 @@ pub struct Lightbox {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TextRow {
   Line(usize),
+  /// A rendered Markdown block, by its index.
+  Block(usize),
   Composer,
-  Comment(u64),
+}
+
+/// The margin beside a text, where its comments show as annotations.
+const MARGIN_WIDTH: f32 = 280.;
+/// How far the margin's cards may hang below the last block of the Preview.
+const MARGIN_OVERHANG: f32 = 240.;
+
+/// A comment in the margin: the lines it is on, then what it says.
+fn comment_card(comment: &LineComment, palette: &Palette) -> gpui::AnyElement {
+  let id = comment.id;
+  let range = if comment.start == comment.end {
+    format!("Line {}", comment.start)
+  } else {
+    format!("Lines {}–{}", comment.start, comment.end)
+  };
+  ui::text(div(), TextSize::Sm)
+    .debug_selector(move || format!("treq-send-line-comment-{id}"))
+    .flex()
+    .flex_col()
+    .gap_1()
+    .px_3()
+    .py_2()
+    .rounded(radius::MD)
+    .border_1()
+    .border_color(ui::Tone::Warning.text(palette).opacity(0.4))
+    .bg(palette.popover)
+    .shadow_sm()
+    .font_family(theme::SANS_FONT)
+    .text_color(palette.foreground)
+    .child(
+      // Short label (['line range']): 11px is fine.
+      // ast-grep-ignore: gpui-text-xs-short-label-only
+      ui::text(div(), TextSize::Xs)
+        .text_color(palette.muted_foreground)
+        .child(range),
+    )
+    .child(comment_body(comment, palette))
+    .into_any_element()
+}
+
+/// A comment's text, with a suggested change drawn as a diff against the
+/// lines it is on, as code review draws one, without Apply.
+fn comment_body(comment: &LineComment, palette: &Palette) -> gpui::AnyElement {
+  let Some(suggestion) = parse_suggestion(&comment.text) else {
+    return div()
+      .whitespace_normal()
+      .child(comment.text.clone())
+      .into_any_element();
+  };
+  let original = comment.lines.join("\n");
+  div()
+    .min_w_0()
+    .flex()
+    .flex_col()
+    .gap_2()
+    .when(!suggestion.before.is_empty(), |this| {
+      this.child(div().whitespace_normal().child(suggestion.before.clone()))
+    })
+    .child(suggestion_box(
+      Some(&original),
+      &suggestion.suggested,
+      palette,
+    ))
+    .when(!suggestion.after.is_empty(), |this| {
+      this.child(div().whitespace_normal().child(suggestion.after.clone()))
+    })
+    .into_any_element()
 }
 
 /// A text this long draws its lines as a virtual list in a box of fixed
@@ -133,6 +211,7 @@ impl Lightbox {
     assets: Vec<SendAsset>,
     index: usize,
     can_review: bool,
+    dark: bool,
     cx: &mut Context<Self>,
   ) -> Self {
     let mut this = Self {
@@ -141,6 +220,7 @@ impl Lightbox {
       index,
       zoom: ZOOM_MIN,
       can_review,
+      dark,
       general: None,
       general_text: String::new(),
       general_disabled: None,
@@ -154,7 +234,10 @@ impl Lightbox {
       composer_text: String::new(),
       focus_composer: false,
       anchor: None,
+      blocks: Vec::new(),
+      block_anchor: None,
       texts: HashMap::new(),
+      source: HashSet::new(),
       text_rows: Rows::default(),
       reading: HashSet::new(),
       sizes: HashMap::new(),
@@ -210,20 +293,109 @@ impl Lightbox {
         continue;
       }
       let host = self.host.clone();
-      let read = cx
-        .background_executor()
-        .spawn(async move { host.read_send_asset(&path).unwrap_or_default() });
+      // The file is read and split into lines off the main thread.
+      let read = cx.background_executor().spawn(async move {
+        let text = host.read_send_asset(&path).unwrap_or_default();
+        text_lines(&text)
+          .into_iter()
+          .map(str::to_string)
+          .collect::<Vec<_>>()
+      });
       let path = asset.path.clone();
       cx.spawn(async move |this, cx| {
-        let text = read.await;
-        let _ = this.update(cx, |view, cx| {
-          let lines = text_lines(&text).into_iter().map(str::to_string).collect();
-          view.texts.insert(path, Rc::new(lines));
-          cx.notify();
-        });
+        let lines = read.await;
+        this
+          .update(cx, |view, cx| {
+            view.texts.insert(path, Rc::new(lines));
+            cx.notify();
+          })
+          .ignore_closed();
       })
       .detach();
     }
+  }
+
+  /// Whether the shown attachment draws as rendered Markdown, its Preview
+  /// tab, commented on by block.
+  fn rendered(&self) -> bool {
+    self
+      .current()
+      .is_some_and(|a| renders_markdown(a) && !self.source.contains(&a.id))
+  }
+
+  fn set_source(&mut self, source: bool, cx: &mut Context<Self>) {
+    let Some(id) = self.current().map(|a| a.id.clone()) else {
+      return;
+    };
+    if source {
+      self.source.insert(id);
+    } else {
+      self.source.remove(&id);
+    }
+    cx.notify();
+  }
+
+  /// A rendered Markdown block, its relative links and images pointed at
+  /// the file's folder. A click comments on its source lines.
+  fn text_block(&self, b: usize, palette: &Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
+    let (Some(asset), Some(&(start, end))) = (self.current(), self.blocks.get(b)) else {
+      return div().into_any_element();
+    };
+    let text = self
+      .texts
+      .get(&asset.path)
+      .and_then(|lines| lines.get(start - 1..end.min(lines.len())))
+      .map(|lines| lines.join("\n"))
+      .unwrap_or_default();
+    let dir = Path::new(&asset.path)
+      .parent()
+      .map(|d| d.display().to_string())
+      .unwrap_or_default();
+    let pending = self
+      .pending
+      .is_some_and(|p| start <= p.end && p.start <= end);
+    let commented = self
+      .current_lines()
+      .iter()
+      .any(|c| start <= c.end && c.start <= end);
+    let row = div()
+      .id(SharedString::from(format!("treq-send-block-{b}")))
+      .role(gpui::Role::Button)
+      .aria_label(format!("Block {b}"))
+      .debug_selector(move || format!("treq-send-block-{b}"))
+      .px_8()
+      .py_1p5()
+      .cursor_pointer()
+      .hover(|s| s.bg(palette.hover()))
+      .when(pending, |d| d.bg(ui::Tone::Danger.tint(palette)))
+      .when(commented, |d| d.bg(ui::Tone::Warning.tint(palette)))
+      .on_mouse_down(
+        MouseButton::Left,
+        cx.listener(move |view, e: &MouseDownEvent, _, cx| view.block_down((start, end), e, cx)),
+      )
+      .on_mouse_move(
+        cx.listener(move |view, e: &MouseMoveEvent, _, cx| view.block_over((start, end), e, cx)),
+      )
+      .child(super::code::markdown(
+        format!("treq-send-md-{}-{b}", asset.id),
+        &resolve_relative_links(&text, &dir),
+        14.,
+        self.dark,
+      ));
+    // In the Preview the box is written in the margin, beside the first
+    // block it covers, so the text never moves.
+    let writing_here = self.composer.is_some()
+      && self
+        .pending
+        .is_some_and(|p| block_at_or_before(&self.blocks, p.start) == Some(b));
+    let composer = writing_here.then(|| self.composer_box(palette, false, cx));
+    let blocks = &self.blocks;
+    self.annotated(
+      row.into_any_element(),
+      |c| block_at_or_before(blocks, c.start) == Some(b),
+      composer,
+      palette,
+    )
   }
 
   fn current_highlights(&self) -> &[Highlight] {
@@ -268,20 +440,12 @@ impl Lightbox {
     cx.notify();
   }
 
-  fn toast(&self, title: &str, description: String, tone: ToastTone, cx: &mut Context<Self>) {
-    cx.emit(LightboxEvent::Toast {
-      title: title.into(),
-      description,
-      tone,
-    });
-  }
-
   fn copy(&mut self, cx: &mut Context<Self>) {
     let Some(asset) = self.current() else {
       return;
     };
     cx.write_to_clipboard(ClipboardItem::new_string(shell_quote(&asset.path)));
-    self.toast("Asset path copied", String::new(), ToastTone::Success, cx);
+    cx.emit(LightboxEvent::Toast(Toast::success("Asset path copied")));
   }
 
   fn reveal(&mut self) {
@@ -330,38 +494,37 @@ impl Lightbox {
     });
     cx.spawn(async move |this, cx| {
       let annotated = annotate.await;
-      let _ = this.update(cx, |view, cx| {
-        let annotated = match annotated {
-          Some(Ok(path)) => Some(path),
-          Some(Err(error)) => {
-            view.toast(
-              "Could not attach highlighted image",
-              error,
-              ToastTone::Error,
-              cx,
-            );
-            None
-          }
-          None => None,
-        };
-        let prompt = review_prompt(&Review {
-          title: &asset.title,
-          path: &asset.path,
-          general: &view.general_text,
-          highlights: &highlights,
-          lines: view.lines.get(&asset.id).map_or(&[], Vec::as_slice),
-          annotated: annotated.as_deref(),
-        });
-        cx.emit(LightboxEvent::SendReview(prompt));
-        view.general_text.clear();
-        view.highlights.insert(asset.id.clone(), Vec::new());
-        view.lines.insert(asset.id.clone(), Vec::new());
-        view.active_highlight = None;
-        view.pending = None;
-        view.sending = false;
-        view.clear_general = true;
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          let annotated = match annotated {
+            Some(Ok(path)) => Some(path),
+            Some(Err(error)) => {
+              cx.emit(LightboxEvent::Toast(
+                Toast::error("Could not attach highlighted image").description(error),
+              ));
+              None
+            }
+            None => None,
+          };
+          let prompt = review_prompt(&Review {
+            title: &asset.title,
+            path: &asset.path,
+            general: &view.general_text,
+            highlights: &highlights,
+            lines: view.lines.get(&asset.id).map_or(&[], Vec::as_slice),
+            annotated: annotated.as_deref(),
+          });
+          cx.emit(LightboxEvent::SendReview(prompt));
+          view.general_text.clear();
+          view.highlights.insert(asset.id.clone(), Vec::new());
+          view.lines.insert(asset.id.clone(), Vec::new());
+          view.active_highlight = None;
+          view.pending = None;
+          view.sending = false;
+          view.clear_general = true;
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -518,6 +681,7 @@ impl Lightbox {
 
   fn on_mouse_up(&mut self, position: gpui::Point<Pixels>, cx: &mut Context<Self>) {
     self.anchor = None;
+    self.block_anchor = None;
     let Some(start) = self.drag.take() else {
       return;
     };
@@ -593,6 +757,68 @@ impl Lightbox {
     }
   }
 
+  /// A click on a rendered block picks its source lines, as a click on a
+  /// line does; Shift+click grows the range open to the block.
+  fn block_down(&mut self, block: (usize, usize), event: &MouseDownEvent, cx: &mut Context<Self>) {
+    let shift = event.modifiers.shift;
+    let extending = shift && self.pending.is_some();
+    self.select_line(block.0, shift);
+    self.select_line(block.1, true);
+    if !extending {
+      self.block_anchor = Some(block);
+    }
+    cx.stop_propagation();
+    cx.notify();
+  }
+
+  fn block_over(&mut self, block: (usize, usize), event: &MouseMoveEvent, cx: &mut Context<Self>) {
+    let Some(anchor) = self.block_anchor else {
+      return;
+    };
+    if event.pressed_button != Some(MouseButton::Left) {
+      self.block_anchor = None;
+      return;
+    }
+    let next = Pending {
+      start: anchor.0.min(block.0),
+      end: anchor.1.max(block.1),
+    };
+    if self.pending != Some(next) {
+      self.pending = Some(next);
+      cx.notify();
+    }
+  }
+
+  /// The source lines `pending` covers.
+  fn pending_lines(&self, pending: Pending) -> Vec<String> {
+    self
+      .current()
+      .and_then(|a| self.texts.get(&a.path))
+      .and_then(|lines| lines.get(pending.start - 1..pending.end.min(lines.len())))
+      .map(<[String]>::to_vec)
+      .unwrap_or_default()
+  }
+
+  /// "Suggest change": the picked lines as a suggestion block, at the
+  /// cursor. Nothing applies it; the agent reads it in the review.
+  fn suggest_change(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    let (Some(pending), Some(composer)) = (self.pending, self.composer.clone()) else {
+      return;
+    };
+    let block = suggestion_for(&self.pending_lines(pending));
+    let lead = if self.composer_text.is_empty() || self.composer_text.ends_with('\n') {
+      ""
+    } else {
+      "\n"
+    };
+    composer.update(cx, |s, cx| {
+      s.insert(format!("{lead}{block}"), window, cx);
+      s.focus(window, cx);
+    });
+    self.composer_text = composer.read(cx).value().to_string();
+    cx.notify();
+  }
+
   fn commit_line_comment(&mut self, cx: &mut Context<Self>) {
     let (Some(pending), Some(asset)) = (self.pending, self.current().cloned()) else {
       return;
@@ -605,9 +831,7 @@ impl Lightbox {
     let picked = lines
       .get(pending.start - 1..pending.end.min(lines.len()))
       .unwrap_or_default()
-      .iter()
-      .map(|l| l.to_string())
-      .collect();
+      .to_vec();
     self.next_id += 1;
     self.lines.entry(asset.id).or_default().push(LineComment {
       id: self.next_id,
@@ -651,6 +875,14 @@ fn content<E: InteractiveElement>(el: E) -> E {
 /// `Button variant="ghost" size="icon-xs" className="h-8 w-8 text-white
 /// hover:bg-white/15"`.
 fn tool(id: &'static str, icon: &'static str, disabled: bool) -> Stateful<Div> {
+  tool_with(
+    id,
+    ui::icon(icon, 16., chrome(1.)).into_any_element(),
+    disabled,
+  )
+}
+
+fn tool_with(id: &'static str, icon: gpui::AnyElement, disabled: bool) -> Stateful<Div> {
   div()
     .id(id)
     .debug_selector(move || id.into())
@@ -661,9 +893,10 @@ fn tool(id: &'static str, icon: &'static str, disabled: bool) -> Stateful<Div> {
     .rounded(radius::MD)
     .when(disabled, |d| d.opacity(0.4))
     .when(!disabled, |d| {
-      d.cursor_pointer().hover(|s| s.bg(chrome(0.15)))
+      d.cursor_pointer()
+        .hover(|s| s.bg(theme::palette(true).hover_on_dark()))
     })
-    .child(ui::icon(icon, 16., chrome(1.)))
+    .child(icon)
 }
 
 impl Lightbox {
@@ -690,6 +923,8 @@ impl Lightbox {
           }),
         )
         .child(
+          // Short label (['zoom level']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .debug_selector(|| "treq-send-zoom-level".into())
             .min_w_10()
@@ -708,10 +943,17 @@ impl Lightbox {
     }
     let pill = content(
       pill
-        .child(
-          tool("treq-send-copy", theme::ICON_COPY, false)
-            .on_click(cx.listener(|view, _, _, cx| view.copy(cx))),
-        )
+        .child(ui::copy_feedback::copyable("treq-send-copy-feedback", {
+          let copy = cx.listener(|view, _, _, cx| view.copy(cx));
+          move |copied| {
+            let success = theme::palette(true).success;
+            let icon =
+              ui::copy_feedback::copy_icon("treq-send-copy", copied, 16., chrome(1.), success);
+            tool_with("treq-send-copy", icon, false)
+              .on_click(copy)
+              .into_any_element()
+          }
+        }))
         .child(
           tool("treq-send-reveal", theme::ICON_FOLDER_OPEN, false)
             .on_click(cx.listener(|view, _, _, _| view.reveal())),
@@ -852,6 +1094,8 @@ impl Lightbox {
                 .id(SharedString::from(format!(
                   "treq-send-highlight-remove-{id}"
                 )))
+                .role(gpui::Role::Button)
+                .aria_label("Remove highlight")
                 .debug_selector(|| "treq-send-highlight-remove".into())
                 .size_6()
                 .flex()
@@ -859,7 +1103,7 @@ impl Lightbox {
                 .justify_center()
                 .rounded(radius::MD)
                 .cursor_pointer()
-                .hover(|s| s.bg(chrome(0.1)))
+                .hover(|s| s.bg(d.hover_on_dark()))
                 .on_click(cx.listener(move |view, _, _, cx| view.remove_highlight(id, cx)))
                 .child(ui::icon(theme::ICON_X, 14., d.foreground)),
             ),
@@ -905,31 +1149,34 @@ impl Lightbox {
   /// comment, the box being written and the comments made.
   fn sync_text_rows(&mut self, window: &Window) {
     let mut rows = Vec::new();
-    if let Some(asset) = self.current().filter(|a| !a.is_image()) {
+    self.blocks = match self.current().filter(|_| self.rendered()) {
+      Some(asset) => self.texts.get(&asset.path).map_or_else(Vec::new, |lines| {
+        markdown_blocks(&lines.iter().map(String::as_str).collect::<Vec<_>>())
+      }),
+      None => Vec::new(),
+    };
+    if self.rendered() {
+      // Comments and the comment box sit in the margin (`annotated`).
+      rows.extend((0..self.blocks.len()).map(|b| (self.index, TextRow::Block(b))));
+    } else if let Some(asset) = self.current().filter(|a| !a.is_image()) {
       let count = self.texts.get(&asset.path).map_or(1, |t| t.len());
-      let comments = self.current_lines();
       for n in 1..=count {
         rows.push((self.index, TextRow::Line(n)));
         if self.composer.is_some() && self.pending.is_some_and(|p| p.end == n) {
           rows.push((self.index, TextRow::Composer));
         }
-        rows.extend(
-          comments
-            .iter()
-            .filter(|c| c.end == n)
-            .map(|c| (self.index, TextRow::Comment(c.id))),
-        );
       }
     }
     self.text_rows.sync(window, rows, |a, b| a == b);
   }
 
-  fn text_row(&self, ix: usize, cx: &mut Context<Self>) -> gpui::AnyElement {
+  fn text_line(&self, ix: usize, cx: &mut Context<Self>) -> gpui::AnyElement {
     let Some(&(_, row)) = self.text_rows.get(ix) else {
       return div().into_any_element();
     };
-    let palette = theme::palette(true);
+    let palette = theme::palette(text_panel_dark(self.rendered(), self.dark));
     match row {
+      TextRow::Block(b) => self.text_block(b, &palette, cx),
       TextRow::Line(n) => {
         let line = self
           .current()
@@ -940,16 +1187,19 @@ impl Lightbox {
           .current_lines()
           .iter()
           .any(|c| n >= c.start && n <= c.end);
-        div()
+        let row = div()
           .id(SharedString::from(format!("treq-send-text-line-{n}")))
+          .cursor_text()
           .debug_selector(move || format!("treq-send-text-line-{n}"))
+          .role(gpui::Role::Row)
+          .aria_label(format!("Line {n}"))
           .flex()
           .w_full()
           .items_start()
           .gap_3()
           .px_4()
           .py(zpx(LINE_PADDING_Y))
-          .hover(|s| s.bg(chrome(0.05)))
+          .hover(|s| s.bg(palette.hover()))
           .when(pending, |d| d.bg(ui::Tone::Danger.tint(&palette)))
           .when(commented, |d| d.bg(ui::Tone::Warning.tint(&palette)))
           .on_mouse_down(
@@ -979,92 +1229,210 @@ impl Lightbox {
                 line.to_string()
               }),
           )
-          .into_any_element()
+          .test_support();
+        self.annotated(row.into_any_element(), |c| c.start == n, None, &palette)
       }
-      TextRow::Composer => {
-        let Some(composer) = &self.composer else {
-          return div().into_any_element();
-        };
-        let blank = self.composer_text.trim().is_empty();
-        div()
-          .debug_selector(|| "treq-send-line-comment-composer".into())
-          .border_t_1()
-          .border_color(chrome(0.1))
-          .bg(palette.background)
-          .px_4()
-          .py_3()
-          .font_family(theme::SANS_FONT)
-          .child(
-            ui::text(div(), TextSize::Sm)
-              .min_h(zpx(72.))
-              .px_3()
-              .py_2()
-              .rounded(radius::MD)
-              .border_1()
-              .border_color(palette.input)
-              .bg(palette.background)
-              .text_color(palette.foreground)
-              .child(Textarea::new(composer).appearance(false).bordered(false)),
-          )
-          .child(
-            div()
-              .mt_2()
-              .flex()
-              .justify_end()
-              .gap_2()
-              .child(
-                Button::new("treq-send-line-comment-cancel", &palette)
-                  .variant(Variant::Ghost)
-                  .size(ui::Size::Xs)
-                  .label("Cancel")
-                  .on_click(cx.listener(|view, _, _, cx| {
-                    view.pending = None;
-                    cx.notify();
-                  })),
-              )
-              .child(
-                Button::new("treq-send-line-comment-save", &palette)
-                  .size(ui::Size::Xs)
-                  .disabled(blank)
-                  .label("Add comment")
-                  .on_click(cx.listener(|view, _, _, cx| view.commit_line_comment(cx))),
-              ),
-          )
-          .into_any_element()
-      }
-      TextRow::Comment(id) => {
-        let Some(comment) = self.current_lines().iter().find(|c| c.id == id) else {
-          return div().into_any_element();
-        };
-        let range = if comment.start == comment.end {
-          format!("LINES {}", comment.start)
-        } else {
-          format!("LINES {}–{}", comment.start, comment.end)
-        };
-        ui::text(div(), TextSize::Sm)
-          .debug_selector(move || format!("treq-send-line-comment-{id}"))
-          .border_t_1()
-          .border_color(chrome(0.1))
-          .bg(palette.background.opacity(0.8))
-          .px_4()
-          .py_2()
-          .font_family(theme::SANS_FONT)
-          .text_color(palette.foreground)
-          .child(
-            ui::text(div(), TextSize::Xs)
-              .text_color(palette.muted_foreground)
-              .child(range),
-          )
-          .child(div().whitespace_normal().child(comment.text.clone()))
-          .into_any_element()
-      }
+      TextRow::Composer => self.composer_box(&palette, true, cx),
     }
   }
 
+  /// The box a comment is written in: under the lines in the Markdown
+  /// tab, or a card in the comments column in the Preview.
+  fn composer_box(
+    &self,
+    palette: &Palette,
+    inline: bool,
+    cx: &mut Context<Self>,
+  ) -> gpui::AnyElement {
+    let Some(composer) = &self.composer else {
+      return div().into_any_element();
+    };
+    let blank = self.composer_text.trim().is_empty();
+    div()
+      .debug_selector(|| "treq-send-line-comment-composer".into())
+      .bg(palette.background)
+      .map(|this| {
+        if inline {
+          this.border_t_1().border_color(palette.border).px_4().py_3()
+        } else {
+          // A card in the comments column, like the comments in it.
+          this
+            .rounded(radius::MD)
+            .border_1()
+            .border_color(palette.border)
+            .shadow_md()
+            .px_3()
+            .py_2()
+        }
+      })
+      .font_family(theme::SANS_FONT)
+      .child(
+        ui::text(div(), TextSize::Sm)
+          .min_h(zpx(72.))
+          .px_3()
+          .py_2()
+          .rounded(radius::MD)
+          .border_1()
+          .border_color(palette.input)
+          .bg(palette.background)
+          .text_color(palette.foreground)
+          .child(Textarea::new(composer).appearance(false).bordered(false)),
+      )
+      .child(
+        div()
+          .mt_2()
+          .flex()
+          .flex_wrap()
+          .justify_end()
+          .gap_2()
+          .child(
+            Button::new("treq-send-suggest-change", palette)
+              .variant(Variant::Ghost)
+              .size(ui::Size::Xs)
+              .icon(theme::ICON_FILE_DIFF, 14.)
+              .label("Suggest change")
+              .on_click(cx.listener(|view, _, window, cx| view.suggest_change(window, cx))),
+          )
+          .child(div().flex_1())
+          .child(
+            Button::new("treq-send-line-comment-cancel", palette)
+              .variant(Variant::Ghost)
+              .size(ui::Size::Xs)
+              .label("Cancel")
+              .on_click(cx.listener(|view, _, _, cx| {
+                view.pending = None;
+                cx.notify();
+              })),
+          )
+          .child(
+            Button::new("treq-send-line-comment-save", palette)
+              .size(ui::Size::Xs)
+              .disabled(blank)
+              .label("Add comment")
+              .on_click(cx.listener(|view, _, _, cx| view.commit_line_comment(cx))),
+          ),
+      )
+      .into_any_element()
+  }
+
+  /// Whether the comments column shows: once the text has a comment, or
+  /// while one is written in it in the Preview.
+  fn margin_shown(&self) -> bool {
+    let writing = self.rendered() && self.composer.is_some() && self.pending.is_some();
+    !self.current_lines().is_empty() || writing
+  }
+
+  /// A row of the text beside its margin, which holds the comments that
+  /// start on it, as annotations. Without comments there is no margin.
+  fn annotated(
+    &self,
+    content: gpui::AnyElement,
+    starts_here: impl Fn(&LineComment) -> bool,
+    composer: Option<gpui::AnyElement>,
+    palette: &Palette,
+  ) -> gpui::AnyElement {
+    // The margin shows once the text has a comment, or one is being
+    // written in it; until then the text takes the whole width.
+    if !self.margin_shown() {
+      return content;
+    }
+    let mut cards: Vec<_> = self
+      .current_lines()
+      .iter()
+      .filter(|c| starts_here(c))
+      .map(|c| comment_card(c, palette))
+      .collect();
+    cards.extend(composer);
+    div()
+      .flex()
+      .w_full()
+      .child(div().flex_1().min_w_0().child(content))
+      .child(
+        // The cards hang from the row without growing it, so the text keeps
+        // its spacing; the margin's empty rows let them show through.
+        div()
+          .debug_selector(|| "treq-send-margin".into())
+          .w(zpx(MARGIN_WIDTH))
+          .flex_none()
+          .relative()
+          .border_l_1()
+          .border_color(palette.border)
+          .when(!cards.is_empty(), |this| {
+            this.child(
+              div()
+                .absolute()
+                .top_1()
+                .left_3()
+                .right_3()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .children(cards),
+            )
+          }),
+      )
+      .into_any_element()
+  }
+
+  /// Over a text: how to comment, and for Markdown, its Preview and
+  /// Markdown tabs.
+  fn text_bar(&self, d: &Palette, cx: &mut Context<Self>) -> Div {
+    let markdown = self.current().is_some_and(renders_markdown);
+    let rendered = self.rendered();
+    let hint = if rendered {
+      "Click a block to comment. Drag or Shift+click to select multiple blocks."
+    } else {
+      "Click a line to comment. Drag or Shift+click to select multiple lines."
+    };
+    let comments = self.current_lines().len();
+    let source = ui::Tab::new("treq-send-view-markdown", "Markdown");
+    let source = if comments > 0 {
+      source.count(comments)
+    } else {
+      source
+    };
+    ui::text(div(), TextSize::Sm)
+      .flex_none()
+      .flex()
+      .items_center()
+      .justify_between()
+      .gap_3()
+      .border_b_1()
+      .border_color(d.border)
+      .px_4()
+      .py_1p5()
+      .text_color(d.muted_foreground)
+      .child(
+        div()
+          .debug_selector(|| "treq-send-text-hint".into())
+          .child(hint),
+      )
+      .when(markdown, |this| {
+        let view = cx.entity().downgrade();
+        this.child(
+          ui::Tabs::new("treq-send-view", d)
+            .tab(ui::Tab::new("treq-send-view-preview", "Preview"))
+            .tab(source)
+            .selected(usize::from(!rendered))
+            .on_select(move |ix, _, cx| {
+              view
+                .update(cx, |view, cx| view.set_source(ix == 1, cx))
+                .ignore_closed();
+            }),
+        )
+      })
+  }
+
   fn text_slide(&self, window: &Window, cx: &mut Context<Self>) -> Div {
-    let d = theme::palette(true);
     let count = self.text_rows.len();
-    let long = count > LONG_TEXT;
+    let rendered = self.rendered();
+    // Blocks span many lines: a long file draws its blocks as a virtual list.
+    let lines = self
+      .current()
+      .and_then(|a| self.texts.get(&a.path))
+      .map_or(0, |t| t.len());
+    let long = count > LONG_TEXT || (rendered && lines > LONG_TEXT);
+    let d = theme::palette(text_panel_dark(rendered, self.dark));
     let max_h = f32::from(window.viewport_size().height) * 0.8;
     let panel = div()
       .id("treq-send-text-preview")
@@ -1076,39 +1444,41 @@ impl Lightbox {
       .flex()
       .flex_col()
       .overflow_hidden()
-      .rounded(radius::LG)
+      .map(|el| ui::floating(el, &d))
+      .border_0()
       .bg(d.background)
-      .shadow_2xl()
-      .child(
-        ui::text(div(), TextSize::Xs)
-          .flex_none()
-          .border_b_1()
-          .border_color(chrome(0.1))
-          .px_4()
-          .py_1p5()
-          .text_color(d.muted_foreground)
-          .child("Click a line to comment. Drag or Shift+click to select multiple lines."),
-      )
+      .child(self.text_bar(&d, cx))
       .child(
         ui::text(div(), TextSize::Code)
           .id("treq-send-text-scroll")
           .min_h_0()
           .flex_shrink(1.)
-          .font_family(theme::MONO_FONT)
+          .when(rendered, |this| {
+            this
+              .debug_selector(|| "treq-send-markdown".into())
+              .py_4()
+              .font_family(theme::SANS_FONT)
+          })
+          // Room under the last block for the cards hanging in the margin,
+          // the same while writing and after, so the text never moves.
+          .when(rendered && self.margin_shown(), |this| {
+            this.pb(zpx(MARGIN_OVERHANG))
+          })
+          .when(!rendered, |this| this.font_family(theme::MONO_FONT))
           .text_color(d.foreground)
           .map(|this| {
             if long {
               this.flex_1().child(
                 gpui::list(
                   self.text_rows.list.clone(),
-                  cx.processor(|view, ix, _, cx| view.text_row(ix, cx)),
+                  cx.processor(|view, ix, _, cx| view.text_line(ix, cx)),
                 )
                 .size_full(),
               )
             } else {
               this
                 .overflow_y_scroll()
-                .children((0..count).map(|ix| self.text_row(ix, cx)))
+                .children((0..count).map(|ix| self.text_line(ix, cx)))
             }
           }),
       );
@@ -1134,6 +1504,8 @@ impl Lightbox {
     content(
       div()
         .id(id)
+        .role(gpui::Role::Button)
+        .aria_label(if next { "Next" } else { "Previous" })
         .debug_selector(move || id.into())
         .absolute()
         .top(gpui::relative(0.5))
@@ -1150,90 +1522,50 @@ impl Lightbox {
         .bg(scrim(0.4))
         .when(disabled, |d| d.opacity(0.5))
         .when(!disabled, |d| {
-          d.cursor_pointer().hover(|s| s.bg(scrim(0.6))).on_click(
-            cx.listener(move |view, _, window, cx| view.go(if next { 1 } else { -1 }, window, cx)),
-          )
+          d.cursor_pointer()
+            .hover(|s| s.border_color(chrome(0.6)))
+            .on_click(
+              cx.listener(move |view, _, window, cx| {
+                view.go(if next { 1 } else { -1 }, window, cx)
+              }),
+            )
         })
         .child(ui::icon(icon, 32., chrome(1.))),
     )
   }
 
-  fn discard_dialog(&self, p: &Palette, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+  fn discard_dialog(&self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
     if !self.discard {
       return None;
     }
-    let panel = div()
-      .id("treq-send-unsaved-dialog")
-      .debug_selector(|| "treq-send-unsaved-dialog".into())
-      .w_full()
-      .max_w(zpx(512.))
-      .p_6()
-      .rounded(radius::LG)
-      .border_1()
-      .border_color(p.border.opacity(0.5))
-      .bg(p.popover)
-      .text_color(p.popover_foreground)
-      .shadow_2xl()
-      .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-      .child(
-        div()
-          .flex()
-          .flex_col()
-          .gap_1p5()
-          .child(
-            ui::text(div(), TextSize::Lg)
-              .font_weight(gpui::FontWeight::SEMIBOLD)
-              .child("Discard unsent comments?"),
-          )
-          .child(
-            ui::text(div(), TextSize::Sm)
-              .text_color(p.muted_foreground)
-              .child(
-                "You have review comments that have not been sent to the agent. Close anyway \
-                 and lose them?",
-              ),
-          ),
-      )
-      .child(
-        div()
-          .mt_4()
-          .flex()
-          .justify_end()
-          .gap_2()
-          .child(
-            Button::new("treq-send-unsaved-keep", p)
-              .variant(Variant::Ghost)
-              .label("Keep reviewing")
-              .on_click(cx.listener(|view, _, _, cx| {
-                view.discard = false;
-                cx.notify();
-              })),
-          )
-          .child(
-            Button::new("treq-send-unsaved-discard", p)
-              .label("Discard comments")
-              .on_click(cx.listener(|_, _, _, cx| cx.emit(LightboxEvent::Close))),
-          ),
-      );
+    let keep = |view: &mut Self, cx: &mut Context<Self>| {
+      view.discard = false;
+      cx.notify();
+    };
     Some(
-      div()
-        .id("treq-send-unsaved-backdrop")
-        .absolute()
-        .inset_0()
-        .p_4()
-        .flex()
-        .items_center()
-        .justify_center()
-        .bg(scrim(0.4))
-        .on_mouse_down(
-          MouseButton::Left,
-          cx.listener(|view, _, _, cx| {
-            cx.stop_propagation();
-            view.discard = false;
-            cx.notify();
-          }),
-        )
-        .child(panel),
+      div().absolute().inset_0().child(
+        ui::Dialog::new("treq-send-unsaved-dialog", p)
+          .width(512.)
+          .title("Discard unsent comments?")
+          .description(
+            "You have review comments that have not been sent to the agent. Close anyway and \
+             lose them?",
+          )
+          .on_close(ui::handler(cx, move |view, _, cx| keep(view, cx)))
+          .on_primary(ui::handler(cx, |_, _, cx| cx.emit(LightboxEvent::Close)))
+          .footer([
+            Button::new("treq-send-unsaved-keep", p)
+              .variant(Variant::Outline)
+              .label("Keep reviewing")
+              .on_click(cx.listener(move |view, _, _, cx| keep(view, cx)))
+              .into_any_element(),
+            Button::new("treq-send-unsaved-discard", p)
+              .variant(Variant::Destructive)
+              .label("Discard comments")
+              .on_click(cx.listener(|_, _, _, cx| cx.emit(LightboxEvent::Close)))
+              .into_any_element(),
+          ]),
+      ),
     )
   }
 }
@@ -1283,6 +1615,9 @@ impl Render for Lightbox {
     div()
       .id("treq-send-preview-lightbox")
       .debug_selector(|| "treq-send-preview-lightbox".into())
+      .role(gpui::Role::Dialog)
+      .aria_label("Preview")
+      .test_support()
       .track_focus(&self.focus)
       .relative()
       .w(viewport.width)
@@ -1302,6 +1637,8 @@ impl Render for Lightbox {
       .child(
         div()
           .id("treq-send-preview-backdrop")
+          // A dismiss target, not a control.
+          .cursor_default()
           .absolute()
           .inset_0()
           .bg(scrim(0.55))
@@ -1313,6 +1650,8 @@ impl Render for Lightbox {
       .child(
         div()
           .id("treq-send-preview-carousel-shell")
+          // A dismiss target, not a control.
+          .cursor_default()
           .debug_selector(|| "treq-send-preview-carousel-shell".into())
           .relative()
           .w(zpx(vw * 0.9))

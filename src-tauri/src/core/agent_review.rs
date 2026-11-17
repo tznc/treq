@@ -1,6 +1,85 @@
+use crate::result_ext::ResultExt;
 use std::path::{Path, PathBuf};
 
-use crate::local_db;
+use crate::local_db::{self, AgentReviewComment};
+
+/// The comments left on a reviewed target (a PR, a workspace diff, a Linear
+/// issue), ordered by file and line.
+pub fn list_comments(
+  repo_path: &str,
+  target_type: &str,
+  target_id: &str,
+) -> Result<Vec<AgentReviewComment>, String> {
+  local_db::list_agent_review_comments(repo_path, target_type, target_id)
+}
+
+/// The comments on a workspace's diff plus those an AI review left on the
+/// pull request the workspace was opened from, ordered by file and line.
+pub fn workspace_comments(
+  repo_path: &str,
+  workspace_id: i64,
+) -> Result<Vec<AgentReviewComment>, String> {
+  let id = workspace_id.to_string();
+  let mut comments = list_comments(repo_path, crate::core::agent_launch::REVIEW_TARGET, &id)?;
+  if let Some(pr) = local_db::get_workspace_pr_sync(repo_path, workspace_id)? {
+    comments.extend(list_comments(
+      repo_path,
+      "github_pr",
+      &pr.pr_number.to_string(),
+    )?);
+    comments.sort_by(|a, b| {
+      (&a.file_path, a.start_line, &a.created_at).cmp(&(&b.file_path, b.start_line, &b.created_at))
+    });
+  }
+  Ok(comments)
+}
+
+pub fn resolve_comment(repo_path: &str, id: &str) -> Result<(), String> {
+  local_db::resolve_agent_review_comment(repo_path, id)
+}
+
+pub fn delete_comment(repo_path: &str, id: &str) -> Result<(), String> {
+  local_db::delete_agent_review_comment(repo_path, id)
+}
+
+/// The text of `start_line..=end_line` of `file` as the reviewed target has
+/// it now, stored with a comment so applying its suggestion later can tell
+/// whether those lines moved. `None` for targets read from elsewhere.
+pub fn quote_target_lines(
+  repo_path: &str,
+  target_type: &str,
+  target_id: &str,
+  file: &str,
+  start_line: i64,
+  end_line: i64,
+) -> Result<Option<String>, String> {
+  let Some(root) = workspace_root(repo_path, target_type, target_id)? else {
+    return Ok(None);
+  };
+  let path = contained_path(Path::new(&root), file)?;
+  let text = std::fs::read_to_string(&path)
+    .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+  let lines: Vec<&str> = text.lines().collect();
+  let (start, end) = (start_line.max(1) as usize - 1, end_line.max(0) as usize);
+  if start >= end || end > lines.len() {
+    return Ok(None);
+  }
+  Ok(Some(lines[start..end].join("\n")))
+}
+
+/// The workspace folder a `workspace_diff` target's files live in.
+fn workspace_root(
+  repo_path: &str,
+  target_type: &str,
+  target_id: &str,
+) -> Result<Option<String>, String> {
+  match target_id.parse() {
+    Ok(id) if target_type == crate::core::agent_launch::REVIEW_TARGET => {
+      crate::core::changes::resolve_workspace_dir(repo_path, Some(id)).map(Some)
+    }
+    _ => Ok(None),
+  }
+}
 
 /// Replace `start_line..=end_line` of the comment's file with its suggested
 /// text. Deliberately not the generic patch-file path: a suggestion already
@@ -14,15 +93,23 @@ pub fn apply_agent_review_suggestion(repo_path: String, comment_id: String) -> R
     .as_deref()
     .ok_or_else(|| "Review comment has no suggested change".to_string())?;
 
+  // A workspace diff's file lives in that workspace, not the home repo, and
+  // its comment quotes the lines it covered: refuse if they have moved since.
+  let workspace = workspace_root(&repo_path, &comment.target_type, &comment.target_id)?;
+  let expected: Option<Vec<String>> = workspace
+    .as_ref()
+    .and(comment.quoted_text.as_ref())
+    .map(|quoted| quoted.split('\n').map(str::to_string).collect());
   splice_lines(
-    &repo_path,
+    workspace.as_deref().unwrap_or(&repo_path),
     &comment.file_path,
     comment.start_line,
     comment.end_line,
-    None,
+    expected.as_deref(),
     replacement,
   )?;
-  local_db::resolve_agent_review_comment(&repo_path, &comment.id)
+  local_db::resolve_agent_review_comment(&repo_path, &comment.id)?;
+  local_db::mark_review_history_applied(&repo_path, &comment.id)
 }
 
 /// Replaces lines `start_line..=end_line` (1-based) of `file_path` with
@@ -98,6 +185,10 @@ fn contained_path(root: &Path, file_path: &str) -> Result<PathBuf, String> {
     .map_err(|e| format!("Failed to resolve {}: {}", root.display(), e))?;
   let requested = Path::new(file_path);
   let relative = if requested.is_absolute() {
+    // Resolved like the root, so a path through a symlink still matches it.
+    let requested = requested
+      .canonicalize()
+      .map_err(|e| format!("Failed to read {file_path}: {e}"))?;
     requested
       .strip_prefix(&root)
       .map_err(|_| format!("'{file_path}' is outside the workspace"))?
@@ -131,7 +222,7 @@ fn write_atomically(path: &Path, contents: &str) -> Result<(), String> {
     })
     .and_then(|()| std::fs::rename(&temp, path));
   if result.is_err() {
-    let _ = std::fs::remove_file(&temp);
+    std::fs::remove_file(&temp).best_effort();
   }
   result.map_err(write_err)
 }
@@ -139,6 +230,96 @@ fn write_atomically(path: &Path, contents: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  fn comment(repo: &str, target_type: &str, target_id: &str, file: &str) {
+    local_db::create_agent_review_comment(
+      repo,
+      target_type,
+      target_id,
+      file,
+      None,
+      1,
+      1,
+      Some("new"),
+      "Note",
+      None,
+      "local-agent",
+      None,
+    )
+    .unwrap();
+  }
+
+  #[test]
+  fn workspace_comments_include_its_pull_requests_review() {
+    let root = tempfile::TempDir::new().unwrap();
+    let repo = root.path().to_str().unwrap();
+    let ws = local_db::add_workspace(
+      repo,
+      "w".into(),
+      format!("{repo}/w"),
+      "b".into(),
+      None,
+      None,
+      None,
+    )
+    .unwrap();
+    comment(repo, "workspace_diff", &ws.to_string(), "a.rs");
+    comment(repo, "github_pr", "42", "b.rs");
+    comment(repo, "github_pr", "7", "c.rs");
+    let record = local_db::PrSyncRecord {
+      pr_number: 42,
+      title: None,
+      description: None,
+    };
+    local_db::set_workspace_pr_sync(repo, ws, &record).unwrap();
+
+    let files: Vec<String> = workspace_comments(repo, ws)
+      .unwrap()
+      .into_iter()
+      .map(|c| c.file_path)
+      .collect();
+    assert_eq!(files, ["a.rs", "b.rs"]);
+  }
+
+  #[test]
+  fn workspace_without_a_pull_request_reads_only_its_own_comments() {
+    let root = tempfile::TempDir::new().unwrap();
+    let repo = root.path().to_str().unwrap();
+    comment(repo, "workspace_diff", "3", "a.rs");
+    comment(repo, "github_pr", "42", "b.rs");
+    let files: Vec<String> = workspace_comments(repo, 3)
+      .unwrap()
+      .into_iter()
+      .map(|c| c.file_path)
+      .collect();
+    assert_eq!(files, ["a.rs"]);
+  }
+
+  #[test]
+  fn applying_a_suggestion_records_it_as_applied() {
+    let root = tempfile::TempDir::new().unwrap();
+    let repo = root.path().to_str().unwrap();
+    std::fs::write(root.path().join("a.rs"), "a\nb\n").unwrap();
+    let comment = local_db::create_agent_review_comment(
+      repo,
+      "github_pr",
+      "7",
+      "a.rs",
+      None,
+      2,
+      2,
+      Some("new"),
+      "Use B",
+      Some("B\n"),
+      "local-agent",
+      None,
+    )
+    .unwrap();
+    apply_agent_review_suggestion(repo.into(), comment.id.clone()).unwrap();
+    let history = local_db::list_review_history(repo, 10).unwrap();
+    assert_eq!(history[0].comment_id.as_deref(), Some(comment.id.as_str()));
+    assert_eq!(history[0].outcome, "applied");
+  }
 
   #[test]
   fn splices_lines_only_while_they_still_read_as_expected() {
@@ -217,6 +398,32 @@ mod tests {
     .unwrap();
 
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "A\n");
+  }
+
+  // macOS temp dirs live under /var, a symlink to /private/var.
+  #[cfg(unix)]
+  #[test]
+  fn accepts_an_absolute_path_under_a_symlinked_root() {
+    let real = tempfile::TempDir::new().unwrap();
+    std::fs::write(real.path().join("a.rs"), "a\n").unwrap();
+    let links = tempfile::TempDir::new().unwrap();
+    let root = links.path().join("root");
+    std::os::unix::fs::symlink(real.path(), &root).unwrap();
+
+    splice_lines(
+      root.to_str().unwrap(),
+      root.join("a.rs").to_str().unwrap(),
+      1,
+      1,
+      None,
+      "A",
+    )
+    .unwrap();
+
+    assert_eq!(
+      std::fs::read_to_string(real.path().join("a.rs")).unwrap(),
+      "A\n"
+    );
   }
 
   #[test]

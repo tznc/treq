@@ -24,6 +24,16 @@ pub trait LaunchHost: Send + Sync {
   /// `treq send` attachments not dismissed yet.
   fn send_assets(&self) -> Vec<SendAsset>;
   fn dismiss_send_asset(&self, id: &str);
+  /// Keeps a review sent to an agent in the review history; `scope` is
+  /// `changes` or `files`.
+  fn record_review(
+    &self,
+    repo_path: &str,
+    workspace_id: Option<i64>,
+    scope: &str,
+    markdown: &str,
+    mode: &str,
+  );
 }
 
 /// `onSessionCreated` for a session a screen created: `session` is its

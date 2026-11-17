@@ -1,26 +1,26 @@
 //! `RenameWorkspaceDialog`: renames a workspace's branch, checking each
 //! typed name with a dry run first.
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
+use gpui_kit::base::TestSupportExt as _;
 use std::{sync::Arc, time::Duration};
 
 use gpui_kit::component::input::{InputEvent, InputState};
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
-  anchored, deferred, div, point, prelude::*, px, Context, Entity, FocusHandle, FontWeight,
-  KeyDownEvent, MouseButton, Subscription, Task, Window,
+  div, prelude::*, Context, Entity, FocusHandle, FontWeight, Subscription, Task, Window,
 };
 
 use super::{
-  workspace_data::WorkspaceHost,
-  workspace_dialog_data::WorkspaceDialogHost,
-  workspace_modal::{dialog_description, dialog_header, dialog_panel, press},
-  ActionSink,
+  workspace_data::WorkspaceHost, workspace_dialog_data::WorkspaceDialogHost,
+  workspace_modal::press, ActionSink,
 };
 use crate::gpui_shell::{
-  native::{NativeEvent, ToastTone},
+  native::NativeEvent,
   theme,
-  ui::{self, Button, TextSize, Variant},
+  ui::{self, Button, TextSize},
 };
 
 /// `useDebounce(branchName, 500)`.
@@ -132,10 +132,12 @@ impl RenameDialog {
     let (host, route) = (self.host.clone(), self.route.clone());
     self._check = Some(cx.spawn(async move |this, cx| {
       cx.background_executor().timer(DEBOUNCE).await;
-      let _ = this.update(cx, |view, cx| {
-        view.running = true;
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.running = true;
+          cx.notify();
+        })
+        .ignore_closed();
       let checked = cx
         .background_spawn({
           let name = name.clone();
@@ -154,11 +156,13 @@ impl RenameDialog {
           message,
         },
       };
-      let _ = this.update(cx, |view, cx| {
-        view.running = false;
-        view.checked = Some(checked);
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          view.running = false;
+          view.checked = Some(checked);
+          cx.notify();
+        })
+        .ignore_closed();
     }));
   }
 
@@ -166,18 +170,6 @@ impl RenameDialog {
     self.dismissed = true;
     press(&self.sink, "renameWorkspace.close", cx);
     cx.notify();
-  }
-
-  fn toast(&self, tone: ToastTone, title: &str, description: String) {
-    WorkspaceHost::notify(
-      &*self.host,
-      NativeEvent::Toast {
-        title: title.into(),
-        description,
-        tone,
-        action: None,
-      },
-    );
   }
 
   /// The form's action.
@@ -197,32 +189,38 @@ impl RenameDialog {
           async move { host.rename_workspace(&route.repo_path, route.workspace_id, &next, false) }
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        view.pending = false;
-        match result {
-          Ok(result) if !result.success => view.error = result.message,
-          Ok(_) => {
-            view.error.clear();
-            view.toast(
-              ToastTone::Success,
-              &format!("Renamed to {next}"),
-              String::new(),
-            );
-            WorkspaceHost::notify(
-              &*view.host,
-              NativeEvent::WorkspaceChanged {
-                repo_path: route.repo_path.clone(),
-              },
-            );
-            view.close(cx);
+      this
+        .update(cx, |view, cx| {
+          view.pending = false;
+          match result {
+            Ok(result) if !result.success => view.error = result.message,
+            Ok(_) => {
+              view.error.clear();
+              WorkspaceHost::notify(
+                &*view.host,
+                Toast::success(format!("Renamed to {next}")).into(),
+              );
+              WorkspaceHost::notify(
+                &*view.host,
+                NativeEvent::WorkspaceChanged {
+                  repo_path: route.repo_path.clone(),
+                },
+              );
+              view.close(cx);
+            }
+            Err(err) => {
+              WorkspaceHost::notify(
+                &*view.host,
+                Toast::error("Failed to rename workspace")
+                  .description(err.clone())
+                  .into(),
+              );
+              view.error = err;
+            }
           }
-          Err(err) => {
-            view.toast(ToastTone::Error, "Failed to rename workspace", err.clone());
-            view.error = err;
-          }
-        }
-        cx.notify();
-      });
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -277,26 +275,16 @@ impl Render for RenameDialog {
       })
     };
     let invalid = validation.filter(|v| !checking && !v.success);
-    let (backdrop, panel) =
-      dialog_panel("rename-workspace-dialog", 500., window.viewport_size(), &p);
-    let keys = cx.listener(|view, e: &KeyDownEvent, _, cx| {
-      let k = &e.keystroke;
-      if ui::is_escape(k) {
-        cx.stop_propagation();
-        view.close(cx);
-      } else if k.key == "enter"
-        && (crate::gpui_shell::keys::held(k.modifiers).platform
-          || crate::gpui_shell::keys::held(k.modifiers).control)
-      {
-        cx.stop_propagation();
-        view.submit(cx);
-      }
-    });
-    let panel = panel
-      .child(dialog_header(
-        "Rename Workspace",
-        dialog_description("Rename the branch for this workspace", &p),
-      ))
+    let can_submit = self.can_submit();
+    ui::Dialog::new("rename-workspace-dialog", &p)
+      .overlay(window.viewport_size())
+      .width(500.)
+      .title("Rename workspace")
+      .description("Rename the branch for this workspace")
+      .focus(&self.focus)
+      .on_close(ui::handler(cx, |view, _, cx| view.close(cx)))
+      .on_primary(ui::handler(cx, |view, _, cx| view.submit(cx)))
+      .primary_disabled(!can_submit)
       .child(
         div()
           .flex()
@@ -311,7 +299,7 @@ impl Render for RenameDialog {
               .child(
                 ui::text(div(), TextSize::Sm)
                   .font_weight(FontWeight::MEDIUM)
-                  .child("Branch Name"),
+                  .child("Branch name"),
               )
               .child(
                 div()
@@ -326,7 +314,11 @@ impl Render for RenameDialog {
               .when_some(invalid, |this, v| {
                 this.child(
                   ui::text(div(), TextSize::Sm)
+                    .id("rename-invalid")
                     .debug_selector(|| "rename-invalid".into())
+                    .role(tauri_plugin_gpui::gpui::Role::Alert)
+                    .aria_label(v.message.clone())
+                    .test_support()
                     .flex()
                     .items_center()
                     .gap_2()
@@ -345,42 +337,11 @@ impl Render for RenameDialog {
             )
           }),
       )
-      .child(
-        div()
-          .flex()
-          .justify_end()
-          .gap_2()
-          .child(
-            Button::new("rename-cancel", &p)
-              .variant(Variant::Outline)
-              .disabled(pending)
-              .label("Cancel")
-              .on_click(cx.listener(|view, _, _, cx| view.close(cx))),
-          )
-          .child(
-            Button::new("rename-submit", &p)
-              .disabled(!self.can_submit())
-              .label(if pending { "Renaming..." } else { "Rename" })
-              .on_click(cx.listener(|view, _, _, cx| view.submit(cx))),
-          ),
-      );
-    deferred(
-      anchored().position(point(px(0.), px(0.))).child(
-        backdrop
-          .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|view, _, _, cx| view.close(cx)),
-          )
-          .child(
-            panel
-              .id("rename-workspace-panel")
-              .track_focus(&self.focus)
-              .capture_key_down(keys)
-              .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()),
-          ),
-      ),
-    )
-    .with_priority(2)
-    .into_any_element()
+      .footer([Button::new("rename-submit", &p)
+        .disabled(!can_submit)
+        .label(if pending { "Renaming…" } else { "Rename" })
+        .on_click(cx.listener(|view, _, _, cx| view.submit(cx)))
+        .into_any_element()])
+      .into_any_element()
   }
 }

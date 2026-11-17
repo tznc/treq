@@ -7,11 +7,13 @@
 //! and the character-level marks are kept between frames, per file, until
 //! its diff changes.
 
+use gpui_kit::base::TestSupportExt as _;
 use std::{
-  collections::{HashMap, HashSet},
+  collections::{BTreeSet, HashMap, HashSet},
   ops::Range,
   rc::Rc,
   sync::Arc,
+  time::{Duration, Instant},
 };
 
 use tauri_plugin_gpui::gpui::{
@@ -25,10 +27,11 @@ use crate::{
   gpui_shell::{
     screen::{
       changes_data::{
-        body, conflict_lines, conflicts, is_collapsed, line_counts, new_lines, Body, BodyInput,
-        Conflict, FileHunks,
+        body, conflict_lines, conflicts, context_row_numbers, is_collapsed, line_counts, Body,
+        BodyInput, Conflict, FileHunks,
       },
-      commits_data::line_numbers,
+      changes_review::FILE_HUNK,
+      commits_data::{line_number, line_numbers},
       highlight, intraline,
     },
     theme::{self, Palette},
@@ -122,6 +125,32 @@ pub(super) struct DiffRows {
   prepared: HashMap<(String, bool), Rc<Prepared>>,
   /// The rem size the rows were measured at.
   rem: Pixels,
+  /// What the rows were laid out from, so an unchanged frame keeps them.
+  key: Option<Key>,
+  /// Bumped each time the rows are laid out again: the find index and the
+  /// placed threads are derived from the same inputs and follow it.
+  pub(super) revision: u64,
+  /// How long the last layout of the rows took.
+  pub(super) layout_cost: Duration,
+}
+
+/// Every input of `layout_rows`. The snapshot, the hunks and the lines read
+/// around them are too large to compare, so `ChangesView::layout_gen`
+/// stands for them: it is bumped wherever any of them changes.
+#[derive(PartialEq)]
+struct Key {
+  generation: u64,
+  pr_error: bool,
+  changeset_expanded: bool,
+  show_committed: Option<bool>,
+  /// Generated files the filter keeps because they are staged; `None`
+  /// with the filter off.
+  kept_generated: Option<BTreeSet<String>>,
+  collapsed: HashSet<String>,
+  expanded_large: HashSet<String>,
+  loaded_generated: HashSet<String>,
+  /// Files with a file comment or one being written.
+  file_comments: BTreeSet<String>,
 }
 
 impl Default for DiffRows {
@@ -134,6 +163,9 @@ impl Default for DiffRows {
       cards: Vec::new(),
       prepared: HashMap::new(),
       rem: px(0.),
+      key: None,
+      revision: 0,
+      layout_cost: Duration::ZERO,
     }
   }
 }
@@ -147,14 +179,58 @@ fn card_key(cards: &[Card], row: Row) -> Option<(&str, bool)> {
 }
 
 impl ChangesView {
-  /// The diff a card shows: the working copy's, else the branch's.
+  /// The diff a card shows: the branch's for a file in
+  /// [`Snapshot::shows_branch_diff`], else the working copy's, else the
+  /// branch's.
   pub(super) fn shown_hunks(&self, path: &str) -> Option<&FileHunks> {
-    self.hunks.get(path).or_else(|| {
-      self
-        .snapshot
-        .as_ref()
-        .and_then(|s| s.committed_hunks.get(path))
-    })
+    let branch = self
+      .snapshot
+      .as_ref()
+      .and_then(|s| s.committed_hunks.get(path));
+    if self
+      .snapshot
+      .as_ref()
+      .is_some_and(|s| s.shows_branch_diff(path))
+    {
+      return branch.or_else(|| self.hunks.get(path));
+    }
+    self.hunks.get(path).or(branch)
+  }
+
+  fn layout_key(&self) -> Key {
+    let review = &self.review;
+    Key {
+      generation: self.layout_gen,
+      pr_error: self.pr.as_ref().is_some_and(|pr| pr.error.is_some()),
+      changeset_expanded: self.changeset_expanded,
+      show_committed: self.options.show_committed,
+      kept_generated: self.hide_generated.then(|| {
+        self
+          .snapshot
+          .iter()
+          .flat_map(|s| &s.generated)
+          .filter(|p| self.staging.staged.contains(*p))
+          .cloned()
+          .collect()
+      }),
+      collapsed: self.collapsed_files.clone(),
+      expanded_large: self.expanded_large.clone(),
+      loaded_generated: self.loaded_generated.clone(),
+      file_comments: review
+        .comments
+        .iter()
+        .filter(|c| c.is_file())
+        .map(|c| &c.file_path)
+        .chain(
+          review
+            .draft
+            .iter()
+            .filter(|d| d.hunk_id == FILE_HUNK)
+            .map(|d| &d.file_path),
+        )
+        .cloned()
+        .collect(),
+    }
   }
 
   /// The cards and rows the diff shows now. None while the tab shows a
@@ -262,7 +338,7 @@ impl ChangesView {
             .checked_sub(1)
             .is_some_and(|prev| read(prev, Dir::After) > 0));
       if !joined {
-        rows.push(Row::HunkHeader(c, h, !card.committed && above.is_some()));
+        rows.push(Row::HunkHeader(c, h, above.is_some()));
       }
       rows.extend((0..before).map(|i| Row::Context(c, h, Dir::Before, i)));
       for l in 0..hunk.lines.len() {
@@ -278,7 +354,6 @@ impl ChangesView {
         rows.push(Row::Line(c, h, l));
       }
       rows.extend((0..read(h, Dir::After)).map(|i| Row::Context(c, h, Dir::After, i)));
-      // Drawn for committed files too, where React's click finds no hunk.
       if below.is_some() {
         rows.push(Row::Below(c, h));
       }
@@ -288,12 +363,20 @@ impl ChangesView {
   /// Brings the list up to date with the rows, keeping the measured
   /// heights of the rows that did not change.
   pub(super) fn sync_rows(&mut self, window: &mut Window) {
-    let (cards, rows) = self.layout_rows();
     let rem = window.rem_size();
     if rem != self.diff.rem {
       self.diff.rem = rem;
       self.diff.list.remeasure();
     }
+    let key = self.layout_key();
+    if self.diff.key.as_ref() == Some(&key) {
+      return;
+    }
+    let started = Instant::now();
+    let (cards, rows) = self.layout_rows();
+    self.diff.layout_cost = started.elapsed();
+    self.diff.key = Some(key);
+    self.diff.revision += 1;
     let old = (&self.diff.rows, &self.diff.cards);
     let same = |a: Row, b: Row| a == b && card_key(old.1, a) == card_key(&cards, b);
     if old.0.len() == rows.len() && old.0.iter().zip(&rows).all(|(a, b)| same(*a, *b)) {
@@ -320,6 +403,12 @@ impl ChangesView {
       .splice(prefix..old.0.len() - suffix, rows.len() - prefix - suffix);
     self.diff.rows = rows;
     self.diff.cards = cards;
+  }
+
+  /// How many times the rows were laid out.
+  #[cfg(test)]
+  pub(in crate::gpui_shell::screen) fn layout_revision(&self) -> u64 {
+    self.diff.revision
   }
 
   /// The row of a file's card.
@@ -398,7 +487,7 @@ impl ChangesView {
       Row::Head(..) => self.card_head(c, &p, cx),
       _ => ui::text(div(), TextSize::Code)
         .font_family(theme::MONO_FONT)
-        .child(self.body_row(row, &p, cx))
+        .child(self.body_line(row, &p, cx))
         .into_any_element(),
     };
     div()
@@ -423,7 +512,7 @@ impl ChangesView {
   }
 
   /// A row below a card's head.
-  fn body_row(&self, row: Row, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+  fn body_line(&self, row: Row, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
     let (c, h) = match row {
       Row::HunkHeader(c, h, _) | Row::Context(c, h, ..) | Row::Line(c, h, _) | Row::Below(c, h) => {
         (c, h)
@@ -455,16 +544,25 @@ impl ChangesView {
     match row {
       Row::HunkHeader(_, _, expandable) => {
         let file = path.to_string();
-        let hover = p.muted.opacity(0.8);
         gutter_cols(
           div()
             .id(SharedString::from(format!("hunk-header-{path}-{h}")))
+            .when(expandable, |this| {
+              this.role(gpui::Role::Button).aria_label("Show more lines")
+            })
+            .debug_selector({
+              let id = format!("hunk-header-{path}-{h}");
+              move || id
+            })
             .flex()
             .bg(p.muted.opacity(0.6))
             .when(expandable, |this| {
-              this.cursor_pointer().hover(move |s| s.bg(hover)).on_click(
-                cx.listener(move |view, _, _, cx| view.expand_context(&file, h, Dir::Before, cx)),
-              )
+              this
+                .cursor_pointer()
+                .hover(move |s| s.bg(p.hover()))
+                .on_click(cx.listener(move |view, _, _, cx| {
+                  view.expand_context(&file, h, Dir::Before, false, cx)
+                }))
             }),
         )
         .child(
@@ -490,13 +588,23 @@ impl ChangesView {
             )
             .when(expandable, |this| {
               this.child(
+                // Short label (['expander button label']): 11px is fine.
+                // ast-grep-ignore: gpui-text-xs-short-label-only
                 ui::text(div(), TextSize::Xs)
                   .ml_2()
                   .flex_none()
                   .text_color(muted)
                   .child("Show more lines above"),
               )
-            }),
+            })
+            // Between hunks the row above offers it, for the same gap.
+            .when_some(
+              (h == 0)
+                .then(|| self.expand_all_range(path, hunks, h, Dir::Before))
+                .flatten()
+                .map(|(start, end)| end + 1 - start),
+              |this, count| this.child(self.expand_all_button(path, h, Dir::Before, count, cx)),
+            ),
         )
         .into_any_element()
       }
@@ -507,14 +615,24 @@ impl ChangesView {
           .map(Vec::as_slice)
           .unwrap_or_default();
         let line = lines.get(i).map_or("", String::as_str);
-        let (first, last) = new_lines(&hunk.header);
-        let n = match dir {
-          Dir::Before => first as i64 - lines.len() as i64 + i as i64,
-          Dir::After => (last + 1 + i) as i64,
-        };
-        context_row(n, line, language, p).into_any_element()
+        let numbers = context_row_numbers(&hunk.header, dir == Dir::After, lines.len(), i);
+        let side = if dir == Dir::After { "after" } else { "before" };
+        context_row(
+          format!("context-new-{path}-{h}-{side}-{i}"),
+          numbers,
+          line,
+          language,
+          p,
+        )
+        .into_any_element()
       }
       Row::Line(_, _, l) => {
+        // Numbered with the card's other lines, not by counting up to this one.
+        let numbers = card
+          .prepared
+          .as_ref()
+          .and_then(|prep| prep.numbers.get(h)?.get(l).copied())
+          .unwrap_or_else(|| line_number(hunk, l));
         let changed = card
           .prepared
           .as_ref()
@@ -523,33 +641,49 @@ impl ChangesView {
         div()
           .child(
             self
-              .diff_line(path, hunks, h, l, changed, language, card.conflicted, p, cx)
+              .diff_line(
+                path,
+                hunks,
+                h,
+                l,
+                numbers,
+                changed,
+                language,
+                card.conflicted,
+                p,
+                cx,
+              )
               .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|view, e: &gpui::MouseDownEvent, _, cx| view.line_menu(e.position, cx)),
-              ),
+              )
+              .test_support(),
           )
-          .children(self.line_extras(path, hunks, h, l, p, cx))
+          .children(self.line_extras(path, hunks, h, l, numbers, p, cx))
           .into_any_element()
       }
       Row::Below(..) => {
         let file = path.to_string();
-        let committed = card.committed;
-        let hover = p.muted.opacity(0.5);
         gutter_cols(
           div()
             .id(SharedString::from(format!("expand-after-{path}-{h}")))
+            .role(gpui::Role::Button)
+            .aria_label("Show more lines")
+            .debug_selector({
+              let id = format!("expand-after-{path}-{h}");
+              move || id
+            })
             .flex()
             .bg(p.muted.opacity(0.3))
             .cursor_pointer()
-            .hover(move |s| s.bg(hover))
+            .hover(move |s| s.bg(p.hover()))
             .on_click(cx.listener(move |view, _, _, cx| {
-              if !committed {
-                view.expand_context(&file, h, Dir::After, cx)
-              }
+              view.expand_context(&file, h, Dir::After, false, cx)
             })),
         )
         .child(
+          // Short label (['expander button label']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .flex_1()
             .flex()
@@ -560,12 +694,55 @@ impl ChangesView {
             .py_0p5()
             .text_color(muted)
             .child(ui::icon(theme::ICON_CHEVRON_DOWN, 12., muted))
-            .child("Show more lines below"),
+            .child("Show more lines below")
+            .when_some(
+              self
+                .expand_all_range(path, hunks, h, Dir::After)
+                .map(|(start, end)| end + 1 - start),
+              |this, count| this.child(self.expand_all_button(path, h, Dir::After, count, cx)),
+            ),
         )
         .into_any_element()
       }
       Row::Head(..) | Row::Conflict(..) | Row::End => div().into_any_element(),
     }
+  }
+
+  /// "Expand all (N lines)": reads the whole gap in one click.
+  fn expand_all_button(
+    &self,
+    path: &str,
+    h: usize,
+    dir: Dir,
+    count: usize,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
+    let p = theme::palette(self.dark);
+    let id = match dir {
+      Dir::Before => format!("expand-all-above-{path}-{h}"),
+      Dir::After => format!("expand-all-{path}-{h}"),
+    };
+    let file = path.to_string();
+    let hover = p.foreground;
+    // Short label (['expander button label']): 11px is fine.
+    // ast-grep-ignore: gpui-text-xs-short-label-only
+    ui::text(div(), TextSize::Xs)
+      .id(SharedString::from(id.clone()))
+      .role(gpui::Role::Button)
+      .aria_label(format!("Expand all ({count} lines)"))
+      .debug_selector(move || id)
+      .ml_3()
+      .flex_none()
+      .text_color(p.muted_foreground)
+      .cursor_pointer()
+      .hover(move |s| s.text_color(hover))
+      .on_click(cx.listener(move |view, _, _, cx| {
+        // The row behind it reads twenty lines.
+        cx.stop_propagation();
+        view.expand_context(&file, h, dir, true, cx);
+      }))
+      .child(format!("Expand all ({count} lines)"))
+      .test_support()
   }
 
   /// Added and removed lines of a card, for its header.

@@ -1,5 +1,6 @@
 //! The workspace header's actions GPUI runs itself (`workspace/actions.rs`):
-//! checks, pull requests, retargeting, the merge queue and Delete Workspace.
+//! checks, pull requests, retargeting, Reset to remote and Delete
+//! Workspace.
 
 use gpui::TestAppContext;
 
@@ -152,12 +153,13 @@ fn views_the_pull_request_in_treq(cx: &mut TestAppContext) {
 fn deletes_the_workspace_from_the_more_menu(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, feature_host(), workspace_route());
   h.click("workspace-more");
-  h.pick("Delete Workspace");
+  h.pick("Delete workspace");
   assert!(calls_starting(&host, &["delete workspace"]).is_empty());
   h.answer("Delete workspace");
   assert_eq!(
     calls_starting(&host, &["delete workspace", "notify"]),
     [
+      "notify workspacesRemoving",
       "delete workspace 7",
       "notify workspaceChanged",
       "notify workspacesRemoved",
@@ -167,16 +169,94 @@ fn deletes_the_workspace_from_the_more_menu(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn restores_the_row_when_delete_fails(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    failing: vec!["delete_workspace"],
+    ..feature_host()
+  };
+  let (mut h, host) = workspace_harness(cx, host, workspace_route());
+  h.click("workspace-more");
+  h.pick("Delete workspace");
+  h.answer("Delete workspace");
+  assert_eq!(
+    calls_starting(&host, &["delete workspace", "notify"]),
+    [
+      "notify workspacesRemoving",
+      "delete workspace 7",
+      "notify workspacesRestored",
+      "notify toast Delete failed",
+    ]
+  );
+}
+
+#[gpui::test]
 fn keeps_the_workspace_when_delete_is_declined(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, feature_host(), workspace_route());
   h.click("workspace-more");
-  h.pick("Delete Workspace");
+  h.pick("Delete workspace");
   h.answer("Cancel");
-  assert!(!h.drawn("confirm"));
+  let screen = h.rendered();
+  assert!(screen
+    .query_by_role(gpui_testing_library::by::role(gpui::Role::Dialog))
+    .is_none());
   assert!(!host
     .calls()
     .iter()
     .any(|c| c.starts_with("delete workspace")));
+}
+
+/// The labels of the menu shown last.
+fn menu_labels(h: &mut Harness) -> Vec<String> {
+  use crate::gpui_shell::popup::{MenuEntry, PopupRequest};
+  h.cx.run_until_parked();
+  match h.popups.borrow().last() {
+    Some(PopupRequest::ShowDropdown { entries, .. }) => entries
+      .iter()
+      .filter_map(|e| match e {
+        MenuEntry::Item { text, .. } => Some(text.clone()),
+        _ => None,
+      })
+      .collect(),
+    _ => panic!("no dropdown is shown"),
+  }
+}
+
+#[gpui::test]
+fn resets_to_the_remote_from_the_more_menu(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, feature_host(), workspace_route());
+  h.click("workspace-more");
+  assert_eq!(menu_labels(&mut h), ["Reset to remote", "Delete workspace"]);
+  h.pick("Reset to remote");
+  assert!(calls_starting(&host, &["reset"]).is_empty(), "asks first");
+  h.answer("Reset to remote");
+  assert_eq!(
+    calls_starting(&host, &["reset", "notify toast"]),
+    ["reset 7", "notify toast Reset to remote"]
+  );
+}
+
+#[gpui::test]
+fn keeps_local_work_when_reset_is_declined(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, feature_host(), workspace_route());
+  h.click("workspace-more");
+  h.pick("Reset to remote");
+  h.answer("Cancel");
+  let screen = h.rendered();
+  assert!(screen
+    .query_by_role(gpui_testing_library::by::role(gpui::Role::Dialog))
+    .is_none());
+  assert!(calls_starting(&host, &["reset"]).is_empty());
+}
+
+#[gpui::test]
+fn offers_no_reset_without_an_upstream(cx: &mut TestAppContext) {
+  let mut host = feature_host();
+  if let Some(status) = host.loaded.status.as_mut() {
+    status.remote_sync = crate::core::RemoteSyncStatus::NotOnRemote;
+  }
+  let (mut h, _) = workspace_harness(cx, host, workspace_route());
+  h.click("workspace-more");
+  assert_eq!(menu_labels(&mut h), ["Delete workspace"]);
 }
 
 #[gpui::test]
@@ -200,73 +280,22 @@ fn retargets_onto_another_branch(cx: &mut TestAppContext) {
   );
 }
 
-fn queue_route(label: &str) -> ScreenSnapshot {
-  let mut json = route_json(Some(7), "main");
-  json["mergeQueue"] = serde_json::json!({
-    "label": label,
-    "secondary": false,
-    "disabled": false,
-    "tooltip": "Add this branch to the merge queue",
-  });
-  serde_json::from_value(json).expect("route")
-}
-
 #[gpui::test]
-fn adds_to_and_removes_from_the_merge_queue(cx: &mut TestAppContext) {
-  let (mut h, host) = workspace_harness(cx, feature_host(), queue_route("Add to Queue"));
-  h.cx.run_until_parked();
-  act(&mut h, press("workspace.mergeQueue"));
-  h.update(|s| *s = queue_route("Queued"));
-  act(&mut h, press("workspace.mergeQueue"));
-  assert_eq!(
-    calls_starting(&host, &["queue", "notify toast"]),
-    [
-      "queue tznc/treq feature/login Enqueue",
-      "notify toast Added to merge queue",
-      "queue tznc/treq feature/login Dequeue",
-      "notify toast Removed from merge queue",
-    ]
-  );
-}
-
-#[gpui::test]
-fn offers_pro_when_the_queue_needs_it(cx: &mut TestAppContext) {
-  let host = FakeHost {
-    failing: vec!["queue_pro"],
-    ..feature_host()
-  };
-  let (mut h, host) = workspace_harness(cx, host, queue_route("Add to Queue"));
-  h.cx.run_until_parked();
-  act(&mut h, press("workspace.mergeQueue"));
-  assert!(host
-    .calls()
-    .contains(&"notify toast The merge queue needs Pro".to_string()));
-}
-
-#[gpui::test]
-fn hands_a_remote_repositorys_actions_to_react(cx: &mut TestAppContext) {
+fn hands_a_remote_repository_actions_to_react(cx: &mut TestAppContext) {
   let host = FakeHost {
     react_actions: true,
     ..no_pr_host()
   };
   let (mut h, host) = workspace_harness(cx, host, workspace_route());
   h.cx.run_until_parked();
-  for id in [
-    "workspace.checksRunAll",
-    "workspace.createPr",
-    "workspace.mergeQueue",
-  ] {
+  for id in ["workspace.checksRunAll", "workspace.createPr"] {
     act(&mut h, press(id));
   }
   assert_eq!(
     h.sent(),
-    [
-      press("workspace.checksRunAll"),
-      press("workspace.createPr"),
-      press("workspace.mergeQueue"),
-    ]
+    [press("workspace.checksRunAll"), press("workspace.createPr"),]
   );
-  assert!(calls_starting(&host, &["run ", "create pr", "queue"]).is_empty());
+  assert!(calls_starting(&host, &["run ", "create pr"]).is_empty());
 }
 
 #[gpui::test]
@@ -276,8 +305,53 @@ fn a_merged_pull_request_hides_create_pr(cx: &mut TestAppContext) {
     pr.state = "MERGED".into();
   }
   let (mut h, _) = workspace_harness(cx, host, workspace_route());
-  assert!(h.drawn("workspace-view-pr"));
-  assert!(!h.drawn("workspace-create-pr"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(
+      gpui_testing_library::by::role(gpui::Role::Button)
+        .name(gpui_testing_library::TextMatch::regex(r"^View PR \(#42, ")),
+    ),
+  )
+  .to_be_visible();
+  assert!(screen
+    .query_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("Create PR"))
+    .is_none());
+}
+
+#[gpui::test]
+fn a_merged_pull_request_offers_archive_instead_of_merge(cx: &mut TestAppContext) {
+  let mut host = feature_host();
+  if let Some(Some(pr)) = host.pr.pr.as_mut() {
+    pr.state = "MERGED".into();
+  }
+  let (mut h, host) = workspace_harness(cx, host, workspace_route());
+  let screen = h.rendered();
+  assert!(
+    screen
+      .query_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("Merge…"))
+      .is_none(),
+    "no Merge… once the PR merged"
+  );
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("Archive")),
+  )
+  .to_be_visible();
+  h.click("workspace-archive");
+  h.cx.run_until_parked();
+  assert!(host.calls().contains(&"archive workspace 7".to_string()));
+}
+
+#[gpui::test]
+fn an_open_pull_request_keeps_merge(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, feature_host(), workspace_route());
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("Merge…")),
+  )
+  .to_be_visible();
+  assert!(screen
+    .query_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("Archive"))
+    .is_none());
 }
 
 #[gpui::test]
@@ -287,6 +361,16 @@ fn a_closed_pull_request_can_be_replaced(cx: &mut TestAppContext) {
     pr.state = "CLOSED".into();
   }
   let (mut h, _) = workspace_harness(cx, host, workspace_route());
-  assert!(h.drawn("workspace-view-pr"));
-  assert!(h.drawn("workspace-create-pr"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(
+      gpui_testing_library::by::role(gpui::Role::Button)
+        .name(gpui_testing_library::TextMatch::regex(r"^View PR \(#42, ")),
+    ),
+  )
+  .to_be_visible();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("Create PR")),
+  )
+  .to_be_visible();
 }

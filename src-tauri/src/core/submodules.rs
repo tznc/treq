@@ -1,4 +1,5 @@
 use crate::jj;
+use crate::result_ext::ResultExt;
 use gix::bstr::{BStr, ByteSlice};
 use gix::refs::transaction::{Change, LogChange, PreviousValue, RefEdit};
 use gix::refs::Target;
@@ -45,9 +46,8 @@ pub fn list_submodules(
   if !gitmodules.is_file() {
     return Ok(Vec::new());
   }
-  let contents = match fs::read_to_string(&gitmodules) {
-    Ok(text) => text,
-    Err(_) => return Ok(Vec::new()),
+  let Ok(contents) = fs::read_to_string(&gitmodules) else {
+    return Ok(Vec::new());
   };
   let declared = parse_gitmodules(&contents);
   if declared.is_empty() {
@@ -151,13 +151,15 @@ fn parse_gitmodules(contents: &str) -> Vec<SubmoduleSpec> {
 
 fn unquote_config_value(value: &str) -> String {
   let trimmed = value.trim();
-  if (trimmed.starts_with('"') && trimmed.ends_with('"'))
-    || (trimmed.starts_with('\'') && trimmed.ends_with('\''))
-  {
-    trimmed[1..trimmed.len() - 1].to_string()
-  } else {
-    trimmed.to_string()
-  }
+  ['"', '\'']
+    .into_iter()
+    .find_map(|quote| {
+      trimmed
+        .strip_prefix(quote)
+        .and_then(|inner| inner.strip_suffix(quote))
+    })
+    .unwrap_or(trimmed)
+    .to_string()
 }
 
 fn gitlinks_for_workspace(workspace_path: &str, git_repo_path: &str) -> BTreeMap<String, String> {
@@ -369,7 +371,7 @@ fn checkout_detached(
     let path = entry.path(&previous);
     if !kept.contains(path) {
       if let Ok(relative) = path.to_path() {
-        let _ = fs::remove_file(checkout.join(relative));
+        fs::remove_file(checkout.join(relative)).best_effort();
       }
     }
   }
@@ -539,42 +541,11 @@ pub fn merge_submodules_into_entries(
 #[cfg(test)]
 mod tests {
   use super::*;
-  use std::process::Command;
+  use crate::test_cli::git;
   use tempfile::TempDir;
 
-  fn run(cwd: &Path, program: &str, args: &[&str]) {
-    let output = Command::new(program)
-      .current_dir(cwd)
-      .args(args)
-      .output()
-      .unwrap_or_else(|e| panic!("{program} {:?}: {e}", args));
-    assert!(
-      output.status.success(),
-      "{program} {:?} failed: {}{}",
-      args,
-      String::from_utf8_lossy(&output.stdout),
-      String::from_utf8_lossy(&output.stderr)
-    );
-  }
-
-  fn git(cwd: &Path, args: &[&str]) {
-    run(cwd, "git", args);
-  }
-
   fn git_allow_file(cwd: &Path, args: &[&str]) {
-    let output = Command::new("git")
-      .current_dir(cwd)
-      .args(["-c", "protocol.file.allow=always"])
-      .args(args)
-      .output()
-      .unwrap_or_else(|e| panic!("git {:?}: {e}", args));
-    assert!(
-      output.status.success(),
-      "git {:?} failed: {}{}",
-      args,
-      String::from_utf8_lossy(&output.stdout),
-      String::from_utf8_lossy(&output.stderr)
-    );
+    git(cwd, &[&["-c", "protocol.file.allow=always"], args].concat());
   }
 
   fn init_git_repo(dir: &Path) {
@@ -670,16 +641,6 @@ mod tests {
     assert!(ids_match(head, &updated[0].pin));
   }
 
-  fn git_stdout(cwd: &Path, args: &[&str]) -> String {
-    let output = Command::new("git")
-      .current_dir(cwd)
-      .args(args)
-      .output()
-      .unwrap();
-    assert!(output.status.success(), "git {:?}", args);
-    String::from_utf8_lossy(&output.stdout).trim().to_string()
-  }
-
   #[test]
   fn update_submodules_clones_missing_store_into_usable_checkout() {
     let (_temp, superproject, _) = create_superproject_with_submodule();
@@ -696,11 +657,8 @@ mod tests {
       "sub\n"
     );
     // Plain git sees a detached, clean worktree at the pin.
-    assert_eq!(
-      git_stdout(&checkout, &["rev-parse", "HEAD"]),
-      updated[0].pin
-    );
-    assert_eq!(git_stdout(&checkout, &["status", "--porcelain"]), "");
+    assert_eq!(git(&checkout, &["rev-parse", "HEAD"]), updated[0].pin);
+    assert_eq!(git(&checkout, &["status", "--porcelain"]), "");
   }
 
   #[test]
@@ -754,10 +712,7 @@ mod tests {
       fs::read_to_string(checkout.join("keep.txt")).unwrap(),
       "mine\n"
     );
-    assert_eq!(
-      git_stdout(&checkout, &["status", "--porcelain"]),
-      "?? keep.txt"
-    );
+    assert_eq!(git(&checkout, &["status", "--porcelain"]), "?? keep.txt");
   }
 
   #[test]

@@ -1,5 +1,5 @@
 // Long branch names in the sidebar: a hovered workspace row truncates its
-// title before the Start agent, Open shell and Stack workspace buttons
+// title before the Start agent, Open shell and Stack on this… buttons
 // instead of running under them. The sidebar is dragged narrow so the
 // seed's stacked feat/empty-event-message overflows.
 import { expect, test } from "@playwright/test";
@@ -26,7 +26,7 @@ test("sidebar-truncation: long titles stop before the row actions", async ({ pag
 
   await row(page, LONG).hover();
   await settle(page, 1500);
-  await expect(row(page, LONG).getByRole("button", { name: "Stack workspace" })).toBeVisible();
+  await expect(row(page, LONG).getByRole("button", { name: "Stack on this…" })).toBeVisible();
   await capture(page, {
     name: "14-sidebar-long-title-hover",
     title: "Hovered workspace row with a title too long for the narrow sidebar",

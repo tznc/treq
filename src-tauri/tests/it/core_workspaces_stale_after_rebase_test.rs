@@ -375,13 +375,12 @@ fn update_stale_workspace_is_idempotent() {
 /// The child therefore starts as a sibling of `wo` off `tsy`. Auto-rebase preserves the
 /// fork because `roots(main..ducks-bookmark)` is bookmark-relative and cannot see `wo`.
 ///
-/// After auto-rebase, the stacked pair must form a straight line:
-///   main → chicken-bookmark → chicken-wc → ducks-bookmark → ducks-wc
-///
-/// FAILS on current code: chicken's working-copy commit `wo` and the ducks bookmark
-/// `uorp` are siblings under the chicken bookmark `tsy`, not a straight line.
+/// After auto-rebase, ducks stays stacked on chicken's bookmark, beside
+/// chicken's working copy rather than on it:
+///   main → chicken-bookmark → { chicken-wc, ducks-bookmark → ducks-wc }
+/// so chicken's uncommitted changes never reach ducks.
 #[test]
-fn test_stacked_workspace_lineage_stays_linear_after_auto_rebase() {
+fn stacked_workspace_stays_on_parent_bookmark_after_auto_rebase() {
   let repo = TestRepo::new().expect("Failed to create test repo");
   let default_branch = repo.default_branch().to_string();
 
@@ -439,30 +438,26 @@ fn test_stacked_workspace_lineage_stays_linear_after_auto_rebase() {
   println!("chicken WC (after): {chicken_wc_after}");
   println!("ducks bookmark:     {ducks_bm}");
 
-  // PRIMARY assertion: ducks bookmark must be a descendant of chicken's WC commit.
-  // If they are siblings (the bug), ancestors(ducks_bm) does not contain chicken_wc.
-  let ancestors_check = TestRepo::jj_commit_ids_in_revset(
+  // ducks sits on chicken's bookmark...
+  let on_chicken = TestRepo::jj_commit_ids_in_revset(
+    &repo.repo_path,
+    &format!("{chicken_bm} & ancestors({ducks_bm})"),
+  )
+  .unwrap_or_default();
+  assert!(
+    !on_chicken.is_empty(),
+    "ducks ({ducks_bm}) left chicken's bookmark ({chicken_bm})"
+  );
+
+  // ...and not on chicken's working copy.
+  let on_chicken_wc = TestRepo::jj_commit_ids_in_revset(
     &repo.repo_path,
     &format!("{chicken_wc_after} & ancestors({ducks_bm})"),
   )
   .unwrap_or_default();
   assert!(
-    !ancestors_check.is_empty(),
-    "ducks bookmark ({ducks_bm}) must be a descendant of chicken's WC commit \
-         ({chicken_wc_after}); got empty — they are siblings (fork bug)"
-  );
-
-  // CORROBORATING: chicken bookmark must have exactly one child (the chicken WC, not also
-  // the ducks bookmark). Two children means the fork exists.
-  let children_of_chicken_bm =
-    TestRepo::jj_commit_ids_in_revset(&repo.repo_path, &format!("children({chicken_bm})"))
-      .unwrap_or_default();
-  let child_count = children_of_chicken_bm.len();
-  assert_eq!(
-    child_count, 1,
-    "chicken bookmark ({chicken_bm}) must have exactly 1 child (its WC commit), \
-         but has {child_count} — the ducks bookmark is forked as a sibling (fork bug)\n\
-         children:\n{children_of_chicken_bm:?}"
+    on_chicken_wc.is_empty(),
+    "ducks ({ducks_bm}) sits on chicken's working copy ({chicken_wc_after})"
   );
 }
 
@@ -517,13 +512,12 @@ fn test_auto_rebase_does_not_leave_stale_working_copy_on_stacked_workspaces() {
   }
 }
 
-// ─── test 7: commits stacked on a carried working copy ──────────────────────
+// ─── test 7: commits stacked on a moved bookmark ────────────────────────────
 
-/// A rebase carries another workspace's working copy along when it sits on the
-/// moved lineage. When commits sit on top of that working copy, moving it alone
-/// would split them off it, so the stack stays together.
+/// A rebase carries everything stacked on the moved branch: C sits on B's
+/// bookmark, which sits on A's tip, so the whole stack moves together.
 #[test]
-fn lineage_rebase_keeps_commits_on_their_stacked_working_copy() {
+fn lineage_rebase_keeps_stacked_commits_on_their_parent_bookmark() {
   let repo = TestRepo::new().expect("Failed to create test repo");
   let default_branch = repo.default_branch().to_string();
   let ws_a = repo
@@ -565,7 +559,56 @@ fn lineage_rebase_keeps_commits_on_their_stacked_working_copy() {
   );
   assert_eq!(
     jj::jj_get_commit_id(&c_path, "@--").expect("C base"),
-    workspace_wc_commit(&b_path),
-    "C's commit should stay on B's working copy"
+    jj::jj_get_commit_id(&b_path, &ws_b.branch_name).expect("B bookmark"),
+    "C's commit should stay on B's bookmark"
   );
+}
+
+/// A rewrite reconciles every workspace, but one it did not touch keeps its
+/// working-copy state as it was: rewriting it would be an fsynced write per
+/// workspace per rewrite, for nothing.
+#[test]
+fn rebase_leaves_an_untouched_sibling_working_copy_state_alone() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  let default_branch = repo.default_branch().to_string();
+  let rebased = repo
+    .create_workspace_with_commit("feat/rebased", "rebased.txt", "rebased\n", None)
+    .expect("Failed to create rebased workspace");
+  let sibling = treq_lib::core::create_workspace(
+    &repo.repo_path,
+    "feat/sibling",
+    None,
+    None,
+    None,
+    None,
+    None,
+  )
+  .expect("Failed to create sibling workspace");
+  let rebased_path = repo.workspace_full_path(&rebased);
+  let sibling_path = repo.workspace_full_path(&sibling);
+  let checkout = std::path::Path::new(&sibling_path)
+    .join(".jj")
+    .join("working_copy")
+    .join("checkout");
+  let before = std::fs::read(&checkout).expect("Failed to read sibling checkout state");
+
+  repo
+    .commit_file("main.txt", "main\n", "advance main")
+    .expect("Failed to advance main");
+  jj::jj_rebase_with_revset(
+    &rebased_path,
+    &format!("roots({default_branch}..{})", rebased.branch_name),
+    &default_branch,
+    &rebased.branch_name,
+    "diff",
+  )
+  .expect("Failed to rebase");
+
+  assert_eq!(
+    std::fs::read(&checkout).expect("Failed to read sibling checkout state"),
+    before,
+    "the sibling's working-copy state is not rewritten"
+  );
+  assert!(!jj::is_workspace_stale(&sibling_path).expect("staleness"));
+  assert_working_copy_clean(&sibling_path);
 }

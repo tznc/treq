@@ -11,6 +11,7 @@
 //! know which files exist (see
 //! <https://stackoverflow.com/questions/6824717/sqlite-how-do-you-join-tables-from-different-databases>).
 
+use crate::result_ext::ResultExt;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -171,7 +172,10 @@ pub fn span_id_for_job(run_id: i64, job_id: &str) -> String {
 }
 
 /// Build an OTel record for one captured line.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+  clippy::too_many_arguments,
+  reason = "flat argument list kept to match callers"
+)]
 pub fn make_log_line(
   timestamp: String,
   run_id: i64,
@@ -418,9 +422,9 @@ fn cleanup_old_telemetry_dbs(dir: &Path, max_age: Duration) {
       continue;
     };
     if date < cutoff.date_naive() {
-      let _ = std::fs::remove_file(dir.join(name));
-      let _ = std::fs::remove_file(dir.join(format!("{}-wal", name)));
-      let _ = std::fs::remove_file(dir.join(format!("{}-shm", name)));
+      std::fs::remove_file(dir.join(name)).best_effort();
+      std::fs::remove_file(dir.join(format!("{}-wal", name))).best_effort();
+      std::fs::remove_file(dir.join(format!("{}-shm", name))).best_effort();
     }
   }
 }
@@ -843,10 +847,11 @@ fn validate_sql(sql: &str) -> Result<(), String> {
   }
 
   let lower = trimmed.to_lowercase();
-  if !ALLOWED_SQL_PREFIXES
-    .iter()
-    .any(|p| lower.starts_with(p) && lower[p.len()..].starts_with(char::is_whitespace))
-  {
+  if !ALLOWED_SQL_PREFIXES.iter().any(|p| {
+    lower
+      .strip_prefix(p)
+      .is_some_and(|rest| rest.starts_with(char::is_whitespace))
+  }) {
     return Err("Only read-only queries are allowed (SELECT, WITH, VALUES, EXPLAIN)".to_string());
   }
 
@@ -879,7 +884,7 @@ pub fn run_logs_sql(repo_path: &str, sql: &str, max_rows: i64) -> Result<SqlResu
   let mut stmt = conn
     .prepare(&capped)
     .map_err(|e| format!("Query error: {}", e))?;
-  let columns: Vec<String> = stmt.column_names().into_iter().map(String::from).collect();
+  let columns: Vec<String> = stmt.column_names().map(String::from).collect();
 
   let mut rows = stmt.query([]).map_err(|e| format!("Query error: {}", e))?;
   let mut out_rows: Vec<Vec<Option<String>>> = Vec::new();

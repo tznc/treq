@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "test": "playwright test",
-    "landing": "playwright test -c landing/landing.config.ts",
+    "landing": "node landing/capture.ts",
     "typecheck": "tsc -p .",
-    "qa": "playwright test -c qa/qa.config.ts"
+    "qa": "node qa/run-each.ts",
+    "qa:mobile": "playwright test -c mobile/mobile.config.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.64.1",

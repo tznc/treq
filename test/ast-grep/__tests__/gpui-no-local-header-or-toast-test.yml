@@ -1,0 +1,46 @@
+id: gpui-no-local-header-or-toast
+valid:
+  - |
+    fn conflicts_header(&mut self, count: usize, p: &Palette) -> impl IntoElement {
+      ui::SectionHeader::new("conflicts", "Conflicts", p).count(count)
+    }
+  - |
+    fn content_bar(&self, path: &str) -> Div {
+      div().child(path.to_uppercase())
+    }
+  - |
+    fn file_header(&self, path: &str) -> Div {
+      div().child(path.to_string())
+    }
+  - |
+    fn pushed(&self) {
+      self.host.notify(Toast::success("Pushed").into());
+    }
+  - |
+    mod tests {
+      fn toast(&self, _: ToastTone, _: &str, _: &str) {}
+    }
+invalid:
+  - |
+    fn section(p: &Palette, title: &str) -> Div {
+      ui::text(div(), TextSize::Xs).child(title.to_uppercase())
+    }
+  - |
+    fn group_heading(label: &str, p: &Palette) -> Div {
+      div().text_color(p.muted_foreground).child(label.to_uppercase())
+    }
+  - |
+    fn toast(&self, tone: ToastTone, title: &str, description: impl Into<String>) {
+      self.host.notify(NativeEvent::Toast {
+        title: title.into(),
+        description: description.into(),
+        tone,
+        action: None,
+      });
+    }
+  - |
+    impl View {
+      fn toast(&self, title: &str) {
+        self.host.toast(ToastTone::Error, title, "");
+      }
+    }

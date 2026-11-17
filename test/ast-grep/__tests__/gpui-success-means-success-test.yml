@@ -1,0 +1,63 @@
+id: gpui-success-means-success
+valid:
+  - |
+    fn tool_row(p: &Palette) -> Div {
+      match installed { Some(true) => ui::icon(ICON_CIRCLE_CHECK, 16., p.success), _ => x }
+    }
+  - |
+    fn ci_icon(p: &Palette) -> Hsla {
+      Tone::Success.text(p)
+    }
+  - |
+    fn file_status(status: &str, p: &Palette) -> (&'static str, Hsla) {
+      match status { "added" => ("A", p.diff_added()), _ => ("?", p.muted_foreground) }
+    }
+  - |
+    fn stats(p: &Palette) -> Div {
+      div().text_color(p.diff_added()).child(format!("+{n}"))
+    }
+  - |
+    fn render(v: &Validation) -> bool {
+      v.success
+    }
+invalid:
+  - |
+    fn diff_line(line: &str) -> Div {
+      div().text_color(theme.success)
+    }
+  - |
+    fn selected_row(p: &Palette) -> Hsla {
+      Tone::Success.color(p)
+    }
+  - |
+    fn file_status(status: &str, p: &Palette) -> (&'static str, Hsla) {
+      match status { "added" => ("A", p.success), _ => ("?", p.muted_foreground) }
+    }
+  - |
+    fn status_dot(status: &str) -> Option<ui::Tone> {
+      match status { "??" | "A" => Some(ui::Tone::Success), _ => None }
+    }
+  - |
+    fn row(p: &Palette) -> Row {
+      let (icon, color, tag) = match group { 0 => (ICON_CHECK, p.success, Some("current".to_string())), _ => x };
+    }
+  - |
+    fn hunk(p: &Palette) -> Hsla {
+      if line.starts_with('+') { p.success } else { p.foreground }
+    }
+  - |
+    fn stats(p: &Palette) -> Div {
+      div().text_color(Tone::Success.text(p)).child(format!("+{n}"))
+    }
+  - |
+    fn editor(p: &Palette) -> Div {
+      line("+", l, Tone::Success)
+    }
+  - |
+    fn conflict_card(p: &Palette) -> Hsla {
+      Tone::Success.tint(p)
+    }
+  - |
+    impl Render for DiffAsText {
+      fn render(&mut self) -> Div { let (add, del) = (theme.success, theme.danger); }
+    }

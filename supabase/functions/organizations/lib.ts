@@ -183,6 +183,23 @@ function callFor(
         respond: (data) => ({ ok: true, result: data }),
       };
     }
+    case "set_role": {
+      const orgId = uuid(fields, "organization_id");
+      const memberId = uuid(fields, "user_id");
+      const role = fields.role;
+      if (
+        orgId === null ||
+        memberId === null ||
+        (role !== "admin" && role !== "member")
+      ) {
+        return "set_role needs organization_id, user_id and role (admin or member)";
+      }
+      return {
+        fn: "organization_set_role",
+        args: { ...actor, p_org_id: orgId, p_user_id: memberId, p_role: role },
+        respond: (data) => ({ ok: true, result: data }),
+      };
+    }
     case "delete_organization": {
       const orgId = uuid(fields, "organization_id");
       if (orgId === null) return "delete_organization needs organization_id";
@@ -210,7 +227,7 @@ function callFor(
       };
     }
     default:
-      return "action must be one of create, invite, accept, revoke_invite, remove_member, leave, promote_member, demote_owner, delete_organization, attach_installation";
+      return "action must be one of create, invite, accept, revoke_invite, remove_member, leave, promote_member, demote_owner, set_role, delete_organization, attach_installation";
   }
 }
 

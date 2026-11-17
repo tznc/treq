@@ -1,4 +1,5 @@
 use crate::lock_ext::LockExt;
+use crate::result_ext::ResultExt;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -43,7 +44,7 @@ pub fn commit_repo(repo_path: &str, message: &str) -> Result<String, String> {
   let _guard = lock.lock_or_recover();
   let result =
     jj::jj_commit(repo_path, message).map_err(|e| format!("Failed to create commit: {}", e))?;
-  let _ = jj::jj_drop_autosave_ancestors(repo_path);
+  jj::jj_drop_autosave_ancestors(repo_path).warn_on_err("jj drop autosave ancestors");
   Ok(result)
 }
 
@@ -76,7 +77,7 @@ pub fn get_repo_current_branch(repo_path: &str) -> Result<RepoBranch, String> {
       .take(12)
       .collect()
   } else {
-    resolved_branch.clone()
+    resolved_branch
   };
 
   Ok(RepoBranch {
@@ -118,7 +119,7 @@ pub fn repo_status(repo_path: &str) -> Result<RepoStatus, String> {
   // Step 1: fetch — capture error but continue
   let fetch_error = jj::jj_git_fetch(repo_path).err().map(|e| e.to_string());
   // Keep jj view aligned with colocated git state before status checks.
-  let _ = jj::jj_util_import_git_refs(repo_path);
+  jj::jj_util_import_git_refs(repo_path).warn_on_err("jj util import git refs");
 
   // Step 2: default branch for conflict/change checks
   let default_branch = get_repo_default_branch(repo_path).unwrap_or_else(|_| "main".to_string());
@@ -177,6 +178,45 @@ fn is_repo_noise_path(path: &str) -> bool {
 pub fn list_repo_branches(repo_path: &str) -> Result<Vec<jj::JjBranch>, String> {
   jj::jj_util_import_git_refs(repo_path).map_err(|e| e.to_string())?;
   jj::get_branches(repo_path).map_err(|e| e.to_string())
+}
+
+/// Fetches the repository's remotes, returning what the fetch reported.
+pub fn fetch_repo(repo_path: &str) -> Result<String, String> {
+  jj::jj_git_fetch(repo_path).map_err(|e| e.to_string())
+}
+
+/// Whether `branch` exists locally and on `origin`.
+pub fn repo_branch_status(repo_path: &str, branch: &str) -> Result<jj::BranchStatus, String> {
+  jj::check_branch_exists(repo_path, branch).map_err(|e| e.to_string())
+}
+
+/// Whether rebasing the home repo's `branch` onto `target_branch` would
+/// likely conflict; `None` when that cannot be told.
+pub fn dry_run_home_rebase(
+  repo_path: &str,
+  branch: &str,
+  target_branch: &str,
+) -> Option<jj::HomeRebaseDryRunResult> {
+  jj::jj_dry_run_home_repo_rebase(repo_path, branch, target_branch).ok()
+}
+
+/// Rebases the home repo's `branch` onto `target_branch`.
+pub fn rebase_home_branch(
+  repo_path: &str,
+  branch: &str,
+  target_branch: &str,
+) -> Result<jj::JjRebaseResult, String> {
+  jj::jj_rebase_home_repo_branch(repo_path, branch, target_branch).map_err(|e| e.to_string())
+}
+
+/// Whether the user trusted the repo to run its workflows and scripts.
+pub fn is_repo_trusted(repo_path: &str) -> bool {
+  crate::local_db::is_repo_trusted(repo_path)
+}
+
+/// Records that the user trusts the repo.
+pub fn trust_repo(repo_path: &str) -> Result<(), String> {
+  crate::local_db::trust_repo(repo_path)
 }
 
 /// Switches the repository working copy to the given bookmark (branch).

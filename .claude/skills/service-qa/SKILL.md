@@ -9,11 +9,14 @@ description: >-
 
 # Service QA (Supabase CLI integration checks)
 
+> **Also the "web-qa" skill.** There is no separate `web-qa` skill: when a
+> request says web-qa (for example, capturing the signed-in treq.dev
+> dashboard), use this skill.
+
 ## When to use
 
 - User invokes `/service-qa`, optionally naming a flow ("service-qa desktop
-  token exchange", "service-qa merge-queue enabled RPC", "service-qa webhook
-  HMAC").
+  token exchange", "service-qa webhook HMAC").
 - Proactively, immediately after an Edit/Write/MultiEdit that changes the
   Supabase service contract or the app code that calls it — don't wait to be
   asked. If you see `additionalContext` from `post-edit-service-qa.sh` naming a
@@ -35,8 +38,7 @@ the app singleton; for a Pro user, post signed Stripe events with
 `scripts/service-qa/stripe.ts` rather than stubbing the gate). Never
 paste terminal logs or outcome HTML as stand-ins for those UI captures.
 
-Pure `_shared/merge-queue` unit tests under `test/merge-queue/` stay in
-`npm test`. service-qa covers the **I/O boundary**: Postgres, Auth Admin API,
+Pure Edge Function unit tests under `test/` stay in `npm test`. service-qa covers the **I/O boundary**: Postgres, Auth Admin API,
 PostgREST, and `functions/v1/*`.
 
 ## Delegate grunt work and discovery to cheaper subagents
@@ -73,7 +75,7 @@ Keep these yourself — they are the skill, not the legwork:
 Every call inside a service-qa spec must hit the local CLI stack at
 `http://127.0.0.1:54321` through the harness clients in
 `scripts/service-qa/clients.ts` (anon JWT for user-scoped calls, service-role
-for seeding / admin). Never `vi.mock("../../src/lib/supabase")`. Never point
+for seeding / admin). Never `jest.mock("../../src/lib/supabase")`. Never point
 at production (`*.supabase.co`).
 
 If a flow needs a signed-in user, use **email/password only** via
@@ -82,10 +84,9 @@ If a flow needs a signed-in user, use **email/password only** via
 `package.json` → `featureFlags.emailSignup` to `true` in
 `scripts/service-qa/features.ts` so this path stays available even when the
 shipped product flag is off. Do not hard-code production user IDs or paste live
-session tokens. Prefer `withMergeQueueFixture` (or an equivalent try/finally)
-so every user, install, and queue row is torn down.
+session tokens. Tear down every user and install row you seed in a try/finally.
 
-GitHub App side effects (labeling PRs, merging) are out of scope for early
+GitHub App side effects are out of scope for early
 specs unless you mock only the **outbound GitHub adapter** inside an Edge
 Function test — never mock PostgREST or Auth themselves. Prefer specs that
 assert DB rows, RPC return values, and HTTP status codes from Edge Functions.
@@ -109,8 +110,7 @@ Optional secrets for flows that need them (OAuth, GitHub App):
 - `SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET` / `SUPABASE_AUTH_EXTERNAL_GITHUB_SECRET`
   (see `supabase/config.toml`)
 - `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY_BASE64`, `GITHUB_WEBHOOK_SECRET`
-  for enqueue / webhook / worker specs (see
-  `supabase/functions/_shared/merge-queue/README.md`)
+  for GitHub App / webhook specs
 
 Email confirmations are **off** locally (`[auth.email] enable_confirmations =
 false`), so password signup works without Inbucket. service-qa **overrides**
@@ -136,13 +136,12 @@ signing uses `STRIPE_WEBHOOK_SECRET` from `supabase/functions/.env`.
 
 2. **Write or extend a spec** under
    `scripts/service-qa/specs/<slug>.spec.ts`. One spec per contract. Auth must
-   use email/password (`createTestUser` / `signInWithEmailPassword` /
-   `withMergeQueueFixture`) — the service-qa feature override keeps
+   use email/password (`createTestUser` / `signInWithEmailPassword`) — the service-qa feature override keeps
    `emailSignup` on. If an existing spec already covers this flow, add steps
    to it rather than duplicating seed setup. Shape:
 
    ```ts
-   import { it, expect } from "vitest";
+   import { it, expect } from "@jest/globals";
    import { getAnonClient, getServiceClient } from "../clients";
    import { createTestUser, linkGithubRepo } from "../seed";
    import { recordOutcome } from "../record";
@@ -173,9 +172,8 @@ signing uses `STRIPE_WEBHOOK_SECRET` from `supabase/functions/.env`.
    ```
 
    `scripts/service-qa/specs/desktop-token-exchange.spec.ts` is the worked
-   example for Auth + Edge Function. `merge-queue-enabled-rpc.spec.ts` is the
-   worked example for seeding a linked GitHub repo and exercising an RPC the
-   desktop app calls. Copy whichever shape fits.
+   example for Auth + Edge Function. `organizations.spec.ts` is the worked
+   example for exercising RPCs as a signed-in user. Copy whichever shape fits.
 
    Give every outcome a numbered, descriptive `name` —
    `<slug>-<NN>-<what-it-shows>` — that string becomes the JSON filename.
@@ -184,7 +182,7 @@ signing uses `STRIPE_WEBHOOK_SECRET` from `supabase/functions/.env`.
    for `expect`.** `recordOutcome` requires a non-empty `expectations:
    string[]` — plain-English claims about what the run proved (status codes,
    token single-use, RPC return value, RLS denial). These are written to
-   `<name>.json` so step 5 has a concrete checklist. Keep real Vitest
+   `<name>.json` so step 5 has a concrete checklist. Keep real Jest
    assertions in the spec body too.
 
    **At most 3 expectations per outcome.** If you
@@ -194,14 +192,14 @@ signing uses `STRIPE_WEBHOOK_SECRET` from `supabase/functions/.env`.
    - First run in a session, or after touching migrations / `config.toml`:
      `npm run service-qa:full` (start + reset + all specs).
    - Stack already up, iterating on one spec:
-     `npx vitest run --config vitest.service-qa.config.ts scripts/service-qa/specs/<slug>.spec.ts`
+     `npx jest --config jest.service-qa.config.js scripts/service-qa/specs/<slug>.spec.ts`
    - After a migration-only change with stack already running:
      `make db.reset && npm run service-qa`
 
 5. **Verify each outcome against its expectations before saying the task is
    done.** For every `recordOutcome`: read
    `scripts/service-qa/.generated/<name>.json` and confirm or refute each
-   claim against the Vitest output and, when relevant, a follow-up query via
+   claim against the Jest output and, when relevant, a follow-up query via
    the service-role client or Studio (`http://127.0.0.1:54323`). A spec whose
    `expect` calls passed can still leave the wrong row shape or a half-applied
    migration — the checklist is what forces a second look.

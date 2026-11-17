@@ -27,3 +27,10 @@ export const SUBSCRIPTION_STATUSES = [
 ] as const;
 
 export type SubscriptionStatus = (typeof SUBSCRIPTION_STATUSES)[number];
+
+/**
+ * The metered price for cloud workspace usage, added to every Pro
+ * subscription. Billed in micro-USD (see usage-report.ts). Not a plan, so it
+ * is not in PLAN_BY_LOOKUP_KEY.
+ */
+export const DEFAULT_USAGE_PRICE_LOOKUP_KEY = "treq_sandbox_usage";

@@ -7,6 +7,7 @@ use std::{
 };
 
 use gpui::{point, size, Bounds, Entity, Modifiers, TestAppContext, VisualTestContext};
+use gpui_testing_library::Queries as _;
 
 use super::{
   checks::{check_duration, ci_state},
@@ -89,6 +90,8 @@ impl crate::gpui_shell::screen::launch_data::LaunchHost for FakeHost {
   }
 
   fn dismiss_send_asset(&self, _: &str) {}
+
+  fn record_review(&self, _: &str, _: Option<i64>, _: &str, _: &str, _: &str) {}
 }
 
 impl crate::gpui_shell::screen::WorkspaceHost for FakeHost {
@@ -105,6 +108,10 @@ impl crate::gpui_shell::screen::WorkspaceHost for FakeHost {
   }
 
   fn sync(&self, _: &str, _: Option<i64>) -> Outcome {
+    unreachable!()
+  }
+
+  fn reset_to_remote(&self, _: &str, _: i64) -> Outcome {
     unreachable!()
   }
 
@@ -150,16 +157,6 @@ struct Harness {
 
 impl Harness {
   fn new(cx: &mut TestAppContext, kind: Kind, host: FakeHost) -> Self {
-    Self::over(cx, kind, host, None)
-  }
-
-  /// A popover over `shell`, which its outside presses go on to.
-  fn over(
-    cx: &mut TestAppContext,
-    kind: Kind,
-    host: FakeHost,
-    shell: Option<gpui::AnyWindowHandle>,
-  ) -> Self {
     let sent = Rc::new(RefCell::new(Vec::new()));
     let sink: ActionSink = {
       let sent = sent.clone();
@@ -170,7 +167,7 @@ impl Harness {
     let dyn_host: Arc<dyn PopoverHost> = host.clone();
     let anchor = Bounds::new(point(px(700.), px(10.)), size(px(80.), px(32.)));
     let (popover, cx) =
-      cx.add_window_view(|_, cx| Popover::new(kind, anchor, shell, false, dyn_host, sink, cx));
+      cx.add_window_view(|_, cx| Popover::new(kind, anchor, false, dyn_host, sink, cx));
     let mut cx = cx.clone();
     let closed = Rc::new(Cell::new(false));
     let subscription = {
@@ -187,9 +184,33 @@ impl Harness {
     }
   }
 
-  fn drawn(&mut self, selector: &'static str) -> bool {
+  /// The window as the user sees it, once everything pending has run.
+  fn rendered(&mut self) -> gpui_testing_library::Screen {
     self.cx.run_until_parked();
-    self.cx.debug_bounds(selector).is_some()
+    let window = self.cx.update(|window, _| window.window_handle());
+    let screen = gpui_testing_library::Screen::new(&self.cx, window);
+    screen.redraw();
+    screen
+  }
+
+  /// Whether the user sees an element of `role` named `name`.
+  fn shows(&mut self, role: gpui::Role, name: &str) -> bool {
+    !self
+      .rendered()
+      .query_all_by_role(
+        gpui_testing_library::by::role(role).name(gpui_testing_library::normalize(name)),
+      )
+      .is_empty()
+  }
+
+  /// The names of the branches the user can pick.
+  fn branches(&mut self) -> Vec<String> {
+    self
+      .rendered()
+      .query_all_by_role(gpui_testing_library::by::role(gpui::Role::ListBoxOption))
+      .iter()
+      .filter_map(|option| option.name())
+      .collect()
   }
 
   fn click(&mut self, selector: &'static str) {
@@ -249,6 +270,7 @@ fn target(branches: Vec<&'static str>) -> (Kind, FakeHost) {
     Kind::Target(TargetSpec {
       repo_path: "/repo".into(),
       current: Some("main".into()),
+      branches: None,
     }),
     FakeHost {
       branches,
@@ -340,10 +362,13 @@ fn setup_holds_checks_back_until_it_finishes() {
 #[gpui::test]
 fn details_list_the_workspace_and_its_starting_prompt(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, details(), prompt_host());
-  assert!(h.drawn("workspace-details-popover"));
-  assert!(h.drawn("details-prompt"));
-  assert!(h.drawn("details-view-full"));
-  assert!(!h.drawn("details-no-prompt"));
+  assert!(h
+    .rendered()
+    .query_by_role(gpui_testing_library::by::role(gpui::Role::Dialog))
+    .is_some());
+  assert!(h.shows(gpui::Role::Paragraph, "Add a login form"));
+  assert!(h.shows(gpui::Role::Button, "View full prompt"));
+  assert!(!h.shows(gpui::Role::Status, "No prompt recorded"));
   let shown = h.popover.read_with(&h.cx, |p, _| match &p.content {
     Content::Details(state) => state.prompt().cloned(),
     _ => None,
@@ -354,8 +379,8 @@ fn details_list_the_workspace_and_its_starting_prompt(cx: &mut TestAppContext) {
 #[gpui::test]
 fn details_say_when_no_prompt_was_recorded(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, details(), FakeHost::default());
-  assert!(h.drawn("details-no-prompt"));
-  assert!(!h.drawn("details-copy"));
+  assert!(h.shows(gpui::Role::Status, "No prompt recorded"));
+  assert!(!h.shows(gpui::Role::Button, "Copy"));
 }
 
 #[gpui::test]
@@ -398,56 +423,66 @@ fn popovers_close_from_an_outside_press_and_escape(cx: &mut TestAppContext) {
   assert!(h.closed.get());
 }
 
-/// The shell window under the backdrop: records the presses it gets.
-struct Shell {
-  presses: Rc<RefCell<Vec<gpui::Point<Pixels>>>>,
+/// A view with a button under a popover's backdrop.
+struct Under {
+  clicks: Rc<Cell<usize>>,
+  popover: Entity<Popover>,
 }
 
-impl Render for Shell {
+impl Render for Under {
   fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-    let presses = self.presses.clone();
+    let clicks = self.clicks.clone();
     div()
-      .id("shell")
       .size_full()
-      .on_click(move |event, _, _| presses.borrow_mut().push(event.position()))
+      .child(
+        div()
+          .id("under")
+          .absolute()
+          .left(px(0.))
+          .top(px(500.))
+          .size(px(100.))
+          .on_click(move |_, _, _| clicks.set(clicks.get() + 1)),
+      )
+      .child(
+        div()
+          .absolute()
+          .top_0()
+          .left_0()
+          .child(self.popover.clone()),
+      )
   }
 }
 
-fn shell(
-  cx: &mut TestAppContext,
-) -> (gpui::AnyWindowHandle, Rc<RefCell<Vec<gpui::Point<Pixels>>>>) {
-  let presses = Rc::new(RefCell::new(Vec::new()));
-  let window = cx.add_window({
-    let presses = presses.clone();
-    |_, _| Shell { presses }
+#[gpui::test]
+fn a_press_outside_does_not_reach_what_is_under_the_backdrop(cx: &mut TestAppContext) {
+  cx.update(theme::init);
+  let clicks = Rc::new(Cell::new(0));
+  let host: Arc<dyn PopoverHost> = Arc::new(prompt_host());
+  let anchor = Bounds::new(point(px(700.), px(10.)), size(px(80.), px(32.)));
+  let (_, cx) = cx.add_window_view({
+    let clicks = clicks.clone();
+    move |_, cx| {
+      let popover =
+        cx.new(|cx| Popover::new(details(), anchor, false, host, Rc::new(|_, _| {}), cx));
+      Under { clicks, popover }
+    }
   });
   cx.run_until_parked();
-  (window.into(), presses)
+  cx.simulate_click(point(px(50.), px(550.)), Modifiers::none());
+  cx.run_until_parked();
+  assert_eq!(clicks.get(), 0);
 }
 
 #[gpui::test]
-fn an_outside_press_goes_on_to_the_shell_window(cx: &mut TestAppContext) {
-  let (window, presses) = shell(cx);
-  let mut h = Harness::over(cx, details(), prompt_host(), Some(window));
+fn the_backdrop_covers_the_window(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, details(), prompt_host());
   h.cx.run_until_parked();
-  h.cx
-    .simulate_click(point(px(10.), px(600.)), Modifiers::none());
-  h.cx.run_until_parked();
-  assert!(h.closed.get());
-  assert_eq!(*presses.borrow(), [point(px(10.), px(600.))]);
-}
-
-#[gpui::test]
-fn a_press_on_the_popover_button_only_closes_it(cx: &mut TestAppContext) {
-  let (window, presses) = shell(cx);
-  let mut h = Harness::over(cx, details(), prompt_host(), Some(window));
-  h.cx.run_until_parked();
-  // The Harness's anchor.
-  h.cx
-    .simulate_click(point(px(720.), px(20.)), Modifiers::none());
-  h.cx.run_until_parked();
-  assert!(h.closed.get());
-  assert!(presses.borrow().is_empty());
+  let backdrop = h
+    .cx
+    .debug_bounds("header-popover-backdrop")
+    .expect("backdrop");
+  let viewport = h.cx.update(|window, _| window.viewport_size());
+  assert_eq!(backdrop.size, viewport);
 }
 
 #[gpui::test]
@@ -461,10 +496,26 @@ fn a_press_inside_the_popover_keeps_it_open(cx: &mut TestAppContext) {
 fn target_lists_the_repository_branches(cx: &mut TestAppContext) {
   let (kind, host) = target(vec!["main", "develop", "release"]);
   let mut h = Harness::new(cx, kind, host);
-  assert!(h.drawn("target-branch-popover"));
-  assert!(h.drawn("branch-option-0"));
-  assert!(h.drawn("branch-option-2"));
-  assert!(!h.drawn("branch-option-3"));
+  assert_eq!(h.branches(), ["main", "develop", "release"]);
+  assert!(h.host.calls().contains(&"branches /repo".to_string()));
+}
+
+/// Branches read ahead while the pointer rested on the button list in the
+/// first frame, with nothing loading, and are read again behind.
+#[gpui::test]
+fn target_lists_branches_read_ahead_at_once(cx: &mut TestAppContext) {
+  let (mut kind, host) = target(vec!["main", "develop"]);
+  if let Kind::Target(spec) = &mut kind {
+    spec.branches = Some(vec!["main".into(), "develop".into()]);
+  }
+  let mut h = Harness::new(cx, kind, host);
+  h.cx.update(|window, cx| {
+    window.refresh();
+    window.draw(cx).clear(cx);
+  });
+  assert!(h.cx.debug_bounds("branch-option-1").is_some());
+  assert!(h.cx.debug_bounds("target-loading").is_none());
+  assert!(h.shows(gpui::Role::ListBoxOption, "develop"));
   assert!(h.host.calls().contains(&"branches /repo".to_string()));
 }
 
@@ -475,9 +526,7 @@ fn target_filters_with_the_search_field(cx: &mut TestAppContext) {
   h.cx.run_until_parked();
   h.cx.simulate_input("rel");
   h.cx.run_until_parked();
-  assert!(h.drawn("branch-option-2"));
-  assert!(!h.drawn("branch-option-0"));
-  assert!(!h.drawn("branch-option-1"));
+  assert_eq!(h.branches(), ["release"]);
   assert_eq!(
     h.popover.read_with(&h.cx, |p, _| match &p.content {
       Content::Target(state) => state.selected().map(str::to_string),
@@ -494,7 +543,7 @@ fn target_says_when_no_branch_matches(cx: &mut TestAppContext) {
   h.cx.run_until_parked();
   h.cx.simulate_input("zzz");
   h.cx.run_until_parked();
-  assert!(h.drawn("target-empty"));
+  assert!(h.shows(gpui::Role::Status, "No branches match"));
 }
 
 #[gpui::test]
@@ -510,6 +559,20 @@ fn target_picks_with_the_keyboard(cx: &mut TestAppContext) {
   assert!(h.closed.get());
 }
 
+/// The arrows, End, Home and PageDown move the selection; Enter picks it.
+#[gpui::test]
+fn target_moves_the_selection_with_list_keys(cx: &mut TestAppContext) {
+  let (kind, host) = target(vec!["main", "develop", "release"]);
+  let mut h = Harness::new(cx, kind, host);
+  h.cx.run_until_parked();
+  h.keys("end");
+  h.keys("up");
+  h.keys("home");
+  h.keys("pagedown");
+  h.keys("enter");
+  assert_eq!(h.sent(), vec![field("workspace.target", "release")]);
+}
+
 #[gpui::test]
 fn target_picks_with_a_click(cx: &mut TestAppContext) {
   let (kind, host) = target(vec!["main", "develop"]);
@@ -522,7 +585,7 @@ fn target_picks_with_a_click(cx: &mut TestAppContext) {
 #[gpui::test]
 fn checks_run_one_workflow_or_all(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, checks(checks_input()), FakeHost::default());
-  assert!(h.drawn("checks-popover"));
+  assert!(h.shows(gpui::Role::Button, "Run all checks"));
   h.click("checks-run-1");
   h.click("checks-run-all");
   assert_eq!(
@@ -580,7 +643,7 @@ fn checks_close_to_show_the_logs(cx: &mut TestAppContext) {
   let mut input = checks_input();
   input.logs = false;
   let mut h = Harness::new(cx, checks(input), FakeHost::default());
-  assert!(!h.drawn("checks-view-logs"));
+  assert!(!h.shows(gpui::Role::Button, "View logs"));
 }
 
 #[gpui::test]
@@ -604,7 +667,7 @@ fn checks_list_pull_request_checks_failed_first(cx: &mut TestAppContext) {
     ],
   });
   let mut h = Harness::new(cx, checks(input), FakeHost::default());
-  assert!(h.drawn("checks-github"));
+  assert!(h.shows(gpui::Role::Heading, "GitHub checks · 1/2"));
   let first = h.cx.debug_bounds("ci-check-0").expect("first");
   let second = h.cx.debug_bounds("ci-check-1").expect("second");
   assert!(first.top() < second.top());
@@ -616,12 +679,44 @@ fn checks_list_pull_request_checks_failed_first(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn checks_list_the_wip_status_last_as_inactive(cx: &mut TestAppContext) {
+  let mut input = checks_input();
+  let check = |name: &str, bucket: &str| PrCheckEntry {
+    name: name.into(),
+    bucket: bucket.into(),
+    link: String::new(),
+    duration_secs: None,
+  };
+  input.ci = Some(PrCiStatus {
+    state: "success".into(),
+    total: 1,
+    passed: 1,
+    failed: 0,
+    pending: 0,
+    checks: vec![
+      check("WIP", crate::github::INACTIVE),
+      check("build", "pass"),
+    ],
+  });
+  let mut h = Harness::new(cx, checks(input), FakeHost::default());
+  // Below the counted checks, labelled instead of spinning.
+  let screen = h.rendered();
+  let inactive =
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Label).name("WIP inactive"));
+  let first = h.cx.debug_bounds("ci-check-0").expect("first");
+  assert!(first.top() < inactive.bounds().top());
+  assert!(screen
+    .query_by_role(gpui_testing_library::by::role(gpui::Role::Label).name("build inactive"))
+    .is_none());
+}
+
+#[gpui::test]
 fn checks_follow_the_workspace_view(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, checks(checks_input()), FakeHost::default());
-  assert!(!h.drawn("checks-workflow-2"));
+  assert!(!h.shows(gpui::Role::Button, "Run deploy"));
   let mut input = checks_input();
   input.data.workflows.push(workflow("deploy.yml", None));
   h.popover
     .update(&mut h.cx, |popover, cx| popover.set_checks(input, cx));
-  assert!(h.drawn("checks-workflow-2"));
+  assert!(h.shows(gpui::Role::Button, "Run deploy"));
 }

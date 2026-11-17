@@ -1,3 +1,9 @@
+#![expect(
+  clippy::unwrap_used,
+  clippy::let_underscore_must_use,
+  clippy::expect_used,
+  reason = "test code"
+)]
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use std::fs;
 
@@ -11,7 +17,7 @@ fn bench_commit_workspace(c: &mut Criterion) {
   group.sample_size(100);
 
   group.bench_function("create_commit", |b| {
-    b.iter_batched(
+    b.iter_batched_ref(
       || {
         let repo = TestRepo::new().expect("failed to init test repo");
         let workspace = treq_lib::core::create_workspace(

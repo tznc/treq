@@ -284,11 +284,7 @@ fn test_list_commits_includes_stacked_working_copies_for_dirty_chain() {
 
   assert_eq!(
     stacked_labels,
-    vec![
-      grandchild.branch_name.clone(),
-      child.branch_name.clone(),
-      root.branch_name.clone()
-    ],
+    vec![grandchild.branch_name, child.branch_name, root.branch_name],
     "Stacked working copies should be ordered from terminal workspace upward"
   );
 }
@@ -373,7 +369,7 @@ fn test_list_commits_skips_clean_branches_in_stacked_chain() {
 
   assert_eq!(
     stacked_labels,
-    vec![grandchild.branch_name.clone(), root.branch_name.clone()],
+    vec![grandchild.branch_name, root.branch_name],
     "Clean intermediate branches should be skipped without breaking ancestry traversal"
   );
 }
@@ -691,7 +687,8 @@ fn test_undo_commit_only_allows_latest_commit_sequentially() {
     .expect("Failed to get commits after undo");
   assert_eq!(commits_after.commits.len(), 1);
   assert_eq!(commits_after.commits[0].change_id, oldest_change_id);
-  assert!(!workspace_path.join("second.txt").exists());
+  // The undone commit's changes stay in the working copy.
+  assert!(workspace_path.join("second.txt").exists());
 
   // The now-tip commit (previously the older one) can be undone in turn.
   treq_lib::core::undo_commit(&repo.repo_path, workspace.id, &oldest_change_id)
@@ -700,7 +697,8 @@ fn test_undo_commit_only_allows_latest_commit_sequentially() {
   let commits_final = treq_lib::jj::jj_get_commits_ahead(workspace_path_str, default_branch)
     .expect("Failed to get commits after second undo");
   assert!(commits_final.commits.is_empty());
-  assert!(!workspace_path.join("first.txt").exists());
+  assert!(workspace_path.join("first.txt").exists());
+  assert!(workspace_path.join("second.txt").exists());
 }
 
 #[test]
@@ -1263,10 +1261,215 @@ fn test_list_commits() {
   );
 
   // Should exclude working copy commits
-  let wc: Vec<_> = result
-    .commits
-    .iter()
-    .filter(|c| c.is_working_copy)
-    .collect();
-  assert_eq!(wc.len(), 0, "Should have no working copy commits");
+  assert_eq!(
+    result.commits.iter().filter(|c| c.is_working_copy).count(),
+    0,
+    "Should have no working copy commits"
+  );
+}
+
+#[test]
+fn test_stacked_working_copy_row_tracks_edits_and_caches_in_the_repo() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  let root = treq_lib::core::create_workspace(
+    &repo.repo_path,
+    "feat/stats-root",
+    None,
+    None,
+    None,
+    None,
+    None,
+  )
+  .expect("Failed to create root workspace");
+  let child = treq_lib::core::create_workspace(
+    &repo.repo_path,
+    "feat/stats-child",
+    None,
+    None,
+    Some(&root.branch_name),
+    None,
+    None,
+  )
+  .expect("Failed to create child workspace");
+  let root_path = repo.workspaces_dir().join(&root.workspace_path);
+  let root_path_str = root_path.to_str().expect("root path should be utf-8");
+  let stacked_row = || {
+    treq_lib::core::list_commits(&repo.repo_path, Some(child.id), false, None, None)
+      .expect("Failed to list stacked workspace commits")
+      .commits
+      .into_iter()
+      .find(|c| c.workspace_label.as_deref() == Some(root.branch_name.as_str()))
+  };
+
+  assert!(
+    stacked_row().is_none(),
+    "a clean lower workspace has no row"
+  );
+
+  TestRepo::write_workspace_file(root_path_str, "root.txt", "one\n").expect("write");
+  let first = stacked_row().expect("a dirty lower workspace has a row");
+  assert_eq!((first.insertions, first.deletions), (1, 0));
+  assert_eq!(
+    stacked_row().map(|c| c.insertions),
+    Some(1),
+    "reads again the same"
+  );
+
+  TestRepo::write_workspace_file(root_path_str, "root.txt", "one\ntwo\nthree\n").expect("write");
+  let edited = stacked_row().expect("still dirty");
+  assert_eq!((edited.insertions, edited.deletions), (3, 0));
+  assert_ne!(edited.commit_id, first.commit_id);
+
+  assert!(
+    !root_path.join(".treq").join("local.db").exists(),
+    "the diff stat cache is the repository's, not one inside the workspace"
+  );
+}
+
+/// Past 5,000 changed paths a commit diff skips rename tracking, which is
+/// quadratic in the paths: a rename shows as a deletion and an addition.
+#[test]
+fn test_commit_diff_of_over_five_thousand_paths_skips_rename_tracking() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  let workspace = treq_lib::core::create_workspace(
+    &repo.repo_path,
+    "feat/commit-diff-many-paths",
+    None,
+    None,
+    None,
+    None,
+    None,
+  )
+  .expect("Failed to create workspace");
+  let dir = repo.workspaces_dir().join(&workspace.workspace_path);
+  let dir = dir.to_str().unwrap();
+  let text = "one\ntwo\nthree\nfour\nfive\n";
+  TestRepo::write_workspace_file(dir, "old.txt", text).expect("Failed to write file");
+  treq_lib::core::commit_workspace(&repo.repo_path, workspace.id, "Add old")
+    .expect("Failed to commit");
+
+  let diff_of = |message: &str| {
+    let log = treq_lib::core::list_commits(&repo.repo_path, Some(workspace.id), false, None, None)
+      .expect("Failed to list commits");
+    let commit = log
+      .commits
+      .iter()
+      .find(|commit| commit.description == message)
+      .expect("Should find the commit");
+    treq_lib::core::get_commit_diff_with_conflict_style(
+      &repo.repo_path,
+      Some(workspace.id),
+      &commit.change_id,
+      "git",
+    )
+    .expect("Failed to get commit diff")
+  };
+  let status_of = |diff: &treq_lib::jj::JjRevisionDiff, path: &str| {
+    diff
+      .committed_files
+      .iter()
+      .find(|f| f.path == path)
+      .map(|f| f.status.clone())
+  };
+
+  std::fs::remove_file(std::path::Path::new(dir).join("old.txt")).expect("Failed to remove");
+  TestRepo::write_workspace_file(dir, "new.txt", text).expect("Failed to write file");
+  treq_lib::core::commit_workspace(&repo.repo_path, workspace.id, "Rename")
+    .expect("Failed to commit");
+  let renamed = diff_of("Rename");
+  assert_eq!(status_of(&renamed, "new.txt").as_deref(), Some("R"));
+
+  std::fs::rename(
+    std::path::Path::new(dir).join("new.txt"),
+    std::path::Path::new(dir).join("newer.txt"),
+  )
+  .expect("Failed to rename");
+  for i in 0..5_000 {
+    TestRepo::write_workspace_file(dir, &format!("many/f{i}.txt"), "").expect("Failed to write");
+  }
+  treq_lib::core::commit_workspace(&repo.repo_path, workspace.id, "Rename among many")
+    .expect("Failed to commit");
+  let many = diff_of("Rename among many");
+  assert!(many.committed_files.len() > 5_000);
+  assert_eq!(status_of(&many, "newer.txt").as_deref(), Some("A"));
+  assert_eq!(status_of(&many, "new.txt").as_deref(), Some("D"));
+}
+
+/// jj's git backend stores commit times in whole seconds, so redoing an
+/// abandon in the same second rewrites descendants to commits that already
+/// exist.
+#[test]
+fn abandon_succeeds_again_right_after_undo() {
+  let repo = TestRepo::new().unwrap();
+  repo.commit_file("f1.txt", "f1\n", "f1").unwrap();
+  repo.commit_file("f2.txt", "f2\n", "f2").unwrap();
+  let path = &repo.repo_path;
+  treq_lib::jj::jj_get_changed_files(path).unwrap();
+  let f1 = treq_lib::jj::jj_get_change_id(path, "@--").unwrap();
+
+  let op = treq_lib::jj::jj_abandon(path, &f1).unwrap();
+  treq_lib::jj::jj_undo_operation(path, &op).unwrap();
+
+  treq_lib::jj::jj_abandon(path, &f1).unwrap();
+}
+
+#[test]
+fn commits_ahead_handles_target_bookmark_conflicted_with_deletion() {
+  let repo = TestRepo::new().expect("test repo");
+  let default_branch = repo.default_branch().to_string();
+  let workspace = repo
+    .create_workspace_with_commit("feat/ahead-conflict", "a.txt", "a\n", None)
+    .expect("workspace");
+  let workspace_path = repo.workspace_full_path(&workspace);
+
+  repo.create_file("main.txt", "main\n").expect("write");
+  treq_lib::jj::jj_commit(&repo.repo_path, "main commit").expect("commit main");
+  let op = TestRepo::run_jj_cli(
+    &repo.repo_path,
+    &["op", "log", "--no-graph", "-n1", "-T", "id.short()"],
+  )
+  .expect("op id");
+  let op = op.trim();
+  // One side deletes the bookmark, the other moves it: the merged bookmark is
+  // conflicted but has a single present term.
+  TestRepo::run_jj_cli(
+    &repo.repo_path,
+    &[
+      "--at-op",
+      op,
+      "--ignore-working-copy",
+      "bookmark",
+      "delete",
+      &default_branch,
+    ],
+  )
+  .expect("delete");
+  TestRepo::run_jj_cli(
+    &repo.repo_path,
+    &[
+      "--at-op",
+      op,
+      "--ignore-working-copy",
+      "bookmark",
+      "set",
+      &default_branch,
+      "-r",
+      "@",
+      "--allow-backwards",
+    ],
+  )
+  .expect("set");
+  let listed = TestRepo::run_jj_cli(
+    &repo.repo_path,
+    &["--ignore-working-copy", "bookmark", "list", &default_branch],
+  )
+  .expect("list");
+  assert!(
+    listed.contains("conflict"),
+    "bookmark should be conflicted: {listed}"
+  );
+
+  let ahead = treq_lib::jj::jj_get_commits_ahead(&workspace_path, &default_branch)
+    .expect("commits ahead must not fail on a conflicted target");
+  assert!(!ahead.commits.is_empty());
 }

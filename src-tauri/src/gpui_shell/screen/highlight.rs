@@ -5,7 +5,15 @@
 //! does too: a line is parsed from a fresh state, and its spans are cached
 //! by language and text because a diff redraws on every hover.
 
-use std::{cell::RefCell, collections::HashMap, ops::Range, rc::Rc, sync::LazyLock};
+use crate::result_ext::ResultExt;
+use std::{
+  cell::RefCell,
+  collections::HashMap,
+  hash::{BuildHasher, BuildHasherDefault, Hasher, RandomState},
+  ops::Range,
+  rc::Rc,
+  sync::LazyLock,
+};
 
 use syntect::parsing::{ParseState, Scope, ScopeStack, SyntaxReference, SyntaxSet};
 use tauri_plugin_gpui::gpui::{
@@ -14,9 +22,15 @@ use tauri_plugin_gpui::gpui::{
 
 static SYNTAXES: LazyLock<SyntaxSet> = LazyLock::new(two_face::syntax::extra_newlines);
 
-/// The cache is dropped whole past this many lines, which a long review
-/// session reaches without holding much memory.
-const CACHE_MAX: usize = 20_000;
+/// The cache holds at most about this many bytes of lines and spans, which
+/// a long review session reaches without holding much memory. A count
+/// would let a few thousand minified lines hold gigabytes.
+const CACHE_MAX_BYTES: usize = 16 << 20;
+
+/// Lines longer than this (minified code) are drawn plain: syntect takes
+/// 23 ms on 5,000 characters of JavaScript and 92 ms on 20,000, on the
+/// main thread, and a line this long is not read for its colors.
+const LONG_LINE: usize = 2_000;
 
 /// What Prism would call a span, reduced to what the two themes color.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,8 +63,101 @@ pub(super) enum Token {
 
 pub(super) type Spans = Rc<Vec<(Range<usize>, Token)>>;
 
+/// A highlighted line: its text, which [`styled`] draws without copying
+/// it again, and its spans.
+#[derive(Clone)]
+struct Line {
+  language: &'static str,
+  text: SharedString,
+  spans: Spans,
+}
+
+impl Line {
+  /// What the cache holds for the line: its text, its spans and the map's
+  /// entry.
+  fn weight(&self) -> usize {
+    const ENTRY: usize = 64;
+    ENTRY + self.text.len() + self.spans.len() * std::mem::size_of::<(Range<usize>, Token)>()
+  }
+
+  fn is(&self, language: &str, text: &str) -> bool {
+    self.language == language && self.text.as_ref() == text
+  }
+}
+
+/// The map's keys are already hashes, and are used as they are.
+#[derive(Default)]
+struct Prehashed(u64);
+
+impl Hasher for Prehashed {
+  fn finish(&self) -> u64 {
+    self.0
+  }
+
+  fn write(&mut self, bytes: &[u8]) {
+    for b in bytes {
+      self.0 = self.0.rotate_left(8) ^ u64::from(*b);
+    }
+  }
+
+  fn write_u64(&mut self, n: u64) {
+    self.0 = n;
+  }
+}
+
+type Lines = HashMap<u64, Line, BuildHasherDefault<Prehashed>>;
+
+/// Lines by a hash of their language and text, so a hit allocates nothing.
+/// Lines go into `current`; once it weighs half of [`CACHE_MAX_BYTES`] it
+/// becomes `previous`, and a line found there moves back. A full cache so
+/// drops only lines not drawn for a while, never the ones on screen.
+#[derive(Default)]
+struct Cache {
+  current: Lines,
+  /// The bytes `current` holds, by [`Line::weight`].
+  weight: usize,
+  previous: Lines,
+  hasher: RandomState,
+}
+
+impl Cache {
+  fn get<R>(
+    &mut self,
+    key: u64,
+    language: &str,
+    text: &str,
+    read: impl FnOnce(&Line) -> R,
+  ) -> Option<R> {
+    if let Some(line) = self.current.get(&key) {
+      // Another line with the same hash is a miss, and is replaced.
+      return line.is(language, text).then(|| read(line));
+    }
+    let line = self.previous.remove(&key)?;
+    if !line.is(language, text) {
+      return None;
+    }
+    let out = read(&line);
+    self.insert(key, line);
+    Some(out)
+  }
+
+  fn insert(&mut self, key: u64, line: Line) {
+    if self.weight >= CACHE_MAX_BYTES / 2 {
+      self.previous = std::mem::take(&mut self.current);
+      self.weight = 0;
+    }
+    self.weight += line.weight();
+    if let Some(replaced) = self.current.insert(key, line) {
+      self.weight -= replaced.weight();
+    }
+  }
+}
+
 thread_local! {
-  static CACHE: RefCell<HashMap<(&'static str, String), Spans>> = RefCell::new(HashMap::new());
+  static CACHE: RefCell<Cache> = RefCell::new(Cache::default());
+  /// What each scope maps to, by whether the file is JavaScript: a scope's
+  /// name is built and matched once.
+  static TOKENS: RefCell<HashMap<(Scope, bool), Option<Token>>> = RefCell::new(HashMap::new());
 }
 
 /// The language React's `getLanguageFromPath` picks for a file, as the
@@ -90,25 +197,60 @@ fn syntax(language: &str) -> Option<&'static SyntaxReference> {
     .or_else(|| SYNTAXES.find_syntax_by_token(language))
 }
 
+/// Every [`language`]'s token, for [`warm`].
+const LANGUAGES: &[&str] = &[
+  "sh", "c", "cpp", "css", "erl", "ex", "go", "html", "java", "js", "json", "md", "py", "rb", "rs",
+  "scss", "sql", "xml", "ts", "tsx", "yaml",
+];
+
+/// Loads the grammars and compiles the regexes a first line of each
+/// language needs, so the first diff drawn doesn't do it on the main
+/// thread. Grammars compile their patterns lazily and keep them in the
+/// shared [`SYNTAXES`], so parsing on any thread warms them for all.
+pub fn warm() {
+  const LINE: &str = "let x = f(\"a\", 1); // b";
+  for language in LANGUAGES {
+    if let Some(syntax) = syntax(language) {
+      parse(language, syntax, LINE);
+    }
+  }
+}
+
 /// Token spans of one line, byte ranges into `line`.
 pub(super) fn spans(language: &'static str, line: &str) -> Spans {
-  let key = (language, line.to_string());
-  if let Some(hit) = CACHE.with(|c| c.borrow().get(&key).cloned()) {
-    return hit;
+  highlighted(language, line, |l| l.spans.clone())
+}
+
+/// `read` of `line`'s cache entry, highlighting it first on a miss.
+fn highlighted<R>(language: &'static str, line: &str, read: impl Fn(&Line) -> R) -> R {
+  if line.len() > LONG_LINE {
+    return read(&Line {
+      language,
+      text: SharedString::from(line.to_string()),
+      spans: Rc::default(),
+    });
   }
-  let spans: Spans = Rc::new(
-    syntax(language)
-      .map(|s| parse(language, s, line))
-      .unwrap_or_default(),
-  );
-  CACHE.with(|c| {
+  let key = CACHE.with(|c| {
     let mut c = c.borrow_mut();
-    if c.len() >= CACHE_MAX {
-      c.clear();
-    }
-    c.insert(key, spans.clone());
+    let key = c.hasher.hash_one((language, line));
+    c.get(key, language, line, &read).ok_or(key)
   });
-  spans
+  let key = match key {
+    Ok(hit) => return hit,
+    Err(key) => key,
+  };
+  let entry = Line {
+    language,
+    text: SharedString::from(line.to_string()),
+    spans: Rc::new(
+      syntax(language)
+        .map(|s| parse(language, s, line))
+        .unwrap_or_default(),
+    ),
+  };
+  let out = read(&entry);
+  CACHE.with(|c| c.borrow_mut().insert(key, entry));
+  out
 }
 
 fn parse(language: &str, syntax: &SyntaxReference, line: &str) -> Vec<(Range<usize>, Token)> {
@@ -136,15 +278,24 @@ fn parse(language: &str, syntax: &SyntaxReference, line: &str) -> Vec<(Range<usi
   let mut cursor = 0;
   for (index, op) in ops {
     push(cursor..index, &scopes);
-    let _ = scopes.apply(&op);
+    scopes.apply(&op).best_effort();
     cursor = index;
   }
   push(cursor..text.len(), &scopes);
   out
 }
 
-/// Maps a TextMate scope onto the Prism token that colors the same thing.
+/// [`token_of`], remembered.
 fn token(scope: Scope, js: bool) -> Option<Token> {
+  TOKENS.with(|t| {
+    *t.borrow_mut()
+      .entry((scope, js))
+      .or_insert_with(|| token_of(scope, js))
+  })
+}
+
+/// Maps a TextMate scope onto the Prism token that colors the same thing.
+fn token_of(scope: Scope, js: bool) -> Option<Token> {
   let scope = scope.build_string();
   let is = |prefix: &str| {
     scope == prefix
@@ -246,8 +397,8 @@ pub(super) fn color(token: Token, dark: bool) -> Option<Hsla> {
 
 /// `line` drawn with its highlights; plain when the file has no language.
 pub(super) fn styled(line: &str, language: Option<&'static str>, dark: bool) -> StyledText {
-  let text = SharedString::from(line.to_string());
-  StyledText::new(text).with_highlights(token_styles(line, language, dark))
+  let (text, styles) = text_and_styles(line, language, dark);
+  StyledText::new(text).with_highlights(styles)
 }
 
 /// [`styled`] with `marks` painted behind the text (search matches).
@@ -257,19 +408,21 @@ pub(super) fn styled_marked(
   dark: bool,
   marks: &[(Range<usize>, Hsla)],
 ) -> StyledText {
-  let text = SharedString::from(line.to_string());
-  StyledText::new(text).with_highlights(overlay(token_styles(line, language, dark), marks))
+  let (text, styles) = text_and_styles(line, language, dark);
+  StyledText::new(text).with_highlights(overlay(styles, marks))
 }
 
-fn token_styles(
+/// `line` as drawn, from the cache when it has a language, and its styles.
+fn text_and_styles(
   line: &str,
   language: Option<&'static str>,
   dark: bool,
-) -> Vec<(Range<usize>, HighlightStyle)> {
+) -> (SharedString, Vec<(Range<usize>, HighlightStyle)>) {
   let Some(language) = language else {
-    return Vec::new();
+    return (SharedString::from(line.to_string()), Vec::new());
   };
-  spans(language, line)
+  let (text, spans) = highlighted(language, line, |l| (l.text.clone(), l.spans.clone()));
+  let styles = spans
     .iter()
     .filter_map(|(range, token)| {
       let italic = *token == Token::Italic || *token == Token::Comment && !dark;
@@ -288,7 +441,8 @@ fn token_styles(
         )
       })
     })
-    .collect()
+    .collect();
+  (text, styles)
 }
 
 /// Splits sorted, disjoint `styles` at the `marks`' edges so each piece
@@ -356,6 +510,73 @@ mod tests {
   }
 
   #[test]
+  fn a_full_cache_keeps_the_lines_read_since() {
+    let mut cache = Cache::default();
+    let line = |text: &str| Line {
+      language: "rs",
+      text: text.to_string().into(),
+      spans: Rc::default(),
+    };
+    cache.insert(0, line("kept"));
+    cache.insert(1, line("dropped"));
+    let count = 2 * CACHE_MAX_BYTES as u64 / line("other").weight() as u64;
+    for i in 2..count {
+      cache.insert(i, line("other"));
+      if i % 1000 == 0 {
+        assert!(cache.get(0, "rs", "kept", |_| ()).is_some());
+      }
+    }
+    assert!(cache.get(0, "rs", "kept", |_| ()).is_some());
+    assert!(cache.get(1, "rs", "dropped", |_| ()).is_none());
+    // Another text or language with the same hash is not taken for the line.
+    assert!(cache.get(0, "rs", "collides", |_| ()).is_none());
+    assert!(cache.get(0, "ts", "kept", |_| ()).is_none());
+    let held: usize = [&cache.current, &cache.previous]
+      .into_iter()
+      .flat_map(|lines| lines.values())
+      .map(Line::weight)
+      .sum();
+    assert!(held <= CACHE_MAX_BYTES, "{held} bytes held");
+  }
+
+  #[test]
+  fn long_lines_weigh_what_they_hold() {
+    let mut cache = Cache::default();
+    let spans: Spans = Rc::new(vec![(0..1, Token::Keyword); 3_000]);
+    let line = Line {
+      language: "js",
+      text: "x".repeat(LONG_LINE).into(),
+      spans,
+    };
+    let weight = line.weight();
+    assert!(weight > 3_000 * 24 + LONG_LINE);
+    for key in 0..(CACHE_MAX_BYTES / weight * 4) as u64 {
+      cache.insert(key, line.clone());
+    }
+    assert!(cache.current.len() + cache.previous.len() < CACHE_MAX_BYTES / weight + 2);
+  }
+
+  /// `cargo test highlight::tests::first_draw_of_a_long_line -- --ignored --nocapture`
+  #[test]
+  #[ignore = "measurement"]
+  fn first_draw_of_a_long_line_cost() {
+    for chars in [1_000usize, 1_900, 2_100, 5_000, 20_000] {
+      let line: String = "var a=function(b){return b+1},c=\"s\";".repeat(chars / 35 + 1);
+      let line = &line[..chars];
+      let started = std::time::Instant::now();
+      let n = spans("js", line).len();
+      println!("{chars} chars: {:?}, {n} spans", started.elapsed());
+    }
+  }
+
+  #[test]
+  fn long_lines_are_left_plain() {
+    let long = format!("let s = \"{}\";", "a".repeat(LONG_LINE));
+    assert!(spans("rs", &long).is_empty());
+    assert!(!spans("rs", "let s = 1;").is_empty());
+  }
+
+  #[test]
   fn picks_the_language_react_does() {
     assert_eq!(language("src/a.tsx"), Some("tsx"));
     assert_eq!(language("x.YML"), Some("yaml"));
@@ -407,5 +628,41 @@ mod tests {
     assert_eq!(color(Token::Keyword, false), Some(rgb(0x0000ff).into()));
     assert_eq!(color(Token::Keyword, true), Some(rgb(0x569cd6).into()));
     assert_eq!(color(Token::Function, false), None);
+  }
+
+  #[test]
+  fn warm_covers_every_language() {
+    let extensions = [
+      "sh", "c", "cpp", "css", "erl", "ex", "go", "html", "java", "js", "json", "md", "py", "rb",
+      "rs", "scss", "sql", "xml", "ts", "tsx", "yaml",
+    ];
+    for ext in extensions {
+      let language = language(&format!("a.{ext}")).expect("a language");
+      assert!(LANGUAGES.contains(&language), "{language}");
+      assert!(syntax(language).is_some(), "{language}");
+    }
+  }
+
+  /// What the first diff line of each language costs the main thread
+  /// after [`warm`] ran elsewhere (`COLD=1`: without it). Run alone, so
+  /// nothing else warmed the syntax set:
+  /// `cargo test --features gpui-shell --lib highlight_warm_perf -- --ignored --nocapture`
+  #[test]
+  #[ignore]
+  fn highlight_warm_perf() {
+    let started = std::time::Instant::now();
+    if std::env::var_os("COLD").is_none() {
+      std::thread::spawn(warm).join().expect("warm");
+    }
+    let warm_took = started.elapsed();
+    let started = std::time::Instant::now();
+    for language in LANGUAGES {
+      spans(language, "const y = g('c', 2); # d");
+    }
+    println!(
+      "warm (background): {warm_took:?}; first line of {} languages after: {:?}",
+      LANGUAGES.len(),
+      started.elapsed()
+    );
   }
 }

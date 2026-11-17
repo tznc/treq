@@ -7,6 +7,8 @@
 //! ([`NativeEvent::AgentSessionStarted`]), since React still routes the
 //! selection.
 
+use crate::gpui_shell::native::Toast;
+use crate::result_ext::ResultExt;
 use tauri::{AppHandle, Manager};
 
 use super::native::{Backend, NativeEvent, ToastTone};
@@ -37,12 +39,12 @@ impl LaunchStore for Store<'_> {
       .with_db(|db| crate::core::sessions::create_session(db, &scope, workspace_id, name.into()))
   }
 
-  fn session_count(&self, repo: &str, workspace_id: Option<i64>) -> usize {
-    crate::local_db::get_sessions(&self.0.state_scope(repo))
+  fn session_names(&self, repo: &str) -> Vec<String> {
+    crate::core::sessions::list_sessions(&self.0.state_scope(repo))
       .unwrap_or_default()
-      .iter()
-      .filter(|s| s.workspace_id == workspace_id)
-      .count()
+      .into_iter()
+      .map(|s| s.name)
+      .collect()
   }
 
   fn repo_setting(&self, repo: &str, key: &str) -> Option<String> {
@@ -74,14 +76,13 @@ impl LaunchStore for Store<'_> {
     prompt: &str,
     agent: Option<&str>,
   ) -> Result<(), String> {
-    crate::local_db::add_prompt_history(
+    crate::core::sessions::add_prompt_history(
       &self.0.state_scope(repo),
       workspace_id,
-      Some(session_id),
+      session_id,
       prompt,
       agent,
     )
-    .map(|_| ())
   }
 
   fn open_issue_workspace(
@@ -111,7 +112,7 @@ impl LaunchStore for Store<'_> {
           )?;
           crate::linear::resolve_linear_client(repo, db)
         })?;
-        let result = tauri::async_runtime::block_on(async {
+        let result = crate::gpui_shell::block_on(async {
           let issue = crate::linear::linear_get_issue_impl(&client, id).await?;
           crate::commands::linear::open_or_create_workspace_from_linear_issue(repo, &issue).await
         })?;
@@ -192,18 +193,25 @@ impl LaunchHost for Backend {
   fn dismiss_send_asset(&self, id: &str) {
     launch::dismiss_send_asset(id);
   }
-}
 
-/// The shell windows whose main repository is `repo`.
-fn windows_showing(app: &AppHandle, repo: &str) -> Vec<String> {
-  let state = app.state::<AppState>();
-  let normalized = crate::agent_dispatch::normalize_repo_path(repo);
-  let windows = state.window_repo_paths.lock_or_recover();
-  windows
-    .iter()
-    .filter(|(_, path)| crate::agent_dispatch::normalize_repo_path(path) == normalized)
-    .map(|(label, _)| label.clone())
-    .collect()
+  fn record_review(
+    &self,
+    repo_path: &str,
+    workspace_id: Option<i64>,
+    scope: &str,
+    markdown: &str,
+    mode: &str,
+  ) {
+    if let Err(err) = crate::core::review_history::record_sent_review(
+      repo_path,
+      workspace_id,
+      scope,
+      markdown,
+      mode,
+    ) {
+      log::warn!("Failed to record review history: {err}");
+    }
+  }
 }
 
 /// The repositories window `label` shows: its main one, then supporting.
@@ -228,13 +236,16 @@ fn window_repos(app: &AppHandle, label: &str) -> Vec<String> {
 }
 
 /// `handleAutoReviewEvent`: starts the review the backend found due, in
-/// each window whose main repository it is.
+/// one window showing its repository (the focused one, as for deep links), so
+/// a repo open in several windows gets one review per operation.
 pub fn auto_review(app: &AppHandle, event: crate::auto_review::AutoReviewEvent) {
-  for label in windows_showing(app, &event.repo_path) {
+  if let Some(label) =
+    crate::agent_runtime::find_target_window_label_for_repo(app, &event.repo_path)
+  {
     let backend = Backend::new(app.clone(), label);
     let event = event.clone();
     std::thread::spawn(move || {
-      let workspaces = crate::local_db::get_workspaces(&event.repo_path).unwrap_or_default();
+      let workspaces = crate::core::list_all_workspaces(&event.repo_path).unwrap_or_default();
       let Some(workspace) = workspaces.iter().find(|w| w.id == event.workspace_id) else {
         return;
       };
@@ -272,14 +283,10 @@ fn start_request(app: &AppHandle, label: String, request: AgentDeepLinkRequest) 
 pub(super) fn start_deep_link(host: &dyn WindowHost, request: &AgentDeepLinkRequest) {
   let workspaces = host.workspaces(&request.repo).unwrap_or_default();
   let Some(workspace) = launch::find_workspace_by_branch(&workspaces, &request.branch) else {
-    host.toast(
-      ToastTone::Error,
-      "Workspace not found",
-      &format!(
-        "Branch '{}' is not available in this window.",
-        request.branch
-      ),
-    );
+    host.show_toast(Toast::error("Workspace not found").description(format!(
+      "Branch '{}' is not available in this window.",
+      request.branch
+    )));
     return;
   };
   let launched = LaunchRequest {
@@ -294,7 +301,7 @@ pub(super) fn start_deep_link(host: &dyn WindowHost, request: &AgentDeepLinkRequ
     Ok(()) => launch::deep_links()
       .lock_or_recover()
       .mark_processed(&request.request_id),
-    Err(err) => host.toast(ToastTone::Error, "Failed to start agent", &err),
+    Err(err) => host.show_toast(Toast::error("Failed to start agent").description(&err)),
   }
 }
 
@@ -321,11 +328,13 @@ fn open_window_for(app: &AppHandle, repo: &str) {
   let label = crate::open_new_window::new_repo_window_label();
   let title = crate::open_new_window::new_repo_window_title(repo);
   let (app_for_window, repo) = (app.clone(), repo.to_string());
-  let _ = app.run_on_main_thread(move || {
-    if let Err(err) = super::open_window(&app_for_window, &label, Some(repo), &title) {
-      log::error!("failed to open a window for an agent deep link: {err}");
-    }
-  });
+  app
+    .run_on_main_thread(move || {
+      if let Err(err) = super::open_window(&app_for_window, &label, Some(repo), &title) {
+        log::error!("failed to open a window for an agent deep link: {err}");
+      }
+    })
+    .ignore_closed();
 }
 
 /// Starts the deep links queued for `repo` once window `label` shows it.
@@ -357,7 +366,7 @@ pub fn treq_send(app: &AppHandle, request: &crate::send_dispatch::SendDispatchRe
   };
   if launch::add_send_asset(asset) {
     super::defer_main(app, |_| {
-      let _ = tauri_plugin_gpui::with_app(|cx| cx.refresh_windows());
+      tauri_plugin_gpui::with_app(|cx| cx.refresh_windows()).ignore_closed();
     });
   }
 }

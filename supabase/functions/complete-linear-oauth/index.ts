@@ -185,19 +185,14 @@ Deno.serve(async (req) => {
     ? new Date(Date.now() + expiresIn * 1000).toISOString()
     : null;
 
-  const { error: storeError } = await supabase.from("linear_oauth_tokens")
-    .upsert(
-      {
-        user_id: user.id,
-        access_token: accessToken,
-        refresh_token: refreshToken,
-        expires_at: expiresAt,
-        linear_workspace_id: workspaceInfo.id,
-        linear_workspace_name: workspaceInfo.name,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "user_id" },
-    );
+  const { error: storeError } = await supabase.rpc("linear_tokens_save", {
+    p_user_id: user.id,
+    p_access_token: accessToken,
+    p_refresh_token: refreshToken,
+    p_expires_at: expiresAt,
+    p_workspace_id: workspaceInfo.id,
+    p_workspace_name: workspaceInfo.name,
+  });
 
   if (storeError) {
     console.error("[complete-linear-oauth] store failed:", storeError.message);

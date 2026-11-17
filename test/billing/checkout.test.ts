@@ -3,6 +3,10 @@ import {
   buildCheckoutSessionParams,
   parseCheckoutBody,
 } from "../../supabase/functions/_shared/billing/checkout.ts";
+import type {
+  BillingStore,
+  OrganizationBilling,
+} from "../../supabase/functions/_shared/billing/store.ts";
 import {
   createStripeClient,
   encodeStripeForm,
@@ -11,10 +15,6 @@ import {
   type StripeClient,
   type StripeParams,
 } from "../../supabase/functions/_shared/billing/stripe-api.ts";
-import type {
-  BillingStore,
-  OrganizationBilling,
-} from "../../supabase/functions/_shared/billing/store.ts";
 import { createCheckout } from "../../supabase/functions/billing-checkout/lib.ts";
 import { createPortal } from "../../supabase/functions/billing-portal/lib.ts";
 
@@ -30,11 +30,9 @@ describe("buildCheckoutSessionParams", () => {
     webUrl: WEB_URL,
   };
 
-  it("builds an embedded subscription session with a 14-day trial", () => {
-    expect(
-      buildCheckoutSessionParams({ ...base, trialEligible: true }),
-    ).toEqual({
-      ui_mode: "embedded",
+  it("builds a hosted subscription session with no trial", () => {
+    expect(buildCheckoutSessionParams(base)).toEqual({
+      ui_mode: "hosted",
       mode: "subscription",
       customer: "cus_123",
       "line_items[0][price]": "price_pro",
@@ -45,19 +43,19 @@ describe("buildCheckoutSessionParams", () => {
       "metadata[owner_id]": USER_ID,
       "subscription_data[metadata][owner_type]": "user",
       "subscription_data[metadata][owner_id]": USER_ID,
-      return_url:
+      success_url:
         "https://treq.dev/dashboard?tab=subscription&session_id={CHECKOUT_SESSION_ID}",
-      "subscription_data[trial_period_days]": 14,
+      cancel_url: "https://treq.dev/dashboard?tab=subscription",
     });
   });
 
-  it("leaves the trial out once the owner has used it", () => {
+  it("adds the metered usage price as a second line item without a quantity", () => {
     const params = buildCheckoutSessionParams({
       ...base,
-      trialEligible: false,
+      usagePriceId: "price_usage",
     });
-    expect(params).not.toHaveProperty("subscription_data[trial_period_days]");
-    expect(params.payment_method_collection).toBe("always");
+    expect(params["line_items[1][price]"]).toBe("price_usage");
+    expect(params).not.toHaveProperty("line_items[1][quantity]");
   });
 
   it("builds a Team session owned by the organization, returning to the Team tab", () => {
@@ -66,10 +64,9 @@ describe("buildCheckoutSessionParams", () => {
         ...base,
         ownerId: ORG_ID,
         ownerType: "organization",
-        trialEligible: false,
       }),
     ).toEqual({
-      ui_mode: "embedded",
+      ui_mode: "hosted",
       mode: "subscription",
       customer: "cus_123",
       "line_items[0][price]": "price_pro",
@@ -80,20 +77,10 @@ describe("buildCheckoutSessionParams", () => {
       "metadata[owner_id]": ORG_ID,
       "subscription_data[metadata][owner_type]": "organization",
       "subscription_data[metadata][owner_id]": ORG_ID,
-      return_url:
+      success_url:
         "https://treq.dev/dashboard?tab=team&session_id={CHECKOUT_SESSION_ID}",
+      cancel_url: "https://treq.dev/dashboard?tab=team",
     });
-  });
-
-  it("never gives an organization a trial (B01)", () => {
-    expect(
-      buildCheckoutSessionParams({
-        ...base,
-        ownerId: ORG_ID,
-        ownerType: "organization",
-        trialEligible: true,
-      }),
-    ).not.toHaveProperty("subscription_data[trial_period_days]");
   });
 
   it("drops a trailing slash from the web URL", () => {
@@ -101,8 +88,7 @@ describe("buildCheckoutSessionParams", () => {
       buildCheckoutSessionParams({
         ...base,
         webUrl: "http://localhost:3001/",
-        trialEligible: true,
-      }).return_url,
+      }).success_url,
     ).toBe(
       "http://localhost:3001/dashboard?tab=subscription&session_id={CHECKOUT_SESSION_ID}",
     );
@@ -158,9 +144,7 @@ describe("parseCheckoutBody", () => {
 });
 
 describe("createStripeClient", () => {
-  it("pins the API version that still accepts ui_mode=embedded", () => {
-    // @stripe/stripe-js 8 (release train "clover") provides
-    // initEmbeddedCheckout. Later trains rename embedded Checkout.
+  it("pins the clover API version", () => {
     expect(STRIPE_API_VERSION).toMatch(/\.clover$/);
   });
 
@@ -275,7 +259,7 @@ function fakeStore(overrides: Partial<BillingStore> = {}): BillingStore {
 
 function fakeOrganizations(store: BillingStore, owner = true, members = 7) {
   return {
-    isOwner: vi.fn(async (_organizationId: string) => owner),
+    canManageBilling: vi.fn(async (_organizationId: string) => owner),
     memberCount: vi.fn(async (_organizationId: string) => members),
     store: vi.fn((_organizationId: string) => store),
   } satisfies OrganizationBilling;
@@ -284,22 +268,161 @@ function fakeOrganizations(store: BillingStore, owner = true, members = 7) {
 const STRIPE_OK = {
   "POST /v1/customers": { id: "cus_new" },
   "GET /v1/prices": {
-    data: [{ id: "price_pro", lookup_key: "treq_pro_monthly" }],
+    data: [
+      { id: "price_pro", lookup_key: "treq_pro_monthly" },
+      { id: "price_usage", lookup_key: "treq_sandbox_usage" },
+    ],
   },
   "POST /v1/checkout/sessions": {
     id: "cs_1",
-    client_secret: "cs_1_secret_abc",
+    url: "https://checkout.stripe.com/c/pay/cs_1",
   },
+  "GET /v1/subscriptions": { data: [] },
+  "GET /v1/checkout/sessions": { data: [] },
 };
 
+function liveSubscription(status: string, lookupKey = "treq_pro_monthly") {
+  return {
+    data: [
+      {
+        id: "sub_live",
+        status,
+        items: { data: [{ price: { lookup_key: lookupKey } }] },
+      },
+    ],
+  };
+}
+
 function sessionParams(calls: Call[]): StripeParams | undefined {
-  return calls.find((c) => c.path === "/v1/checkout/sessions")?.params;
+  return calls.find(
+    (c) => c.method === "POST" && c.path === "/v1/checkout/sessions",
+  )?.params;
 }
 
 describe("createCheckout", () => {
   const user = { id: USER_ID, email: "dev@example.com" };
+  const existing = { stripe_customer_id: "cus_old", trial_used_at: null };
 
-  it("creates and records a customer, then offers the trial", async () => {
+  it("applies the test coupon only when the email matches a test account exactly", async () => {
+    const testCoupon = {
+      emails: ["dev@example.com", "qa@example.com"],
+      couponId: "coupon_free",
+    };
+    const cases: [string, string | undefined][] = [
+      ["dev@example.com", "coupon_free"],
+      ["qa@example.com", "coupon_free"],
+      ["Dev@example.com", undefined],
+      ["dev@example.com.evil", undefined],
+    ];
+    for (const [email, expected] of cases) {
+      const { stripe, calls } = fakeStripe(STRIPE_OK);
+      const result = await createCheckout(
+        { plan: "pro" },
+        {
+          user: { id: USER_ID, email },
+          store: fakeStore({ getCustomer: vi.fn(async () => existing) }),
+          stripe,
+          webUrl: WEB_URL,
+          testCoupon,
+        },
+      );
+      expect(result.status).toBe(200);
+      expect(sessionParams(calls)?.["discounts[0][coupon]"]).toBe(expected);
+    }
+  });
+
+  it("applies no coupon when the test account is not configured", async () => {
+    const { stripe, calls } = fakeStripe(STRIPE_OK);
+    await createCheckout(
+      { plan: "pro" },
+      {
+        user,
+        store: fakeStore({ getCustomer: vi.fn(async () => existing) }),
+        stripe,
+        webUrl: WEB_URL,
+        testCoupon: { emails: [], couponId: "" },
+      },
+    );
+    expect(sessionParams(calls)?.["discounts[0][coupon]"]).toBeUndefined();
+  });
+
+  it("refuses a second Pro checkout while Stripe already has a live subscription the webhook has not recorded", async () => {
+    for (const status of ["trialing", "active", "past_due", "incomplete"]) {
+      const { stripe, calls } = fakeStripe({
+        ...STRIPE_OK,
+        "GET /v1/subscriptions": liveSubscription(status),
+      });
+      const result = await createCheckout(
+        { plan: "pro" },
+        {
+          user,
+          store: fakeStore({ getCustomer: vi.fn(async () => existing) }),
+          stripe,
+          webUrl: WEB_URL,
+        },
+      );
+      expect(result.status).toBe(409);
+      expect(sessionParams(calls)).toBeUndefined();
+      const list = calls.find((c) => c.path === "/v1/subscriptions");
+      expect(list?.params).toMatchObject({
+        customer: "cus_old",
+        status: "all",
+      });
+    }
+  });
+
+  it("opens a session when the customer's only Stripe subscription has ended", async () => {
+    const { stripe, calls } = fakeStripe({
+      ...STRIPE_OK,
+      "GET /v1/subscriptions": liveSubscription("canceled"),
+    });
+    const result = await createCheckout(
+      { plan: "pro" },
+      {
+        user,
+        store: fakeStore({ getCustomer: vi.fn(async () => existing) }),
+        stripe,
+        webUrl: WEB_URL,
+      },
+    );
+    expect(result.status).toBe(200);
+    expect(sessionParams(calls)).toBeDefined();
+  });
+
+  it("expires the customer's open checkout sessions before opening a new one", async () => {
+    const { stripe, calls } = fakeStripe({
+      ...STRIPE_OK,
+      "GET /v1/checkout/sessions": {
+        data: [{ id: "cs_old_a" }, { id: "cs_old_b" }],
+      },
+      "POST /v1/checkout/sessions/cs_old_a/expire": { id: "cs_old_a" },
+      "POST /v1/checkout/sessions/cs_old_b/expire": { id: "cs_old_b" },
+    });
+    const result = await createCheckout(
+      { plan: "pro" },
+      {
+        user,
+        store: fakeStore({ getCustomer: vi.fn(async () => existing) }),
+        stripe,
+        webUrl: WEB_URL,
+      },
+    );
+    expect(result.status).toBe(200);
+    const paths = calls.map((c) => `${c.method} ${c.path}`);
+    const created = paths.lastIndexOf("POST /v1/checkout/sessions");
+    expect(
+      paths.indexOf("POST /v1/checkout/sessions/cs_old_a/expire"),
+    ).toBeLessThan(created);
+    expect(
+      paths.indexOf("POST /v1/checkout/sessions/cs_old_b/expire"),
+    ).toBeLessThan(created);
+    const open = calls.find(
+      (c) => c.method === "GET" && c.path === "/v1/checkout/sessions",
+    );
+    expect(open?.params).toMatchObject({ customer: "cus_old", status: "open" });
+  });
+
+  it("creates and records a customer, then opens checkout with no trial", async () => {
     const { stripe, calls } = fakeStripe(STRIPE_OK);
     const store = fakeStore({
       getCustomer: vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce({
@@ -314,7 +437,7 @@ describe("createCheckout", () => {
 
     expect(result).toEqual({
       status: 200,
-      body: { client_secret: "cs_1_secret_abc" },
+      body: { url: "https://checkout.stripe.com/c/pay/cs_1" },
     });
     expect(calls[0]).toEqual({
       method: "POST",
@@ -329,8 +452,10 @@ describe("createCheckout", () => {
     expect(store.attachCustomer).toHaveBeenCalledWith("cus_new");
     expect(sessionParams(calls)).toMatchObject({
       customer: "cus_new",
-      "subscription_data[trial_period_days]": 14,
     });
+    expect(sessionParams(calls)).not.toHaveProperty(
+      "subscription_data[trial_period_days]",
+    );
   });
 
   it("uses the customer another checkout recorded first", async () => {
@@ -361,33 +486,19 @@ describe("createCheckout", () => {
       { plan: "pro" },
       { user, store, stripe, webUrl: WEB_URL },
     );
-    expect(calls.map((c) => c.path)).toEqual([
-      "/v1/prices",
-      "/v1/checkout/sessions",
+    expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+      "GET /v1/subscriptions",
+      "GET /v1/checkout/sessions",
+      "GET /v1/prices",
+      "POST /v1/checkout/sessions",
     ]);
     expect(sessionParams(calls)).toMatchObject({
       customer: "cus_old",
-      "subscription_data[trial_period_days]": 14,
     });
-    expect(store.attachCustomer).not.toHaveBeenCalled();
-  });
-
-  it("offers no trial once trial_used_at is set", async () => {
-    const { stripe, calls } = fakeStripe(STRIPE_OK);
-    const store = fakeStore({
-      getCustomer: vi.fn(async () => ({
-        stripe_customer_id: "cus_old",
-        trial_used_at: "2026-09-01T00:00:00Z",
-      })),
-    });
-    const result = await createCheckout(
-      { plan: "pro" },
-      { user, store, stripe, webUrl: WEB_URL },
-    );
-    expect(result.status).toBe(200);
     expect(sessionParams(calls)).not.toHaveProperty(
       "subscription_data[trial_period_days]",
     );
+    expect(store.attachCustomer).not.toHaveBeenCalled();
   });
 
   it("resolves the price by lookup key", async () => {
@@ -402,13 +513,40 @@ describe("createCheckout", () => {
       { plan: "pro" },
       { user, store, stripe, webUrl: WEB_URL },
     );
-    expect(calls[0]).toEqual({
+    expect(calls.find((c) => c.path === "/v1/prices")).toEqual({
       method: "GET",
       path: "/v1/prices",
-      params: { "lookup_keys[0]": "treq_pro_monthly", active: true, limit: 1 },
+      params: {
+        "lookup_keys[0]": "treq_pro_monthly",
+        "lookup_keys[1]": "treq_sandbox_usage",
+        active: true,
+        limit: 2,
+      },
       idempotencyKey: undefined,
     });
     expect(sessionParams(calls)?.["line_items[0][price]"]).toBe("price_pro");
+    expect(sessionParams(calls)?.["line_items[1][price]"]).toBe("price_usage");
+  });
+
+  it("opens Pro checkout without the usage line when that price is missing", async () => {
+    const { stripe, calls } = fakeStripe({
+      ...STRIPE_OK,
+      "GET /v1/prices": {
+        data: [{ id: "price_pro", lookup_key: "treq_pro_monthly" }],
+      },
+    });
+    const store = fakeStore({
+      getCustomer: vi.fn(async () => ({
+        stripe_customer_id: "cus_old",
+        trial_used_at: null,
+      })),
+    });
+    const result = await createCheckout(
+      { plan: "pro" },
+      { user, store, stripe, webUrl: WEB_URL },
+    );
+    expect(result.status).toBe(200);
+    expect(sessionParams(calls)).not.toHaveProperty("line_items[1][price]");
   });
 
   it("refuses a second subscription for someone who already has Pro", async () => {
@@ -478,7 +616,10 @@ describe("createCheckout for Team", () => {
     ...STRIPE_OK,
     "POST /v1/customers": { id: "cus_org" },
     "GET /v1/prices": {
-      data: [{ id: "price_team", lookup_key: "treq_team_monthly" }],
+      data: [
+        { id: "price_team", lookup_key: "treq_team_monthly" },
+        { id: "price_usage", lookup_key: "treq_sandbox_usage" },
+      ],
     },
   };
   const body = { plan: "team", organization_id: ORG_ID };
@@ -495,9 +636,11 @@ describe("createCheckout for Team", () => {
     });
     expect(result).toEqual({
       status: 403,
-      body: { error: "Only an owner of this organization can buy Team." },
+      body: {
+        error: "Only an owner or admin of this organization can buy Team.",
+      },
     });
-    expect(organizations.isOwner).toHaveBeenCalledWith(ORG_ID);
+    expect(organizations.canManageBilling).toHaveBeenCalledWith(ORG_ID);
     expect(calls).toEqual([]);
   });
 
@@ -552,13 +695,14 @@ describe("createCheckout for Team", () => {
 
     expect(result).toEqual({
       status: 200,
-      body: { client_secret: "cs_1_secret_abc" },
+      body: { url: "https://checkout.stripe.com/c/pay/cs_1" },
     });
     expect(calls[0]).toEqual({
       method: "POST",
       path: "/v1/customers",
+      // The Team customer is the organization's billing account: the buyer's
+      // personal email stays off it, and Checkout asks for a billing email.
       params: {
-        email: "owner@example.com",
         "metadata[owner_type]": "organization",
         "metadata[owner_id]": ORG_ID,
       },
@@ -566,16 +710,20 @@ describe("createCheckout for Team", () => {
     });
     expect(orgStore.attachCustomer).toHaveBeenCalledWith("cus_org");
     expect(userStore.attachCustomer).not.toHaveBeenCalled();
-    expect(calls[1]?.params).toEqual({
+    // Team carries the metered cloud usage price too: members' usage on the
+    // organization profile is billed to the organization (068_team_cloud.sql).
+    expect(calls.find((c) => c.path === "/v1/prices")?.params).toEqual({
       "lookup_keys[0]": "treq_team_monthly",
+      "lookup_keys[1]": "treq_sandbox_usage",
       active: true,
-      limit: 1,
+      limit: 2,
     });
     // One unit per member: the graduated price bills 2 seats beyond 5.
     expect(sessionParams(calls)).toMatchObject({
       customer: "cus_org",
       "line_items[0][price]": "price_team",
       "line_items[0][quantity]": 7,
+      "line_items[1][price]": "price_usage",
       client_reference_id: ORG_ID,
       "metadata[owner_type]": "organization",
       "metadata[owner_id]": ORG_ID,

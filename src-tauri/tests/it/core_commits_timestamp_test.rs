@@ -242,11 +242,13 @@ fn rejects_immutable_and_invalid_change_ids() {
   assert!(err.is_err(), "should reject change_id starting with '-'");
 
   let home = treq_lib::core::list_commits(&repo.repo_path, None, false, None, None).expect("home");
+  // A default-branch commit: immutable to a workspace, whatever the home log
+  // marks it (with no remote, nothing there is published).
   let immutable = home
     .commits
     .iter()
-    .find(|commit| commit.is_immutable && !commit.is_working_copy)
-    .expect("immutable home commit");
+    .find(|commit| !commit.is_working_copy)
+    .expect("default-branch home commit");
   // Editing via a workspace still must refuse the default-branch immutable commit
   // if we somehow passed its change id; use the workspace WC parent instead by
   // trying the initial commit through the workspace.

@@ -1,0 +1,19 @@
+id: ui-copy-ellipsis
+valid:
+  - |
+    fn ellipsis() -> Button {
+      ui::Button::new("open", p).label("Open repository…")
+    }
+  - |
+    fn range() -> String {
+      format!("https://github.com/{o}/{r}/compare/{}...{}", a, b)
+    }
+invalid:
+  - |
+    fn dots() -> Button {
+      ui::Button::new("open", p).label("Open repository...")
+    }
+  - |
+    fn loading() -> &'static str {
+      "Loading..."
+    }

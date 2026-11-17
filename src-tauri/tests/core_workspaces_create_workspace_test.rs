@@ -1,3 +1,9 @@
+#![expect(
+  clippy::unwrap_used,
+  clippy::let_underscore_must_use,
+  clippy::expect_used,
+  reason = "test code"
+)]
 mod common;
 
 use common::{JjVerifier, TestRepo};
@@ -38,8 +44,9 @@ fn test_can_create_workspace() {
     "Repo path should match"
   );
   assert_eq!(
-    workspace.workspace_path, "feat-test",
-    "Workspace path should be generated and sanitised correctly"
+    workspace.workspace_path,
+    format!("{}-feat-test", workspace.id),
+    "Workspace path should be the id followed by the sanitised branch"
   );
 
   assert!(
@@ -125,13 +132,14 @@ fn workspace_creation_creates_empty_wc_but_bookmark_targets_parent() {
   let bookmark_tip = JjVerifier::get_bookmark_commit_id(&repo.repo_path, &workspace.branch_name)
     .expect("Failed to resolve workspace bookmark tip")
     .expect("Workspace bookmark should resolve");
+  // The bookmark stays below the working copy: only a commit moves it.
   assert_eq!(
-    bookmark_tip, at_commit,
-    "Workspace bookmark should point to @ (working-copy commit)"
+    bookmark_tip, parent_commit,
+    "Workspace bookmark should point to @- (the parent commit)"
   );
   assert_ne!(
-    bookmark_tip, parent_commit,
-    "Workspace bookmark should not point to @- (parent commit)"
+    bookmark_tip, at_commit,
+    "Workspace bookmark should not point to @ (the working copy)"
   );
 
   let recent_ids = TestRepo::jj_commit_ids_in_revset(workspace_path_str, "::@")
@@ -352,7 +360,8 @@ fn test_open_or_create_workspace_from_pr_creates_from_remote_head() {
     "feature-remote",
     &default_branch,
     Some("PR title"),
-    Some("From GitHub PR #42"),
+    Some("PR body"),
+    Some(42),
   )
   .expect("should create workspace from PR head");
 
@@ -363,7 +372,11 @@ fn test_open_or_create_workspace_from_pr_creates_from_remote_head() {
     Some(default_branch.as_str())
   );
   assert_eq!(workspace.title, "PR title");
-  assert_eq!(workspace.description.as_deref(), Some("From GitHub PR #42"));
+  assert_eq!(workspace.description.as_deref(), Some("PR body"));
+  let sync = treq_lib::core::pr_sync::sync_state(&repo.repo_path, &workspace)
+    .expect("a workspace opened from a PR follows it");
+  assert_eq!(sync.pr_number, 42);
+  assert!(sync.title && sync.description);
 
   let workspace_path = repo.workspaces_dir().join(&workspace.workspace_path);
   assert!(
@@ -383,6 +396,7 @@ fn test_open_or_create_workspace_from_pr_returns_existing() {
     &default_branch,
     Some("PR title"),
     None,
+    None,
   )
   .expect("should create workspace from PR head");
   assert!(created_first);
@@ -392,6 +406,7 @@ fn test_open_or_create_workspace_from_pr_returns_existing() {
     "feature-remote",
     "some-other-base",
     Some("ignored"),
+    None,
     None,
   )
   .expect("should return existing workspace");
@@ -415,6 +430,7 @@ fn test_open_or_create_workspace_from_pr_errors_when_head_missing() {
     &repo.repo_path,
     "does-not-exist-on-remote",
     &default_branch,
+    None,
     None,
     None,
   )
@@ -472,10 +488,11 @@ fn test_can_create_stacked_workspace() {
   let stacked_path = repo.workspaces_dir().join(&stacked.workspace_path);
   assert!(stacked_path.exists(), "Stacked workspace should exist");
 
-  // Verify it has the base file from the source branch
+  // The base's uncommitted edit stays in the base: a stacked workspace
+  // builds on the committed branch only.
   assert!(
-    stacked_path.join("base.txt").exists(),
-    "Stacked workspace should have file from source branch"
+    !stacked_path.join("base.txt").exists(),
+    "Stacked workspace must not pick up the source's uncommitted changes"
   );
 
   let workspaces =
@@ -808,7 +825,7 @@ fn test_moved_files_from_main_repo() {
   // Verify workspace has moved_files set
   assert_eq!(
     workspace.moved_files,
-    Some(moved_files.clone()),
+    Some(moved_files),
     "Workspace should have moved_files set after creation"
   );
 
@@ -891,7 +908,7 @@ fn test_moved_files_from_workspace_to_workspace() {
     &repo.repo_path,
     "feat/components",
     Some("extract components".to_string()),
-    Some(moved_files.clone()),
+    Some(moved_files),
     Some("feat/base"),
     None,
     None,
@@ -1162,6 +1179,7 @@ fn test_create_workspace_materializes_installed_library_skills() {
     license: None,
     proprietary: false,
     url: None,
+    route: None,
     checksum: Some(checksum),
     files: vec![],
   };
@@ -1197,4 +1215,174 @@ fn test_create_workspace_materializes_installed_library_skills() {
     "library skill should be copied into the workspace"
   );
   assert!(ws.join(".claude/skills/demo/SKILL.md").exists());
+}
+
+#[test]
+fn branches_that_sanitize_alike_get_distinct_workspace_dirs() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+
+  let slash =
+    treq_lib::core::create_workspace(&repo.repo_path, "feat/x", None, None, None, None, None)
+      .expect("create feat/x");
+  let dash =
+    treq_lib::core::create_workspace(&repo.repo_path, "feat-x", None, None, None, None, None)
+      .expect("create feat-x after feat/x");
+
+  assert_ne!(slash.workspace_path, dash.workspace_path);
+  assert_ne!(slash.workspace_name, dash.workspace_name);
+  assert!(repo
+    .workspaces_dir()
+    .join(&slash.workspace_path)
+    .join(".jj")
+    .exists());
+  assert!(repo
+    .workspaces_dir()
+    .join(&dash.workspace_path)
+    .join(".jj")
+    .exists());
+}
+
+#[test]
+fn new_workspace_dir_and_jj_name_start_with_its_id() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+
+  let workspace = treq_lib::core::create_workspace(
+    &repo.repo_path,
+    "feat/prefixed",
+    None,
+    None,
+    None,
+    None,
+    None,
+  )
+  .expect("create workspace");
+
+  let expected = format!("{}-feat-prefixed", workspace.id);
+  assert_eq!(workspace.workspace_path, expected);
+  assert_eq!(workspace.workspace_name, expected);
+  assert!(repo.workspaces_dir().join(&expected).join(".jj").exists());
+  let jj_workspaces = JjVerifier::list_workspaces(&repo.repo_path).expect("list jj workspaces");
+  assert!(jj_workspaces.contains(&expected), "{jj_workspaces:?}");
+
+  let statuses =
+    treq_lib::core::list_workspace_statuses(&repo.repo_path).expect("list workspace statuses");
+  let status = statuses
+    .iter()
+    .find(|s| s.current.id == workspace.id)
+    .expect("status for the new workspace");
+  assert_eq!(status.current.branch_name, "feat/prefixed");
+}
+
+#[test]
+fn workspace_with_old_style_dir_still_lists_and_deletes() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  // A workspace made before ids were prefixed: dir and jj name are the bare sanitized branch.
+  treq_lib::jj::create_workspace(
+    &repo.repo_path,
+    "feat/legacy",
+    "feat/legacy",
+    true,
+    None,
+    Some("main"),
+    None,
+  )
+  .expect("create legacy jj workspace");
+  let id = treq_lib::local_db::add_workspace(
+    &repo.repo_path,
+    "feat-legacy".to_string(),
+    "feat-legacy".to_string(),
+    "feat/legacy".to_string(),
+    None,
+    None,
+    None,
+  )
+  .expect("insert legacy row");
+  let legacy_dir = repo.workspaces_dir().join("feat-legacy");
+  assert!(legacy_dir.join(".jj").exists());
+
+  let statuses =
+    treq_lib::core::list_workspace_statuses(&repo.repo_path).expect("list workspace statuses");
+  let status = statuses
+    .iter()
+    .find(|s| s.current.id == id)
+    .expect("legacy workspace listed");
+  assert_eq!(status.current.workspace_path, "feat-legacy");
+  assert_eq!(status.current.branch_name, "feat/legacy");
+
+  // A new workspace for another branch does not disturb the legacy dir.
+  let other =
+    treq_lib::core::create_workspace(&repo.repo_path, "feat/other", None, None, None, None, None)
+      .expect("create another workspace");
+  assert_eq!(other.workspace_path, format!("{}-feat-other", other.id));
+  assert!(legacy_dir.join(".jj").exists());
+
+  treq_lib::core::delete_workspace(&repo.repo_path, &id).expect("delete legacy workspace");
+  assert!(!legacy_dir.exists());
+  assert!(
+    treq_lib::local_db::get_workspace_by_branch(&repo.repo_path, "feat/legacy")
+      .expect("query")
+      .is_none()
+  );
+  assert!(!JjVerifier::list_workspaces(&repo.repo_path)
+    .expect("list jj workspaces")
+    .contains(&"feat-legacy".to_string()));
+}
+
+#[test]
+fn failed_create_leaves_no_row_and_no_dir() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+
+  // Symlinking a tracked file fails after the workspace dir exists.
+  treq_lib::core::create_workspace_with_symlinked_dirs(
+    &repo.repo_path,
+    "feat/fails",
+    None,
+    None,
+    None,
+    None,
+    None,
+    Some(vec!["README.md".to_string()]),
+  )
+  .expect_err("symlink over a tracked file must fail");
+
+  assert!(treq_lib::core::list_workspaces(&repo.repo_path)
+    .expect("list workspaces")
+    .is_empty());
+  let leftover: Vec<_> = fs::read_dir(repo.workspaces_dir())
+    .expect("read workspaces dir")
+    .map(|entry| entry.expect("entry").file_name())
+    .collect();
+  assert!(leftover.is_empty(), "leftover dirs: {leftover:?}");
+}
+
+#[test]
+fn create_recovers_a_row_left_by_a_create_killed_before_its_dir_was_made() {
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  // A create killed after reserving its row but before jj made the workspace.
+  let stale = treq_lib::local_db::add_workspace(
+    &repo.repo_path,
+    "1-feat-killed".to_string(),
+    "1-feat-killed".to_string(),
+    "feat/killed".to_string(),
+    None,
+    None,
+    None,
+  )
+  .expect("insert stale row");
+
+  let created =
+    treq_lib::core::create_workspace(&repo.repo_path, "feat/killed", None, None, None, None, None)
+      .expect("retry replaces the stale row");
+
+  assert_ne!(created.id, stale);
+  assert_eq!(
+    created.workspace_path,
+    format!("{}-feat-killed", created.id)
+  );
+  assert_eq!(
+    treq_lib::core::list_workspaces(&repo.repo_path)
+      .expect("list")
+      .len(),
+    1
+  );
 }

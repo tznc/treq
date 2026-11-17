@@ -2,9 +2,12 @@
 
 use std::time::Duration;
 
-use gpui::{div, prelude::*, Animation, AnimationExt as _, AnyElement, App, SharedString, Window};
+use gpui::{
+  div, prelude::*, Animation, AnimationExt as _, AnyElement, App, ClickEvent, SharedString, Window,
+};
+use gpui_kit::base::TestSupportExt as _;
 
-use crate::{icon, spinner, text, theme, theme::Palette, zpx, TextSize};
+use crate::{icon, spinner, text, theme, theme::Palette, zpx, Button, Size, TextSize, Variant};
 
 /// Why a pane is empty, and what to do about it: a 24 icon, a title, one
 /// sentence and at most one action.
@@ -34,6 +37,20 @@ impl EmptyState {
       action: None,
       palette: *palette,
     }
+  }
+
+  /// A read that failed: the danger icon, what failed as the title, and
+  /// the error as the message. Add [`error_actions`] as its action.
+  pub fn failed(
+    id: impl Into<SharedString>,
+    title: impl Into<SharedString>,
+    error: impl Into<SharedString>,
+    palette: &Palette,
+  ) -> Self {
+    Self::new(id, title, palette)
+      .icon(theme::ICON_CIRCLE_ALERT)
+      .error(true)
+      .message(error)
   }
 
   /// One sentence: why it's empty, or what failed and what to do next.
@@ -69,9 +86,12 @@ impl RenderOnce for EmptyState {
       p.muted_foreground
     };
     let selector = self.id.to_string();
+    let message_id = format!("{}-message", self.id);
     div()
       .id(self.id)
       .debug_selector(move || selector)
+      .role(gpui::Role::Status)
+      .aria_label(self.title.clone())
       .flex()
       .flex_col()
       .items_center()
@@ -90,15 +110,57 @@ impl RenderOnce for EmptyState {
       .when_some(self.message, |el, message| {
         el.child(
           text(div(), TextSize::Sm)
+            .id(message_id)
+            // Readable on its own, so tests and assistive tech find the why.
+            .role(gpui::Role::Paragraph)
+            .aria_label(message.clone())
             .max_w(zpx(360.))
+            .w_full()
             .text_color(p.muted_foreground)
-            .child(message),
+            .child(message)
+            .test_support(),
         )
       })
       .when_some(self.action, |el, action| {
         el.child(div().pt_2().child(action))
       })
+      .test_support()
   }
+}
+
+/// A button's click handler, boxed so callers can pass a listener.
+pub type OnClick = Box<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
+
+/// Retry, when the read can be run again, and Copy error, so the full
+/// message can go into a bug report.
+pub fn error_actions(
+  id: &str,
+  error: impl Into<SharedString>,
+  on_retry: Option<OnClick>,
+  palette: &Palette,
+) -> gpui::Div {
+  let error: SharedString = error.into();
+  div()
+    .flex()
+    .flex_wrap()
+    .justify_center()
+    .gap_2()
+    .children(on_retry.map(|retry| {
+      Button::new(SharedString::from(format!("{id}-retry")), palette)
+        .size(Size::Sm)
+        .label("Retry")
+        .on_click(retry)
+    }))
+    .child(
+      Button::new(SharedString::from(format!("{id}-copy-error")), palette)
+        .variant(Variant::Ghost)
+        .size(Size::Sm)
+        .icon(theme::ICON_COPY, 12.)
+        .label("Copy error")
+        .on_click(move |_, _, cx| {
+          cx.write_to_clipboard(gpui::ClipboardItem::new_string(error.to_string()))
+        }),
+    )
 }
 
 /// A spinner where the result will appear, with an optional muted label.
@@ -146,6 +208,7 @@ impl RenderOnce for Loading {
         el.aria_label(label.clone())
           .child(text(div(), TextSize::Sm).child(label))
       })
+      .test_support()
   }
 }
 
@@ -155,6 +218,7 @@ impl RenderOnce for Loading {
 pub struct Skeleton {
   id: SharedString,
   rows: usize,
+  row_height: Option<f32>,
   palette: Palette,
 }
 
@@ -163,30 +227,45 @@ impl Skeleton {
     Self {
       id: id.into(),
       rows,
+      row_height: None,
       palette: *palette,
     }
+  }
+
+  /// Each bar centred in a row this tall, so the placeholder takes the
+  /// room of the rows it stands in for.
+  pub fn row_height(mut self, height: f32) -> Self {
+    self.row_height = Some(height);
+    self
   }
 }
 
 impl RenderOnce for Skeleton {
   fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
     let fill = self.palette.hover();
+    let row_height = self.row_height;
     div()
       .flex()
       .flex_col()
-      .gap_2()
-      .children((0..self.rows).map(|row| {
+      .when(row_height.is_none(), |el| el.gap_2())
+      .children((0..self.rows).map(move |row| {
         // Ragged widths, so it reads as text rather than a table.
         let width = [0.9, 0.7, 0.8, 0.6][row % 4];
-        div()
+        let bar = div()
           .h(zpx(12.))
           .w(gpui::relative(width))
           .rounded(zpx(theme::RADIUS_SM))
-          .bg(fill)
+          .bg(fill);
+        match row_height {
+          Some(h) => div().h(zpx(h)).flex().items_center().child(bar),
+          None => bar,
+        }
       }))
       .with_animation(
         self.id,
-        Animation::new(Duration::from_millis(1500)).repeat(),
+        Animation::new(Duration::from_millis(1500))
+          .repeat()
+          .with_max_fps(crate::PULSE_FPS),
         |el, delta| el.opacity(0.5 + 0.5 * (delta * std::f32::consts::TAU).cos().abs()),
       )
   }
@@ -211,5 +290,15 @@ mod tests {
       .label
       .is_some());
     assert_eq!(Skeleton::new("rows", 3, &p).rows, 3);
+  }
+
+  #[test]
+  fn test_skeleton_row_height() {
+    let p = theme::palette(false);
+    assert_eq!(Skeleton::new("rows", 3, &p).row_height, None);
+    assert_eq!(
+      Skeleton::new("rows", 3, &p).row_height(56.).row_height,
+      Some(56.)
+    );
   }
 }

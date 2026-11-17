@@ -3,7 +3,7 @@
 // service-role store.
 //
 // Linear OAuth is a Pro feature (prds/billing-and-teams.md, "Enforcement").
-// Linear through a personal API key stays free and never reaches this
+// The personal API key path is Pro-gated in the desktop app; it never reaches this
 // function.
 
 import {

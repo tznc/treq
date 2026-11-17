@@ -1,9 +1,12 @@
-// Opens an embedded Stripe Checkout session for Pro, or for Team on behalf of
-// an organization the caller owns, and returns its client secret
+// Opens a Stripe-hosted Checkout session for Pro, or for Team on behalf of
+// an organization the caller owns, and returns its URL
 // (prds/billing-and-teams.md, "Edge functions"). Called by the web dashboard
 // with the user's Supabase JWT. The logic lives in lib.ts.
 // Env: STRIPE_SECRET_KEY, and WEB_URL for the return URL (default
-// https://treq.dev).
+// https://treq.dev), and TREQ_STRIPE_USAGE_PRICE_LOOKUP_KEY for Pro's
+// metered usage price (default treq_sandbox_usage). The
+// admin_config key test_coupon ({emails, coupon_id}) gives those accounts a
+// coupon at checkout.
 
 import { createClient } from "npm:@supabase/supabase-js@2.95.3";
 import {
@@ -12,19 +15,7 @@ import {
 } from "../_shared/billing/store.ts";
 import { createStripeClient } from "../_shared/billing/stripe-api.ts";
 import { createCheckout } from "./lib.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-};
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
-}
+import { corsHeaders, json } from "../_shared/http/json.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -69,12 +60,26 @@ Deno.serve(async (req) => {
   );
 
   try {
+    const { data: testCoupon, error: configError } = await service.rpc(
+      "admin_config_get",
+      { p_key: "test_coupon" },
+    );
+    // A failed read only drops the test coupon; real checkouts go ahead.
+    if (configError) {
+      console.error("[billing-checkout] test_coupon read failed:", configError.message);
+    }
     const result = await createCheckout(body, {
       user: { id: user.id, email: user.email },
       store: billingStoreFor(service, user.id),
       organizations: organizationBillingFor(service, user.id),
       stripe: createStripeClient(stripeKey),
       webUrl: Deno.env.get("WEB_URL") ?? "https://treq.dev",
+      usagePriceLookupKey:
+        Deno.env.get("TREQ_STRIPE_USAGE_PRICE_LOOKUP_KEY") || undefined,
+      testCoupon: {
+        emails: testCoupon?.emails ?? [],
+        couponId: testCoupon?.coupon_id ?? "",
+      },
     });
     return json(result.body, result.status);
   } catch (err) {

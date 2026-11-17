@@ -13,6 +13,8 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
+use gpui_kit::base::TestSupportExt as _;
 use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 
 use gpui_kit::component::{
@@ -27,7 +29,6 @@ use tauri_plugin_gpui::gpui::{
 
 use super::{
   account_data::{self, CloudAction},
-  commits::{dialog_description, dialog_panel, dialog_title},
   remote_data::{default_key, RemoteHost},
   settings::account::{cloud_card, cloud_card_element, cloud_delete_dialog_element, ClickFn},
   ActionSink, ScreenAction,
@@ -77,8 +78,13 @@ impl Route {
 pub struct SetupRoute {
   /// Whether the "Your own VM" path is offered (the `remoteSsh` preview).
   pub allow_user_managed: bool,
+  /// The screen to open on instead of the choice: `managed` (the machines
+  /// page's cloud row) or `ownVm` (its SSH Hosts +).
+  pub screen: Option<String>,
   /// The window is registering the endpoint the form confirmed.
   pub registering: bool,
+  /// Why the last registration saved nothing (the host refused the login).
+  pub register_error: Option<String>,
 }
 
 /// `RemoteTerminalDialogProps`, less the handlers.
@@ -115,6 +121,8 @@ struct Form {
   trust: Option<String>,
   probing: bool,
   probe_error: String,
+  /// The probe error is shown in full rather than clamped.
+  error_expanded: bool,
   resolving: bool,
   resolve_error: String,
   /// The confirmed values went to the window, which is registering them.
@@ -158,17 +166,6 @@ impl HasTooltips for RemoteView {
   }
 }
 
-/// A dialog's place in the window.
-struct Frame {
-  id: &'static str,
-  /// `max-w-*`, in pixels.
-  max_width: f32,
-  /// Later dialogs paint over earlier ones.
-  priority: usize,
-  /// The press its backdrop sends React.
-  dismiss: &'static str,
-}
-
 /// The text of a `<label>`'s caption: `text-sm font-medium`.
 fn caption(text: &'static str) -> Div {
   ui::text(div(), TextSize::Sm)
@@ -178,21 +175,11 @@ fn caption(text: &'static str) -> Div {
 
 type Div = gpui::Div;
 
-/// `text-xs text-muted-foreground`.
+/// `text-sm text-muted-foreground`.
 fn hint(text: impl Into<SharedString>, p: &Palette) -> Div {
-  ui::text(div(), TextSize::Xs)
+  ui::text(div(), TextSize::Sm)
     .text_color(p.muted_foreground)
     .child(text.into())
-}
-
-/// `DialogHeader`: a title over its description.
-fn header(title: impl IntoElement, description: impl Into<SharedString>, p: &Palette) -> Div {
-  div()
-    .flex()
-    .flex_col()
-    .gap_1p5()
-    .child(dialog_title(title))
-    .child(dialog_description(description, p))
 }
 
 /// A plain `<input>`: `rounded-md border border-border/60 bg-background
@@ -284,6 +271,9 @@ fn words(parts: &[(&str, bool)], p: &Palette) -> Div {
 }
 
 /// `Number(port) || 22`.
+/// The longest hostname DNS allows.
+const MAX_HOSTNAME: usize = 253;
+
 fn port_number(port: &str) -> u16 {
   port
     .trim()
@@ -342,6 +332,9 @@ impl RemoteView {
         if was && !setup.registering {
           if let Some(form) = self.setup.as_mut().and_then(|s| s.form.as_mut()) {
             form.submitting = false;
+            if let Some(error) = &setup.register_error {
+              form.probe_error = error.clone();
+            }
           }
         }
       }
@@ -354,6 +347,11 @@ impl RemoteView {
   }
 
   fn first_mode(setup: &SetupRoute) -> Mode {
+    match setup.screen.as_deref() {
+      Some("managed") => return Mode::Managed,
+      Some("ownVm") if setup.allow_user_managed => return Mode::UserManaged,
+      _ => {}
+    }
     if setup.allow_user_managed {
       Mode::Choice
     } else {
@@ -399,19 +397,21 @@ impl RemoteView {
           )
         })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if view.sessions.request != request {
-          return;
-        }
-        match result {
-          Ok(list) => view.sessions.list = Some(list),
-          Err(error) => {
-            view.sessions.error = Some(error);
-            view.sessions.list = Some(Vec::new());
+      this
+        .update(cx, |view, cx| {
+          if view.sessions.request != request {
+            return;
           }
-        }
-        cx.notify();
-      });
+          match result {
+            Ok(list) => view.sessions.list = Some(list),
+            Err(error) => {
+              view.sessions.error = Some(error);
+              view.sessions.list = Some(Vec::new());
+            }
+          }
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -442,7 +442,14 @@ impl RemoteView {
       });
       // The Continue button follows what is typed, and the suggestions
       // follow the focus.
-      subscriptions.push(cx.subscribe(&state, |_, _, event: &InputEvent, cx| {
+      subscriptions.push(cx.subscribe(&state, |view, _, event: &InputEvent, cx| {
+        // An edit makes the last probe's error stale.
+        if matches!(event, InputEvent::Change) {
+          if let Some(form) = view.setup.as_mut().and_then(|s| s.form.as_mut()) {
+            form.probe_error.clear();
+            form.error_expanded = false;
+          }
+        }
         if matches!(
           event,
           InputEvent::Change | InputEvent::Focus | InputEvent::Blur
@@ -484,6 +491,7 @@ impl RemoteView {
       trust: None,
       probing: false,
       probe_error: String::new(),
+      error_expanded: false,
       resolving: false,
       resolve_error: String::new(),
       submitting: false,
@@ -498,31 +506,33 @@ impl RemoteView {
       let (identities, aliases) = cx
         .background_spawn(async move { (host.ssh_identities(), host.ssh_aliases()) })
         .await;
-      let _ = this.update_in(cx, |view, window, cx| {
-        let Some(form) = view.setup.as_mut().and_then(|s| s.form.as_mut()) else {
-          return;
-        };
-        if form.key_reference.is_empty() {
-          form.key_reference = default_key(&identities).unwrap_or_default();
-        }
-        let options: Vec<SelectOption> = identities
-          .iter()
-          .map(|identity| SelectOption {
-            value: identity.reference.clone(),
-            label: format!("{} ({})", identity.label, identity.algorithm),
-          })
-          .collect();
-        let selected = form.key_reference.clone();
-        form.identities = identities;
-        form.aliases = aliases;
-        form.key.update(cx, |key, cx| {
-          key.set_items(options, window, cx);
-          if !selected.is_empty() {
-            key.set_selected_value(&selected, window, cx);
+      this
+        .update_in(cx, |view, window, cx| {
+          let Some(form) = view.setup.as_mut().and_then(|s| s.form.as_mut()) else {
+            return;
+          };
+          if form.key_reference.is_empty() {
+            form.key_reference = default_key(&identities).unwrap_or_default();
           }
-        });
-        cx.notify();
-      });
+          let options: Vec<SelectOption> = identities
+            .iter()
+            .map(|identity| SelectOption {
+              value: identity.reference.clone(),
+              label: format!("{} ({})", identity.label, identity.algorithm),
+            })
+            .collect();
+          let selected = form.key_reference.clone();
+          form.identities = identities;
+          form.aliases = aliases;
+          form.key.update(cx, |key, cx| {
+            key.set_items(options, window, cx);
+            if !selected.is_empty() {
+              key.set_selected_value(&selected, window, cx);
+            }
+          });
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -546,16 +556,18 @@ impl RemoteView {
       let result = cx
         .background_spawn(async move { host.probe_host_key(&hostname, port) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if let Some(form) = view.form() {
-          form.probing = false;
-          match result {
-            Ok(fingerprint) => form.trust = Some(fingerprint),
-            Err(error) => form.probe_error = error,
+      this
+        .update(cx, |view, cx| {
+          if let Some(form) = view.form() {
+            form.probing = false;
+            match result {
+              Ok(fingerprint) => form.trust = Some(fingerprint),
+              Err(error) => form.probe_error = error,
+            }
           }
-        }
-        cx.notify();
-      });
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
     cx.notify();
@@ -578,31 +590,33 @@ impl RemoteView {
       let result = cx
         .background_spawn(async move { host.resolve_alias(&alias) })
         .await;
-      let _ = this.update_in(cx, |view, window, cx| {
-        if let Some(form) = view.form() {
-          form.resolving = false;
-          match result {
-            Ok(resolved) => {
-              let (hostname, port, username) = (
-                form.hostname.clone(),
-                form.port.clone(),
-                form.username.clone(),
-              );
-              hostname.update(cx, |input, cx| {
-                input.set_value(resolved.hostname, window, cx)
-              });
-              port.update(cx, |input, cx| {
-                input.set_value(resolved.port.to_string(), window, cx)
-              });
-              if let Some(name) = resolved.username.filter(|name| !name.is_empty()) {
-                username.update(cx, |input, cx| input.set_value(name, window, cx));
+      this
+        .update_in(cx, |view, window, cx| {
+          if let Some(form) = view.form() {
+            form.resolving = false;
+            match result {
+              Ok(resolved) => {
+                let (hostname, port, username) = (
+                  form.hostname.clone(),
+                  form.port.clone(),
+                  form.username.clone(),
+                );
+                hostname.update(cx, |input, cx| {
+                  input.set_value(resolved.hostname, window, cx)
+                });
+                port.update(cx, |input, cx| {
+                  input.set_value(resolved.port.to_string(), window, cx)
+                });
+                if let Some(name) = resolved.username.filter(|name| !name.is_empty()) {
+                  username.update(cx, |input, cx| input.set_value(name, window, cx));
+                }
               }
+              Err(error) => form.resolve_error = error,
             }
-            Err(error) => form.resolve_error = error,
           }
-        }
-        cx.notify();
-      });
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
     cx.notify();
@@ -620,6 +634,10 @@ impl RemoteView {
     let hostname = form.hostname.read(cx).value().trim().to_string();
     let display = form.display_name.read(cx).value().trim().to_string();
     let alias = form.alias.read(cx).value().trim().to_string();
+    #[expect(
+      clippy::redundant_clone,
+      reason = "`hostname` is read again below; json! hides the use"
+    )]
     let values = serde_json::json!({
       "display_name": if display.is_empty() { hostname.clone() } else { display },
       "hostname": hostname,
@@ -647,7 +665,18 @@ impl RemoteView {
       "cloud.upgrade" => self
         .host
         .open_url(&format!("{}/dashboard", native::web_url())),
-      "cloud.provision" => self.host.cloud_action(CloudAction::Provision),
+      "account.signIn" => self
+        .host
+        .open_url(&format!("{}/sign-in?source=desktop", native::web_url())),
+      id if account_data::cloud_press(id).is_some() => {
+        if let Some(action) = account_data::cloud_press(id) {
+          self.host.cloud_action(action);
+        }
+      }
+      "cloud.provision" => {
+        let host = self.host.clone();
+        account_data::provision_once(cx, || host.cloud_action(CloudAction::Provision));
+      }
       "cloud.wake" => self.host.cloud_action(CloudAction::Wake),
       "cloud.repair" => self.host.cloud_action(CloudAction::Repair),
       // The repository list opens once the endpoint connects.
@@ -663,46 +692,31 @@ impl RemoteView {
     move |id| {
       let (view, id) = (view.clone(), id.to_string());
       Box::new(move |_, _, cx| {
-        let _ = view.update(cx, |view, cx| view.pressed(&id, cx));
+        view
+          .update(cx, |view, cx| view.pressed(&id, cx))
+          .ignore_closed();
       })
     }
   }
 
-  /// `ui/dialog.tsx`: the backdrop over the whole window, which closes the
-  /// dialog when clicked, and the panel.
-  fn dialog(
-    &self,
-    frame: Frame,
+  /// A remote dialog over the window: later ones stack above earlier
+  /// ones, and closing one sends React `dismiss`.
+  fn layer(
+    id: &'static str,
+    width: f32,
+    priority: usize,
+    dismiss: &'static str,
     window: &Window,
-    content: impl IntoElement,
     p: &Palette,
     cx: &mut Context<Self>,
-  ) -> AnyElement {
-    let Frame {
-      id,
-      max_width,
-      priority,
-      dismiss,
-    } = frame;
-    let (backdrop, panel) = dialog_panel(id, max_width, window.viewport_size(), p);
-    deferred(
-      anchored().position(point(px(0.), px(0.))).child(
-        backdrop
-          .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |view, _, _, cx| view.press_react(dismiss, cx)),
-          )
-          .child(
-            ui::text(panel, TextSize::Sm)
-              .id(id)
-              .font_family(theme::SANS_FONT)
-              .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-              .child(content),
-          ),
-      ),
-    )
-    .with_priority(priority)
-    .into_any_element()
+  ) -> ui::Dialog {
+    ui::Dialog::new(id, p)
+      .overlay(window.viewport_size())
+      .width(width)
+      .priority(priority)
+      .on_close(ui::handler(cx, move |view, _, cx| {
+        view.press_react(dismiss, cx)
+      }))
   }
 
   fn setup_dialog(
@@ -712,30 +726,60 @@ impl RemoteView {
     cx: &mut Context<Self>,
   ) -> Option<AnyElement> {
     let route = self.route.setup.clone()?;
+    // Opened straight on "Your own VM": its form, as choosing it makes.
+    if self
+      .setup
+      .as_ref()
+      .is_some_and(|s| s.mode == Mode::UserManaged && s.form.is_none())
+    {
+      self.set_mode(Mode::UserManaged, window, cx);
+    }
     let setup = self.setup.as_ref()?;
     let (mode, confirming) = (setup.mode, setup.confirming_delete);
-    let content = match mode {
-      Mode::Choice => self.choice(window, p, cx).into_any_element(),
-      Mode::Managed => self.managed(&route, p, cx).into_any_element(),
-      Mode::UserManaged => self.user_managed(window, p, cx).into_any_element(),
-    };
-    let content = div().relative().child(content).child(
-      div().absolute().top(zpx(-8.)).right(zpx(-8.)).child(
-        Button::new("remote-setup-close", p)
-          .variant(Variant::Ghost)
-          .size(Size::IconXs)
-          .aria_label("Close")
-          .icon(theme::ICON_X, 16.)
-          .on_click(cx.listener(|view, _, _, cx| view.press_react("remote.setup.close", cx))),
+    let (title, description, content, footer, can_continue) = match mode {
+      Mode::Choice => (
+        "Connect a remote repository",
+        "Choose how the remote machine is managed.",
+        self.choice(window, p, cx).into_any_element(),
+        Vec::new(),
+        None,
       ),
-    );
-    let frame = Frame {
-      id: "remote-setup-dialog",
-      max_width: 576.,
-      priority: 3,
-      dismiss: "remote.setup.close",
+      Mode::Managed => (
+        "Treq-managed cloud workspace",
+        "Treq manages the machine lifecycle. Commands run over managed SSH with short-lived certificates.",
+        self.managed(&route, p, cx).into_any_element(),
+        Vec::new(),
+        None,
+      ),
+      Mode::UserManaged => {
+        let (content, footer, can_continue) = self.user_managed(window, p, cx);
+        (
+          "Your own VM",
+          "Enter the connection details exactly - Treq never infers trust from your local SSH configuration.",
+          content.into_any_element(),
+          footer,
+          Some(can_continue),
+        )
+      }
     };
-    let dialog = self.dialog(frame, window, content, p, cx);
+    let dialog = Self::layer(
+      "remote-setup-dialog",
+      576.,
+      3,
+      "remote.setup.close",
+      window,
+      p,
+      cx,
+    )
+    .title(title)
+    .description(description)
+    .when_some(can_continue, |d, can| {
+      d.on_primary(ui::handler(cx, |view, _, cx| view.probe_host_key(cx)))
+        .primary_disabled(!can)
+    })
+    .child(content)
+    .footer(footer)
+    .into_any_element();
     let confirm = (mode == Mode::Managed && confirming).then(|| {
       let press = Self::cloud_press(cx);
       let layer = div()
@@ -761,9 +805,10 @@ impl RemoteView {
                 mode: Mode,
                 cx: &mut Context<Self>| {
       let hover_border = p.primary.opacity(0.6);
-      let hover_bg = p.muted.opacity(0.4);
       div()
         .id(id)
+        .role(gpui::Role::RadioButton)
+        .aria_label(title)
         .debug_selector(|| id.into())
         .flex_1()
         .min_w_0()
@@ -772,7 +817,7 @@ impl RemoteView {
         .border_1()
         .border_color(p.border.opacity(0.6))
         .p_4()
-        .hover(move |s| s.border_color(hover_border).bg(hover_bg))
+        .hover(move |s| s.border_color(hover_border).bg(p.hover()))
         .child(div().font_weight(FontWeight::MEDIUM).child(title))
         .child(
           div()
@@ -783,15 +828,8 @@ impl RemoteView {
         .on_click(cx.listener(move |view, _, window, cx| view.set_mode(mode, window, cx)))
     };
     let wide = window.viewport_size().width >= crate::gpui_shell::ui::zoomed(640., window);
-    div()
-      .child(header(
-        "Connect a remote repository",
-        "Choose how the remote machine is managed.",
-        p,
-      ))
-      .child(
-        div()
-          .mt_4()
+    div().child(
+      div()
           .flex()
           .gap_3()
           .when(!wide, |this| this.flex_col())
@@ -809,7 +847,7 @@ impl RemoteView {
             Mode::UserManaged,
             cx,
           )),
-      )
+    )
   }
 
   fn managed(
@@ -819,18 +857,20 @@ impl RemoteView {
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
     let confirming = self.setup.as_ref().is_some_and(|s| s.confirming_delete);
-    let cloud = account_data::account(cx).cloud.unwrap_or_default();
-    let card = cloud_card(&cloud, confirming);
+    let account = account_data::account(cx);
     let press = Self::cloud_press(cx);
-    let card = cloud_card_element(&card, p, &self.tips, &press, cx);
+    let card = if account.user.is_some() {
+      let cloud = account.cloud.unwrap_or_default();
+      let card = cloud_card(&cloud, confirming);
+      cloud_card_element(&card, p, &self.tips, &press, cx).into_any_element()
+    } else {
+      Self::sign_in(&account, &press, p).into_any_element()
+    };
     div()
-      .child(header(
-        "Treq-managed cloud workspace",
-        "Treq manages the machine lifecycle. Commands run over managed SSH with short-lived certificates.",
-        p,
-      ))
-      .child(div().mt_4().child(card))
-      .when(route.allow_user_managed, |this| {
+      .child(card)
+      // Opened on this screen from the Overview, there is no choice to go
+      // back to.
+      .when(route.allow_user_managed && route.screen.is_none(), |this| {
         this.child(
           div().mt_6().child(
             Button::new("remote-setup-back", p)
@@ -840,6 +880,42 @@ impl RemoteView {
           ),
         )
       })
+  }
+
+  /// Before the account is signed in: the cloud workspace belongs to an
+  /// account, so sign in first.
+  fn sign_in(
+    account: &super::settings::AccountRoute,
+    press: &impl Fn(&str) -> ClickFn,
+    p: &Palette,
+  ) -> Div {
+    let busy = account.loading || account.signing_in;
+    div()
+      .debug_selector(|| "remote-setup-signed-out".into())
+      .flex()
+      .flex_col()
+      .items_start()
+      .gap_3()
+      .child(hint(
+        "Sign in to Treq to create your cloud workspace. The browser opens the sign-in page and brings you back here.",
+        p,
+      ))
+      .child(
+        Button::new("remote-setup-sign-in", p)
+          .child(ui::icon(theme::ICON_EXTERNAL_LINK, 16., p.primary_foreground))
+          .label(if account.signing_in {
+            "Signing in…"
+          } else {
+            "Sign in with browser"
+          })
+          .disabled(busy)
+          .on_click(press("account.signIn")),
+      )
+      .children(account.sign_in_error.clone().map(|error| {
+        ui::text(div(), TextSize::Sm)
+          .text_color(p.destructive)
+          .child(format!("Sign-in failed: {error}"))
+      }))
   }
 
   /// A text field whose `<datalist>` suggests the `~/.ssh/config` aliases
@@ -869,17 +945,18 @@ impl RemoteView {
     let anchor = self.bounds.borrow().get(id).copied();
     let bounds = self.bounds.clone();
     let list = anchor.filter(|_| !matches.is_empty()).map(|anchor| {
-      let menu_accent = p.menu_accent;
       let rows = matches.into_iter().enumerate().map(|(i, alias)| {
         let (state, value) = (state.clone(), alias.clone());
         div()
           .id(SharedString::from(format!("{id}-suggestion-{i}")))
+          .role(gpui::Role::ListBoxOption)
+          .aria_label(alias.clone())
           .debug_selector(move || format!("{id}-suggestion-{i}"))
           .px_2()
           .py_1()
           .rounded(radius::SM)
           .cursor_pointer()
-          .hover(move |s| s.bg(menu_accent))
+          .hover(move |s| s.bg(p.hover()))
           .child(alias)
           .on_mouse_down(
             MouseButton::Left,
@@ -932,10 +1009,16 @@ impl RemoteView {
     window: &mut Window,
     p: &Palette,
     cx: &mut Context<Self>,
-  ) -> impl IntoElement {
+  ) -> (Div, Vec<AnyElement>, bool) {
     let two_columns = window.viewport_size().width >= crate::gpui_shell::ui::zoomed(640., window);
+    // Opened on this form from the Overview: Cancel closes it.
+    let direct = self
+      .route
+      .setup
+      .as_ref()
+      .is_some_and(|r| r.screen.is_some());
     let Some(form) = self.setup.as_ref().and_then(|s| s.form.as_ref()) else {
-      return div();
+      return (div(), Vec::new(), false);
     };
     let value = |input: &Entity<InputState>| input.read(cx).value().to_string();
     let (hostname, username, port) = (
@@ -947,7 +1030,9 @@ impl RemoteView {
       .identities
       .iter()
       .any(|identity| identity.reference == form.key_reference);
-    let valid = !hostname.trim().is_empty() && !username.trim().is_empty() && key_selected;
+    let too_long = hostname.trim().len() > MAX_HOSTNAME;
+    let valid =
+      !hostname.trim().is_empty() && !too_long && !username.trim().is_empty() && key_selected;
     let busy = form.submitting;
 
     let key = div()
@@ -972,15 +1057,9 @@ impl RemoteView {
         ))
       });
 
-    let alias_toggle = div()
-      .id("remote-alias-toggle")
-      .debug_selector(|| "remote-alias-toggle".into())
-      .flex()
-      .items_center()
-      .gap_2()
-      .cursor_pointer()
-      .child(ui::Checkbox::new("remote-alias-checkbox", p).checked(form.alias_mode))
-      .child(div().child("Use an explicit SSH alias for this endpoint (optional)"))
+    let alias_toggle = ui::Checkbox::new("remote-alias-toggle", p)
+      .checked(form.alias_mode)
+      .label("Use an explicit SSH alias for this endpoint (optional)")
       .on_click(cx.listener(|view, _, _, cx| {
         if let Some(form) = view.form() {
           form.alias_mode = !form.alias_mode;
@@ -1014,7 +1093,7 @@ impl RemoteView {
                   .size(Size::Sm)
                   .disabled(alias_empty || form.resolving)
                   .label(if form.resolving {
-                    "Resolving..."
+                    "Resolving…"
                   } else {
                     "Autofill from alias"
                   })
@@ -1027,7 +1106,7 @@ impl RemoteView {
           ))
           .when(!form.resolve_error.is_empty(), |this| {
             this.child(
-              ui::text(div(), TextSize::Xs)
+              ui::text(div(), TextSize::Sm)
                 .text_color(p.destructive)
                 .child(form.resolve_error.clone()),
             )
@@ -1129,48 +1208,86 @@ impl RemoteView {
     let show_continue = form.trust.is_none();
     let probing = form.probing;
     let probe_error = form.probe_error.clone();
-    div()
-      .child(header(
-        "Your own VM",
-        "Enter the connection details exactly - Treq never infers trust from your local SSH configuration.",
-        p,
-      ))
-      .child(div().mt_4().child(grid(cells, two_columns)))
+    let probe_title = if probe_error.starts_with("Authentication failed") {
+      "Couldn't sign in to the host"
+    } else {
+      "Couldn't reach the host"
+    };
+    // Opened straight on the form, there is nothing to go back to: the X
+    // closes it.
+    let back = (!direct).then(|| {
+      Button::new("remote-setup-back", p)
+        .variant(Variant::Outline)
+        .disabled(busy)
+        .label("Back")
+        .on_click(cx.listener(|view, _, window, cx| view.set_mode(Mode::Choice, window, cx)))
+        .into_any_element()
+    });
+    let can_continue = show_continue && valid && !busy && !probing;
+    let footer = back
+      .into_iter()
+      .chain(show_continue.then(|| {
+        Button::new("remote-continue", p)
+          .disabled(!valid || busy || probing)
+          .label(if probing {
+            "Checking host key…"
+          } else {
+            "Continue"
+          })
+          .on_click(cx.listener(|view, _, _, cx| view.probe_host_key(cx)))
+          .into_any_element()
+      }))
+      .collect();
+    let expanded = form.error_expanded;
+    // A long error is clamped to about three lines until asked for.
+    let clamp = !expanded && probe_error.chars().count() > 240;
+    let more = (probe_error.chars().count() > 240).then(|| {
+      Button::new("remote-probe-error-more", p)
+        .variant(Variant::Ghost)
+        .size(Size::Sm)
+        .label(if expanded { "Show less" } else { "Show more" })
+        .on_click(cx.listener(|view, _, _, cx| {
+          if let Some(form) = view.form() {
+            form.error_expanded = !form.error_expanded;
+          }
+          cx.notify();
+        }))
+    });
+    let content = div()
+      .child(grid(cells, two_columns))
+      .when(too_long, |this| {
+        let message = format!("Hostnames are at most {MAX_HOSTNAME} characters.");
+        this.child(
+          ui::text(div(), TextSize::Sm)
+            .id("remote-hostname-too-long")
+            .debug_selector(|| "remote-hostname-too-long".into())
+            .role(gpui::Role::Alert)
+            .aria_label(message.clone())
+            .mt_2()
+            .text_color(ui::Tone::Danger.text(p))
+            .child(message)
+            .test_support(),
+        )
+      })
       .children(trust)
       .when(!probe_error.is_empty(), |this| {
         this.child(
           div()
-            .debug_selector(|| "remote-probe-error".into())
             .mt_4()
-            .text_color(p.destructive)
-            .child(probe_error),
-        )
-      })
-      .child(
-        div()
-          .mt_6()
-          .flex()
-          .justify_between()
-          .child(
-            Button::new("remote-setup-back", p)
-              .variant(Variant::Ghost)
-              .disabled(busy)
-              .label("Back")
-              .on_click(cx.listener(|view, _, window, cx| view.set_mode(Mode::Choice, window, cx))),
-          )
-          .when(show_continue, |this| {
-            this.child(
-              Button::new("remote-continue", p)
-                .disabled(!valid || busy || probing)
-                .label(if probing {
-                  "Checking host key..."
+            .child(
+              ui::Alert::new("remote-probe-error", probe_title, p)
+                .severity(ui::Severity::Danger)
+                .message(if clamp {
+                  let cut: String = probe_error.chars().take(240).collect();
+                  format!("{cut}…")
                 } else {
-                  "Continue"
-                })
-                .on_click(cx.listener(|view, _, _, cx| view.probe_host_key(cx))),
+                  probe_error
+                }),
             )
-          }),
-      )
+            .children(more),
+        )
+      });
+    (content, footer, can_continue)
   }
 
   fn terminal_dialog(
@@ -1191,13 +1308,20 @@ impl RemoteView {
         .flex_col()
         .gap_2()
         .child(
+          // Short label (['section heading']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .font_weight(FontWeight::MEDIUM)
             .text_color(p.muted_foreground)
             .child("RUNNING SESSIONS"),
         )
         .children(sessions.iter().enumerate().map(|(i, session)| {
-          let label = session.label.clone();
+          let (label, title) = (session.label.clone(), session.title.clone());
+          let state = if session.running {
+            "running"
+          } else {
+            "stopped"
+          };
           div()
             .flex()
             .items_center()
@@ -1215,116 +1339,125 @@ impl RemoteView {
                   div()
                     .font_weight(FontWeight::MEDIUM)
                     .truncate()
-                    .child(session.label.clone()),
+                    .child(title.clone().unwrap_or_else(|| label.clone())),
                 )
                 .child(
-                  ui::text(div(), TextSize::Xs)
+                  ui::text(div(), TextSize::Sm)
                     .text_color(p.muted_foreground)
                     .truncate()
-                    .child(if session.running {
-                      "running"
-                    } else {
-                      "stopped"
+                    .child(match &title {
+                      Some(_) => format!("{label} · {state}"),
+                      None => state.to_string(),
                     }),
                 ),
             )
             .child(
               Button::new(format!("remote-reattach-{i}"), p)
+                .variant(Variant::Outline)
                 .size(Size::Sm)
                 .disabled(!session.running)
                 .label("Reattach")
                 .on_click(cx.listener(move |view, _, _, cx| {
-                  view.open_session(Some(label.clone()), true, cx)
+                  view.open_session(Some(label.clone()), title.clone(), true, cx)
                 })),
             )
         }))
     });
 
-    let content = div()
-      .child(
-        div()
-          .flex()
-          .flex_col()
-          .gap_1p5()
-          .child(dialog_title(
+    let header = ui::text(div(), TextSize::Lg)
+      .font_weight(FontWeight::SEMIBOLD)
+      .flex()
+      .items_center()
+      .gap_2()
+      .child(ui::icon(
+        theme::ICON_TERMINAL_SQUARE,
+        16.,
+        p.popover_foreground,
+      ))
+      .child("Remote terminal");
+    let description = format!(
+      "Open an interactive shell on {}.",
+      terminal.endpoint.hostname
+    );
+    let content = div().child(
+      div()
+        .mt_2()
+        .flex()
+        .flex_col()
+        .gap_3()
+        .when(loading, |this| {
+          this.child(
             div()
+              .py_4()
               .flex()
               .items_center()
               .gap_2()
-              .child(ui::icon(
-                theme::ICON_TERMINAL_SQUARE,
+              .text_color(p.muted_foreground)
+              .child(ui::spinner(
+                "remote-terminal-loading",
                 16.,
-                p.popover_foreground,
+                p.muted_foreground,
               ))
-              .child("Remote terminal"),
-          ))
-          .child(dialog_description(
-            format!(
-              "Open an interactive shell on {}.",
-              terminal.endpoint.hostname
-            ),
-            p,
-          )),
+              .child("Checking for running sessions…"),
+          )
+        })
+        .when_some(self.sessions.error.clone(), |this, error| {
+          this.child(
+            div()
+              .debug_selector(|| "remote-terminal-error".into())
+              .text_color(red)
+              .child(error),
+          )
+        })
+        .children(rows)
+        .when(list.is_some(), |this| {
+          this.child(
+            Button::new("remote-start-new", p)
+              .variant(if sessions.is_empty() {
+                Variant::Default
+              } else {
+                Variant::Outline
+              })
+              .label("Start new session")
+              .on_click(cx.listener(|view, _, _, cx| view.open_session(None, None, false, cx))),
+          )
+        }),
+    );
+    Some(
+      Self::layer(
+        "remote-terminal-dialog",
+        512.,
+        5,
+        "remote.terminal.close",
+        window,
+        p,
+        cx,
       )
-      .child(
-        div()
-          .mt_2()
-          .flex()
-          .flex_col()
-          .gap_3()
-          .when(loading, |this| {
-            this.child(
-              div()
-                .py_4()
-                .flex()
-                .items_center()
-                .gap_2()
-                .text_color(p.muted_foreground)
-                .child(ui::spinner(
-                  "remote-terminal-loading",
-                  16.,
-                  p.muted_foreground,
-                ))
-                .child("Checking for running sessions…"),
-            )
-          })
-          .when_some(self.sessions.error.clone(), |this, error| {
-            this.child(
-              div()
-                .debug_selector(|| "remote-terminal-error".into())
-                .text_color(red)
-                .child(error),
-            )
-          })
-          .children(rows)
-          .when(list.is_some(), |this| {
-            this.child(
-              Button::new("remote-start-new", p)
-                .variant(if sessions.is_empty() {
-                  Variant::Default
-                } else {
-                  Variant::Outline
-                })
-                .label("Start new session")
-                .on_click(cx.listener(|view, _, _, cx| view.open_session(None, false, cx))),
-            )
-          }),
-      );
-    let frame = Frame {
-      id: "remote-terminal-dialog",
-      max_width: 512.,
-      priority: 5,
-      dismiss: "remote.terminal.close",
-    };
-    Some(self.dialog(frame, window, content, p, cx))
+      .title("Remote terminal")
+      .header(
+        div().flex().flex_col().gap_1().child(header).child(
+          ui::text(div(), TextSize::Sm)
+            .text_color(p.muted_foreground)
+            .child(description),
+        ),
+      )
+      .child(content)
+      .into_any_element(),
+    )
   }
 
   /// Hands React the session to open in the terminal pane. A new session
   /// has no label: React makes a fresh one.
-  fn open_session(&mut self, label: Option<String>, reattach: bool, cx: &mut Context<Self>) {
+  fn open_session(
+    &mut self,
+    label: Option<String>,
+    title: Option<String>,
+    reattach: bool,
+    cx: &mut Context<Self>,
+  ) {
     self.field_react(
       "remote.terminal.open",
-      serde_json::json!({ "label": label, "reattach": reattach }),
+      serde_json::json!({ "label": label, "title": title, "reattach": reattach }),
       cx,
     );
   }
@@ -1336,47 +1469,43 @@ impl RemoteView {
     cx: &mut Context<Self>,
   ) -> Option<AnyElement> {
     let reason = self.route.reason()?.to_string();
-    // `DialogContent` is a plain block: the reason and the buttons follow
-    // the header with no gap.
-    let content = div()
-      .child(header(
-        "Remote change could not be verified",
-        "A network interruption happened while a mutation was in flight. Treq did not retry automatically because the remote state is ambiguous. Refresh to check whether the change landed before trying again.",
+    Some(
+      Self::layer(
+        "remote-ambiguous-dialog",
+        512.,
+        4,
+        "remote.ambiguous.dismiss",
+        window,
         p,
-      ))
+        cx,
+      )
+      .title("Remote change could not be verified")
+      .description("A network interruption happened while a mutation was in flight. Treq did not retry automatically because the remote state is ambiguous. Refresh to check whether the change landed before trying again.")
+      .on_primary(ui::handler(cx, |view, _, cx| {
+        view.press_react("remote.ambiguous.refresh", cx)
+      }))
       .child(
         div()
           .debug_selector(|| "remote-ambiguous-reason".into())
           .child(reason),
       )
-      .child(
-        div()
-          .flex()
-          .justify_end()
-          .gap_2()
-          .child(
-            Button::new("remote-ambiguous-dismiss", p)
-              .variant(Variant::Outline)
-              .label("Dismiss")
-              .on_click(cx.listener(|view, _, _, cx| {
-                view.press_react("remote.ambiguous.dismiss", cx)
-              })),
-          )
-          .child(
-            Button::new("remote-ambiguous-refresh", p)
-              .label("Refresh")
-              .on_click(cx.listener(|view, _, _, cx| {
-                view.press_react("remote.ambiguous.refresh", cx)
-              })),
-          ),
-      );
-    let frame = Frame {
-      id: "remote-ambiguous-dialog",
-      max_width: 512.,
-      priority: 4,
-      dismiss: "remote.ambiguous.dismiss",
-    };
-    Some(self.dialog(frame, window, content, p, cx))
+      .footer([
+        Button::new("remote-ambiguous-dismiss", p)
+          .variant(Variant::Outline)
+          .label("Dismiss")
+          .on_click(cx.listener(|view, _, _, cx| {
+            view.press_react("remote.ambiguous.dismiss", cx)
+          }))
+          .into_any_element(),
+        Button::new("remote-ambiguous-refresh", p)
+          .label("Refresh")
+          .on_click(cx.listener(|view, _, _, cx| {
+            view.press_react("remote.ambiguous.refresh", cx)
+          }))
+          .into_any_element(),
+      ])
+      .into_any_element(),
+    )
   }
 }
 

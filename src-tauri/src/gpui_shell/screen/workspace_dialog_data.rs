@@ -4,6 +4,8 @@
 //! new branch may take, the stack a new workspace joins, and the steps
 //! `useWorkspaceDialogSubmit` takes to create or move.
 
+use crate::gpui_shell::native::Toast;
+use crate::result_ext::ResultExt;
 use std::collections::HashSet;
 
 use serde::Deserialize;
@@ -14,7 +16,7 @@ use super::{
 };
 use crate::{
   core::{self, RenameWorkspaceResult, WorkspaceCommit, WorkspaceMoveRequest},
-  gpui_shell::native::{Backend, NativeEvent, ToastTone},
+  gpui_shell::native::Backend,
   jj::{BranchStatus, JjBranch},
   local_db::Workspace,
 };
@@ -40,6 +42,48 @@ pub trait WorkspaceDialogHost: ChangesHost {
   /// `jj_check_branch_exists`.
   fn branch_status(&self, repo_path: &str, branch: &str) -> Result<BranchStatus, String>;
   fn gitignore_suggestions(&self, repo_path: &str) -> Vec<String>;
+  /// Saves this window's project as `name` (`core::projects`): renames a
+  /// saved one, or saves the window's repositories as a new project.
+  /// The user's Team organizations as (id, name), offered as owners of a
+  /// new project.
+  fn project_teams(&self) -> Vec<(String, String)> {
+    Vec::new()
+  }
+  /// `org_id` assigns a new project to a Team organization; ignored on
+  /// rename.
+  fn save_project(&self, _name: &str, _org_id: Option<&str>) -> Result<(), String> {
+    Err("Projects are not available here".into())
+  }
+  /// Closes this window without asking to save again.
+  fn close_window(&self) {}
+  /// Blocks: whether repository `repo` is still there to read (its folder,
+  /// or the remote repository this window shows).
+  fn repo_exists(&self, _repo: &str) -> bool {
+    true
+  }
+  /// Blocks: the uncommitted files of a repository's home checkout (Home's
+  /// Changes tab).
+  fn home_changes(&self, _repo: &str) -> Vec<super::project_home::HomeChange> {
+    Vec::new()
+  }
+  /// Blocks: a repository's recent home history, newest first (Home's
+  /// Commits tab).
+  fn home_commits(&self, _repo: &str, _limit: usize) -> Vec<super::project_home::HomeCommit> {
+    Vec::new()
+  }
+  /// Blocks: a Home card's numbers for repository `repo` (`github` is its
+  /// `owner/name` when its origin is on GitHub).
+  fn repo_stats(&self, _repo: &str, _github: Option<&str>) -> super::project_home::RepoStats {
+    super::project_home::RepoStats::default()
+  }
+  /// Blocks: asks for files to add as project context; `None` when cancelled.
+  fn pick_context_files(&self) -> Option<Vec<String>> {
+    None
+  }
+  /// Sets this window's saved project's agent instructions and context.
+  fn set_project_context(&self, _prompt: &str, _paths: &[String]) -> Result<(), String> {
+    Err("Projects are not available here".into())
+  }
   /// `create_workspace`, with the repository's copy files and setup script.
   fn new_workspace(
     &self,
@@ -71,6 +115,84 @@ pub trait WorkspaceDialogHost: ChangesHost {
 }
 
 impl WorkspaceDialogHost for Backend {
+  fn project_teams(&self) -> Vec<(String, String)> {
+    crate::commands::cloud::owned_cloud(self.app())
+      .map(|c| {
+        c.snapshot()
+          .cloud
+          .organizations
+          .iter()
+          .map(|o| (o.org_id.clone(), o.name.clone()))
+          .collect()
+      })
+      .unwrap_or_default()
+  }
+
+  fn save_project(&self, name: &str, org_id: Option<&str>) -> Result<(), String> {
+    crate::gpui_shell::projects::save_window_project(self.app(), self.label(), name)?;
+    match org_id {
+      Some(org) => {
+        crate::gpui_shell::projects::set_window_owner(self.app(), self.label(), Some(org))
+      }
+      None => Ok(()),
+    }
+  }
+
+  fn pick_context_files(&self) -> Option<Vec<String>> {
+    super::code_data::CodeHost::pick_files(self)
+  }
+
+  fn repo_exists(&self, repo: &str) -> bool {
+    let remote = crate::gpui_shell::remote_repo::for_window(self.label());
+    remote.is_some_and(|r| r.contains(repo)) || std::path::Path::new(repo).is_dir()
+  }
+
+  fn home_changes(&self, repo: &str) -> Vec<super::project_home::HomeChange> {
+    crate::core::changes::list_changed_files(repo, None)
+      .unwrap_or_default()
+      .into_iter()
+      .map(|f| super::project_home::HomeChange {
+        status: f.status,
+        path: f.path,
+        lines: f.changed_line_count,
+      })
+      .collect()
+  }
+
+  fn repo_stats(&self, repo: &str, github: Option<&str>) -> super::project_home::RepoStats {
+    crate::core::projects::repo_stats(repo, github)
+  }
+
+  fn home_commits(&self, repo: &str, limit: usize) -> Vec<super::project_home::HomeCommit> {
+    crate::core::commits::list_commits(repo, None, false, None, Some(limit))
+      .map(|log| log.commits)
+      .unwrap_or_default()
+      .into_iter()
+      .filter(|c| !c.is_working_copy)
+      .map(|c| super::project_home::HomeCommit {
+        short_id: c.short_id,
+        description: c.description,
+        timestamp: c.timestamp,
+        insertions: c.insertions,
+        deletions: c.deletions,
+      })
+      .collect()
+  }
+
+  fn set_project_context(&self, prompt: &str, paths: &[String]) -> Result<(), String> {
+    let project = crate::gpui_shell::projects::window_project(self.app(), self.label())
+      .ok_or("Save the project first")?;
+    self.with_db(|db| crate::core::projects::set_context(db.conn(), &project.id, prompt, paths))
+  }
+
+  fn close_window(&self) {
+    let (app, label) = (self.app().clone(), self.label().to_string());
+    let main = app.clone();
+    main
+      .run_on_main_thread(move || crate::gpui_shell::projects::close_confirmed(&app, &label))
+      .ok();
+  }
+
   fn all_workspaces(&self, repo_path: &str) -> Result<Vec<Workspace>, String> {
     if let Some(remote) = self.remote(repo_path) {
       return remote.workspaces();
@@ -105,7 +227,7 @@ impl WorkspaceDialogHost for Backend {
     }
     let repo_path = repo_path.to_string();
     std::thread::spawn(move || {
-      let _ = crate::jj::jj_git_fetch(&repo_path);
+      crate::core::repo::fetch_repo(&repo_path).warn_on_err("fetch repo");
     });
   }
 
@@ -140,7 +262,7 @@ impl WorkspaceDialogHost for Backend {
         remote_ref: None,
       });
     }
-    crate::jj::check_branch_exists(repo_path, branch).map_err(|e| e.to_string())
+    crate::core::repo::repo_branch_status(repo_path, branch)
   }
 
   fn gitignore_suggestions(&self, repo_path: &str) -> Vec<String> {
@@ -472,18 +594,6 @@ pub enum Submitted {
   Failed(String),
 }
 
-fn toast(host: &dyn WorkspaceDialogHost, tone: ToastTone, title: &str, description: String) {
-  WorkspaceHost::notify(
-    host,
-    NativeEvent::Toast {
-      title: title.into(),
-      description,
-      tone,
-      action: None,
-    },
-  );
-}
-
 /// `useWorkspaceDialogSubmit`'s `handleSubmit`: creates, splits or moves,
 /// and reports it in a toast.
 pub fn submit(host: &dyn WorkspaceDialogHost, form: &Submit) -> Submitted {
@@ -495,23 +605,23 @@ pub fn submit(host: &dyn WorkspaceDialogHost, form: &Submit) -> Submitted {
     Ok(Err(message)) => Submitted::Failed(message),
     Err(message) => match created {
       Some(id) => {
-        toast(
+        WorkspaceHost::notify(
           host,
-          ToastTone::Error,
-          "Workspace created with errors",
-          format!(
-            "{} was created, but a follow-up step failed: {message}",
-            form.branch_name
-          ),
+          Toast::error("Workspace created with errors")
+            .description(format!(
+              "{} was created, but a follow-up step failed: {message}",
+              form.branch_name
+            ))
+            .into(),
         );
         Submitted::Done(id)
       }
       None => {
-        toast(
+        WorkspaceHost::notify(
           host,
-          ToastTone::Error,
-          "Failed to create workspace",
-          message.clone(),
+          Toast::error("Failed to create workspace")
+            .description(message.clone())
+            .into(),
         );
         Submitted::Failed(message)
       }
@@ -587,11 +697,11 @@ fn run_submit(
     if let Some((source_id, ..)) = &source {
       reparent_source(host, form, *source_id)?;
     }
-    toast(
+    WorkspaceHost::notify(
       host,
-      ToastTone::Success,
-      "Workspace created",
-      format!("Applied stash onto {branch}"),
+      Toast::success("Workspace created")
+        .description(format!("Applied stash onto {branch}"))
+        .into(),
     );
     return Ok(Ok(id));
   }
@@ -611,11 +721,11 @@ fn run_submit(
             ..Default::default()
           },
         )?;
-        toast(
+        WorkspaceHost::notify(
           host,
-          ToastTone::Success,
-          "Commits moved",
-          format!("Moved to workspace: {}", target.branch_name),
+          Toast::success("Commits moved")
+            .description(format!("Moved to workspace: {}", target.branch_name))
+            .into(),
         );
         return Ok(Ok(target_id));
       }
@@ -629,15 +739,15 @@ fn run_submit(
             ..Default::default()
           },
         )?;
-        toast(
+        WorkspaceHost::notify(
           host,
-          ToastTone::Success,
-          "Files moved",
-          format!(
-            "Moved {} file(s) to {}",
-            form.selected_files.len(),
-            target.branch_name
-          ),
+          Toast::success("Files moved")
+            .description(format!(
+              "Moved {} file(s) to {}",
+              form.selected_files.len(),
+              target.branch_name
+            ))
+            .into(),
         );
         return Ok(Ok(target_id));
       }
@@ -672,21 +782,24 @@ fn run_submit(
       host.move_changes(repo, source_branch, branch, request)?;
       reparent_source(host, form, *source_id)?;
       if commits {
-        toast(
+        WorkspaceHost::notify(
           host,
-          ToastTone::Success,
-          "Workspace created",
-          format!(
-            "Moved {} commit(s) to {branch}",
-            form.selected_commits.len()
-          ),
+          Toast::success("Workspace created")
+            .description(format!(
+              "Moved {} commit(s) to {branch}",
+              form.selected_commits.len()
+            ))
+            .into(),
         );
       } else {
-        toast(
+        WorkspaceHost::notify(
           host,
-          ToastTone::Success,
-          "Workspace split",
-          format!("Moved {} file(s) to {branch}", form.selected_files.len()),
+          Toast::success("Workspace split")
+            .description(format!(
+              "Moved {} file(s) to {branch}",
+              form.selected_files.len()
+            ))
+            .into(),
         );
       }
       return Ok(Ok(id));
@@ -704,14 +817,14 @@ fn run_submit(
     );
     let id = host.new_workspace(repo, branch, None, Some(&metadata))?;
     *created = Some(id);
-    toast(
+    WorkspaceHost::notify(
       host,
-      ToastTone::Success,
-      "Workspace created",
-      format!(
-        "Created {branch} with {} file(s) moved",
-        form.selected_files.len()
-      ),
+      Toast::success("Workspace created")
+        .description(format!(
+          "Created {branch} with {} file(s) moved",
+          form.selected_files.len()
+        ))
+        .into(),
     );
     return Ok(Ok(id));
   }
@@ -742,11 +855,11 @@ fn run_submit(
     &metadata,
     created,
   )?;
-  toast(
+  WorkspaceHost::notify(
     host,
-    ToastTone::Success,
-    "Workspace created",
-    branch.to_string(),
+    Toast::success("Workspace created")
+      .description(branch.to_string())
+      .into(),
   );
   Ok(Ok(id))
 }
@@ -830,11 +943,11 @@ fn create_stacked(
   if form.position == Position::Before {
     host.retarget(repo, parent, branch)?;
   }
-  toast(
+  WorkspaceHost::notify(
     host,
-    ToastTone::Success,
-    "Stacked workspace created",
-    format!("Created {branch} stacked on {effective_parent}"),
+    Toast::success("Stacked workspace created")
+      .description(format!("Created {branch} stacked on {effective_parent}"))
+      .into(),
   );
   Ok(id)
 }

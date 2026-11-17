@@ -4,9 +4,8 @@
 // (`QA_THEME`, dark by default) as a suffix unless it already ends in
 // `-dark` or `-light`.
 //
-// `page.screenshot` sees only the page's own window. Toasts, tooltips, menus
-// and popovers are popup windows of their own, and the palette and the
-// other overlays are dialog windows, so `screen: true` grabs the whole X
+// `page.screenshot` sees only the page's own window. Toasts, tooltips and
+// menus are popup windows of their own, so `screen: true` grabs the whole X
 // screen (`import -window root`, ImageMagick) and crops it to the windows
 // that show, which needs `DISPLAY` and `xdotool`.
 import { execFileSync } from "node:child_process";
@@ -30,7 +29,7 @@ export interface Capture {
   title?: string;
   /** A known issue the shot shows. */
   issue?: string;
-  /** Grab the X screen, popups and dialog windows included. */
+  /** Grab the X screen, popup windows included. */
   screen?: boolean;
   /** Logical pixels of the page's window (page captures only). */
   clip?: Clip;

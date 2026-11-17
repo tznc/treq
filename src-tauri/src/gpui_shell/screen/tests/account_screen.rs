@@ -1,0 +1,1715 @@
+use gpui::TestAppContext;
+
+use super::*;
+
+/// How many `name` buttons the window shows.
+fn buttons(h: &mut Harness, name: &str) -> usize {
+  h.rendered()
+    .query_all_by_role(gpui_testing_library::by::role(gpui::Role::Button).name(name))
+    .len()
+}
+
+/// Whether integration `card` shows a `role` element named `name`.
+fn card_shows(h: &mut Harness, card: &str, role: gpui::Role, name: &str) -> bool {
+  h.rendered()
+    .query_all_by_role(gpui_testing_library::by::role(gpui::Role::Button).name(card))
+    .iter()
+    .any(|card| {
+      gpui_testing_library::within(card)
+        .query_by_role(gpui_testing_library::by::role(role).name(name))
+        .is_some()
+    })
+}
+
+/// Whether integration `card` shows whether it is connected.
+fn card_status(h: &mut Harness, card: &str) -> bool {
+  ["Connected", "Not connected"]
+    .into_iter()
+    .any(|status| card_shows(h, card, gpui::Role::Image, status))
+}
+
+/// Whether Acme's cloud section has a `role` control named `name`, on
+/// screen or below the fold.
+fn team_has(h: &mut Harness, role: gpui::Role, name: &str) -> bool {
+  h.rendered()
+    .query_all_by_role(
+      gpui_testing_library::by::role(gpui::Role::Group)
+        .name("Acme cloud")
+        .hidden(true),
+    )
+    .iter()
+    .any(|team| {
+      gpui_testing_library::within(team)
+        .query_by_role(gpui_testing_library::by::role(role).name(name).hidden(true))
+        .is_some()
+    })
+}
+
+#[gpui::test]
+fn account_signs_in_through_the_browser(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let route = account_route("account");
+  let mut h = Harness::with_host(cx, route, host.clone());
+  h.set_account(account_state(
+    serde_json::json!({ "signInError": "token expired" }),
+  ));
+  let account = drawn_settings(&mut h).account.expect("account tab");
+  let settings::AccountTab::SignedOut { error, .. } = account else {
+    panic!("signed out: {account:?}");
+  };
+  assert_eq!(error.as_deref(), Some("Sign-in failed: token expired"));
+  h.click("account-sign-in");
+  h.cx.run_until_parked();
+  assert_eq!(
+    host.writes(),
+    ["open http://localhost:3001/sign-in?source=desktop"]
+  );
+  assert!(h.sent().is_empty());
+}
+
+#[gpui::test]
+fn account_shows_loading_and_signing_in(cx: &mut TestAppContext) {
+  let route = account_route("account");
+  let mut h = Harness::new(cx, route);
+  h.set_account(account_state(serde_json::json!({ "loading": true })));
+  assert_eq!(
+    drawn_settings(&mut h).account,
+    Some(settings::AccountTab::Loading)
+  );
+  h.set_account(account_state(serde_json::json!({ "signingIn": true })));
+  assert_eq!(
+    drawn_settings(&mut h).account,
+    Some(settings::AccountTab::SigningIn)
+  );
+  assert!(h.shows(gpui::Role::Status, "Signing you in…"));
+}
+
+#[gpui::test]
+fn account_trades_a_pasted_callback_token(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let route = account_route("account");
+  let mut h = Harness::with_host(cx, route, host.clone());
+  h.set_account(account_state(serde_json::json!({})));
+  settings_act(
+    &mut h,
+    field("account.callbackUrl", "treq://auth/callback?token=".into()),
+  );
+  h.click("account-dev-callback-go");
+  let account = drawn_settings(&mut h).account.expect("account tab");
+  let settings::AccountTab::SignedOut { dev, .. } = account else {
+    panic!("signed out");
+  };
+  assert_eq!(
+    dev.expect("dev builds offer it").error.as_deref(),
+    Some("No token found in URL")
+  );
+  assert!(h.sent().is_empty());
+
+  settings_act(
+    &mut h,
+    field(
+      "account.callbackUrl",
+      " treq://auth/callback?token=abc&x=1 ".into(),
+    ),
+  );
+  h.click("account-dev-callback-go");
+  h.cx.run_until_parked();
+  settings_act(&mut h, field("account.callbackUrl", "expired".into()));
+  h.click("account-dev-callback-go");
+  h.cx.run_until_parked();
+  assert_eq!(host.writes(), ["exchange abc", "exchange expired"]);
+  assert!(h.sent().is_empty());
+  let Some(settings::AccountTab::SignedOut { dev, .. }) = drawn_settings(&mut h).account else {
+    panic!("signed out");
+  };
+  let dev = dev.expect("dev builds offer it");
+  assert!(!dev.loading);
+  assert_eq!(dev.error.as_deref(), Some("Token exchange failed"));
+}
+
+#[gpui::test]
+fn account_shows_the_plan_and_signs_out(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut user = ada();
+  user["avatarUrl"] = "https://example.com/ada.png".into();
+  let route = account_route("account");
+  let mut h = Harness::with_host(cx, route, host.clone());
+  h.set_account(account_state(
+    serde_json::json!({ "user": user, "subscription": pro() }),
+  ));
+  let account = drawn_settings(&mut h).account.expect("account tab");
+  let settings::AccountTab::SignedIn(signed_in) = account else {
+    panic!("signed in: {account:?}");
+  };
+  assert_eq!(signed_in.name, "Ada");
+  assert_eq!(signed_in.email.as_deref(), Some("ada@example.com"));
+  assert!(signed_in.pro);
+  assert_eq!(
+    signed_in.status,
+    Some(("Active".into(), settings::StatusTone::Good))
+  );
+  assert_eq!(
+    signed_in.period,
+    Some(("Renews on".into(), "11/1/2026".into()))
+  );
+  assert_eq!(signed_in.manage_label, "Manage subscription");
+
+  h.click("account-manage-subscription");
+  h.click("account-sign-out");
+  h.cx.run_until_parked();
+  assert_eq!(
+    host.writes(),
+    [
+      "fetch https://example.com/ada.png",
+      "open http://localhost:3001/dashboard",
+      "sign out"
+    ]
+  );
+  assert!(host.calls().contains(&"read cloud workspace".to_string()));
+  assert!(h.sent().is_empty());
+}
+
+#[gpui::test]
+fn account_flags_a_failed_payment_and_offers_to_update_it(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = Harness::with_host(cx, account_route("account"), host.clone());
+  h.set_account(account_state(serde_json::json!({
+    "user": ada(),
+    "subscription": { "plan": "pro", "status": "past_due", "currentPeriodEnd": "2026-11-01T12:00:00Z" },
+  })));
+  let account = drawn_settings(&mut h).account.expect("account tab");
+  let settings::AccountTab::SignedIn(signed_in) = account else {
+    panic!("signed in: {account:?}");
+  };
+  assert!(signed_in.pro);
+  assert_eq!(
+    signed_in.status,
+    Some(("Payment failed".into(), settings::StatusTone::Warn))
+  );
+  assert_eq!(
+    signed_in.period,
+    Some(("Billing period ends".into(), "11/1/2026".into()))
+  );
+  assert_eq!(signed_in.manage_label, "Update payment method");
+
+  h.click("account-manage-subscription");
+  h.cx.run_until_parked();
+  assert!(host
+    .writes()
+    .contains(&"open http://localhost:3001/dashboard?tab=subscription".to_string()));
+}
+
+fn delete_dialog(h: &mut Harness) -> Option<settings::DeleteAccountDialog> {
+  match drawn_settings(h).account {
+    Some(settings::AccountTab::SignedIn(signed_in)) => signed_in.delete_account,
+    other => panic!("signed in: {other:?}"),
+  }
+}
+
+#[gpui::test]
+fn account_deletes_only_after_the_email_is_typed(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_as_ada(cx, host.clone());
+  assert_eq!(delete_dialog(&mut h), None);
+
+  h.click("account-delete");
+  assert!(h.shows(gpui::Role::Dialog, "Delete your Treq account?"));
+  let dialog = delete_dialog(&mut h).expect("asked");
+  assert!(!dialog.can_confirm);
+
+  h.click("account-delete-confirm");
+  settings_act(
+    &mut h,
+    field("account.delete.email", "eve@example.com".into()),
+  );
+  assert!(!delete_dialog(&mut h).unwrap().can_confirm);
+  h.click("account-delete-confirm");
+  h.cx.run_until_parked();
+  assert!(!host.writes().contains(&"delete account".to_string()));
+
+  settings_act(
+    &mut h,
+    field("account.delete.email", " ADA@example.com ".into()),
+  );
+  assert!(delete_dialog(&mut h).unwrap().can_confirm);
+  h.click("account-delete-confirm");
+  h.cx.run_until_parked();
+  assert_eq!(
+    host
+      .writes()
+      .iter()
+      .filter(|w| *w == "delete account")
+      .count(),
+    1
+  );
+  assert_eq!(delete_dialog(&mut h), None);
+  assert!(h.sent().is_empty());
+}
+
+#[gpui::test]
+fn account_deletion_the_server_refuses_shows_why_and_keeps_the_dialog(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    account_deletion: Some(crate::core::supabase::ApiError {
+      status: 409,
+      code: "last_owner".into(),
+      message: "You are the last owner of Acme. Make another member an owner, or delete the organization, before deleting your account.".into(),
+      correlation_id: None,
+    }),
+    ..FakeHost::default()
+  });
+  let mut h = signed_in_as_ada(cx, host.clone());
+  h.click("account-delete");
+  settings_act(
+    &mut h,
+    field("account.delete.email", "ada@example.com".into()),
+  );
+  h.click("account-delete-confirm");
+  h.cx.run_until_parked();
+
+  let dialog = delete_dialog(&mut h).expect("still open");
+  assert!(!dialog.deleting);
+  assert!(dialog.can_confirm);
+  assert_eq!(
+    dialog.error.as_deref(),
+    Some("You are the last owner of Acme. Make another member an owner, or delete the organization, before deleting your account.")
+  );
+  assert!(host.writes().contains(&"delete account".to_string()));
+}
+
+fn farewell(h: &mut Harness) -> bool {
+  match drawn_settings(h).account {
+    Some(settings::AccountTab::SignedOut { farewell, .. }) => farewell,
+    other => panic!("signed out: {other:?}"),
+  }
+}
+
+#[gpui::test]
+fn account_deletion_toasts_and_says_goodbye_once_signed_out(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_as_ada(cx, host.clone());
+  h.click("account-delete");
+  settings_act(
+    &mut h,
+    field("account.delete.email", "ada@example.com".into()),
+  );
+  h.click("account-delete-confirm");
+  h.cx.run_until_parked();
+  assert!(host
+    .writes()
+    .contains(&"notify toast Account deleted".to_string()));
+
+  // The core signs out after deleting; the tab follows the account.
+  h.set_account(account_state(serde_json::json!({})));
+  assert!(farewell(&mut h));
+  assert!(h.shows(gpui::Role::Alert, "Sorry to see you go"));
+
+  h.click("account-farewell-dismiss");
+  assert!(!farewell(&mut h));
+  assert!(!h.shows(gpui::Role::Alert, "Sorry to see you go"));
+}
+
+#[gpui::test]
+fn a_refused_account_deletion_neither_toasts_nor_says_goodbye(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    account_deletion: Some(crate::core::supabase::ApiError::new("last_owner", "No")),
+    ..FakeHost::default()
+  });
+  let mut h = signed_in_as_ada(cx, host.clone());
+  h.click("account-delete");
+  settings_act(
+    &mut h,
+    field("account.delete.email", "ada@example.com".into()),
+  );
+  h.click("account-delete-confirm");
+  h.cx.run_until_parked();
+  assert!(!host.writes().iter().any(|w| w.starts_with("notify toast")));
+  h.set_account(account_state(serde_json::json!({})));
+  assert!(!farewell(&mut h));
+}
+
+#[gpui::test]
+fn account_deletion_cancel_closes_without_deleting(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_as_ada(cx, host.clone());
+  h.click("account-delete");
+  settings_act(
+    &mut h,
+    field("account.delete.email", "ada@example.com".into()),
+  );
+  h.click("account-delete-cancel");
+  h.cx.run_until_parked();
+  assert_eq!(delete_dialog(&mut h), None);
+  assert!(!h.shows(gpui::Role::Dialog, "Delete your Treq account?"));
+  assert!(!host.writes().contains(&"delete account".to_string()));
+
+  // Asking again starts from an empty field.
+  h.click("account-delete");
+  assert!(!delete_dialog(&mut h).unwrap().can_confirm);
+}
+
+#[gpui::test]
+fn account_offers_pro_on_the_free_plan(cx: &mut TestAppContext) {
+  let route = account_route("account");
+  let mut h = Harness::new(cx, route);
+  h.set_account(account_state(serde_json::json!({
+    "user": ada(),
+    "subscription": { "plan": "free", "status": "canceled", "currentPeriodEnd": null },
+  })));
+  let Some(settings::AccountTab::SignedIn(signed_in)) = drawn_settings(&mut h).account else {
+    panic!("signed in");
+  };
+  assert!(!signed_in.pro);
+  assert_eq!(
+    signed_in.status,
+    Some(("Canceling".into(), settings::StatusTone::Warn))
+  );
+  assert_eq!(signed_in.period, None);
+  assert_eq!(signed_in.manage_label, "Upgrade to Pro");
+}
+
+fn cloud(patch: serde_json::Value) -> serde_json::Value {
+  let mut cloud = serde_json::json!({
+    "instance": null,
+    "endpoint": null,
+    "provisioningStage": null,
+    "provisioningError": null,
+    "usage": null,
+    "usageError": null,
+    "submitting": false,
+  });
+  if let (Some(cloud), Some(patch)) = (cloud.as_object_mut(), patch.as_object()) {
+    for (key, value) in patch {
+      cloud.insert(key.clone(), value.clone());
+    }
+  }
+  cloud
+}
+
+fn signed_in_with_cloud(
+  cx: &mut TestAppContext,
+  host: Arc<FakeHost>,
+  cloud: serde_json::Value,
+) -> Harness {
+  let mut h = Harness::with_host(cx, account_route("account"), host);
+  h.set_account(account_state(
+    serde_json::json!({ "user": ada(), "subscription": pro(), "cloud": cloud }),
+  ));
+  h
+}
+
+/// Shows the Machines tab, where the cloud card lives.
+fn show_machines(h: &mut Harness) {
+  h.update(|s| {
+    if let View::Settings(route) = &mut s.view {
+      route.tab = settings::Tab::Machines;
+    }
+  });
+}
+
+fn cloud_card(h: &mut Harness) -> settings::CloudCard {
+  show_machines(h);
+  match drawn_settings(h).machines {
+    Some(settings::MachinesTab::SignedIn(card)) => *card,
+    other => panic!("signed in: {other:?}"),
+  }
+}
+
+#[gpui::test]
+fn the_cloud_card_moved_from_account_to_machines(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_with_cloud(cx, host, cloud(serde_json::json!({})));
+  assert!(drawn_settings(&mut h)
+    .tabs
+    .contains(&settings::Tab::Machines));
+  let card = || gpui_testing_library::by::role(gpui::Role::Group).name("Cloud workspace");
+  assert!(h.rendered().query_by_role(card()).is_none());
+  show_machines(&mut h);
+  assert!(h.rendered().query_by_role(card()).is_some());
+}
+
+#[gpui::test]
+fn machines_asks_to_sign_in_when_signed_out(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = Harness::with_host(cx, account_route("machines"), host.clone());
+  h.set_account(account_state(serde_json::json!({})));
+  assert_eq!(
+    drawn_settings(&mut h).machines,
+    Some(settings::MachinesTab::SignedOut)
+  );
+  h.click("machines-sign-in");
+  h.cx.run_until_parked();
+  assert_eq!(
+    host.writes(),
+    ["open http://localhost:3001/sign-in?source=desktop"]
+  );
+}
+
+/// A machine that failed before the provider made it has no resource, but
+/// its row stays and Retry keeps its old type: Delete clears the way.
+#[gpui::test]
+fn machines_deletes_a_machine_that_failed_to_create(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let failed = cloud(serde_json::json!({
+    "instance": { "status": "failed", "providerResourceId": null, "diskQuotaGb": 10 },
+  }));
+  let mut h = signed_in_with_cloud(cx, host.clone(), failed);
+  let card = cloud_card(&mut h);
+  assert!(card.deletable);
+  assert_eq!(
+    card.create.map(|c| c.label),
+    Some("Retry cloud workspace creation".into())
+  );
+  h.click("cloud-delete");
+  h.click("cloud-delete-dialog-confirm");
+  assert_eq!(host.writes(), ["cloud Delete"]);
+}
+
+#[gpui::test]
+fn machines_names_the_size_and_region(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let instance = serde_json::json!({
+    "status": "ready", "providerResourceId": "m-1", "diskQuotaGb": 20,
+    "tierId": "m", "region": "us_east"
+  });
+  let mut h = signed_in_with_cloud(
+    cx,
+    host,
+    cloud(serde_json::json!({ "instance": instance, "tiers": tiers() })),
+  );
+  let instance = cloud_card(&mut h).instance.expect("instance");
+  assert_eq!(instance.detail.as_deref(), Some("Medium · US East"));
+}
+
+#[gpui::test]
+fn cloud_workspace_creates_through_rust(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_with_cloud(cx, host.clone(), cloud(serde_json::json!({})));
+  let card = cloud_card(&mut h);
+  assert_eq!(card.instance, None);
+  assert_eq!(
+    card.create.as_ref().map(|c| c.label.as_str()),
+    Some("Create cloud workspace")
+  );
+  h.click("cloud-create");
+  assert_eq!(host.writes(), ["cloud Provision"]);
+  assert!(h.sent().is_empty());
+
+  h.set_account(account_state(serde_json::json!({
+    "user": ada(),
+    "cloud": cloud(serde_json::json!({ "provisioningStage": "Requesting provisioning..." })),
+  })));
+  let create = cloud_card(&mut h).create.expect("create");
+  assert_eq!(create.label, "Creating…");
+  assert!(create.disabled && create.spinning);
+  assert_eq!(create.stage.as_deref(), Some("Requesting provisioning..."));
+}
+
+#[gpui::test]
+fn cloud_workspace_shows_usage_and_deletes_after_confirming(cx: &mut TestAppContext) {
+  let ready = cloud(serde_json::json!({
+    "instance": { "status": "ready", "providerResourceId": "m-1", "diskQuotaGb": 5 },
+    "endpoint": { "username": "treq", "hostname": "box.treq.dev", "port": 2222 },
+    "usage": { "repositoryCount": 3, "workspaceCount": 7, "diskUsedBytes": 1932735283u64 },
+  }));
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_with_cloud(cx, host.clone(), ready);
+  h.cx
+    .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(1200.)));
+  let instance = cloud_card(&mut h).instance.expect("instance");
+  assert_eq!(instance.label, "Ready");
+  assert_eq!(instance.endpoint.as_deref(), Some("treq@box.treq.dev:2222"));
+  assert!(!instance.repairable);
+  assert_eq!(
+    instance.usage,
+    Some(settings::CloudUsage::Report {
+      summary: "7 workspaces across 3 repositories".into(),
+      size: "1.8 GB of 5 GB".into(),
+      percent: 36,
+    })
+  );
+  assert!(!h.shows(gpui::Role::Button, "Repair"));
+  h.click("cloud-open-repositories");
+  h.click("cloud-delete");
+  assert!(h.shows(gpui::Role::Dialog, "Delete cloud workspace?"));
+  h.click("cloud-delete-dialog-cancel");
+  assert!(!h.shows(gpui::Role::Dialog, "Delete cloud workspace?"));
+  h.click("cloud-delete");
+  h.click("cloud-delete-dialog-confirm");
+  assert!(!h.shows(gpui::Role::Dialog, "Delete cloud workspace?"));
+  assert_eq!(host.writes(), ["cloud OpenRepositories", "cloud Delete"]);
+  assert_eq!(h.sent(), [press("settings.close")]);
+}
+
+#[gpui::test]
+fn cloud_workspace_warns_when_a_lapse_will_delete_it(cx: &mut TestAppContext) {
+  let lapsed = cloud(serde_json::json!({
+    "instance": {
+      "status": "suspended",
+      "providerResourceId": "m-1",
+      "diskQuotaGb": 5,
+      "lapsedAt": "2026-11-01T12:00:00Z",
+    },
+  }));
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_with_cloud(cx, host, lapsed);
+  let instance = cloud_card(&mut h).instance.expect("instance");
+  assert_eq!(
+    instance.deletion.as_deref(),
+    Some("Pro ended, so this workspace will be deleted on 12/1/2026. Resubscribe to keep it.")
+  );
+  assert!(h.shows(
+    gpui::Role::Alert,
+    "Pro ended, so this workspace will be deleted on 12/1/2026. Resubscribe to keep it."
+  ));
+}
+
+#[gpui::test]
+fn cloud_workspace_without_a_lapse_shows_no_deletion(cx: &mut TestAppContext) {
+  let kept = cloud(serde_json::json!({
+    "instance": { "status": "ready", "providerResourceId": "m-1", "diskQuotaGb": 5 },
+  }));
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_with_cloud(cx, host, kept);
+  assert_eq!(
+    cloud_card(&mut h).instance.expect("instance").deletion,
+    None
+  );
+  assert!(!h.shows(
+    gpui::Role::Alert,
+    "Pro ended, so this workspace will be deleted on 12/1/2026. Resubscribe to keep it."
+  ));
+}
+
+#[gpui::test]
+fn cloud_workspace_repairs_and_upsells_pro(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let degraded = cloud(serde_json::json!({
+    "instance": { "status": "degraded", "providerResourceId": "m-1", "diskQuotaGb": 5 },
+    "provisioningError": "[pro_required] Cloud workspaces need Pro.\nhttp 402",
+  }));
+  let mut h = signed_in_with_cloud(cx, host.clone(), degraded);
+  let card = cloud_card(&mut h);
+  assert!(card.instance.expect("instance").repairable);
+  assert_eq!(
+    card.pro_required.as_deref(),
+    Some("Cloud workspaces need Pro.")
+  );
+  assert_eq!(card.error, None);
+  h.click("cloud-repair");
+  h.click("cloud-upgrade");
+  h.cx.run_until_parked();
+  assert!(h.sent().is_empty());
+  assert_eq!(
+    host.writes(),
+    ["cloud Repair", "open http://localhost:3001/dashboard"]
+  );
+
+  h.set_account(account_state(serde_json::json!({
+    "user": ada(),
+    "cloud": cloud(serde_json::json!({
+      "instance": { "status": "failed", "providerResourceId": null, "diskQuotaGb": 5 },
+      "provisioningError": "[http_502] exec failed\nstack",
+    })),
+  })));
+  let card = cloud_card(&mut h);
+  assert_eq!(card.error.as_deref(), Some("[http_502] exec failed"));
+  assert_eq!(
+    card.create.map(|c| c.label),
+    Some("Retry cloud workspace creation".into())
+  );
+}
+
+#[gpui::test]
+fn cloud_workspace_lists_background_processes_to_kill_or_keep_alive(cx: &mut TestAppContext) {
+  let stops_at = (chrono::Utc::now() + chrono::Duration::seconds(12 * 60 + 30)).to_rfc3339();
+  let ready = cloud(serde_json::json!({
+    "instance": { "status": "ready", "providerResourceId": "m-1", "diskQuotaGb": 5 },
+    "activity": {
+      "stops_at": stops_at,
+      "idle_timeout_min": 15,
+      "processes": [
+        {"pid": 500, "command": "node server.js", "origin": "orphan", "cpu": 12.5, "ports": [3000], "pinned": false},
+        {"pid": 410, "command": "npm run dev", "origin": "agent", "cpu": 3, "ports": [], "pinned": true},
+        {"pid": 100, "command": "/usr/sbin/sshd", "origin": "service", "cpu": 0, "ports": [2222], "pinned": false}
+      ],
+      "pins": [{"id": "pin-1", "pid": 410, "command": "npm run dev", "pattern": null, "expires_at": stops_at}]
+    },
+  }));
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_with_cloud(cx, host.clone(), ready);
+  h.cx
+    .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(1600.)));
+  let card = cloud_card(&mut h);
+  assert_eq!(card.idle_stop.as_deref(), Some("Stops in 12 min if idle"));
+  assert_eq!(
+    card.processes,
+    [
+      settings::ProcessRow {
+        pid: 500,
+        command: "node server.js".into(),
+        detail: "Background · 12.5% CPU · :3000".into(),
+        pinned: false,
+        pin_id: None,
+        killable: true,
+      },
+      settings::ProcessRow {
+        pid: 410,
+        command: "npm run dev".into(),
+        detail: "Agent · 3.0% CPU".into(),
+        pinned: true,
+        pin_id: Some("pin-1".into()),
+        killable: true,
+      },
+      settings::ProcessRow {
+        pid: 100,
+        command: "/usr/sbin/sshd".into(),
+        detail: "Service · 0.0% CPU · :2222".into(),
+        pinned: false,
+        pin_id: None,
+        killable: false,
+      },
+    ]
+  );
+  assert!(h.shows(gpui::Role::Group, "Processes"));
+  assert_eq!(buttons(&mut h, "Kill"), 2, "500 and 410 only");
+  assert_eq!(buttons(&mut h, "Keep alive (billed)"), 1, "500 only");
+  h.click("cloud-process-kill-500");
+  h.click("cloud-process-pin-500");
+  h.click("cloud-process-unpin-410");
+  assert_eq!(
+    host.writes(),
+    [
+      "cloud KillProcess { pid: 500 }",
+      "cloud PinProcess { pid: 500 }",
+      "cloud UnpinProcess { pin_id: \"pin-1\" }",
+    ]
+  );
+}
+
+#[gpui::test]
+fn cloud_workspace_without_a_probe_shows_no_processes(cx: &mut TestAppContext) {
+  let ready = cloud(serde_json::json!({
+    "instance": { "status": "suspended", "providerResourceId": "m-1", "diskQuotaGb": 5 },
+    "activity": { "stops_at": null, "idle_timeout_min": 15, "processes": [], "pins": [] },
+  }));
+  let mut h = signed_in_with_cloud(cx, Arc::new(FakeHost::default()), ready);
+  let card = cloud_card(&mut h);
+  assert_eq!(card.idle_stop, None);
+  assert!(card.processes.is_empty());
+  assert!(!h.shows(gpui::Role::Group, "Processes"));
+}
+
+fn tiers() -> serde_json::Value {
+  serde_json::json!([
+    {"id": "s", "label": "Small", "vcpu": 2, "ram_gib": 4, "disk_gb": 10, "regions": [
+      {"region": "eu_west", "machine_type_id": "boat:small", "hourly_usd": 0.0216},
+      {"region": "us_east", "machine_type_id": "daytona:s", "hourly_usd": 0.03}
+    ]},
+    {"id": "m", "label": "Medium", "vcpu": 4, "ram_gib": 8, "disk_gb": 20, "regions": [
+      {"region": "us_east", "machine_type_id": "daytona:m", "hourly_usd": 0.06}
+    ]}
+  ])
+}
+
+#[gpui::test]
+fn cloud_workspace_creates_with_the_picked_size(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_with_cloud(
+    cx,
+    host.clone(),
+    cloud(serde_json::json!({ "tiers": tiers(), "selectedTier": "m" })),
+  );
+  let card = cloud_card(&mut h);
+  assert_eq!(
+    card.sizes,
+    [
+      settings::SizeOption {
+        id: "s".into(),
+        label: "Small".into(),
+        spec: "2 vCPU · 4 GiB RAM · 10 GB disk".into(),
+        price: Some("$0.0216/hour".into()),
+        selected: false,
+        current: false,
+      },
+      settings::SizeOption {
+        id: "m".into(),
+        label: "Medium".into(),
+        spec: "4 vCPU · 8 GiB RAM · 20 GB disk".into(),
+        price: Some("$0.0600/hour".into()),
+        selected: true,
+        current: false,
+      },
+    ]
+  );
+  assert!(!card.resize);
+  h.click("cloud-tier-s");
+  h.click("cloud-create");
+  assert_eq!(
+    host.writes(),
+    ["cloud SelectTier { tier_id: \"s\" }", "cloud Provision"]
+  );
+}
+
+#[gpui::test]
+fn cloud_workspace_resizes_after_confirming_the_unpushed_work_it_loses(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let instance = serde_json::json!({
+    "status": "ready", "providerResourceId": "m-1", "diskQuotaGb": 10,
+    "tierId": "s", "region": "us_east"
+  });
+  let mut h = signed_in_with_cloud(
+    cx,
+    host.clone(),
+    cloud(serde_json::json!({
+      "instance": instance, "tiers": tiers(), "selectedTier": "m",
+      "billing": { "billedUsd": 1.234, "hours": 41.5 },
+    })),
+  );
+  let card = cloud_card(&mut h);
+  assert_eq!(card.sizes[0].price.as_deref(), Some("$0.0300/hour"));
+  assert!(card.sizes[0].current);
+  assert!(card.resize);
+  assert_eq!(
+    card.billing.as_deref(),
+    Some("This month: $1.23 for 41.5 hours")
+  );
+  h.click("cloud-resize");
+
+  set_cloud(
+    &mut h,
+    serde_json::json!({
+      "instance": instance, "tiers": tiers(), "selectedTier": "m",
+      "resizePreflight": ["m", {"requires_ack": true, "repos": [
+        {"path": "acme/api", "vcs": "jj", "dirty": 0, "unpushed": 2, "agents": 0, "error": null}
+      ]}],
+    }),
+  );
+  let card = cloud_card(&mut h);
+  assert_eq!(
+    card.resize_confirm,
+    Some(vec!["acme/api: 2 unpushed commits".to_string()])
+  );
+  assert!(h.shows(gpui::Role::Alert, "Resizing loses unpushed work"));
+  h.click("cloud-resize-cancel");
+  h.click("cloud-resize-confirm");
+  assert_eq!(
+    host.writes(),
+    [
+      "cloud Resize { acknowledged_data_loss: false }",
+      "cloud CancelResize",
+      "cloud Resize { acknowledged_data_loss: true }",
+    ]
+  );
+}
+
+#[gpui::test]
+fn cloud_card_shows_a_running_switch_and_a_stuck_one(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let instance = serde_json::json!({
+    "status": "ready", "providerResourceId": "m-1", "diskQuotaGb": 10,
+    "tierId": "s", "region": "us_east"
+  });
+  let mut h = signed_in_with_cloud(
+    cx,
+    host,
+    cloud(serde_json::json!({
+      "instance": instance, "tiers": tiers(), "selectedTier": "m",
+      "migration": {"id": "mig-1", "state": "verifying", "reason": "user_resize", "error": null},
+    })),
+  );
+  let card = cloud_card(&mut h);
+  let migration = card.migration.expect("switch shown");
+  assert_eq!(
+    migration.title,
+    "Moving to a new machine: checking the new machine"
+  );
+  assert!(!migration.stuck);
+  assert!(!card.resize, "no second resize while one runs");
+  assert!(h.shows(
+    gpui::Role::Alert,
+    "Moving to a new machine: checking the new machine"
+  ));
+
+  set_cloud(
+    &mut h,
+    serde_json::json!({
+      "instance": instance, "tiers": tiers(), "selectedTier": "m",
+      "migration": {"id": "mig-1", "state": "rolling_back", "reason": "user_resize",
+        "error": {"step": "rolling_back", "kind": "unavailable", "message": "vendor down"}},
+    }),
+  );
+  let migration = cloud_card(&mut h).migration.expect("switch shown");
+  assert_eq!(migration.title, "Moving to a new machine: undoing the move");
+  assert!(migration.stuck);
+  assert_eq!(
+    migration.detail.as_deref(),
+    Some("Last error: vendor down. If this doesn't clear, contact support with migration mig-1.")
+  );
+}
+
+#[gpui::test]
+fn integrations_sign_in_when_signed_out(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::with_settings(&[(
+    "feature_preview.linearIntegration",
+    "false",
+  )]));
+  let route = account_route("integrations");
+  let mut h = Harness::with_host(cx, route, host.clone());
+  h.set_account(account_state(serde_json::json!({})));
+  let integrations = drawn_settings(&mut h).integrations.expect("integrations");
+  assert_eq!(integrations.github, settings::GithubSection::SignedOut);
+  assert!(
+    integrations.linear.is_some(),
+    "Linear shows without the preview"
+  );
+  // Collapsed, the card only says it isn't connected.
+  assert!(h.shows(gpui::Role::Button, "GitHub integration"));
+  assert!(!h.shows(gpui::Role::Button, "Sign in with browser"));
+  h.click("integration-card-github");
+  assert!(h.shows(gpui::Role::Button, "Sign in with browser"));
+  h.click("integrations-sign-in");
+  h.cx.run_until_parked();
+  assert_eq!(
+    host.writes(),
+    ["open http://localhost:3001/sign-in?source=desktop"]
+  );
+}
+
+#[gpui::test]
+fn integrations_list_public_repositories_on_the_free_plan(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::with_settings(&[(
+    "feature_preview.linearIntegration",
+    "false",
+  )]));
+  let repo = |id, name: &str, private| crate::core::account::GithubRepository {
+    id,
+    full_name: name.into(),
+    private,
+  };
+  let host = Arc::new(FakeHost {
+    github_repos: Some(Ok(vec![
+      repo(1, "acme/public", false),
+      repo(2, "acme/private", true),
+    ])),
+    ..Arc::into_inner(host).expect("one owner")
+  });
+  let route = account_route("integrations");
+  let mut h = Harness::with_host(cx, route, host.clone());
+  h.set_account(account_state(serde_json::json!({ "user": ada() })));
+  let integrations = drawn_settings(&mut h).integrations.expect("integrations");
+  assert_eq!(
+    integrations.github,
+    settings::GithubSection::SignedIn {
+      scope: "Public repositories".into(),
+      description: "1 enabled.".into(),
+      repositories: vec![("acme/public".into(), false)],
+    }
+  );
+  assert!(!h.shows(gpui::Role::Button, "Manage GitHub"), "collapsed");
+  h.click("integration-card-github");
+  h.click("github-manage");
+  h.cx.run_until_parked();
+  assert_eq!(
+    host.writes(),
+    ["open http://localhost:3001/dashboard?tab=integrations"]
+  );
+}
+
+#[gpui::test]
+fn integrations_cards_say_whether_each_is_connected(cx: &mut TestAppContext) {
+  let (mut h, _) = linear_harness(cx, true, Some("lin_api_1"));
+  let integrations = drawn_settings(&mut h).integrations.expect("integrations");
+  // Signed in with GitHub repositories still loading: connected.
+  assert!(integrations.github_connected);
+  assert!(integrations.linear.expect("linear").connected);
+  assert!(card_shows(
+    &mut h,
+    "GitHub integration",
+    gpui::Role::Image,
+    "Connected"
+  ));
+  assert!(card_shows(
+    &mut h,
+    "Linear integration",
+    gpui::Role::Image,
+    "Connected"
+  ));
+}
+
+#[gpui::test]
+fn integrations_card_expands_and_collapses(cx: &mut TestAppContext) {
+  let (mut h, _) = linear_harness(cx, true, None);
+  assert!(!h.shows(gpui::Role::Button, "Add API key"));
+  h.click("integration-card-linear");
+  assert!(h.shows(gpui::Role::Button, "Add API key"));
+  h.click("integration-card-linear");
+  assert!(!h.shows(gpui::Role::Button, "Add API key"));
+}
+
+#[gpui::test]
+fn integrations_linear_card_shows_a_paywall_on_free(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::with_settings(&[(
+    "feature_preview.linearIntegration",
+    "false",
+  )]));
+  let mut h = Harness::with_host(cx, account_route("integrations"), host.clone());
+  h.set_account(account_state(serde_json::json!({ "user": ada() })));
+  assert!(h.shows(gpui::Role::Button, "Linear integration"));
+  assert!(card_shows(
+    &mut h,
+    "Linear integration",
+    gpui::Role::Label,
+    "Requires Pro"
+  ));
+  assert!(!card_status(&mut h, "Linear integration"));
+  assert!(!h.shows(gpui::Role::Group, "Linear is a Pro feature"));
+  h.click("integration-card-linear");
+  assert!(h.shows(gpui::Role::Group, "Linear is a Pro feature"));
+  h.click("linear-upgrade");
+  h.cx.run_until_parked();
+  assert_eq!(host.writes(), ["open http://localhost:3001/dashboard"]);
+}
+
+#[gpui::test]
+fn integrations_linear_card_shows_status_on_pro(cx: &mut TestAppContext) {
+  let (mut h, _) = linear_harness(cx, true, None);
+  assert!(card_status(&mut h, "Linear integration"));
+  assert!(!card_shows(
+    &mut h,
+    "Linear integration",
+    gpui::Role::Label,
+    "Requires Pro"
+  ));
+}
+
+fn linear_harness(
+  cx: &mut TestAppContext,
+  pro: bool,
+  key: Option<&str>,
+) -> (Harness, Arc<FakeHost>) {
+  let mut settings = vec![("feature_preview.linearIntegration", "true")];
+  settings.extend(key.map(|key| ("/repo:linear_api_key", key)));
+  let host = Arc::new(FakeHost::with_settings(&settings));
+  let subscription = if pro {
+    self::pro()
+  } else {
+    serde_json::Value::Null
+  };
+  let route = account_route("integrations");
+  let mut h = Harness::with_host(cx, route, host.clone());
+  h.set_account(account_state(
+    serde_json::json!({ "user": ada(), "subscription": subscription }),
+  ));
+  h.cx
+    .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(1200.)));
+  (h, host)
+}
+
+fn linear_section(h: &mut Harness) -> settings::LinearSection {
+  drawn_settings(h)
+    .integrations
+    .expect("integrations")
+    .linear
+    .expect("linear")
+}
+
+#[gpui::test]
+fn linear_saves_an_api_key_to_the_repository(cx: &mut TestAppContext) {
+  let (mut h, host) = linear_harness(cx, true, None);
+  let linear = linear_section(&mut h);
+  assert_eq!(linear.description, "Paste a Linear personal API key");
+  assert_eq!(linear.edit_label, "Add API key");
+  assert!(!linear.upgrade);
+  assert!(!linear.connected);
+  h.click("integration-card-linear");
+  h.click("linear-api-key-edit");
+  assert!(linear_section(&mut h).editing);
+  settings_act(&mut h, field("linear.apiKey", "lin_api_1".into()));
+  h.click("linear-api-key-save");
+  h.cx.run_until_parked();
+  assert_eq!(
+    host.writes(),
+    [
+      "set repo /repo linear_api_key=lin_api_1",
+      "notify repoSettingsChanged",
+      "notify toast API key saved",
+    ]
+  );
+  let linear = linear_section(&mut h);
+  assert!(!linear.editing);
+  assert!(linear.connected);
+  assert_eq!(linear.description, "Direct API access configured");
+  assert_eq!(linear.edit_label, "Update API key");
+}
+
+#[gpui::test]
+fn linear_connects_via_oauth_on_pro(cx: &mut TestAppContext) {
+  let (mut h, host) = linear_harness(cx, true, Some("lin_api_1"));
+  let linear = linear_section(&mut h);
+  assert!(linear.oauth);
+  assert!(linear.key_priority_note);
+  assert_eq!(
+    linear.oauth_description,
+    "API key takes priority, but you can also connect via OAuth"
+  );
+  h.click("integration-card-linear");
+  h.click("linear-oauth");
+  h.cx.run_until_parked();
+  assert!(h.sent().is_empty());
+  assert_eq!(
+    host.writes(),
+    ["linear oauth", "open https://linear.app/oauth/authorize"]
+  );
+  assert!(!linear_section(&mut h).oauth_loading);
+}
+
+#[gpui::test]
+fn linear_oauth_refused_for_want_of_pro_offers_the_upgrade(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    oauth: Some(Err(crate::core::supabase::ApiError {
+      status: 402,
+      code: "pro_required".into(),
+      message: "Pro".into(),
+      correlation_id: None,
+    })),
+    ..FakeHost::with_settings(&[("feature_preview.linearIntegration", "true")])
+  });
+  let mut h = Harness::with_host(cx, account_route("integrations"), host.clone());
+  h.cx
+    .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(1200.)));
+  h.set_account(account_state(
+    serde_json::json!({ "user": ada(), "subscription": pro() }),
+  ));
+  h.click("integration-card-linear");
+  h.click("linear-oauth");
+  h.cx.run_until_parked();
+  assert_eq!(
+    host.writes(),
+    ["linear oauth", "notify toast Linear OAuth needs Pro"]
+  );
+}
+
+#[gpui::test]
+fn the_cloud_delete_confirmation_cancels_on_escape_and_deletes_on_enter(cx: &mut TestAppContext) {
+  let ready = cloud(serde_json::json!({
+    "instance": { "status": "ready", "providerResourceId": "m-1", "diskQuotaGb": 5 },
+    "endpoint": { "username": "treq", "hostname": "box.treq.dev", "port": 2222 },
+  }));
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_with_cloud(cx, host.clone(), ready);
+  h.cx
+    .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(1200.)));
+  show_machines(&mut h);
+  h.click("cloud-delete");
+  assert!(h.shows(gpui::Role::Dialog, "Delete cloud workspace?"));
+  h.cx.simulate_keystrokes("escape");
+  assert!(!h.shows(gpui::Role::Dialog, "Delete cloud workspace?"));
+  h.click("cloud-delete");
+  h.cx.simulate_keystrokes("enter");
+  h.cx.run_until_parked();
+  assert!(!h.shows(gpui::Role::Dialog, "Delete cloud workspace?"));
+  assert_eq!(host.writes(), ["cloud Delete"]);
+}
+
+#[gpui::test]
+fn the_account_delete_dialog_cancels_on_escape(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_as_ada(cx, host);
+  h.click("account-delete");
+  assert!(h.shows(gpui::Role::Dialog, "Delete your Treq account?"));
+  h.cx.simulate_keystrokes("escape");
+  h.cx.run_until_parked();
+  assert_eq!(delete_dialog(&mut h), None);
+}
+
+#[gpui::test]
+fn the_account_delete_dialog_deletes_on_enter_once_the_email_is_typed(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_as_ada(cx, host.clone());
+  h.click("account-delete");
+  // Enter waits for the email.
+  h.cx.simulate_keystrokes("enter");
+  h.cx.run_until_parked();
+  assert!(!host.writes().contains(&"delete account".to_string()));
+  settings_act(
+    &mut h,
+    field("account.delete.email", "ada@example.com".into()),
+  );
+  h.cx.simulate_keystrokes("enter");
+  h.cx.run_until_parked();
+  assert!(host.writes().contains(&"delete account".to_string()));
+}
+
+fn spend(cap: f64, spent: f64, state: &str) -> serde_json::Value {
+  serde_json::json!({
+    "cap_usd": cap, "spent_usd": spent,
+    "month_start": "2026-10-01T00:00:00+00:00", "state": state
+  })
+}
+
+/// Signs Ada in on Pro with the cloud workspace `patch` describes.
+fn set_cloud(h: &mut Harness, patch: serde_json::Value) {
+  h.set_account(account_state(
+    serde_json::json!({ "user": ada(), "subscription": pro(), "cloud": cloud(patch) }),
+  ));
+}
+
+fn signed_in_tab(h: &mut Harness) -> settings::SignedIn {
+  h.update(|s| {
+    if let View::Settings(route) = &mut s.view {
+      route.tab = settings::Tab::Account;
+    }
+  });
+  match drawn_settings(h).account {
+    Some(settings::AccountTab::SignedIn(signed_in)) => *signed_in,
+    other => panic!("signed in: {other:?}"),
+  }
+}
+
+#[gpui::test]
+fn cloud_card_shows_spend_against_the_cap(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_with_cloud(
+    cx,
+    host,
+    cloud(serde_json::json!({
+      "billing": { "billedUsd": 12.0, "hours": 3.0 },
+      "spend": spend(50., 12.345, "ok"),
+    })),
+  );
+  let card = cloud_card(&mut h);
+  assert_eq!(
+    card.billing.as_deref(),
+    Some("This month: $12.35 of $50.00")
+  );
+  assert_eq!(
+    card.spend_state,
+    Some(crate::core::cloud_catalog::SpendState::Ok)
+  );
+  assert_eq!(card.spend_note, None);
+  assert!(h.shows(gpui::Role::Status, "This month: $12.35 of $50.00"));
+}
+
+#[gpui::test]
+fn cloud_card_warns_at_80_percent_and_explains_a_reached_cap(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_with_cloud(
+    cx,
+    host,
+    cloud(serde_json::json!({ "spend": spend(50., 41., "warning") })),
+  );
+  let card = cloud_card(&mut h);
+  assert_eq!(
+    card.spend_state,
+    Some(crate::core::cloud_catalog::SpendState::Warning)
+  );
+  assert_eq!(
+    card.spend_note.as_deref(),
+    Some("You've used 82% of your monthly cap. Workspaces stop when you reach it.")
+  );
+
+  set_cloud(
+    &mut h,
+    serde_json::json!({
+      "instance": { "status": "suspended", "providerResourceId": "m-1", "diskQuotaGb": 5 },
+      "spend": spend(50., 50.2, "capped"),
+      "provisioningError": "[spend_cap_reached] You reached your monthly cloud spend cap of $50.00. Raise the cap to keep working.\nHTTP 402",
+    }),
+  );
+  let card = cloud_card(&mut h);
+  assert_eq!(
+    card.spend_state,
+    Some(crate::core::cloud_catalog::SpendState::Capped)
+  );
+  assert_eq!(
+    card.spend_note.as_deref(),
+    Some("You reached your monthly cap. Your cloud workspaces are stopped until you raise the cap or the month ends (UTC).")
+  );
+  assert_eq!(
+    card.spend_cap_reached.as_deref(),
+    Some("You reached your monthly cloud spend cap of $50.00. Raise the cap to keep working.")
+  );
+  assert_eq!(card.error, None);
+  assert!(h.shows(gpui::Role::Alert, "Monthly spend cap reached"));
+  // Raise cap opens the cap editor.
+  h.click("cloud-spend-cap-raise");
+  let editor = signed_in_tab(&mut h).spend_cap.expect("cap editor");
+  assert!(editor.editing);
+  assert_eq!(editor.draft, "50");
+}
+
+#[gpui::test]
+fn the_spend_cap_is_changed_in_the_app(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_with_cloud(
+    cx,
+    host.clone(),
+    cloud(serde_json::json!({ "spend": spend(50., 10., "ok") })),
+  );
+  let editor = signed_in_tab(&mut h).spend_cap.expect("cap editor");
+  assert_eq!(editor.label, "Monthly spend cap: $50.00");
+  assert!(!editor.editing);
+  h.click("cloud-spend-cap-edit");
+  settings_act(&mut h, field("cloud.spendCap", "4".into()));
+  h.click("cloud-spend-cap-save");
+  assert_eq!(
+    signed_in_tab(&mut h).spend_cap.unwrap().error.as_deref(),
+    Some("Enter an amount of at least $5.")
+  );
+  assert!(host.writes().is_empty());
+  settings_act(&mut h, field("cloud.spendCap", "$80".into()));
+  h.click("cloud-spend-cap-save");
+  assert_eq!(host.writes(), ["cloud SetSpendCap { cap_usd: 80.0 }"]);
+  assert!(!signed_in_tab(&mut h).spend_cap.unwrap().editing);
+
+  // The server's refusal shows under the editor.
+  set_cloud(
+    &mut h,
+    serde_json::json!({
+      "spend": spend(50., 10., "ok"),
+      "spendCapError": "That cap is above the maximum allowed.",
+    }),
+  );
+  assert_eq!(
+    signed_in_tab(&mut h).spend_cap.unwrap().error.as_deref(),
+    Some("That cap is above the maximum allowed.")
+  );
+}
+
+#[gpui::test]
+fn stored_notifications_show_and_dismiss(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_with_cloud(
+    cx,
+    host.clone(),
+    cloud(serde_json::json!({ "notifications": [{
+      "id": "n1", "kind": "spend_cap_warning", "period": "2026-10",
+      "title": "Cloud spend at 80% of your cap",
+      "body": "You spent $40.00 of your $50.00 monthly cap.",
+      "created_at": "2026-10-28T12:00:00+00:00"
+    }] })),
+  );
+  let card = cloud_card(&mut h);
+  let notice = &card.notifications[0];
+  assert_eq!(
+    (
+      notice.id.as_str(),
+      notice.title.as_str(),
+      notice.body.as_str()
+    ),
+    (
+      "n1",
+      "Cloud spend at 80% of your cap",
+      "You spent $40.00 of your $50.00 monthly cap."
+    )
+  );
+  h.click("cloud-notification-dismiss-n1");
+  assert_eq!(host.writes(), ["cloud DismissNotification { id: \"n1\" }"]);
+}
+
+// -- Bring your own sandbox (BYOS) ------------------------------------------
+
+fn provider_keys(h: &mut Harness) -> Option<settings::ProviderKeysSection> {
+  signed_in_tab(h).provider_keys
+}
+
+fn boat_key() -> serde_json::Value {
+  serde_json::json!([{ "id": "c1", "provider_kind": "boat", "validated_at": "2026-10-28T00:00:00Z" }])
+}
+
+#[gpui::test]
+fn byos_shows_for_pro_without_a_feature_preview(cx: &mut TestAppContext) {
+  let mut h = signed_in_with_cloud(
+    cx,
+    Arc::new(FakeHost::default()),
+    cloud(serde_json::json!({ "providerKeys": boat_key() })),
+  );
+  assert!(provider_keys(&mut h).is_some());
+  assert!(h.shows(gpui::Role::Heading, "Provider keys"));
+}
+
+#[gpui::test]
+fn byos_is_hidden_without_pro(cx: &mut TestAppContext) {
+  let mut h = Harness::with_host(cx, account_route("account"), Arc::new(FakeHost::default()));
+  h.set_account(account_state(serde_json::json!({
+    "user": ada(),
+    "cloud": cloud(serde_json::json!({ "providerKeys": boat_key(), "selectedProvider": "boat" })),
+  })));
+  assert_eq!(provider_keys(&mut h), None);
+  assert!(!h.shows(gpui::Role::Heading, "Provider keys"));
+}
+
+#[gpui::test]
+fn byos_adds_and_removes_provider_keys(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_with_cloud(
+    cx,
+    host.clone(),
+    cloud(serde_json::json!({ "providerKeys": boat_key() })),
+  );
+  let keys = provider_keys(&mut h).expect("provider keys for Pro");
+  assert!(h.shows(gpui::Role::Heading, "Provider keys"));
+  assert_eq!(
+    keys.rows,
+    [settings::ProviderKeyRow {
+      kind: "boat".into(),
+      name: "Boat".into(),
+      status: "Key saved".into(),
+      invalid: false,
+      can_create: true,
+    }]
+  );
+  assert_eq!(
+    keys.addable,
+    [
+      ("daytona".to_string(), "Daytona".to_string()),
+      ("e2b".to_string(), "E2B".to_string()),
+      ("cloudflare".to_string(), "Cloudflare".to_string())
+    ]
+  );
+  h.click("byos-key-add-daytona");
+  assert_eq!(
+    provider_keys(&mut h).unwrap().editing.as_deref(),
+    Some("daytona")
+  );
+  settings_act(&mut h, field("byos.key", "dt-secret".into()));
+  h.click("byos-key-save");
+  h.click("byos-key-remove-boat");
+  assert_eq!(
+    host.writes(),
+    [
+      "cloud SaveProviderKey { kind: \"daytona\", key: <redacted> }",
+      "cloud RemoveProviderKey { kind: \"boat\" }",
+    ]
+  );
+  assert_eq!(
+    provider_keys(&mut h).unwrap().editing,
+    None,
+    "saving closes the field"
+  );
+}
+
+#[gpui::test]
+fn byos_shows_a_key_the_provider_rejected(cx: &mut TestAppContext) {
+  let mut h = signed_in_with_cloud(
+    cx,
+    Arc::new(FakeHost::default()),
+    cloud(serde_json::json!({
+      "providerKeys": [{ "id": "c1", "provider_kind": "daytona", "invalid_at": "2026-10-28T00:00:00Z" }],
+      "providerKeyError": "Daytona rejected this API key. Check it and try again.",
+      "provisioningError": "[provider_credential_invalid] provider credential is invalid\nHTTP 409",
+    })),
+  );
+  let keys = provider_keys(&mut h).unwrap();
+  assert!(keys.rows[0].invalid);
+  assert_eq!(keys.rows[0].status, "Rejected by Daytona. Replace the key.");
+  assert_eq!(
+    keys.error.as_deref(),
+    Some("Daytona rejected this API key. Check it and try again.")
+  );
+  let card = cloud_card(&mut h);
+  assert_eq!(
+    card.credential_invalid.as_deref(),
+    Some("Your provider rejected the saved API key. Replace it under Provider keys.")
+  );
+  assert_eq!(card.error, None);
+}
+
+#[gpui::test]
+fn the_cloud_card_never_names_a_provider(cx: &mut TestAppContext) {
+  let mut h = signed_in_with_cloud(
+    cx,
+    Arc::new(FakeHost::default()),
+    cloud(serde_json::json!({ "tiers": tiers(), "selectedTier": "s", "providerKeys": boat_key() })),
+  );
+  let card = cloud_card(&mut h);
+  assert!(!format!("{card:?}").contains("Boat"), "{card:?}");
+  assert!(!h.shows(gpui::Role::Button, "Boat"));
+  assert!(!h.shows(gpui::Role::RadioButton, "Boat"));
+}
+
+#[gpui::test]
+fn byos_creates_on_your_own_account_from_its_key(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_with_cloud(
+    cx,
+    host.clone(),
+    cloud(serde_json::json!({ "tiers": tiers(), "selectedTier": "s", "providerKeys": boat_key() })),
+  );
+  assert!(provider_keys(&mut h).unwrap().rows[0].can_create);
+  h.click("byos-key-create-boat");
+  assert_eq!(host.writes(), ["cloud ProvisionOn { kind: \"boat\" }"]);
+}
+
+#[gpui::test]
+fn byos_create_is_offered_only_without_a_workspace_and_with_a_valid_key(cx: &mut TestAppContext) {
+  let ready = serde_json::json!({
+    "instance": { "status": "ready", "providerResourceId": "m-1", "diskQuotaGb": 5 },
+    "providerKeys": boat_key(),
+  });
+  let mut h = signed_in_with_cloud(cx, Arc::new(FakeHost::default()), cloud(ready));
+  assert!(!provider_keys(&mut h).unwrap().rows[0].can_create);
+  assert!(!h.shows(gpui::Role::Button, "Create workspace on this account"));
+  set_cloud(
+    &mut h,
+    serde_json::json!({ "providerKeys": [{ "id": "c1", "provider_kind": "boat", "invalid_at": "2026-11-01T00:00:00Z" }] }),
+  );
+  assert!(!provider_keys(&mut h).unwrap().rows[0].can_create);
+}
+
+fn acme(role: &str, allow_managed: bool, allow_byos: bool) -> serde_json::Value {
+  serde_json::json!([{ "org_id": "o1", "name": "Acme", "role": role, "has_team": true,
+    "allow_managed": allow_managed, "allow_byos": allow_byos,
+    "org_cap_usd": 500, "member_cap_usd": 50 }])
+}
+
+fn team_cloud(
+  orgs: serde_json::Value,
+  profile_org: Option<&str>,
+  keys: serde_json::Value,
+) -> serde_json::Value {
+  cloud(serde_json::json!({
+    "organizations": orgs,
+    "profile": { "org_id": profile_org, "entitled": true, "allow_managed": true, "allow_byos": true },
+    "orgKeys": { "o1": keys },
+  }))
+}
+
+#[gpui::test]
+fn team_cloud_is_hidden_without_a_team(cx: &mut TestAppContext) {
+  let mut h = signed_in_with_cloud(
+    cx,
+    Arc::new(FakeHost::default()),
+    cloud(serde_json::json!({})),
+  );
+  let tab = signed_in_tab(&mut h);
+  assert_eq!(tab.cloud_profile, None);
+  assert!(tab.org_cloud.is_empty());
+  assert!(!h.shows(gpui::Role::Heading, "Cloud billing"));
+}
+
+#[gpui::test]
+fn team_profile_switches_where_cloud_bills(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_with_cloud(
+    cx,
+    host.clone(),
+    team_cloud(acme("member", true, false), None, serde_json::json!([])),
+  );
+  let profile = signed_in_tab(&mut h)
+    .cloud_profile
+    .expect("a Team member gets the profile switcher");
+  assert!(h.shows(gpui::Role::Heading, "Cloud billing"));
+  assert_eq!(
+    profile
+      .options
+      .iter()
+      .map(|o| (o.label.as_str(), o.selected))
+      .collect::<Vec<_>>(),
+    [("Personal", true), ("Acme", false)]
+  );
+  assert_eq!(
+    profile.options[1].note,
+    "Bills Acme. treq-managed sandboxes."
+  );
+  h.click("team-profile-personal");
+  assert!(
+    host.writes().is_empty(),
+    "the profile in use is not picked again"
+  );
+  h.click("team-profile-o1");
+  assert_eq!(
+    host.writes(),
+    ["cloud SetCloudProfile { org_id: Some(\"o1\") }"]
+  );
+  assert!(
+    signed_in_tab(&mut h).org_cloud.is_empty(),
+    "a member gets no owner settings"
+  );
+}
+
+#[gpui::test]
+fn team_owner_sets_what_members_may_run_and_both_caps(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_with_cloud(
+    cx,
+    host.clone(),
+    team_cloud(
+      acme("owner", true, false),
+      Some("o1"),
+      serde_json::json!([]),
+    ),
+  );
+  let org = signed_in_tab(&mut h)
+    .org_cloud
+    .pop()
+    .expect("an owner gets the organization's cloud settings");
+  assert!(h
+    .rendered()
+    .query_by_role(
+      gpui_testing_library::by::role(gpui::Role::Group)
+        .name("Acme cloud")
+        .hidden(true)
+    )
+    .is_some());
+  assert_eq!((org.allow_managed, org.allow_byos), (true, false));
+  assert_eq!(
+    (org.org_cap.as_str(), org.member_cap.as_str()),
+    ("500", "50")
+  );
+  for (role, name) in [
+    (gpui::Role::Switch, "treq-managed sandboxes"),
+    (gpui::Role::Switch, "The organization's own keys"),
+    (gpui::Role::Button, "Save"),
+  ] {
+    assert!(team_has(&mut h, role, name), "{name} is drawn");
+  }
+  // Below the test window's fold a simulated click lands nowhere, so press by action.
+  settings_act(&mut h, field("team.byos.o1", true.into()));
+  settings_act(&mut h, field("team.cap.org.o1", "3".into()));
+  settings_act(&mut h, press("team.save.o1"));
+  assert_eq!(
+    signed_in_tab(&mut h).org_cloud[0].error.as_deref(),
+    Some("Enter an amount of at least $5.")
+  );
+  assert!(
+    host.writes().is_empty(),
+    "nothing is sent for a cap under $5"
+  );
+  settings_act(&mut h, field("team.cap.org.o1", "300".into()));
+  settings_act(&mut h, field("team.cap.member.o1", "$20".into()));
+  settings_act(&mut h, press("team.save.o1"));
+  assert_eq!(
+    host.writes(),
+    ["cloud SaveOrgCloudSettings { org_id: \"o1\", allow_managed: true, allow_byos: true, org_cap_usd: 300.0, member_cap_usd: 20.0 }"]
+  );
+}
+
+#[gpui::test]
+fn team_owner_adds_and_removes_organization_keys(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_with_cloud(
+    cx,
+    host.clone(),
+    team_cloud(
+      acme("owner", false, true),
+      Some("o1"),
+      serde_json::json!([{ "id": "k1", "provider_kind": "boat" }]),
+    ),
+  );
+  let org = signed_in_tab(&mut h).org_cloud.pop().unwrap();
+  assert_eq!(
+    org.keys.iter().map(|k| k.kind.as_str()).collect::<Vec<_>>(),
+    ["boat"]
+  );
+  assert!(
+    team_has(&mut h, gpui::Role::Button, "Add Daytona key")
+      && team_has(&mut h, gpui::Role::Button, "Remove")
+  );
+  settings_act(&mut h, press("team.key.add.o1.daytona"));
+  assert_eq!(
+    signed_in_tab(&mut h).org_cloud[0].editing.as_deref(),
+    Some("daytona")
+  );
+  settings_act(&mut h, field("team.key", "dt-secret".into()));
+  settings_act(&mut h, press("team.key.save"));
+  settings_act(&mut h, press("team.key.remove.o1.boat"));
+  assert_eq!(
+    host.writes(),
+    [
+      "cloud SaveOrgProviderKey { org_id: \"o1\", kind: \"daytona\", key: <redacted> }",
+      "cloud RemoveOrgProviderKey { org_id: \"o1\", kind: \"boat\" }",
+    ]
+  );
+}
+
+#[gpui::test]
+fn on_an_organization_profile_the_card_names_no_provider_and_a_key_row_creates_on_it(
+  cx: &mut TestAppContext,
+) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = signed_in_with_cloud(
+    cx,
+    host.clone(),
+    team_cloud(
+      acme("owner", false, true),
+      Some("o1"),
+      serde_json::json!([{ "id": "k1", "provider_kind": "boat" }]),
+    ),
+  );
+  let card = cloud_card(&mut h);
+  assert!(!format!("{card:?}").contains("Boat"), "{card:?}");
+  let org = signed_in_tab(&mut h).org_cloud.pop().unwrap();
+  assert!(org.keys[0].can_create);
+  settings_act(&mut h, press("byos.create.boat"));
+  assert_eq!(host.writes(), ["cloud ProvisionOn { kind: \"boat\" }"]);
+}
+
+#[gpui::test]
+fn an_organization_key_creates_only_while_its_profile_is_selected(cx: &mut TestAppContext) {
+  let mut h = signed_in_with_cloud(
+    cx,
+    Arc::new(FakeHost::default()),
+    team_cloud(
+      acme("owner", true, true),
+      None,
+      serde_json::json!([{ "id": "k1", "provider_kind": "boat" }]),
+    ),
+  );
+  let org = signed_in_tab(&mut h).org_cloud.pop().unwrap();
+  assert!(!org.keys[0].can_create);
+  assert!(!team_has(
+    &mut h,
+    gpui::Role::Button,
+    "Create workspace on this account"
+  ));
+}
+
+#[gpui::test]
+fn account_loading_is_a_progress_indicator(cx: &mut TestAppContext) {
+  use gpui::Role;
+  use gpui_testing_library::prelude::*;
+  let mut h = Harness::new(cx, account_route("account"));
+  h.set_account(account_state(serde_json::json!({ "loading": true })));
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  expect(screen.get_by_role(by::role(Role::ProgressIndicator).name("Loading account…")))
+    .to_be_visible();
+}
+
+/// The Provider keys header is the shared section heading, named by its
+/// title, as written.
+#[gpui::test]
+fn the_provider_keys_header_is_a_heading(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  let mut h = signed_in_with_cloud(
+    cx,
+    Arc::new(FakeHost::default()),
+    cloud(serde_json::json!({ "providerKeys": boat_key() })),
+  );
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  expect(screen.get_by_role(by::role(gpui::Role::Heading).name("Provider keys"))).to_be_visible();
+}
+
+#[gpui::test]
+fn linear_on_free_offers_upgrade_instead_of_api_key(cx: &mut TestAppContext) {
+  let (mut h, host) = linear_harness(cx, false, Some("lin_api_1"));
+  let linear = linear_section(&mut h);
+  assert!(linear.upgrade);
+  assert!(!linear.oauth);
+  h.click("integration-card-linear");
+  assert!(!h.shows(gpui::Role::Button, "Update API key"));
+  assert!(h.shows(gpui::Role::Button, "Upgrade to Pro"));
+  h.click("linear-upgrade");
+  h.cx.run_until_parked();
+  assert!(
+    host.writes().iter().any(|w| w.contains("/dashboard")),
+    "{:?}",
+    host.writes()
+  );
+}

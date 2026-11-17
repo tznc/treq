@@ -15,12 +15,15 @@ env:
 
 on:
   pull_request:
-    # ready_for_review runs the heavy jobs that drafts skip.
-    types: [opened, synchronize, reopened, ready_for_review]
+    # Every check runs on drafts, so marking a PR ready doesn't rerun CI.
+    types: [opened, synchronize, reopened]
+  # The merge queue reruns CI on the queued result; ci-ok must report there.
+  merge_group:
 
 # A new push supersedes the previous run; free its runners for other PRs.
+# Merge group runs have no PR number; each queue entry has its own ref.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -37,12 +40,24 @@ jobs:
     # No checkout: on pull_request, paths-filter lists the changed files
     # through the GitHub API.
     permissions:
+      contents: read
       pull-requests: read
     steps:
+      # A merge group has no PR to ask the API about, so paths-filter diffs
+      # the queued commits against the base locally. Trees only, no blobs.
+      - if: github.event_name == 'merge_group'
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          filter: blob:none
+
       - name: Check for Rust and JS/TS changes
         id: filter
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
+          # Ignored on pull_request.
+          base: ${{ github.event.merge_group.base_sha }}
+          ref: ${{ github.event.merge_group.head_sha }}
           filters: |
             rust:
               - "src-tauri/**"
@@ -50,6 +65,7 @@ jobs:
               - "Cargo.toml"
               - "Cargo.lock"
               - ".config/nextest.toml"
+              - "deny.toml"
               - ".github/workflows/ci.yml"
             js:
               - "*.{js,ts,mjs,cjs,mts,cts}"
@@ -61,6 +77,7 @@ jobs:
               - "biome.json"
               - "sgconfig.yml"
               - ".tool-versions"
+              - "_typos.toml"
               - ".github/workflows/ci.yml"
             e2e:
               - "e2e/desktop/**"
@@ -79,10 +96,10 @@ jobs:
       JS: ${{ needs.detect-changes.outputs.js_changed }}
       RUST: ${{ needs.detect-changes.outputs.rust_changed }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: npm
@@ -105,7 +122,7 @@ jobs:
         run: npm run lint
 
       # Edge functions run on Deno: type-check them and run the Deno unit
-      # tests (remote_e2e.test.ts is the live suite in remote-e2e.yml).
+      # tests.
       - name: Setup Deno
         if: ${{ !cancelled() && env.JS == 'true' }}
         uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
@@ -121,7 +138,7 @@ jobs:
         if: ${{ !cancelled() && env.JS == 'true' }}
         run: npm run test:functions
 
-      # The Supabase-side unit tests (billing, merge queue, Linear proxy).
+      # The Supabase-side unit tests (billing, Linear proxy).
       # They share this job's npm ci instead of paying for their own runner.
       - name: test
         if: ${{ !cancelled() && env.JS == 'true' }}
@@ -129,7 +146,7 @@ jobs:
 
       - name: Install rustfmt
         if: ${{ !cancelled() && env.RUST == 'true' }}
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           components: rustfmt
           toolchain: stable
@@ -139,8 +156,22 @@ jobs:
         working-directory: src-tauri
         run: cargo fmt --all --check
 
-  # Heavy jobs skip draft PRs; marking the PR ready for review runs them.
-  #
+      - name: Install typos and cargo-machete
+        if: ${{ !cancelled() }}
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: typos,cargo-machete
+
+      # Spelling across code and docs (_typos.toml).
+      - name: typos
+        if: ${{ !cancelled() }}
+        run: typos
+
+      # Unused Cargo dependencies.
+      - name: cargo-machete
+        if: ${{ !cancelled() && env.RUST == 'true' }}
+        run: cargo machete
+
   # The end-to-end suite (e2e/desktop): the app built with the `e2e`
   # feature, which embeds a Playwright server (gpui-playwright), driven by
   # stock @playwright/test under Xvfb on a fixture repository. The desktop
@@ -148,34 +179,38 @@ jobs:
   # run covers them.
   test-desktop-e2e:
     needs: detect-changes
-    if: ${{ !github.event.pull_request.draft && (needs.detect-changes.outputs.rust_changed == 'true' || needs.detect-changes.outputs.e2e_changed == 'true') }}
-    timeout-minutes: 20
+    if: ${{ needs.detect-changes.outputs.rust_changed == 'true' || needs.detect-changes.outputs.e2e_changed == 'true' }}
+    # A cold e2e build takes up to 15 minutes, the suite and the capture up to 10 each.
+    timeout-minutes: 35
     name: test-desktop-e2e / playwright / ubuntu-22.04
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: stable
 
       - name: Use mold linker
-        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621 # v1
+        uses: rui314/setup-mold@da13e0b42e392e3a45d1215033a2270b849d7d36 # v1
 
       # test-rust's packages, plus Xvfb and Mesa's software Vulkan
       # (lavapipe), which GPUI renders with on a runner without a GPU, and
       # xdotool, which presses keys through X for the text shortcut tests.
+      # A stale runner apt index resolves versions the mirror no longer has (404s).
+      - name: refresh apt index
+        run: sudo apt-get update
       - name: install dependencies (ubuntu only)
-        uses: awalsh128/cache-apt-pkgs-action@681749ae568c81c2037cb9185e38b709b261bd2f # v1.6.1
+        uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
         with:
           packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libgbm-dev libegl-dev libxdo-dev xvfb mesa-vulkan-drivers xdotool
-          version: webkit-4.1-gpui-e2e-2
+          version: webkit-4.1-gpui-e2e-4
           execute_install_scripts: true
 
       # Reads test-rust's cache (warm-caches.yml saves it on main); the
       # dependencies build the same, only treq itself differs.
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: test
           save-if: false
@@ -187,7 +222,7 @@ jobs:
         run: cargo build --locked --features e2e --bin treq
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: npm
@@ -207,9 +242,21 @@ jobs:
           TREQ_E2E_BIN: ${{ github.workspace }}/target/debug/treq
         run: xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" npm test
 
+      # The capture Deploy Web runs, here so a change that breaks a landing
+      # screenshot fails on the PR instead of on main. It reuses this job's
+      # build rather than waiting for a runner of its own. The window renders
+      # at GDK_SCALE=2, so the screen is larger than the suite's.
+      - name: Capture landing screenshots under Xvfb
+        if: ${{ !cancelled() }}
+        working-directory: e2e/desktop
+        env:
+          TREQ_E2E_BIN: ${{ github.workspace }}/target/debug/treq
+          LANDING_OUT: ${{ runner.temp }}/landing-screenshots
+        run: xvfb-run --auto-servernum --server-args="-screen 0 3840x2400x24" npm run landing
+
       - name: Upload the report
         if: ${{ failure() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: desktop-e2e-report
           path: |
@@ -219,41 +266,64 @@ jobs:
 
   # clippy and the Rust tests share one job: each takes 1-2 min on a warm
   # cache, so a second job only paid for another runner and setup.
+  # Advisories, licenses, crate sources and duplicates (deny.toml).
+  cargo-deny:
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.rust_changed == 'true' }}
+    timeout-minutes: 10
+    name: cargo-deny / ubuntu-22.04
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-deny
+
+      - name: cargo deny
+        run: cargo deny --locked check
+
   test-rust:
     needs: detect-changes
-    if: ${{ !github.event.pull_request.draft && needs.detect-changes.outputs.rust_changed == 'true' }}
-    timeout-minutes: 20
+    if: ${{ needs.detect-changes.outputs.rust_changed == 'true' }}
+    # Clippy then the tests: a cold build (a Cargo.lock change misses the
+    # cache) takes about 20 minutes on its own.
+    timeout-minutes: 30
     # macOS runs after merge in warm-caches.yml: macOS runners are the
     # scarcest and slowest, and the tests rarely differ by platform.
     name: test-rust / clippy + test / ubuntu-22.04
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           components: rustfmt, clippy
           toolchain: stable
 
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-nextest
 
       # mold links the large test binaries several times faster than ld.
       - name: Use mold linker
-        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621 # v1
+        uses: rui314/setup-mold@da13e0b42e392e3a45d1215033a2270b849d7d36 # v1
 
       # Cold apt install of WebKit/GTK is ~30–60s per job; restore from Actions
       # cache on subsequent runs. execute_install_scripts is required so dpkg
       # postinst (ldconfig, alternatives) still runs on restore.
+      # A stale runner apt index resolves versions the mirror no longer has (404s).
+      - name: refresh apt index
+        run: sudo apt-get update
       - name: install dependencies (ubuntu only)
         # Tauri links WebKit/GTK; GPUI needs the X11/Wayland/Vulkan libraries.
-        uses: awalsh128/cache-apt-pkgs-action@681749ae568c81c2037cb9185e38b709b261bd2f # v1.6.1
+        uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1.6.3
         with:
           packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxkbcommon-dev libxkbcommon-x11-dev libvulkan-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libgbm-dev libegl-dev libxdo-dev mesa-vulkan-drivers
-          version: webkit-4.1-gpui-2
+          version: webkit-4.1-gpui-4
           execute_install_scripts: true
 
       # Runners already ship git + gh. Only jj needs installing; cache the
@@ -271,7 +341,7 @@ jobs:
 
       - name: Restore jj CLI cache
         id: jj-cache
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: .ci-bin
           key: jj-${{ runner.os }}-${{ runner.arch }}-${{ steps.jj.outputs.tag }}
@@ -321,7 +391,7 @@ jobs:
       - name: Save jj CLI cache
         if: steps.jj-cache.outputs.cache-hit != 'true'
         continue-on-error: true
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: .ci-bin
           key: ${{ steps.jj-cache.outputs.cache-primary-key }}
@@ -338,7 +408,7 @@ jobs:
       # Restores the cache warm-caches.yml saves on main. PR runs don't save:
       # a PR's cache can only be read by that PR, and the multi-GB saves
       # evict main's caches from the repo's 10 GB quota.
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: test
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -361,17 +431,14 @@ jobs:
           RUST_BACKTRACE: 1
         run: cargo nextest run --locked --workspace --profile ci
 
-      # The design system's visual regression check: re-renders the
-      # styleguide (crates/treq-ui) offscreen and compares it with the
-      # committed snapshots. Spinners animate from their first paint, so the
-      # loading example gets a looser tolerance.
-      - name: Styleguide snapshots match
-        if: ${{ !cancelled() }}
-        working-directory: crates/treq-ui
-        run: |
-          cargo build --locked -p treq-ui --example styleguide
-          styleguide=../../target/debug/examples/styleguide
-          for example in $($styleguide list | grep -vx empty-state/loading); do
-            $styleguide check --filter "$example" --tolerance 0.01
-          done
-          $styleguide check --filter empty-state/loading --tolerance 0.05
+  # The one required check: jobs skipped by detect-changes count as passing.
+  ci-ok:
+    name: ci-ok
+    if: ${{ always() }}
+    needs: [detect-changes, verify, test-desktop-e2e, cargo-deny, test-rust]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Fail if any job failed or was cancelled
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: exit 1

@@ -7,7 +7,7 @@ export const PRICING_SCHEMA = {
   '@type': 'Product',
   name: 'Treq',
   description:
-    'Open source desktop app for running coding agents in stacked workspaces. Free on your machine. Pro and Team add the Treq GitHub App, Linear OAuth, and a managed cloud workspace.',
+    'Open source desktop app for running coding agents in stacked workspaces. Free on your machine. Pro and Team add the Treq GitHub App and Linear. Cloud workspaces are pay-as-you-go at one price per size on every provider, from US$0.20 per hour, billed by the second.',
   url: 'https://treq.dev/pricing',
   brand: {
     '@type': 'Brand',
@@ -20,7 +20,7 @@ export const PRICING_SCHEMA = {
       price: '0',
       priceCurrency: 'USD',
       description:
-        'The full desktop app. GitHub through your local gh CLI and Linear through a personal API key, for any repository.',
+        'The full desktop app. GitHub through your local gh CLI, for any repository.',
     },
     {
       '@type': 'Offer',
@@ -29,7 +29,7 @@ export const PRICING_SCHEMA = {
       priceCurrency: 'USD',
       unitText: 'user/month',
       description:
-        'The Treq GitHub App and Linear OAuth, plus a managed cloud workspace and the merge queue in private alpha. Billed per user per month after a 14-day trial that needs a card.',
+        'The Treq GitHub App and the Linear integration (OAuth or personal API key). Billed per user per month. Cloud workspaces are pay-as-you-go at one price per size on every provider, billed by the second.',
     },
     {
       '@type': 'Offer',
@@ -38,7 +38,7 @@ export const PRICING_SCHEMA = {
       priceCurrency: 'USD',
       unitText: 'month',
       description:
-        'Everything in Pro for 5 members, with a shared GitHub App installation and a shared merge queue in private alpha. Each extra member is US$8 per month. Billed per month.',
+        'Everything in Pro for 5 members, with a shared GitHub App installation. Each extra member is US$8 per month. Billed per month.',
     },
   ],
 };
@@ -47,12 +47,12 @@ export const FAQ_ITEMS = [
   {
     question: 'What is free, and what do I pay for?',
     answer:
-      "The desktop app is free and open source, and runs everything on your machine. GitHub works through your local gh CLI and Linear through a personal API key, for any repository. You pay for the features that run on Treq's servers: the Treq GitHub App, Linear OAuth, a managed cloud workspace, and the merge queue in private alpha.",
+      "The desktop app is free and open source, and runs everything on your machine. GitHub works through your local gh CLI, for any repository. You pay for Pro features, some of which run on Treq's servers: the Treq GitHub App and the Linear integration. Cloud workspaces are pay-as-you-go on top of Pro, at one price per size on every provider, from US$0.20 per hour, billed by the second. If you bring your own Boat, Daytona, or E2B account, the provider bills you for the machine and Treq charges a fixed fee per size, from US$0.0085 per hour.",
   },
   {
-    question: 'How does the Pro trial work?',
+    question: 'How is Pro billed?',
     answer:
-      'Pro starts with a 14-day free trial. Checkout asks for a card, and Stripe charges it when the trial ends unless you cancel first. Each account gets one trial. If you cancel, Pro stays on until the end of the period you already have. Team has no trial.',
+      'Checkout asks for a card, and Stripe charges it at the start of each monthly period. If you cancel, Pro stays on until the end of the period you already paid for.',
   },
   {
     question: 'How do Team seats count?',
@@ -70,3 +70,13 @@ export const FAQ_ITEMS = [
       'Create an account, then start Pro from the Subscription tab of your dashboard. For Team, create an organization on the Team tab, buy Team there, and send your teammates their invite links.',
   },
 ] as const;
+
+export const FAQ_SCHEMA = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: FAQ_ITEMS.map((item) => ({
+    '@type': 'Question',
+    name: item.question,
+    acceptedAnswer: {'@type': 'Answer', text: item.answer},
+  })),
+};

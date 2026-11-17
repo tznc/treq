@@ -5,9 +5,11 @@
 //! React still owns which tab shows, closing the page, and the Supabase
 //! session the Account and Integrations tabs show (see `account`).
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
-use std::{rc::Rc, sync::Arc, time::Duration};
+use crate::result_ext::ResultExt;
+use std::{collections::HashSet, rc::Rc, sync::Arc, time::Duration};
 
 use gpui_kit::base::TestSupportExt as _;
 use serde::Deserialize;
@@ -18,32 +20,46 @@ use tauri_plugin_gpui::gpui::{
 pub(super) mod account;
 
 // The tests read what the tabs draw by these names.
-#[cfg_attr(not(test), allow(unused_imports))]
+#[cfg_attr(
+  not(test),
+  expect(unused_imports, reason = "re-exported for the tests only")
+)]
 pub use account::{
   AccountRoute, AccountTab, CloudCard, CloudEndpoint, CloudInstance, CloudRoute, CloudUsage,
-  GithubSection, IntegrationsTab, LinearSection, StatusTone, Subscription, UsageReport, User,
+  DeleteAccountDialog, GithubSection, IntegrationsTab, InviteRow, LinearSection, MachinesTab,
+  MemberRow, OrgCard, ProcessRow, ProviderKeyRow, ProviderKeysSection, SignedIn, SizeOption,
+  StatusTone, Subscription, TeamSection, UsageReport, User,
 };
 
 use super::{
+  agent_card::{self, CardAction},
   checklist,
   settings_data::{self as data, AppFields, SettingsHost},
   ActionSink, ScreenAction,
 };
 use crate::{
   core::{
-    app_setup_script::AppSetupScriptStatus, feature_preview::PreviewFeature,
-    skills::SkillCatalogSkillView, PrerequisiteStatus,
+    app_setup_script::AppSetupScriptStatus,
+    feature_preview::PreviewFeature,
+    skills::{
+      self, CustomSkill, CustomSkillLevel, InstalledSkill, SkillCatalogSkillView, SkillInstallScope,
+    },
+    PrerequisiteStatus,
   },
   gpui_shell::{
     form::{self, Controls, SelectOption},
-    native::{self, NativeEvent, ToastTone},
+    native::{self, NativeEvent},
     popup::PopupSink,
     theme::{self, Palette},
     tooltips::{HasTooltips, Tooltips},
     ui::{self, Button, Size, TextSize, Variant},
   },
+  local_db::AgentReviewComment,
   repo_config::RepoConfig,
 };
+
+/// How often the tuning agent's proposed edits are read again.
+const PROMPT_EDITS_POLL: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -51,6 +67,7 @@ pub enum Tab {
   Repository,
   Application,
   Account,
+  Machines,
   Integrations,
   Skills,
   Preview,
@@ -62,9 +79,10 @@ impl Tab {
       Tab::Repository => "Repository",
       Tab::Application => "Application",
       Tab::Account => "Account",
+      Tab::Machines => "Machines",
       Tab::Integrations => "Integrations",
       Tab::Skills => "Skills",
-      Tab::Preview => "Feature Preview",
+      Tab::Preview => "Feature preview",
     }
   }
 
@@ -73,6 +91,7 @@ impl Tab {
       Tab::Repository => theme::ICON_FOLDER_GIT,
       Tab::Application => theme::ICON_SETTINGS,
       Tab::Account => theme::ICON_USER,
+      Tab::Machines => theme::ICON_SERVER,
       Tab::Integrations => theme::ICON_PLUG,
       Tab::Skills => theme::ICON_BOOK_OPEN,
       Tab::Preview => theme::ICON_FLASK,
@@ -84,6 +103,7 @@ impl Tab {
       Tab::Repository => "repository",
       Tab::Application => "application",
       Tab::Account => "account",
+      Tab::Machines => "machines",
       Tab::Integrations => "integrations",
       Tab::Skills => "skills",
       Tab::Preview => "preview",
@@ -99,6 +119,9 @@ pub struct Route {
   pub repo_path: Option<String>,
   /// The home repository's branch, as the workspace header shows it.
   pub current_branch: Option<String>,
+  /// The catalog skill a `treq://skill/install` link asked to install.
+  #[serde(default)]
+  pub install_request: Option<String>,
 }
 
 /// What the screen draws.
@@ -106,12 +129,12 @@ pub struct Route {
 pub struct Settings {
   pub tab: Tab,
   pub tabs: Vec<Tab>,
-  pub save: Option<SaveButton>,
   pub application: Option<Application>,
   pub repository: Option<Repository>,
   pub preview: Option<Preview>,
   pub skills: Option<SkillsTab>,
   pub account: Option<AccountTab>,
+  pub machines: Option<MachinesTab>,
   pub integrations: Option<IntegrationsTab>,
 }
 
@@ -121,11 +144,73 @@ pub struct SkillsTab {
   pub loading: bool,
   pub error: Option<String>,
   pub query: String,
-  pub scope: String,
-  pub scope_options: Vec<SelectOption>,
+  /// The status filter chips.
+  pub filters: Vec<SkillFilter>,
+  /// Every skill the search and the filter leave, labelled by status:
+  /// installed or customized ones first, then the rest of the registry.
   pub rows: Vec<SkillRow>,
   /// The skill whose install dialog is open, by name.
   pub dialog: Option<SkillDialog>,
+  /// The confirmation for a `treq://skill/install` link.
+  pub confirm: Option<SkillConfirm>,
+}
+
+/// What the user checks before a link's skill installs for all agents.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SkillConfirm {
+  pub title: String,
+  pub description: Option<String>,
+  /// Catalog metadata, as label and value.
+  pub details: Vec<(String, String)>,
+  pub checksum: Option<String>,
+  pub registry_url: String,
+  /// Why the skill cannot install, or that the registry is loading.
+  pub notice: Option<String>,
+  pub can_install: bool,
+  pub busy: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SkillFilter {
+  pub id: &'static str,
+  pub label: &'static str,
+  pub selected: bool,
+}
+
+pub const LABEL_APP_WIDE: &str = "App-wide";
+pub const LABEL_REPOSITORY: &str = "Repository";
+pub const LABEL_CUSTOM_REPO: &str = "Custom · Repo";
+pub const LABEL_CUSTOM_GLOBAL: &str = "Custom · Global";
+pub const LABEL_UNCATALOGED: &str = "Not in registry";
+
+/// The filter chips, in order: id and label.
+const SKILL_FILTERS: [(&str, &str); 5] = [
+  ("installed", "Installed"),
+  ("app-wide", LABEL_APP_WIDE),
+  ("repository", LABEL_REPOSITORY),
+  ("custom", "Custom"),
+  ("not-installed", "Not installed"),
+];
+
+/// A hand-written skill's row id: its level and name.
+fn custom_row_id(skill: &CustomSkill) -> String {
+  let level = match skill.level {
+    CustomSkillLevel::Repo => "repo",
+    CustomSkillLevel::Global => "global",
+  };
+  format!("custom-{level}/{}", skill.name)
+}
+
+fn skill_filter_matches(filter: &str, row: &SkillRow) -> bool {
+  let has = |label: &str| row.labels.iter().any(|l| l == label);
+  match filter {
+    "installed" => !row.labels.is_empty(),
+    "app-wide" => has(LABEL_APP_WIDE),
+    "repository" => has(LABEL_REPOSITORY),
+    "custom" => has(LABEL_CUSTOM_REPO) || has(LABEL_CUSTOM_GLOBAL),
+    "not-installed" => row.labels.is_empty(),
+    _ => true,
+  }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -138,6 +223,14 @@ pub struct SkillRow {
   pub proprietary: bool,
   /// The install level, when installed.
   pub installed: Option<String>,
+  /// The repository holds a user-owned copy that catalog updates never touch.
+  pub customized: bool,
+  /// Installed but no longer listed in the registry.
+  pub uncataloged: bool,
+  /// A user-owned skill with no registry entry: hand-written.
+  pub custom: bool,
+  /// Its install status: level, custom copies, registry state.
+  pub labels: Vec<String>,
   pub busy: bool,
 }
 
@@ -145,12 +238,6 @@ pub struct SkillRow {
 pub struct SkillDialog {
   pub name: String,
   pub busy: bool,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct SaveButton {
-  pub label: String,
-  pub disabled: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -172,6 +259,7 @@ pub struct Application {
   pub notify_agent_finished: bool,
   pub checklist: checklist::Checklist,
   pub setup_script: SetupScript,
+  pub agent_instructions: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -186,6 +274,9 @@ pub struct SetupScript {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Repository {
+  /// The repository's folder name, the page's title; its full path under it.
+  pub name: String,
+  pub path: String,
   pub yaml_card: Option<YamlCard>,
   pub current_branch: Option<String>,
   pub loading: bool,
@@ -214,6 +305,7 @@ pub struct RepositoryFields {
   pub review_prompt: String,
   pub review_agent: String,
   pub auto_review_trigger: String,
+  pub agent_instructions: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -248,6 +340,8 @@ fn agent_options(default: &str) -> Vec<SelectOption> {
     ("codex", "Codex"),
     ("cursor", "Cursor"),
     ("copilot", "Copilot"),
+    ("devin", "Devin"),
+    ("gemini", "Gemini"),
   ])
 }
 
@@ -301,7 +395,7 @@ impl Setup {
       .is_some_and(|s| !s.running && !self.starting && !unsaved && !s.script.trim().is_empty());
     let (status, status_error) = match (&self.error, &self.status) {
       (Some(error), _) => (format!("Could not load the setup script: {error}"), true),
-      (None, _) if unsaved => ("Save settings to run the edited script.".into(), false),
+      (None, _) if unsaved => ("Saving the edited script…".into(), false),
       (None, Some(status)) => (data::setup_status_text(status), false),
       (None, None) => (String::new(), false),
     };
@@ -328,6 +422,10 @@ struct Repo {
   config_loading: bool,
   saving: bool,
   save_error: Option<String>,
+  /// The tuning agent's proposed review prompt edits, still open.
+  edits: Vec<AgentReviewComment>,
+  /// Edits an Apply or Dismiss runs for.
+  edits_busy: HashSet<String>,
 }
 
 impl Repo {
@@ -340,6 +438,8 @@ impl Repo {
       config_loading: true,
       saving: false,
       save_error: None,
+      edits: Vec::new(),
+      edits_busy: HashSet::new(),
     }
   }
 
@@ -357,10 +457,12 @@ impl Repo {
 struct Skills {
   /// `None` while the registry loads.
   catalog: Option<Result<Vec<SkillCatalogSkillView>, String>>,
-  installed: usize,
+  installed: Vec<InstalledSkill>,
+  /// User-owned skills in the repository and the home folder.
+  custom: Vec<CustomSkill>,
   query: String,
-  /// The install-level filter: `all`, `application` or `repository`.
-  scope: String,
+  /// The selected status filter chip's id; empty shows every skill.
+  filter: String,
   /// The skill an action runs for.
   pending: Option<String>,
   /// The skill whose install dialog is open.
@@ -388,6 +490,30 @@ pub struct SettingsView {
   skills: Option<Skills>,
   account: account::State,
   tips: Tooltips,
+  /// Auto-save: each field's "Saved" tick or save error.
+  marks: std::collections::HashMap<String, FieldMark>,
+  /// Typed fields waiting for a pause, with the edit generation that started
+  /// each wait: a newer edit restarts it.
+  pending: std::collections::HashMap<String, u64>,
+  edits: u64,
+  /// Held by the page itself so Escape, with no field or dialog focused,
+  /// goes back.
+  focus: gpui::FocusHandle,
+  focused_once: bool,
+  /// An Application save is running; `app_again` holds fields edited
+  /// meanwhile, which save once it finishes.
+  app_saving: bool,
+  app_again: Vec<String>,
+  /// Fields edited while a Repository save ran.
+  repo_again: Vec<String>,
+}
+
+/// What a field shows next to its label after auto-saving.
+#[derive(Debug, Clone, PartialEq)]
+enum FieldMark {
+  /// Saved at this time; the tick shows for [`data::SAVED_TICK`].
+  Saved(std::time::Instant),
+  Error(String),
 }
 
 impl HasTooltips for SettingsView {
@@ -411,7 +537,9 @@ impl SettingsView {
     let sink: ActionSink = Rc::new(move |action, cx| {
       let view = view.clone();
       cx.defer(move |cx| {
-        let _ = view.update(cx, |view, cx| view.handle(action, cx));
+        view
+          .update(cx, |view, cx| view.handle(action, cx))
+          .ignore_closed();
       });
     });
     let mut this = Self {
@@ -430,6 +558,14 @@ impl SettingsView {
       skills: None,
       account: account::State::default(),
       tips: Tooltips::new(popups, dark),
+      marks: Default::default(),
+      pending: Default::default(),
+      edits: 0,
+      focus: cx.focus_handle(),
+      focused_once: false,
+      app_saving: false,
+      app_again: Vec::new(),
+      repo_again: Vec::new(),
     };
     this.load_app(cx);
     this.load_setup(cx);
@@ -440,6 +576,19 @@ impl SettingsView {
       this.load_linear(cx);
     }
     this.sync_account(cx);
+    // The tuning agent records its proposed edits while Settings is open.
+    cx.spawn(async move |this, cx| loop {
+      cx.background_executor().timer(PROMPT_EDITS_POLL).await;
+      let polled = this.update(cx, |view, cx| {
+        if view.route.tab == Tab::Repository {
+          view.load_prompt_edits(cx);
+        }
+      });
+      if polled.is_err() {
+        return;
+      }
+    })
+    .detach();
     cx.observe_global::<super::account_data::Account>(|view, cx| {
       view.sync_account(cx);
       cx.notify();
@@ -452,6 +601,10 @@ impl SettingsView {
     if self.route != route || self.dark != dark {
       let repo_moved = self.route.repo_path != route.repo_path;
       let tab_moved = self.route.tab != route.tab;
+      // Leaving a tab or repository saves what is still waiting to.
+      if repo_moved || tab_moved {
+        self.flush_pending(cx);
+      }
       if repo_moved {
         self.set_repo(route.repo_path.clone(), cx);
         self.skills = None;
@@ -478,10 +631,12 @@ impl SettingsView {
     let host = self.host.clone();
     cx.spawn(async move |this, cx| {
       let result = cx.background_spawn(async move { work(&*host) }).await;
-      let _ = this.update(cx, |view, cx| {
-        done(view, result, cx);
-        cx.notify();
-      });
+      this
+        .update(cx, |view, cx| {
+          done(view, result, cx);
+          cx.notify();
+        })
+        .ignore_closed();
     })
     .detach();
   }
@@ -603,6 +758,113 @@ impl SettingsView {
         repo.loaded = Some(fields);
       },
     );
+    self.load_prompt_edits(cx);
+  }
+
+  fn load_prompt_edits(&mut self, cx: &mut Context<Self>) {
+    let Some(path) = self.repo.as_ref().map(|repo| repo.path.clone()) else {
+      return;
+    };
+    self.spawn(
+      cx,
+      {
+        let path = path.clone();
+        move |host| host.prompt_edits(&path)
+      },
+      move |view, edits, _| {
+        let Some(repo) = view.repo.as_mut().filter(|repo| repo.path == path) else {
+          return;
+        };
+        match edits {
+          Ok(edits) => repo.edits = edits,
+          Err(err) => log::warn!("Failed to read review prompt edits: {err}"),
+        }
+      },
+    );
+  }
+
+  /// Dismiss all: removes every proposed edit without applying any.
+  fn dismiss_all_prompt_edits(&mut self, cx: &mut Context<Self>) {
+    let Some(repo) = self.repo.as_mut().filter(|repo| repo.edits_busy.is_empty()) else {
+      return;
+    };
+    let ids: Vec<String> = repo.edits.iter().map(|edit| edit.id.clone()).collect();
+    repo.edits_busy.extend(ids.iter().cloned());
+    let path = repo.path.clone();
+    self.spawn(
+      cx,
+      move |host| {
+        ids
+          .iter()
+          .try_for_each(|id| host.delete_prompt_edit(&path, id))
+      },
+      |view, result, cx| {
+        if let Some(repo) = view.repo.as_mut() {
+          repo.edits_busy.clear();
+          if result.is_ok() {
+            repo.edits.clear();
+          }
+        }
+        if let Err(err) = result {
+          view.host.notify(NativeEvent::from(
+            Toast::error("Review prompt").description(err),
+          ));
+        }
+        view.load_prompt_edits(cx);
+      },
+    );
+  }
+
+  /// Apply or Dismiss on a proposed review prompt edit. Apply
+  /// writes into the prompt as edited here and saves it.
+  fn prompt_edit_action(&mut self, action: CardAction, id: String, cx: &mut Context<Self>) {
+    let Some(repo) = self
+      .repo
+      .as_mut()
+      .filter(|repo| !repo.edits_busy.contains(&id))
+    else {
+      return;
+    };
+    repo.edits_busy.insert(id.clone());
+    let (path, custom) = (repo.path.clone(), repo.fields().review_prompt);
+    let work = {
+      let id = id.clone();
+      move |host: &dyn SettingsHost| match action {
+        CardAction::Apply => host.apply_prompt_edit(&path, &id, &custom).map(Some),
+        CardAction::Resolve | CardAction::Dismiss => {
+          host.delete_prompt_edit(&path, &id).map(|()| None)
+        }
+      }
+    };
+    self.spawn(cx, work, move |view, result, cx| {
+      let Some(repo) = view.repo.as_mut() else {
+        return;
+      };
+      repo.edits_busy.remove(&id);
+      match result {
+        Ok(prompt) => {
+          repo.edits.retain(|edit| edit.id != id);
+          if let Some(prompt) = prompt {
+            for fields in [
+              repo.draft.as_mut(),
+              repo.loaded.as_mut().and_then(|l| l.as_mut().ok()),
+            ]
+            .into_iter()
+            .flatten()
+            {
+              fields.review_prompt = prompt.clone();
+            }
+            view.host.notify(NativeEvent::from(
+              Toast::success("Review prompt updated").description(String::new()),
+            ));
+          }
+        }
+        Err(err) => view.host.notify(NativeEvent::from(
+          Toast::error("Review prompt").description(err),
+        )),
+      }
+      view.load_prompt_edits(cx);
+    });
   }
 
   /// Writes app settings now, as the theme, zoom and preview switches do.
@@ -610,7 +872,6 @@ impl SettingsView {
   fn show_skills(&mut self, cx: &mut Context<Self>) {
     if self.route.tab == Tab::Skills && self.skills.is_none() {
       self.skills = Some(Skills {
-        scope: "all".into(),
         ..Skills::default()
       });
       self.load_skills(cx);
@@ -619,16 +880,36 @@ impl SettingsView {
 
   fn load_skills(&mut self, cx: &mut Context<Self>) {
     let repo = self.route.repo_path.clone();
+    // The registry as last read shows at once; the read below replaces it.
+    if self.skills.as_ref().is_some_and(|s| s.catalog.is_none()) {
+      let cached_repo = repo.clone();
+      self.spawn(
+        cx,
+        move |host| host.skill_catalog_cached(cached_repo.as_deref()),
+        |view, cached, _| {
+          if let Some((skills, cached)) = view.skills.as_mut().zip(cached) {
+            if skills.catalog.is_none() {
+              skills.catalog = Some(Ok(cached));
+            }
+          }
+        },
+      );
+    }
     self.spawn(
       cx,
       move |host| {
         let repo = repo.as_deref();
-        (host.skill_catalog(repo), host.installed_skills(repo))
+        (
+          host.skill_catalog(repo),
+          host.installed_skills(repo),
+          host.custom_skills(repo),
+        )
       },
-      |view, (catalog, installed), _| {
+      |view, (catalog, installed, custom), _| {
         if let Some(skills) = &mut view.skills {
           skills.catalog = Some(catalog);
-          skills.installed = installed.map_or(0, |list| list.len());
+          skills.installed = installed.unwrap_or_default();
+          skills.custom = custom;
         }
       },
     );
@@ -638,6 +919,17 @@ impl SettingsView {
   fn skill_action(
     &mut self,
     skill_id: String,
+    cx: &mut Context<Self>,
+    work: impl FnOnce(&dyn SettingsHost, Option<&str>) -> Result<(), String> + Send + 'static,
+  ) {
+    self.skill_action_then(skill_id, None, cx, work);
+  }
+
+  /// `skill_action`, toasting `success` when the work succeeds.
+  fn skill_action_then(
+    &mut self,
+    skill_id: String,
+    success: Option<(&'static str, String)>,
     cx: &mut Context<Self>,
     work: impl FnOnce(&dyn SettingsHost, Option<&str>) -> Result<(), String> + Send + 'static,
   ) {
@@ -653,10 +945,14 @@ impl SettingsView {
       cx,
       move |host| work(host, repo.as_deref()),
       |view, result, cx| {
-        if let Err(err) = result {
-          view
+        match (result, success) {
+          (Err(err), _) => view.host.notify(NativeEvent::from(
+            Toast::error("Skill library").description(err),
+          )),
+          (Ok(()), Some((title, body))) => view
             .host
-            .notify(toast(ToastTone::Error, "Skill library", err));
+            .notify(NativeEvent::from(Toast::success(title).description(body))),
+          (Ok(()), None) => {}
         }
         if let Some(skills) = &mut view.skills {
           skills.pending = None;
@@ -687,6 +983,17 @@ impl SettingsView {
       "skills.uninstall" => self.skill_action(id.clone(), cx, move |host, repo| {
         host.uninstall_skill(&id, repo)
       }),
+      "skills.customize" => self.customize_skill(id, cx),
+      // Clicking the selected chip clears the filter.
+      "skills.filter" => {
+        if let Some(skills) = &mut self.skills {
+          skills.filter = if skills.filter == id {
+            String::new()
+          } else {
+            id
+          };
+        }
+      }
       "skills.source" => {
         let url = self
           .skills
@@ -700,6 +1007,184 @@ impl SettingsView {
       }
       _ => {}
     }
+  }
+
+  fn catalog_skill(&self, id: &str) -> Option<&SkillCatalogSkillView> {
+    self
+      .skills
+      .as_ref()?
+      .catalog
+      .as_ref()?
+      .as_ref()
+      .ok()?
+      .iter()
+      .find(|v| v.skill.id == id)
+  }
+
+  /// The confirmation a `treq://skill/install` link shows, from the catalog.
+  fn skill_confirm(&self) -> Option<SkillConfirm> {
+    let id = self.route.install_request.as_ref()?;
+    let skills = self.skills.as_ref()?;
+    let mut confirm = SkillConfirm {
+      title: format!("Install {id} for all agents?"),
+      description: None,
+      details: Vec::new(),
+      checksum: None,
+      registry_url: data::skill_registry_url(None),
+      notice: None,
+      can_install: false,
+      busy: skills.pending.as_deref() == Some(id.as_str()),
+    };
+    let view = match &skills.catalog {
+      None => {
+        confirm.notice = Some("Loading skill registry…".into());
+        return Some(confirm);
+      }
+      Some(Err(err)) => {
+        confirm.notice = Some(err.clone());
+        return Some(confirm);
+      }
+      Some(Ok(list)) => list.iter().find(|v| &v.skill.id == id),
+    };
+    let Some(view) = view else {
+      confirm.notice = Some(format!(
+        "{id} is not in the Treq skill catalog, so it cannot be installed."
+      ));
+      return Some(confirm);
+    };
+    let skill = &view.skill;
+    confirm.title = format!("Install {} for all agents?", skill.name);
+    confirm.description = skill.description.clone().filter(|d| !d.is_empty());
+    confirm.details = data::skill_details(skill);
+    confirm.checksum = skill.checksum.clone().filter(|c| !c.trim().is_empty());
+    confirm.registry_url = data::skill_registry_url(skill.route.as_deref());
+    confirm.notice = if skill.proprietary {
+      Some("Proprietary skills cannot be installed from the registry.".into())
+    } else {
+      view.installed.as_ref().map(|installed| {
+        format!(
+          "{} is already installed at the {} level.",
+          skill.name,
+          data::scope_value(installed.scope)
+        )
+      })
+    };
+    confirm.can_install = confirm.notice.is_none();
+    Some(confirm)
+  }
+
+  /// Customize: writes a user-owned copy of an installed skill into the
+  /// repository (once), then asks the window for an agent to edit it.
+  fn customize_skill(&mut self, id: String, cx: &mut Context<Self>) {
+    let custom = self.skills.as_ref().and_then(|skills| {
+      skills
+        .custom
+        .iter()
+        .find(|skill| custom_row_id(skill) == id)
+        .cloned()
+    });
+    // A repository copy is already the user's: edit it in place.
+    if let Some(skill) = custom
+      .as_ref()
+      .filter(|s| s.level == CustomSkillLevel::Repo)
+    {
+      let prompt = skills::edit_custom_skill_prompt(&skill.name, &skill.paths);
+      self.start_skill_agent(prompt, cx);
+      return;
+    }
+    let installed = self.catalog_skill(&id).and_then(|v| v.installed.clone());
+    if custom.is_none() {
+      let Some(view) = self.catalog_skill(&id) else {
+        return;
+      };
+      if view.customized {
+        let name = installed.map_or_else(|| view.skill.name.clone(), |i| i.name);
+        let prompt = skills::customize_skill_prompt(
+          &name,
+          &format!(".agents/skills/{name}"),
+          &format!(".claude/skills/{name}"),
+        );
+        self.start_skill_agent(prompt, cx);
+        return;
+      }
+    }
+    let Some(repo) = self.route.repo_path.clone() else {
+      return;
+    };
+    let Some(skills) = &mut self.skills else {
+      return;
+    };
+    if skills.pending.is_some() {
+      return;
+    }
+    skills.pending = Some(id.clone());
+    // Agents edit inside the repository, so every customisation starts from
+    // a repository copy: of a global skill, the installed pack, or the
+    // registry's files for a skill not installed yet.
+    let work = move |host: &dyn SettingsHost| match (&custom, &installed) {
+      (Some(skill), _) => {
+        let source = skill.paths.first().cloned().unwrap_or_default();
+        host.customize_global_skill(&skill.name, &source, &repo)
+      }
+      (None, Some(_)) => host.customize_skill(&id, &repo),
+      (None, None) => host.customize_registry_skill(&id, &repo),
+    };
+    self.spawn(cx, work, |view, result, cx| {
+      if let Some(skills) = &mut view.skills {
+        skills.pending = None;
+      }
+      match result {
+        Ok(copy) => {
+          let prompt = skills::customize_skill_prompt(
+            &copy.name,
+            &copy.agents_skill_path,
+            &copy.claude_skill_path,
+          );
+          view.start_skill_agent(prompt, cx);
+        }
+        Err(err) => view.host.notify(NativeEvent::from(
+          Toast::error("Skill library").description(err),
+        )),
+      }
+      view.load_skills(cx);
+    });
+  }
+
+  fn start_skill_agent(&self, prompt: String, cx: &mut Context<Self>) {
+    (self.react)(
+      ScreenAction::Field {
+        field: "skills.startAgent".into(),
+        value: serde_json::json!({ "prompt": prompt }),
+      },
+      cx,
+    );
+  }
+
+  /// Answers a `treq://skill/install` link's confirmation; `install` installs
+  /// the catalog skill for all agents (application level).
+  fn answer_skill_link(&mut self, install: bool, cx: &mut Context<Self>) {
+    let Some(id) = self.route.install_request.clone() else {
+      return;
+    };
+    (self.react)(
+      ScreenAction::Press {
+        id: "skills.installRequest.close".into(),
+      },
+      cx,
+    );
+    if !install {
+      return;
+    }
+    let name = self
+      .catalog_skill(&id)
+      .map_or_else(|| id.clone(), |v| v.skill.name.clone());
+    let success = (
+      "Skill installed",
+      format!("{name} is installed for all agents. New workspaces get it automatically."),
+    );
+    self.skill_action_then(id.clone(), Some(success), cx, move |host, repo| {
+      host.install_skill(&id, SkillInstallScope::Application, repo)
+    });
   }
 
   fn write_settings(&self, values: Vec<(String, String)>, cx: &mut Context<Self>) {
@@ -720,10 +1205,17 @@ impl SettingsView {
     );
   }
 
-  fn save_application(&mut self, cx: &mut Context<Self>) {
+  /// Saves the Application tab for the edited `fields`, which get the
+  /// "Saved" tick or the error.
+  fn save_application(&mut self, fields: Vec<String>, cx: &mut Context<Self>) {
     let Some(app) = self.app.clone() else {
       return;
     };
+    if self.app_saving {
+      self.app_again.extend(fields);
+      return;
+    }
+    self.app_saving = true;
     // Unedited, the script may be the "" of an unloaded status.
     let script = (self.setup.script.is_some() || self.setup.always_run.is_some())
       .then(|| (self.setup.script(), self.setup.always_run()));
@@ -736,23 +1228,196 @@ impl SettingsView {
             Some((script, always_run)) => host.save_setup_script(script, *always_run),
             None => Ok(()),
           });
-        match &result {
-          Ok(()) => {
-            host.notify(NativeEvent::SettingsChanged);
-            host.notify(toast(ToastTone::Success, "Settings saved", ""));
-          }
-          Err(err) => host.notify(toast(ToastTone::Error, "Error", err)),
+        if result.is_ok() {
+          host.notify(NativeEvent::SettingsChanged);
         }
         (result, host.setup_script())
       },
-      |view, (_, status), cx| view.set_setup_status(status, cx),
+      move |view, (result, status), cx| {
+        view.app_saving = false;
+        view.set_setup_status(status, cx);
+        view.mark(fields, result, cx);
+        let again = std::mem::take(&mut view.app_again);
+        if !again.is_empty() {
+          view.save_application(again, cx);
+        }
+      },
     );
   }
 
-  fn save_repository(&mut self, cx: &mut Context<Self>) {
-    let Some(repo) = self.repo.as_mut().filter(|repo| !repo.saving) else {
+  /// Shows the "Saved" tick, or the error, next to each of `fields`, and
+  /// hides the tick again after [`data::SAVED_TICK`].
+  fn mark(&mut self, fields: Vec<String>, result: Result<(), String>, cx: &mut Context<Self>) {
+    let now = cx.background_executor().now();
+    for field in fields {
+      let mark = match &result {
+        Ok(()) => FieldMark::Saved(now),
+        Err(err) => FieldMark::Error(format!("Couldn't save: {err}")),
+      };
+      self.marks.insert(field, mark);
+    }
+    if result.is_ok() {
+      cx.spawn(async move |this, cx| {
+        cx.background_executor().timer(data::SAVED_TICK).await;
+        this
+          .update(cx, |view, cx| {
+            let now = cx.background_executor().now();
+            view.marks.retain(|_, mark| match mark {
+              FieldMark::Saved(at) => now.duration_since(*at) < data::SAVED_TICK,
+              FieldMark::Error(_) => true,
+            });
+            cx.notify();
+          })
+          .ignore_closed();
+      })
+      .detach();
+    }
+  }
+
+  /// A field was edited: save it now, or once typing pauses.
+  fn schedule_save(&mut self, field: &str, cx: &mut Context<Self>) {
+    let Some(timing) = data::save_timing(field) else {
       return;
     };
+    match timing {
+      data::SaveTiming::Now => self.save_fields(vec![field.to_string()], cx),
+      data::SaveTiming::Debounced => {
+        self.edits += 1;
+        let edit = self.edits;
+        self.pending.insert(field.to_string(), edit);
+        let field = field.to_string();
+        cx.spawn(async move |this, cx| {
+          cx.background_executor().timer(data::SAVE_DEBOUNCE).await;
+          this
+            .update(cx, |view, cx| {
+              // A newer edit restarted the wait, or a flush saved it already.
+              if view.pending.get(&field) == Some(&edit) {
+                view.pending.remove(&field);
+                view.save_fields(vec![field], cx);
+              }
+            })
+            .ignore_closed();
+        })
+        .detach();
+      }
+    }
+  }
+
+  /// Saves the typed fields still waiting for a pause, as leaving does.
+  fn flush_pending(&mut self, cx: &mut Context<Self>) {
+    let fields: Vec<String> = self.pending.drain().map(|(field, _)| field).collect();
+    if !fields.is_empty() {
+      self.save_fields(fields, cx);
+    }
+  }
+
+  /// Saves `fields`, split by the tab that owns them.
+  fn save_fields(&mut self, fields: Vec<String>, cx: &mut Context<Self>) {
+    let (repo, app): (Vec<String>, Vec<String>) =
+      fields.into_iter().partition(|f| f.starts_with("repo."));
+    if !repo.is_empty() {
+      self.save_repository(repo, cx);
+    }
+    if !app.is_empty() {
+      self.save_application(app, cx);
+    }
+  }
+
+  /// Tune with agent: exports the review history, then asks the window for
+  /// an agent that proposes a revised review prompt from it.
+  fn tune_review_prompt(&mut self, cx: &mut Context<Self>) {
+    let Some(repo) = self.repo.as_ref() else {
+      return;
+    };
+    let (path, current) = (repo.path.clone(), repo.fields().review_prompt);
+    self.spawn(
+      cx,
+      move |host| host.snapshot_review_prompt(&path, &current),
+      move |view, result, cx| match result {
+        Ok(dir) => {
+          let prompt = crate::core::review_prompt::tune_prompt(&dir);
+          (view.react)(
+            ScreenAction::Field {
+              field: "reviewPrompt.tune".into(),
+              value: serde_json::json!({ "prompt": prompt }),
+            },
+            cx,
+          );
+        }
+        Err(err) => view.host.notify(NativeEvent::from(
+          Toast::error("Review prompt").description(err),
+        )),
+      },
+    );
+  }
+
+  /// The tuning agent's proposed edits, each on the review card.
+  fn prompt_edits(
+    &self,
+    edits: &[AgentReviewComment],
+    busy: &HashSet<String>,
+    p: &Palette,
+  ) -> impl IntoElement {
+    div()
+      .debug_selector(|| "settings-prompt-edits".into())
+      .flex()
+      .flex_col()
+      .gap_3()
+      .child(
+        div()
+          .debug_selector(|| "prompt-edits-header".into())
+          .flex()
+          .items_center()
+          .justify_between()
+          .gap_2()
+          .child(
+            ui::text(div(), TextSize::Sm)
+              .font_weight(FontWeight::MEDIUM)
+              .child(format!("Proposed edits ({})", edits.len())),
+          )
+          .child(
+            Button::new("prompt-edits-dismiss-all", p)
+              .variant(Variant::Ghost)
+              .size(Size::Xs)
+              .gap_1()
+              .disabled(!busy.is_empty())
+              .icon(theme::ICON_X, 12.)
+              .label("Dismiss all")
+              .on_click(self.press("repo.promptEdits.dismissAll")),
+          ),
+      )
+      .children(edits.iter().map(|edit| {
+        let location = if edit.end_line == edit.start_line {
+          format!("Line {}", edit.start_line)
+        } else {
+          format!("Lines {}-{}", edit.start_line, edit.end_line)
+        };
+        let spec = agent_card::CardSpec {
+          id_prefix: "prompt-edit",
+          location,
+          resolvable: false,
+          busy: busy.contains(&edit.id),
+        };
+        agent_card::agent_comment_card(edit, spec, p, |action| {
+          let name = match action {
+            CardAction::Apply => "apply",
+            CardAction::Resolve | CardAction::Dismiss => "dismiss",
+          };
+          Box::new(self.press(&format!("repo.promptEdit.{name}:{}", edit.id)))
+        })
+      }))
+  }
+
+  /// Saves the Repository tab for the edited `fields`, which get the
+  /// "Saved" tick or the error.
+  fn save_repository(&mut self, fields: Vec<String>, cx: &mut Context<Self>) {
+    let Some(repo) = self.repo.as_mut() else {
+      return;
+    };
+    if repo.saving {
+      self.repo_again.extend(fields);
+      return;
+    }
     repo.saving = true;
     let (path, values) = (repo.path.clone(), repo.fields().to_values());
     self.spawn(
@@ -761,29 +1426,22 @@ impl SettingsView {
         let path = path.clone();
         move |host| {
           let result = host.set_repo_settings(&path, &values);
-          match &result {
-            Ok(()) => {
-              host.notify(NativeEvent::RepoSettingsChanged {
-                repo_path: path.clone(),
-              });
-              host.notify(toast(ToastTone::Success, "Settings saved", ""));
-            }
-            Err(err) => host.notify(toast(
-              ToastTone::Error,
-              "Error",
-              format!("Failed to save settings: {err}"),
-            )),
+          if result.is_ok() {
+            host.notify(NativeEvent::RepoSettingsChanged { repo_path: path });
           }
           result
         }
       },
-      move |view, result, _| {
+      move |view, result, cx| {
         let Some(repo) = view.repo.as_mut().filter(|repo| repo.path == path) else {
           return;
         };
         repo.saving = false;
-        if let Err(err) = result {
-          repo.save_error = Some(format!("Failed to save settings: {err}"));
+        repo.save_error = None;
+        view.mark(fields, result, cx);
+        let again = std::mem::take(&mut view.repo_again);
+        if !again.is_empty() {
+          view.save_repository(again, cx);
         }
       },
     );
@@ -811,6 +1469,13 @@ impl SettingsView {
     match action {
       ScreenAction::Press { id } if self.press_account(&id, cx) => {}
       ScreenAction::Press { id } => match id.split_once(':') {
+        Some((action, edit)) if action.starts_with("repo.promptEdit.") => {
+          let action = match action {
+            "repo.promptEdit.apply" => CardAction::Apply,
+            _ => CardAction::Dismiss,
+          };
+          self.prompt_edit_action(action, edit.to_string(), cx);
+        }
         Some((action, skill)) if action.starts_with("skills.") => {
           let skill = skill.to_string();
           self.press_skill(action, &skill, cx);
@@ -824,13 +1489,22 @@ impl SettingsView {
           }
         }
         _ => match id.as_str() {
-          "settings.save" => match self.route.tab {
-            Tab::Application => self.save_application(cx),
-            Tab::Repository => self.save_repository(cx),
-            _ => {}
-          },
+          "settings.close" => {
+            // Typed edits still waiting for a pause save on the way out.
+            self.flush_pending(cx);
+            (self.react)(ScreenAction::Press { id }, cx);
+          }
           "app.setupScript.run" => self.run_setup(cx),
+          "repo.reviewPrompt.tune" => self.tune_review_prompt(cx),
+          "repo.promptEdits.dismissAll" => self.dismiss_all_prompt_edits(cx),
           "repo.yaml.reload" => self.load_repo(cx),
+          "skills.confirm.install" => self.answer_skill_link(true, cx),
+          "skills.confirm.cancel" => self.answer_skill_link(false, cx),
+          "skills.confirm.registry" => {
+            if let Some(confirm) = self.skill_confirm() {
+              self.host.open_url(&confirm.registry_url);
+            }
+          }
           "skills.dialog.cancel" => {
             if let Some(skills) = &mut self.skills {
               skills.dialog = None;
@@ -867,6 +1541,8 @@ impl SettingsView {
         let mut fields = repo.fields();
         fields.set(name, &value);
         repo.draft = Some(fields);
+        self.marks.remove(&field);
+        self.schedule_save(&field, cx);
       }
       return;
     }
@@ -878,12 +1554,8 @@ impl SettingsView {
             host.set_skill_scope(&id, scope, repo)
           });
         }
-      } else if let Some(skills) = &mut self.skills {
-        match name {
-          "query" => skills.query = text,
-          "scope" => skills.scope = text,
-          _ => {}
-        }
+      } else if let (Some(skills), "query") = (&mut self.skills, name) {
+        skills.query = text;
       }
       return;
     }
@@ -899,7 +1571,10 @@ impl SettingsView {
     match field.as_str() {
       "app.setupScript" => self.setup.script = Some(text),
       "app.setupScriptAlwaysRun" => self.setup.always_run = value.as_bool(),
-      "settings.tab" => (self.react)(ScreenAction::Field { field, value }, cx),
+      "settings.tab" => {
+        (self.react)(ScreenAction::Field { field, value }, cx);
+        return;
+      }
       _ => {
         let Some(app) = &mut self.app else {
           return;
@@ -919,9 +1594,28 @@ impl SettingsView {
           "app.defaultAgent" => app.default_agent = text,
           "app.conflictMarkerStyle" => app.conflict_marker_style = text,
           "app.notifyAgentFinished" => app.notify_agent_finished = value.as_bool().unwrap_or(true),
+          "app.agentInstructions" => app.agent_instructions = text,
           _ => {}
         }
       }
+    }
+    if field.starts_with("app.") {
+      self.marks.remove(&field);
+      self.schedule_save(&field, cx);
+    }
+  }
+
+  /// The tick or error `key`'s field shows.
+  fn mark_of(&self, key: &str) -> Mark {
+    let (saved, error) = match self.marks.get(key) {
+      Some(FieldMark::Saved(_)) => (true, None),
+      Some(FieldMark::Error(err)) => (false, Some(err.clone())),
+      None => (false, None),
+    };
+    Mark {
+      key: key.to_string(),
+      saved,
+      error,
     }
   }
 
@@ -936,28 +1630,13 @@ impl SettingsView {
       Tab::Repository,
       Tab::Application,
       Tab::Account,
+      Tab::Machines,
       Tab::Integrations,
     ];
     if self.preview_on(PreviewFeature::SkillsInstallation) {
       tabs.push(Tab::Skills);
     }
     tabs.push(Tab::Preview);
-    let save = match tab {
-      Tab::Application => Some(SaveButton {
-        label: "Save Settings".into(),
-        disabled: false,
-      }),
-      Tab::Repository => self.repo.as_ref().map(|repo| SaveButton {
-        label: if repo.saving {
-          "Saving..."
-        } else {
-          "Save Settings"
-        }
-        .into(),
-        disabled: repo.saving,
-      }),
-      _ => None,
-    };
     let application = (tab == Tab::Application).then(|| {
       let app = self
         .app
@@ -989,6 +1668,7 @@ impl SettingsView {
           ("snapshot", "JJ Snapshot"),
         ]),
         notify_agent_finished: app.notify_agent_finished,
+        agent_instructions: app.agent_instructions,
         checklist: checklist::from_statuses(
           "Command-line tools",
           self.statuses.as_deref(),
@@ -1014,6 +1694,8 @@ impl SettingsView {
           .and_then(|l| l.as_ref().err())
           .map(|err| format!("Failed to load settings: {err}"));
         Repository {
+          name: data::repo_name(&repo.path),
+          path: repo.path.clone(),
           yaml_card: (config_error.is_some() || config.is_some_and(data::sets_any_value))
             .then_some(YamlCard {
               error: config_error,
@@ -1023,9 +1705,9 @@ impl SettingsView {
           loading: repo.loaded.is_none() || repo.config_loading,
           fields: repo.fields(),
           managed: config.map(data::managed_fields).unwrap_or_default(),
-          model_options: model_options("Use Application Default"),
-          agent_options: agent_options("Use Application Default"),
-          review_agent_options: agent_options("Use Default Agent"),
+          model_options: model_options("Use application default"),
+          agent_options: agent_options("Use application default"),
+          review_agent_options: agent_options("Use default agent"),
           trigger_options: options(&[
             ("off", "Off"),
             ("on-commit", "On commit"),
@@ -1055,9 +1737,44 @@ impl SettingsView {
           Some(Err(err)) => (false, Some(err.clone()), &[][..]),
           Some(Ok(list)) => (false, None, &list[..]),
         };
-        let rows = data::filter_skills(catalog, &skills.query, &skills.scope)
-          .into_iter()
-          .map(|view| SkillRow {
+        let query = skills.query.trim().to_lowercase();
+        let custom_named = |name: &str, level: CustomSkillLevel| {
+          skills
+            .custom
+            .iter()
+            .any(|c| c.level == level && c.name == name)
+        };
+        let level_label = |scope: SkillInstallScope| match scope {
+          SkillInstallScope::Application => LABEL_APP_WIDE,
+          SkillInstallScope::Repository => LABEL_REPOSITORY,
+        };
+        // Custom copies of installed registry skills join that skill's row.
+        let mut merged: Vec<(&str, CustomSkillLevel)> = Vec::new();
+        let (mut labelled, mut rest) = (Vec::new(), Vec::new());
+        for view in data::filter_skills(catalog, &skills.query) {
+          // The registry can't install proprietary skills, so only list
+          // ones already installed.
+          if view.skill.proprietary && view.installed.is_none() {
+            continue;
+          }
+          let mut labels = Vec::new();
+          let mut customized = view.customized;
+          if let Some(installed) = &view.installed {
+            labels.push(level_label(installed.scope).to_string());
+            for level in [CustomSkillLevel::Repo, CustomSkillLevel::Global] {
+              if custom_named(&installed.name, level) {
+                merged.push((installed.name.as_str(), level));
+                customized |= level == CustomSkillLevel::Repo;
+              }
+            }
+            if customized {
+              labels.push(LABEL_CUSTOM_REPO.into());
+            }
+            if custom_named(&installed.name, CustomSkillLevel::Global) {
+              labels.push(LABEL_CUSTOM_GLOBAL.into());
+            }
+          }
+          let row = SkillRow {
             id: view.skill.id.clone(),
             name: view.skill.name.clone(),
             source: view.skill.source.clone(),
@@ -1068,20 +1785,93 @@ impl SettingsView {
               .installed
               .as_ref()
               .map(|i| data::scope_value(i.scope).to_string()),
+            customized,
+            uncataloged: false,
+            custom: false,
+            labels,
             busy: pending == Some(view.skill.id.as_str()),
+          };
+          if row.labels.is_empty() {
+            rest.push(row);
+          } else {
+            labelled.push(row);
+          }
+        }
+        // Installed skills the registry dropped stay listed, to uninstall.
+        if matches!(skills.catalog, Some(Ok(_))) {
+          for installed in &skills.installed {
+            if catalog.iter().any(|v| v.skill.id == installed.id)
+              || !installed.name.to_lowercase().contains(&query)
+            {
+              continue;
+            }
+            labelled.push(SkillRow {
+              id: installed.id.clone(),
+              name: installed.name.clone(),
+              source: String::new(),
+              description: None,
+              has_url: false,
+              proprietary: false,
+              installed: Some(data::scope_value(installed.scope).to_string()),
+              customized: false,
+              uncataloged: true,
+              custom: false,
+              labels: vec![
+                level_label(installed.scope).to_string(),
+                LABEL_UNCATALOGED.into(),
+              ],
+              busy: pending == Some(installed.id.as_str()),
+            });
+          }
+        }
+        for custom in &skills.custom {
+          let haystack = format!(
+            "{} {}",
+            custom.name,
+            custom.description.as_deref().unwrap_or_default()
+          )
+          .to_lowercase();
+          if merged.contains(&(custom.name.as_str(), custom.level)) || !haystack.contains(&query) {
+            continue;
+          }
+          labelled.push(SkillRow {
+            id: custom_row_id(custom),
+            name: custom.name.clone(),
+            source: String::new(),
+            description: custom.description.clone(),
+            has_url: false,
+            proprietary: false,
+            installed: None,
+            customized: true,
+            uncataloged: false,
+            custom: true,
+            labels: vec![match custom.level {
+              CustomSkillLevel::Repo => LABEL_CUSTOM_REPO.into(),
+              CustomSkillLevel::Global => LABEL_CUSTOM_GLOBAL.into(),
+            }],
+            busy: false,
+          });
+        }
+        labelled.extend(rest);
+        let filter = skills.filter.as_str();
+        let filters = SKILL_FILTERS
+          .iter()
+          .map(|&(id, label)| SkillFilter {
+            id,
+            label,
+            selected: id == filter,
           })
           .collect();
+        let rows = labelled
+          .into_iter()
+          .filter(|row| skill_filter_matches(filter, row))
+          .collect();
         SkillsTab {
-          installed: skills.installed,
+          installed: skills.installed.len(),
           loading,
           error,
           query: skills.query.clone(),
-          scope: skills.scope.clone(),
-          scope_options: options(&[
-            ("all", "All"),
-            ("application", "Application"),
-            ("repository", "Repository"),
-          ]),
+          filters,
           rows,
           dialog: skills.dialog.as_ref().map(|id| SkillDialog {
             name: catalog
@@ -1090,17 +1880,18 @@ impl SettingsView {
               .map_or_else(|| id.clone(), |v| v.skill.name.clone()),
             busy: pending == Some(id.as_str()),
           }),
+          confirm: self.skill_confirm(),
         }
       });
     Settings {
       tab,
       tabs,
-      save,
       application,
       repository,
       preview,
       skills,
       account: (tab == Tab::Account).then(|| self.account_tab()),
+      machines: (tab == Tab::Machines).then(|| self.machines_tab()),
       integrations: (tab == Tab::Integrations).then(|| self.integrations_tab()),
     }
   }
@@ -1121,15 +1912,6 @@ impl SettingsView {
         cx,
       )
     }
-  }
-}
-
-fn toast(tone: ToastTone, title: &str, description: impl ToString) -> NativeEvent {
-  NativeEvent::Toast {
-    title: title.into(),
-    description: description.to_string(),
-    tone,
-    action: None,
   }
 }
 
@@ -1168,16 +1950,89 @@ fn field_block(
   help_text: Option<&str>,
   p: &Palette,
 ) -> gpui::Div {
+  saved_field_block(name, control, help_text, Mark::default(), p)
+}
+
+/// What an auto-saving field shows: the "Saved" tick by its label, or why
+/// it didn't save under it.
+#[derive(Debug, Clone, Default)]
+struct Mark {
+  key: String,
+  saved: bool,
+  error: Option<String>,
+}
+
+impl Mark {
+  /// "✓ Saved", muted, next to the label.
+  fn tick(&self, p: &Palette) -> Option<gpui::AnyElement> {
+    self.saved.then(|| {
+      let id = format!("settings-saved-{}", self.key);
+      ui::text(div(), TextSize::Sm)
+        .id(SharedString::from(id.clone()))
+        .debug_selector(move || id)
+        .role(gpui::Role::Status)
+        .aria_label("Saved")
+        .flex()
+        .items_center()
+        .gap_1()
+        .text_color(p.muted_foreground)
+        .child(ui::icon(theme::ICON_CHECK, 12., p.muted_foreground))
+        .child("Saved")
+        .test_support()
+        .into_any_element()
+    })
+  }
+
+  /// The save error, under the control.
+  fn error(&self, p: &Palette) -> Option<gpui::AnyElement> {
+    self.error.clone().map(|text| {
+      let id = format!("settings-error-{}", self.key);
+      ui::text(div().mt_1(), TextSize::Sm)
+        .id(SharedString::from(id.clone()))
+        .debug_selector(move || id)
+        .role(gpui::Role::Alert)
+        .aria_label(text.clone())
+        .text_color(ui::Tone::Danger.text(p))
+        .child(text)
+        .test_support()
+        .into_any_element()
+    })
+  }
+}
+
+/// A label (with its "Saved" tick) above a control, with a help line and
+/// any save error under it.
+fn saved_field_block(
+  name: &str,
+  control: impl IntoElement,
+  help_text: Option<&str>,
+  mark: Mark,
+  p: &Palette,
+) -> gpui::Div {
   div()
-    .child(label(name.to_string()))
+    .child(
+      div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .child(label(name.to_string()))
+        .children(mark.tick(p)),
+    )
     .child(div().mt_2().child(control))
+    .children(mark.error(p))
     .when_some(help_text, |this, text| {
       this.child(help(text.to_string(), p, 4.))
     })
 }
 
 /// A label and help text on the left, a switch on the right.
-fn switch_row(name: &str, help_text: &str, switch: impl IntoElement, p: &Palette) -> gpui::Div {
+fn switch_row(
+  name: &str,
+  help_text: &str,
+  switch: impl IntoElement,
+  mark: Mark,
+  p: &Palette,
+) -> gpui::Div {
   div()
     .flex()
     .items_center()
@@ -1185,8 +2040,16 @@ fn switch_row(name: &str, help_text: &str, switch: impl IntoElement, p: &Palette
     .gap_4()
     .child(
       div()
-        .child(label(name.to_string()))
-        .child(help(help_text.to_string(), p, 4.)),
+        .child(
+          div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(label(name.to_string()))
+            .children(mark.tick(p)),
+        )
+        .child(help(help_text.to_string(), p, 4.))
+        .children(mark.error(p)),
     )
     .child(switch)
 }
@@ -1197,40 +2060,24 @@ impl Render for SettingsView {
     let p = theme::palette(self.dark);
     let s = self.screen();
 
+    // Every field saves as it changes, so the header only needs a way back.
     let header = div()
       .flex()
       .items_center()
-      .justify_between()
+      .gap_2()
+      .min_h(zpx(48.))
       .border_b_1()
       .border_color(p.border)
       .px_6()
       .py_2()
       .child(
+        ui::IconButton::new("settings-back", theme::ICON_ARROW_LEFT, "Back", &p)
+          .on_click(self.press("settings.close")),
+      )
+      .child(
         ui::text(div(), TextSize::Lg)
           .font_weight(FontWeight::SEMIBOLD)
           .child("Settings"),
-      )
-      .child(
-        div()
-          .flex()
-          .items_center()
-          .gap_2()
-          .child(
-            Button::new("settings-close", &p)
-              .variant(Variant::Outline)
-              .size(Size::Sm)
-              .label("Close")
-              .on_click(self.press("settings.close")),
-          )
-          .when_some(s.save.clone(), |this, save| {
-            this.child(
-              Button::new("settings-save", &p)
-                .size(Size::Sm)
-                .disabled(save.disabled)
-                .label(save.label)
-                .on_click(self.press("settings.save")),
-            )
-          }),
       );
 
     let tabs = div()
@@ -1242,33 +2089,16 @@ impl Render for SettingsView {
       .children(s.tabs.iter().map(|&tab| {
         let active = tab == s.tab;
         let id = SharedString::from(format!("settings-tab-{}", tab.value()));
-        let selector = id.to_string();
         let sink = self.sink.clone();
-        ui::text(div(), TextSize::Sm)
-          .id(id)
-          .debug_selector(move || selector)
+        ui::Row::new(id, &p)
           .role(Role::Tab)
-          .aria_label(tab.label())
-          .aria_selected(active)
-          .test_support()
-          .flex()
-          .items_center()
-          .gap_2()
+          .label(tab.label())
+          .density(ui::RowDensity::Default)
+          .selected(active)
           .px_4()
-          .py_2()
           .rounded(radius::MD)
           .font_weight(FontWeight::MEDIUM)
-          .cursor_pointer()
-          .map(|this| {
-            if active {
-              this.bg(p.accent).text_color(p.foreground)
-            } else {
-              this
-                .text_color(p.muted_foreground)
-                .hover(|style| style.bg(p.accent.opacity(0.5)).text_color(p.foreground))
-            }
-          })
-          .child(ui::icon(
+          .leading(ui::icon(
             tab.icon(),
             16.,
             if active {
@@ -1315,6 +2145,10 @@ impl Render for SettingsView {
         Some(account) => self.account(account, &p, window, cx),
         None => div().into_any_element(),
       },
+      Tab::Machines => match &s.machines {
+        Some(machines) => self.machines(machines, &p, cx),
+        None => div().into_any_element(),
+      },
       Tab::Integrations => match &s.integrations {
         Some(integrations) => self
           .integrations(integrations, &p, window, cx)
@@ -1327,24 +2161,51 @@ impl Render for SettingsView {
       .as_ref()
       .and_then(|skills| skills.dialog.clone())
       .map(|dialog| self.skill_dialog(&dialog, &p));
-    let delete_dialog = match &s.account {
-      Some(AccountTab::SignedIn(signed_in))
-        if signed_in
-          .cloud
-          .as_ref()
-          .is_some_and(|c| c.confirming_delete) =>
-      {
+    let confirm = s
+      .skills
+      .as_ref()
+      .and_then(|skills| skills.confirm.clone())
+      .map(|confirm| self.skill_confirm_dialog(&confirm, &p));
+    let delete_dialog = match (&s.account, &s.machines) {
+      (_, Some(MachinesTab::SignedIn(card))) if card.confirming_delete => {
         Some(self.cloud_delete_dialog(&p).into_any_element())
+      }
+      (Some(AccountTab::SignedIn(signed_in)), _) => {
+        signed_in.delete_account.as_ref().map(|dialog| {
+          let email = signed_in.email.clone().unwrap_or_default();
+          self
+            .delete_account_dialog(dialog, &email, &p, window, cx)
+            .into_any_element()
+        })
       }
       _ => None,
     };
+    let delete_dialog = delete_dialog.or_else(|| self.team_confirm_dialog(&p));
 
+    if !std::mem::replace(&mut self.focused_once, true) {
+      window.focus(&self.focus, cx);
+    }
+    let open = dialog.is_some() || confirm.is_some() || delete_dialog.is_some();
     div()
       .relative()
       .size_full()
       .flex()
       .flex_col()
       .bg(p.background)
+      .track_focus(&self.focus)
+      .on_key_down(
+        cx.listener(move |view, e: &gpui::KeyDownEvent, window, cx| {
+          if ui::is_escape(&e.keystroke) && !open && view.focus.is_focused(window) {
+            (view.sink)(
+              ScreenAction::Press {
+                id: "settings.close".into(),
+              },
+              cx,
+            );
+            cx.stop_propagation();
+          }
+        }),
+      )
       .child(header)
       .child(
         div()
@@ -1355,7 +2216,7 @@ impl Render for SettingsView {
           .overflow_y_scroll()
           .child(
             div()
-              .max_w(zpx(896.))
+              .max_w(zpx(1088.))
               .mx_auto()
               .p_6()
               .flex()
@@ -1365,6 +2226,7 @@ impl Render for SettingsView {
           ),
       )
       .children(dialog)
+      .children(confirm)
       .children(delete_dialog)
   }
 }
@@ -1418,6 +2280,14 @@ impl SettingsView {
       window,
       cx,
     );
+    let instructions = self.controls.textarea(
+      "app.agentInstructions",
+      &app.agent_instructions,
+      "Added to every agent's system prompt",
+      4,
+      window,
+      cx,
+    );
     let script = self.controls.textarea(
       "app.setupScript",
       &app.setup_script.script,
@@ -1449,7 +2319,7 @@ impl SettingsView {
               .flex()
               .items_center()
               .justify_between()
-              .child(label("UI Zoom"))
+              .child(label("UI zoom"))
               .child(
                 ui::text(div(), TextSize::Sm)
                   .text_color(p.muted_foreground)
@@ -1469,11 +2339,18 @@ impl SettingsView {
       )
       .child(
         div()
-          .child(label("Font Size"))
+          .child(
+            div()
+              .flex()
+              .items_center()
+              .gap_2()
+              .child(label("Font size"))
+              .children(self.mark_of("app.fontSize").tick(p)),
+          )
           .child(
             div()
               .mt_2()
-              .child(form::select_field("settings-font-size", "Font Size", &font, false)),
+              .child(form::select_field("settings-font-size", "Font size", &font, false)),
           )
           .child(help(
             "Font size for terminal, code diff display, and overview files",
@@ -1481,23 +2358,27 @@ impl SettingsView {
             8.,
           )),
       )
-      .child(field_block(
-        "Claude Code Model",
-        form::select_field("settings-default-model", "Claude Code Model", &model, false),
+      .child(saved_field_block(
+        "Claude Code model",
+        form::select_field("settings-default-model", "Claude Code model", &model, false),
         Some("Default model for new Claude Code sessions"),
+        self.mark_of("app.defaultModel"),
         p,
       ))
-      .child(field_block(
-        "Default Agent",
-        form::select_field("settings-default-agent", "Default Agent", &agent, false),
+      .child(saved_field_block(
+        "Default agent",
+        form::select_field("settings-default-agent", "Default agent", &agent, false),
         Some("Default agent for new sessions"),
+        self.mark_of("app.defaultAgent"),
         p,
       ))
+
       .child(checklist::render(&app.checklist, &ctx))
-      .child(field_block(
-        "Conflict Marker Style",
-        form::select_field("settings-conflict-marker-style", "Conflict Marker Style", &conflict, false),
+      .child(saved_field_block(
+        "Conflict marker style",
+        form::select_field("settings-conflict-marker-style", "Conflict marker style", &conflict, false),
         Some("Style of conflict markers written to files during rebase. Git Diff3 is compatible with most editors."),
+        self.mark_of("app.conflictMarkerStyle"),
         p,
       ))
       .child(
@@ -1508,7 +2389,14 @@ impl SettingsView {
           .gap_4()
           .child(
             div()
-              .child(label("Notify when an agent finishes"))
+              .child(
+                div()
+                  .flex()
+                  .items_center()
+                  .gap_2()
+                  .child(label("Notify when an agent finishes"))
+                  .children(self.mark_of("app.notifyAgentFinished").tick(p)),
+              )
               .child(help(
                 "Show an OS notification when an agent finishes or asks for input while no Treq window is focused.",
                 p,
@@ -1526,12 +2414,20 @@ impl SettingsView {
       )
       .child(
         div()
-          .child(label("Application Setup Script"))
+          .child(
+            div()
+              .flex()
+              .items_center()
+              .gap_2()
+              .child(label("Application setup script"))
+              .children(self.mark_of("app.setupScript").tick(p)),
+          )
           .child(
             div()
               .mt_2()
               .child(form::textarea_field(&script, true, setup.loading)),
           )
+          .children(self.mark_of("app.setupScript").error(p))
           .child(help(
             "Shell script run from your home directory when you click Run. Its output is in the Logs tab under App setup.",
             p,
@@ -1583,7 +2479,13 @@ impl SettingsView {
                   .child(setup.status.clone()),
               ),
           ),
-      )
+      )      .child(saved_field_block(
+        "Agent instructions",
+        form::textarea_field(&instructions, true, false),
+        Some("Added to every agent terminal in every repository."),
+        self.mark_of("app.agentInstructions"),
+        p,
+      ))
   }
 
   fn repository(
@@ -1602,7 +2504,7 @@ impl SettingsView {
         .size(Size::Sm)
         .disabled(card.loading)
         .label(if card.loading {
-          "Reloading..."
+          "Reloading…"
         } else {
           "Reload"
         })
@@ -1643,7 +2545,7 @@ impl SettingsView {
         .child(
           ui::text(div(), TextSize::Sm)
             .text_color(p.muted_foreground)
-            .child("Current Branch"),
+            .child("Current branch"),
         )
         .child(
           ui::text(div(), TextSize::Sm)
@@ -1656,13 +2558,19 @@ impl SettingsView {
         )
     });
 
+    let (edits, edits_busy) = self
+      .repo
+      .as_ref()
+      .map(|r| (r.edits.clone(), r.edits_busy.clone()))
+      .unwrap_or_default();
     let body: AnyElement = if repo.loading {
-      div()
-        .py_8()
-        .text_center()
-        .text_color(p.muted_foreground)
-        .child("Loading settings...")
-        .into_any_element()
+      ui::delayed(
+        "settings-loading",
+        div()
+          .py_8()
+          .child(ui::Loading::new("settings-loading-spinner", p).label("Loading settings…")),
+      )
+      .into_any_element()
     } else {
       let pattern = self.controls.input(
         "repo.branchNamePattern",
@@ -1701,6 +2609,14 @@ impl SettingsView {
         window,
         cx,
       );
+      let agent_instructions = self.controls.textarea(
+        "repo.agentInstructions",
+        &f.agent_instructions,
+        "Added to every agent's system prompt in this repository",
+        4,
+        window,
+        cx,
+      );
       let review_agent = self.controls.select(
         "repo.reviewAgent",
         &repo.review_agent_options,
@@ -1719,30 +2635,65 @@ impl SettingsView {
         .flex()
         .flex_col()
         .gap_6()
-        .child(field_block(
-          "Branch Name Pattern",
+        .child(saved_field_block(
+          "Branch name pattern",
           form::input_field("settings-branch-pattern", &pattern, true, managed("branchNamePattern")),
           Some(&branch_preview(&f.branch_name_pattern)),
+          self.mark_of("repo.branchNamePattern"),
           p,
         ))
-        .child(field_block(
-          "Included Files/Directories",
+        .child(saved_field_block(
+          "Included files and directories",
           form::textarea_field(&included, true, managed("includedFiles")),
           Some("Paths to copy into each new workspace (e.g. .env). For heavy dirs like node_modules, use Symlink from home repo under Advanced when creating a workspace."),
+          self.mark_of("repo.includedFiles"),
           p,
         ))
-        .child(field_block(
-          "Claude Code Model",
-          form::select_field("settings-repo-default-model", "Claude Code Model", &model, managed("defaultModel")),
-          Some("Default model for new Claude Code sessions in this repository (overrides application default)"),
-          p,
-        ))
-        .child(field_block(
-          "Default Agent",
-          form::select_field("settings-repo-default-agent", "Default Agent", &agent, managed("defaultAgent")),
-          Some("Default agent for new sessions in this repository (overrides application default)"),
-          p,
-        ))
+        .child(
+          // The repository's own choices over the Application tab's.
+          div()
+            .debug_selector(|| "settings-repo-overrides".into())
+            .flex()
+            .flex_col()
+            .gap_4()
+            .border_t_1()
+            .border_color(p.border)
+            .pt_6()
+            .child(
+              div()
+                .child(
+                  ui::text(div(), TextSize::Sm)
+                    .font_weight(FontWeight::MEDIUM)
+                    .child("Overrides for this repository"),
+                )
+                .child(help(
+                  "Leave on 'Use application default' to follow Application settings.",
+                  p,
+                  4.,
+                )),
+            )
+            .child(saved_field_block(
+              "Claude Code model",
+              form::select_field("settings-repo-default-model", "Claude Code model", &model, managed("defaultModel")),
+              Some("Default model for new Claude Code sessions in this repository"),
+              self.mark_of("repo.defaultModel"),
+              p,
+            ))
+            .child(saved_field_block(
+              "Default agent",
+              form::select_field("settings-repo-default-agent", "Default agent", &agent, managed("defaultAgent")),
+              Some("Default agent for new sessions in this repository"),
+              self.mark_of("repo.defaultAgent"),
+              p,
+            ))
+            .child(saved_field_block(
+              "Agent instructions",
+              form::textarea_field(&agent_instructions, true, false),
+              Some("Added to every agent terminal in this repository, after the application instructions."),
+              self.mark_of("repo.agentInstructions"),
+              p,
+            )),
+        )
         .child(switch_row(
           "Auto-push to remote",
           "Automatically push to the remote after every commit in this repository",
@@ -1754,6 +2705,7 @@ impl SettingsView {
             p,
             self.field("repo.autoPush"),
           ),
+          self.mark_of("repo.autoPush"),
           p,
         ))
         .child(
@@ -1769,7 +2721,7 @@ impl SettingsView {
                 .child(
                   ui::text(div(), TextSize::Sm)
                     .font_weight(FontWeight::MEDIUM)
-                    .child("Code Review"),
+                    .child("Code review"),
                 )
                 .child(help(
                   "Settings for the AI review agent. Its comments stay local to this machine and are never pushed to GitHub.",
@@ -1777,22 +2729,46 @@ impl SettingsView {
                   4.,
                 )),
             )
-            .child(field_block(
-              "Custom Review Prompt",
+            .child(saved_field_block(
+              "Custom review prompt",
               form::textarea_field(&review_prompt, true, managed("reviewPrompt")),
               Some("Overrides the built-in prompt. {target_type}, {target_id} and {diff_summary} are substituted before the prompt is sent."),
+              self.mark_of("repo.reviewPrompt"),
               p,
             ))
-            .child(field_block(
-              "Review Agent",
-              form::select_field("settings-review-agent", "Review Agent", &review_agent, managed("reviewAgent")),
+            .child(
+              div()
+                .flex()
+                .items_center()
+                .gap_3()
+                .child(
+                  Button::new("settings-tune-review-prompt", p)
+                    .variant(Variant::Outline)
+                    .size(Size::Sm)
+                    .label("Tune with agent")
+                    .on_click(self.press("repo.reviewPrompt.tune")),
+                )
+                .child(div().flex_1().min_w_0().child(help(
+                  "An agent reads the last 30 days of reviews (Logs → Reviews) and proposes edits to this prompt for you to review below.",
+                  p,
+                  0.,
+                ))),
+            )
+            .when(!edits.is_empty(), |this| {
+              this.child(self.prompt_edits(&edits, &edits_busy, p))
+            })
+            .child(saved_field_block(
+              "Review agent",
+              form::select_field("settings-review-agent", "Review agent", &review_agent, managed("reviewAgent")),
               Some("Agent launched by Start Review (overrides the default agent)"),
+              self.mark_of("repo.reviewAgent"),
               p,
             ))
-            .child(field_block(
-              "Automatic Review",
-              form::select_field("settings-auto-review-trigger", "Automatic Review", &trigger, managed("autoReviewTrigger")),
+            .child(saved_field_block(
+              "Automatic review",
+              form::select_field("settings-auto-review-trigger", "Automatic review", &trigger, managed("autoReviewTrigger")),
               Some("Opens a review terminal on its own after the chosen operation finishes in a workspace of this repository."),
+              self.mark_of("repo.autoReviewTrigger"),
               p,
             )),
         )
@@ -1806,10 +2782,30 @@ impl SettingsView {
         .into_any_element()
     };
 
+    // Which repository these settings belong to.
+    let title = div()
+      .debug_selector(|| "settings-repo-name".into())
+      .child(
+        ui::text(div(), TextSize::Xl)
+          .id("settings-repo-name")
+          .role(gpui::Role::Heading)
+          .aria_label(repo.name.clone())
+          .font_weight(FontWeight::SEMIBOLD)
+          .child(repo.name.clone())
+          .test_support(),
+      )
+      .child(
+        ui::text(div().mt_1(), TextSize::Sm)
+          .text_color(p.muted_foreground)
+          .truncate()
+          .child(repo.path.clone()),
+      );
+
     div()
       .flex()
       .flex_col()
       .gap_6()
+      .child(title)
       .children(yaml_card)
       .children(branch)
       .child(body)
@@ -1825,7 +2821,7 @@ impl SettingsView {
           .child(
             ui::text(div(), TextSize::Sm)
               .font_weight(FontWeight::SEMIBOLD)
-              .child("Feature Preview"),
+              .child("Feature preview"),
           )
           .child(help(
             "Turn on experimental features. Off hides them in the UI and blocks the matching backend commands. Dev builds start with every preview flag on. Release builds use the shipped default until you change a switch.",
@@ -1898,23 +2894,36 @@ impl SettingsView {
       window,
       cx,
     );
-    let scope = self
-      .controls
-      .select("skills.scope", &tab.scope_options, &tab.scope, window, cx);
     let level_options = options(&[("application", "Application"), ("repository", "Repository")]);
-    let mut rows = Vec::new();
-    for row in &tab.rows {
-      let level = row.installed.as_ref().map(|value| {
-        self.controls.select(
-          &format!("skills.level:{}", row.id),
-          &level_options,
-          value,
-          window,
-          cx,
-        )
-      });
-      rows.push(self.skill_row(row, level, p));
-    }
+    let draw = |list: &[SkillRow], view: &mut Self, window: &mut Window, cx: &mut Context<Self>| {
+      list
+        .iter()
+        .map(|row| {
+          let level = row.installed.as_ref().map(|value| {
+            view.controls.select(
+              &format!("skills.level:{}", row.id),
+              &level_options,
+              value,
+              window,
+              cx,
+            )
+          });
+          view.skill_row(row, level, p)
+        })
+        .collect::<Vec<_>>()
+    };
+    let rows = draw(&tab.rows, self, window, cx);
+    let chips = tab.filters.iter().map(|filter| {
+      Button::new(format!("skill-filter-{}", filter.id), p)
+        .variant(if filter.selected {
+          Variant::Default
+        } else {
+          Variant::Outline
+        })
+        .size(Size::Sm)
+        .label(filter.label)
+        .on_click(self.press(&format!("skills.filter:{}", filter.id)))
+    });
     div()
       .flex()
       .flex_col()
@@ -1931,8 +2940,7 @@ impl SettingsView {
             "Browse the Treq skill registry and install skills into this application or the current repository. Installed skills are copied into new workspaces after checksum verification.",
             p,
             4.,
-          ))
-          .child(help(format!("{} installed", tab.installed), p, 4.)),
+          )),
       )
       .child(
         div()
@@ -1951,37 +2959,41 @@ impl SettingsView {
                 false,
                 false,
               ))),
-          )
-          .child(
-            div()
-              .min_w(zpx(160.))
-              .child(label("Install level"))
-              .child(div().mt_2().child(form::select_field("skills-scope", "Install level", &scope, false))),
           ),
       )
+      .child(
+        div()
+          .debug_selector(|| "skill-filters".into())
+          .flex()
+          .flex_wrap()
+          .gap_2()
+          .children(chips),
+      )
       .when(tab.loading, |this| {
-        this.child(
-          ui::text(div(), TextSize::Sm)
-            .flex()
-            .items_center()
-            .gap_2()
-            .text_color(p.muted_foreground)
-            .child(ui::spinner("skills-loading", 16., p.muted_foreground))
-            .child("Loading skill registry…"),
-        )
+        this.child(ui::delayed(
+          "skills-loading",
+          div().child(ui::Skeleton::new("skills-loading", 3, p).row_height(56.)),
+        ))
       })
       .when_some(tab.error.clone(), |this, err| {
         this.child(
-          ui::text(div(), TextSize::Sm)
-            .text_color(p.destructive)
-            .child(err),
+          ui::EmptyState::new("skills-error", "Couldn't load the skill registry", p)
+            .error(true)
+            .icon(theme::ICON_CIRCLE_ALERT)
+            .message(err)
+            .action(
+              ui::Button::new("skills-retry", p)
+                .size(ui::Size::Sm)
+                .label("Retry")
+                .on_click(cx.listener(|view, _, _, cx| view.load_skills(cx))),
+            ),
         )
       })
       .when(!tab.loading && tab.error.is_none() && tab.rows.is_empty(), |this| {
         this.child(
-          ui::text(div(), TextSize::Sm)
-            .text_color(p.muted_foreground)
-            .child("No skills match this search."),
+          ui::EmptyState::new("skills-empty", "No skills match", p)
+            .icon(theme::ICON_SEARCH)
+            .message("Clear the search or pick another filter to see more skills."),
         )
       })
       .child(div().flex().flex_col().gap_3().children(rows))
@@ -2005,116 +3017,162 @@ impl SettingsView {
       .border_color(p.border)
       .rounded(radius::MD)
       .p_3()
-      .pr_12()
       .debug_selector(move || selector)
-      .when(row.installed.is_some(), |this| {
-        this.child(
-          div().absolute().top_2().right_2().child(
-            Button::new(format!("skill-uninstall-{id}"), p)
-              .aria_label("Uninstall")
-              .variant(Variant::Outline)
-              .size(Size::IconXs)
-              .disabled(row.busy)
-              .border_color(p.destructive.opacity(0.3))
-              .text_color(p.destructive)
-              .hover_bg(p.destructive.opacity(0.1))
-              .icon(theme::ICON_TRASH, 14.)
-              .on_click(self.press(&format!("skills.uninstall:{id}"))),
-          ),
-        )
-      })
       .child(
-        div()
-          // React's `space-y-2` counts the absolute uninstall button as the
-          // first child, so an installed skill's text starts 8px lower.
-          .when(row.installed.is_some(), |this| this.mt_2())
-          .flex()
-          .items_start()
-          .justify_between()
-          .gap_3()
-          .child(
-            div()
-              .min_w_0()
-              .child(
-                div()
-                  .flex()
-                  .items_center()
-                  .gap_2()
-                  .child(
-                    ui::text(div(), TextSize::Sm)
-                      .font_weight(FontWeight::MEDIUM)
-                      .truncate()
-                      .child(row.name.clone()),
-                  )
-                  .child(
+        div().flex().items_start().justify_between().gap_3().child(
+          div()
+            .min_w_0()
+            .child(
+              div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(
+                  ui::text(div(), TextSize::Sm)
+                    .font_weight(FontWeight::MEDIUM)
+                    .truncate()
+                    .child(row.name.clone()),
+                )
+                .when(!row.source.is_empty(), |this| {
+                  this.child(
+                    // Short label (['source tag']): 11px is fine.
+                    // ast-grep-ignore: gpui-text-xs-short-label-only
                     ui::text(div(), TextSize::Xs)
                       .text_color(p.muted_foreground)
                       .child(row.source.clone()),
-                  ),
-              )
-              .when_some(row.description.clone(), |this, description| {
-                this.child(
-                  ui::text(div().mt_1(), TextSize::Sm)
-                    .text_color(p.muted_foreground)
-                    .line_clamp(2)
-                    .text_ellipsis()
-                    .child(description),
-                )
-              }),
-          )
-          .when(row.has_url, |this| {
-            let source = SharedString::from(format!("skill-source-{id}"));
-            let selector = source.to_string();
-            this.child(
-              div()
-                .id(source)
-                .debug_selector(move || selector)
-                .flex_none()
-                .mr_6()
-                .cursor_pointer()
-                .child(ui::icon(theme::ICON_BOOK_OPEN, 16., p.muted_foreground))
-                .on_click(self.press(&format!("skills.source:{id}"))),
+                  )
+                })
+                .children(row.labels.iter().map(|label| {
+                  let tone = match label.as_str() {
+                    LABEL_APP_WIDE | LABEL_REPOSITORY => p.primary,
+                    LABEL_CUSTOM_REPO | LABEL_CUSTOM_GLOBAL => p.warning,
+                    _ => p.muted_foreground,
+                  };
+                  // Short label (['tag']): 11px is fine.
+                  // ast-grep-ignore: gpui-text-xs-short-label-only
+                  ui::text(div(), TextSize::Xs)
+                    .flex_none()
+                    .px_1p5()
+                    .rounded(radius::SM)
+                    .border_1()
+                    .border_color(tone.opacity(0.5))
+                    .bg(tone.opacity(0.1))
+                    .text_color(tone)
+                    .child(label.clone())
+                })),
             )
-          }),
-      )
-      .map(|this| {
-        if row.proprietary {
-          this.child(
-            ui::text(div(), TextSize::Sm)
-              .text_color(p.muted_foreground)
-              .child("Proprietary skills cannot be installed from the registry."),
-          )
-        } else if let Some(level) = level {
-          this.child(
-            div()
-              .flex()
-              .items_center()
-              .justify_end()
-              .gap_2()
-              .child(
-                ui::text(div(), TextSize::Sm)
-                  .font_weight(FontWeight::MEDIUM)
-                  .child("Install level"),
+            .when_some(row.description.clone(), |this, description| {
+              this.child(
+                ui::text(div().mt_1(), TextSize::Sm)
+                  .text_color(p.muted_foreground)
+                  .line_clamp(2)
+                  .text_ellipsis()
+                  .child(description),
               )
-              .child(div().w(zpx(128.)).child(form::select_field(
-                format!("skill-level-{id}"),
-                "Install level",
-                &level,
-                row.busy,
-              ))),
+            }),
+        ),
+      )
+      .child(self.skill_actions(row, level, p))
+  }
+
+  /// A skill row's bottom line: Docs, Customise and the install level, its
+  /// select and Uninstall (or Install…), all on the right.
+  fn skill_actions(
+    &self,
+    row: &SkillRow,
+    level: Option<gpui::Entity<form::SelectStateOf>>,
+    p: &Palette,
+  ) -> gpui::Div {
+    let id = &row.id;
+    let customise =
+      (!row.uncataloged && !row.proprietary && self.route.repo_path.is_some()).then(|| {
+        Button::new(format!("skill-customize-{id}"), p)
+          .variant(Variant::Outline)
+          .size(Size::Sm)
+          .disabled(row.busy)
+          .aria_label(format!("Customise {}", row.name))
+          .icon(theme::ICON_PENCIL, 14.)
+          .label("Customise")
+          .on_click(self.press(&format!("skills.customize:{id}")))
+      });
+    let docs = row.has_url.then(|| {
+      Button::new(format!("skill-source-{id}"), p)
+        // Ghost tinted as a link, so the label is not underlined.
+        .variant(Variant::Ghost)
+        .size(Size::Sm)
+        .text_color(p.primary)
+        .aria_label(format!("Docs for {}", row.name))
+        .icon(theme::ICON_BOOK_OPEN, 14.)
+        .label("Docs")
+        .on_click(self.press(&format!("skills.source:{id}")))
+    });
+    let right = if row.proprietary {
+      Some(
+        ui::text(div(), TextSize::Sm)
+          .text_color(p.muted_foreground)
+          .child("Proprietary skills cannot be installed from the registry.")
+          .into_any_element(),
+      )
+    } else if let Some(level) = level {
+      Some(
+        div()
+          .flex()
+          .items_center()
+          .gap_2()
+          .child(
+            ui::text(div(), TextSize::Sm)
+              .font_weight(FontWeight::MEDIUM)
+              .child("Install level"),
           )
-        } else {
-          this.child(
-            div().flex().justify_end().child(
-              Button::new(format!("skill-install-{id}"), p)
-                .size(Size::Sm)
-                .disabled(row.busy)
-                .label("Install…")
-                .on_click(self.press(&format!("skills.install:{id}"))),
-            ),
+          .child(div().w(zpx(120.)).child(form::small_select_field(
+            format!("skill-level-{id}"),
+            "Install level",
+            &level,
+            row.busy,
+          )))
+          .child(
+            Button::new(format!("skill-uninstall-{id}"), p)
+              .aria_label(format!("Uninstall {}", row.name))
+              .variant(Variant::DestructiveOutline)
+              .size(Size::IconSm)
+              .disabled(row.busy)
+              .icon(theme::ICON_TRASH, 14.)
+              .on_click(self.press(&format!("skills.uninstall:{id}"))),
           )
-        }
-      })
+          .into_any_element(),
+      )
+    } else if row.custom {
+      None
+    } else {
+      Some(
+        install_button(row, p)
+          .on_click(self.press(&format!("skills.install:{id}")))
+          .into_any_element(),
+      )
+    };
+    // The proprietary note stays on the left; every action sits on the right.
+    let (note, right) = if row.proprietary {
+      (right, None)
+    } else {
+      (None, right)
+    };
+    div()
+      .w_full()
+      .flex()
+      .items_center()
+      .justify_end()
+      .gap_2()
+      .when(note.is_some(), |el| el.justify_between())
+      .children(note)
+      .child(
+        div()
+          .flex()
+          .items_center()
+          .gap_2()
+          .children(docs)
+          .children(customise)
+          .children(right),
+      )
   }
 
   /// The install dialog: where to store the skill.
@@ -2128,47 +3186,16 @@ impl SettingsView {
       };
       div().child(gpui::StyledText::new(text).with_highlights([(0..strong.len(), bold)]))
     };
-    div()
-      .id("skill-install-dialog-backdrop")
-      .absolute()
-      .inset_0()
-      .flex()
-      .items_center()
-      .justify_center()
-      .bg(p.scrim())
-      .occlude()
-      .child(
-        div()
-          .id("skill-install-dialog")
-          .debug_selector(|| "skill-install-dialog".into())
-          .w_full()
-          .max_w(zpx(576.))
-          .mx_4()
-          .flex()
-          .flex_col()
-          .gap_4()
-          .p_6()
-          .rounded(radius::MD)
-          .border_1()
-          .border_color(p.border)
-          .bg(p.background)
-          .shadow_lg()
-          .child(
-            div()
-              .flex()
-              .flex_col()
-              .gap_2()
-              .child(
-                ui::text(div(), TextSize::Lg)
-                  .font_weight(FontWeight::SEMIBOLD)
-                  .child(format!("Install {}", dialog.name)),
-              )
-              .child(
-                ui::text(div(), TextSize::Sm)
-                  .text_color(p.muted_foreground)
-                  .child("Choose whether this skill is stored for every repository on this machine, or only for the current repository."),
-              ),
-          )
+    let busy = dialog.busy;
+    let press = |id: &str| -> account::ClickFn { Box::new(self.press(id)) };
+    div().absolute().inset_0().child(
+      ui::Dialog::new("skill-install-dialog", p)
+        .width(576.)
+        .title(format!("Install {}", dialog.name))
+        .description("Choose whether this skill is stored for every repository on this machine, or only for the current repository.")
+        .on_close(account::handler(press("skills.dialog.cancel")))
+        .on_primary(account::handler(press("skills.dialog:repository")))
+        .primary_disabled(busy)
           .child(
             ui::text(div(), TextSize::Sm)
               .py_2()
@@ -2184,39 +3211,155 @@ impl SettingsView {
                 "writes the skill into Treq application data. Every repository on this machine can use it.",
               )),
           )
-          .child(
-            div()
-              .flex()
-              .justify_end()
-              .gap_2()
-              .child(
-                Button::new("skill-dialog-cancel", p)
-                  .variant(Variant::Outline)
-                  .disabled(dialog.busy)
-                  .label("Cancel")
-                  .on_click(self.press("skills.dialog.cancel")),
-              )
-              .child(
-                Button::new("skill-dialog-application", p)
-                  .variant(Variant::Outline)
-                  .disabled(dialog.busy)
-                  .label("Install for application")
-                  .on_click(self.press("skills.dialog:application")),
-              )
-              .child(
-                Button::new("skill-dialog-repository", p)
-                  .disabled(dialog.busy)
-                  .label("Install for repository")
-                  .on_click(self.press("skills.dialog:repository")),
-              ),
-          ),
-      )
+          .footer([
+            Button::new("skill-dialog-application", p)
+              .variant(Variant::Outline)
+              .disabled(busy)
+              .label("Install for application")
+              .on_click(self.press("skills.dialog:application"))
+              .into_any_element(),
+            Button::new("skill-dialog-repository", p)
+              .disabled(busy)
+              .label("Install for repository")
+              .on_click(self.press("skills.dialog:repository"))
+              .into_any_element(),
+          ]),
+    )
   }
+  /// A `treq://skill/install` link's confirmation: the catalog entry's
+  /// description, metadata and checksum, and its registry page.
+  fn skill_confirm_dialog(&self, confirm: &SkillConfirm, p: &Palette) -> impl IntoElement {
+    let rows = confirm.details.iter().map(|(label, value)| {
+      div()
+        .flex()
+        .gap_4()
+        .child(
+          div()
+            .w(zpx(96.))
+            .flex_none()
+            .text_color(p.muted_foreground)
+            .child(label.clone()),
+        )
+        .child(div().min_w_0().child(value.clone()))
+    });
+    let checksum = confirm.checksum.clone().map_or_else(
+      || {
+        div()
+          .text_color(p.muted_foreground)
+          .child("Not published. Treq records the checksum of the downloaded files.")
+      },
+      |sum| div().font_family(theme::MONO_FONT).text_xs().child(sum),
+    );
+    let press = |id: &str| -> account::ClickFn { Box::new(self.press(id)) };
+    div().absolute().inset_0().child(
+      ui::Dialog::new("skill-confirm-dialog", p)
+        .width(576.)
+        .title(confirm.title.clone())
+        .description("A link asked Treq to install this skill. Treq installs the copy from its skill catalog, never content from the link.")
+        .on_close(account::handler(press("skills.confirm.cancel")))
+        .when(confirm.can_install, |d| {
+          d.on_primary(account::handler(press("skills.confirm.install")))
+        })
+        .primary_disabled(confirm.busy)
+          .when_some(confirm.description.clone(), |this, description| {
+            this.child(ui::text(div(), TextSize::Sm).child(description))
+          })
+          .when(!confirm.details.is_empty(), |this| {
+            this.child(
+              ui::text(div(), TextSize::Sm)
+                .flex()
+                .flex_col()
+                .gap_1()
+                .p_3()
+                .rounded(radius::MD)
+                .border_1()
+                .border_color(p.border)
+                .children(rows)
+                .child(
+                  div()
+                    .flex()
+                    .gap_4()
+                    .child(
+                      div()
+                        .w(zpx(96.))
+                        .flex_none()
+                        .text_color(p.muted_foreground)
+                        .child("SHA-256"),
+                    )
+                    .child(div().min_w_0().flex_1().child(checksum)),
+                ),
+            )
+            .child(
+              ui::text(div(), TextSize::Sm)
+                .text_color(p.muted_foreground)
+                .child("Treq verifies the downloaded files against this checksum before installing."),
+            )
+          })
+          .when_some(confirm.notice.clone(), |this, notice| {
+            this.child(ui::text(div(), TextSize::Sm).child(notice))
+          })
+          // The registry link sits apart, left of the action pair.
+          .footer(
+            [
+              Some(
+                Button::new("skill-confirm-registry", p)
+                  .variant(Variant::Ghost)
+                  .size(Size::Sm)
+                  .icon(theme::ICON_EXTERNAL_LINK, 14.)
+                  .label("View in skill registry")
+                  .on_click(self.press("skills.confirm.registry"))
+                  .into_any_element(),
+              ),
+              Some(div().flex_1().into_any_element()),
+              Some(
+                Button::new("skill-confirm-cancel", p)
+                  .variant(Variant::Outline)
+                  .disabled(confirm.busy)
+                  .label(if confirm.can_install { "Cancel" } else { "Close" })
+                  .on_click(self.press("skills.confirm.cancel"))
+                  .into_any_element(),
+              ),
+              confirm.can_install.then(|| {
+                Button::new("skill-confirm-install", p)
+                  .disabled(confirm.busy)
+                  .label("Install")
+                  .on_click(self.press("skills.confirm.install"))
+                  .into_any_element()
+              }),
+            ]
+            .into_iter()
+            .flatten(),
+          ),
+    )
+  }
+}
+
+/// A skill card's Install…, before its click handler.
+pub(super) fn install_button(row: &SkillRow, p: &Palette) -> Button {
+  Button::new(format!("skill-install-{}", row.id), p)
+    .variant(Variant::Default)
+    .size(Size::Sm)
+    .disabled(row.busy)
+    .aria_label(format!("Install {}…", row.name))
+    .label("Install…")
 }
 
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn the_agent_picker_offers_every_launchable_agent() {
+    let offered: Vec<_> = agent_options("Default")[1..]
+      .iter()
+      .map(|o| (o.value.clone(), o.label.clone()))
+      .collect();
+    let launchable: Vec<_> = crate::core::agent_launch::AGENTS
+      .iter()
+      .map(|(id, label)| (id.to_string(), label.to_string()))
+      .collect();
+    assert_eq!(offered, launchable);
+  }
 
   #[test]
   fn previews_the_branch_an_edited_pattern_gives() {

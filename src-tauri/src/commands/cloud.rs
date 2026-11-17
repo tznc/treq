@@ -13,6 +13,8 @@ use async_trait::async_trait;
 use tauri::{AppHandle, Manager};
 
 use super::remote_control::{self, RemoteExecState};
+#[cfg(desktop)]
+use crate::core::session_secrets::{KeychainSessionStore, KeyringSecret};
 use crate::{
   core::{
     auth::{SessionStore, SESSION_SETTING},
@@ -35,7 +37,10 @@ pub struct CloudState {
 }
 
 /// The session's tokens, in the app database.
-#[cfg_attr(not(feature = "gpui-shell"), allow(dead_code))]
+#[cfg_attr(
+  not(feature = "gpui-shell"),
+  expect(dead_code, reason = "only the GPUI shell calls this")
+)]
 struct DbStore(AppHandle);
 
 impl SessionStore for DbStore {
@@ -61,6 +66,21 @@ impl SessionStore for DbStore {
   }
 }
 
+/// The keychain, falling back to the app database where there is none.
+#[cfg_attr(
+  not(feature = "gpui-shell"),
+  expect(dead_code, reason = "only the GPUI shell calls this")
+)]
+fn session_store(app: &AppHandle) -> Arc<dyn SessionStore> {
+  let db = DbStore(app.clone());
+  #[cfg(desktop)]
+  match KeyringSecret::new(&app.config().identifier, SESSION_SETTING) {
+    Ok(secret) => return Arc::new(KeychainSessionStore::new(secret, db)),
+    Err(error) => log::warn!("opening the keychain: {error}"),
+  }
+  Arc::new(db)
+}
+
 struct AppEffects {
   app: AppHandle,
   /// The window that started the last cloud workspace action, which
@@ -71,12 +91,18 @@ struct AppEffects {
 #[async_trait]
 impl CloudEffects for AppEffects {
   fn changed(&self, snapshot: &AccountSnapshot) {
+    crate::linear::set_pro(snapshot.is_pro());
     #[cfg(feature = "gpui-shell")]
     #[cfg(desktop)]
     crate::gpui_shell::account_changed(&self.app, snapshot.clone());
   }
 
   fn access_token(&self, supabase_url: &str, token: Option<&str>) {
+    // Project sync runs only while signed in.
+    match (token, crate::commands::cloud::owned_cloud(&self.app)) {
+      (Some(_), Some(cloud)) => PROJECT_SYNC.signed_in(move || sync_projects(cloud)),
+      _ => PROJECT_SYNC.signed_out(),
+    }
     if let Some(state) = self.app.try_state::<RemoteExecState>() {
       state.0.set_relay_access_token(token.map(str::to_string));
     }
@@ -138,25 +164,93 @@ impl CloudEffects for AppEffects {
 
 /// Restores the session and keeps it fresh. Call once from setup, after the
 /// app and remote states.
-#[cfg_attr(not(feature = "gpui-shell"), allow(dead_code))]
+#[cfg_attr(
+  not(feature = "gpui-shell"),
+  expect(dead_code, reason = "only the GPUI shell calls this")
+)]
 pub fn start(app: &AppHandle) {
   let effects = Arc::new(AppEffects {
     app: app.clone(),
     window: Mutex::new(None),
   });
-  let supabase = Arc::new(Supabase::new(
-    &desktop_env().supabase,
-    Arc::new(DbStore(app.clone())),
-  ));
+  let supabase = Arc::new(Supabase::new(&desktop_env().supabase, session_store(app)));
   let cloud = Cloud::new(supabase, effects.clone());
   app.manage(CloudState {
     cloud: cloud.clone(),
     effects,
   });
+  let sync_cloud = cloud.clone();
   tauri::async_runtime::spawn(async move {
     cloud.start().await;
     cloud.keep_fresh().await;
   });
+  tauri::async_runtime::spawn(sync_config(sync_cloud));
+}
+
+/// The project sync loop, started on sign-in and stopped on sign-out.
+static PROJECT_SYNC: std::sync::LazyLock<crate::core::project_sync::Runner> =
+  std::sync::LazyLock::new(Default::default);
+
+/// Team project sync: a pass now, then hourly (`core::project_sync`). Runs
+/// only while signed in ([`PROJECT_SYNC`]).
+async fn sync_projects(cloud: Arc<Cloud>) {
+  use crate::core::{cloud_catalog, project_sync, projects};
+  loop {
+    {
+      if let Ok(orgs) = cloud_catalog::fetch_cloud_organizations(&cloud.supabase).await {
+        let org_ids: Vec<String> = orgs.into_iter().map(|o| o.org_id).collect();
+        let supabase = cloud.supabase.clone();
+        // rusqlite's Connection is not Sync, so the pass runs on its own thread.
+        let pass = tauri::async_runtime::spawn_blocking(move || {
+          let app_dir = crate::core::app_data_dir()?;
+          let db = crate::db::Database::new(app_dir.join("treq.db")).ok()?;
+          let known = projects::list(db.conn())
+            .ok()?
+            .into_iter()
+            .flat_map(|p| p.repos)
+            .collect();
+          let mapper = project_sync::GitMapper {
+            known,
+            clones_root: projects::clones_root(),
+          };
+          let transport = project_sync::SupabaseTransport(supabase);
+          tauri::async_runtime::block_on(project_sync::sync(
+            db.conn(),
+            &transport,
+            &mapper,
+            &org_ids,
+          ))
+          .map_err(|e| log::warn!("project sync: {e}"))
+          .ok()
+        })
+        .await;
+        if let Err(error) = pass {
+          log::warn!("project sync stopped: {error}");
+        }
+      }
+    }
+    project_sync::wait(std::time::Duration::from_secs(3600)).await;
+  }
+}
+
+/// Config sync, once signed in: pulls a missing local copy, then pushes
+/// on change and hourly (`core::config_sync`). Covers the app settings and
+/// the last opened repository.
+async fn sync_config(cloud: Arc<Cloud>) {
+  use crate::core::config_sync;
+  while cloud.supabase.auth.session().is_none() {
+    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+  }
+  let Some(app_dir) = crate::core::app_data_dir() else {
+    return;
+  };
+  let mut sources = vec![config_sync::app_source(app_dir.clone())];
+  let last_repo = crate::db::Database::new(app_dir.join("treq.db"))
+    .ok()
+    .and_then(|db| db.get_setting("last_opened_repo_path").ok().flatten());
+  sources.extend(last_repo.as_deref().and_then(config_sync::repo_source));
+  let transport = Arc::new(config_sync::SupabaseTransport(cloud.supabase.clone()));
+  config_sync::run(transport, sources, app_dir.join("config-sync")).await;
 }
 
 /// The account, while Rust owns it.
@@ -180,15 +274,30 @@ pub fn handle_auth_callback(app: &AppHandle, url: &str) {
 
 /// A window came to the front: reread the plan, as a purchase on the
 /// website may have changed it.
-#[cfg_attr(not(feature = "gpui-shell"), allow(dead_code))]
+#[cfg_attr(
+  not(feature = "gpui-shell"),
+  expect(dead_code, reason = "only the GPUI shell calls this")
+)]
 pub fn window_focused(app: &AppHandle) {
   if let Some(cloud) = owned_cloud(app) {
     tauri::async_runtime::spawn(async move { cloud.refresh_subscription().await });
   }
 }
 
+/// A provider API key on its way to the server. Its `Debug` never shows it,
+/// so logging an action cannot leak it.
+#[derive(Clone, PartialEq, serde::Deserialize)]
+#[serde(transparent)]
+pub struct ApiKey(pub String);
+
+impl std::fmt::Debug for ApiKey {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.write_str("<redacted>")
+  }
+}
+
 /// A cloud workspace action, by the id the account screens use.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
 #[serde(rename_all = "camelCase", tag = "action")]
 pub enum CloudAction {
   Refresh,
@@ -198,12 +307,82 @@ pub enum CloudAction {
   Delete,
   OpenRepositories,
   #[serde(rename_all = "camelCase")]
+  SelectTier {
+    tier_id: String,
+  },
+  /// Resize to the selected tier; `acknowledged_data_loss` confirms the
+  /// unpushed work the server said would be lost.
+  #[serde(rename_all = "camelCase")]
+  Resize {
+    acknowledged_data_loss: bool,
+  },
+  CancelResize,
+  /// Change the monthly spend cap.
+  #[serde(rename_all = "camelCase")]
+  SetSpendCap {
+    cap_usd: f64,
+  },
+  /// Hide a stored notice.
+  DismissNotification {
+    id: String,
+  },
+  #[serde(rename_all = "camelCase")]
   Reauthenticate {
     endpoint_id: String,
   },
   #[serde(rename_all = "camelCase")]
   RevokeKey {
     key_reference: String,
+  },
+  KillProcess {
+    pid: u32,
+  },
+  /// "Keep alive (billed)".
+  PinProcess {
+    pid: u32,
+  },
+  #[serde(rename_all = "camelCase")]
+  UnpinProcess {
+    pin_id: String,
+  },
+  /// Bring your own sandbox: save a provider key (checked by the server).
+  SaveProviderKey {
+    kind: String,
+    key: ApiKey,
+  },
+  RemoveProviderKey {
+    kind: String,
+  },
+  /// Create the workspace on the user's own provider account (BYOS).
+  ProvisionOn {
+    kind: String,
+  },
+  /// Team cloud: bill the next workspace to an organization, or `None` for
+  /// personal.
+  #[serde(rename_all = "camelCase")]
+  SetCloudProfile {
+    org_id: Option<String>,
+  },
+  /// An owner's managed/BYOS choice and caps for their organization.
+  #[serde(rename_all = "camelCase")]
+  SaveOrgCloudSettings {
+    org_id: String,
+    allow_managed: bool,
+    allow_byos: bool,
+    org_cap_usd: f64,
+    member_cap_usd: f64,
+  },
+  /// An owner saves an organization key (checked by the server).
+  #[serde(rename_all = "camelCase")]
+  SaveOrgProviderKey {
+    org_id: String,
+    kind: String,
+    key: ApiKey,
+  },
+  #[serde(rename_all = "camelCase")]
+  RemoveOrgProviderKey {
+    org_id: String,
+    kind: String,
   },
 }
 
@@ -218,6 +397,7 @@ pub async fn run_cloud_action(
     .ok_or("The account is not available in this window.")?;
   *state.effects.window.lock_or_recover() = Some(label.to_string());
   let cloud = state.cloud.clone();
+  use crate::core::control_plane::ProcessAction;
   match action {
     CloudAction::Refresh => cloud.refresh_cloud().await,
     CloudAction::Provision => cloud.provision().await,
@@ -225,8 +405,47 @@ pub async fn run_cloud_action(
     CloudAction::Repair => cloud.reprovision().await,
     CloudAction::Delete => cloud.delete().await,
     CloudAction::OpenRepositories => cloud.open_repositories().await,
+    CloudAction::SelectTier { tier_id } => cloud.select_tier(&tier_id),
+    CloudAction::Resize {
+      acknowledged_data_loss,
+    } => cloud.resize(acknowledged_data_loss).await,
+    CloudAction::CancelResize => cloud.cancel_resize(),
+    CloudAction::SetSpendCap { cap_usd } => cloud.set_spend_cap(cap_usd).await,
+    CloudAction::DismissNotification { id } => cloud.dismiss_notification(&id).await,
     CloudAction::Reauthenticate { endpoint_id } => cloud.reauthenticate(&endpoint_id).await,
     CloudAction::RevokeKey { key_reference } => cloud.revoke_key(&key_reference).await,
+    CloudAction::KillProcess { pid } => cloud.process_action(ProcessAction::Kill(pid)).await,
+    CloudAction::PinProcess { pid } => cloud.process_action(ProcessAction::Pin(pid)).await,
+    CloudAction::UnpinProcess { pin_id } => {
+      cloud.process_action(ProcessAction::Unpin(pin_id)).await
+    }
+    CloudAction::SaveProviderKey { kind, key } => cloud.save_provider_key(&kind, &key.0).await,
+    CloudAction::RemoveProviderKey { kind } => cloud.remove_provider_key(&kind).await,
+    CloudAction::ProvisionOn { kind } => cloud.provision_on(&kind).await,
+    CloudAction::SetCloudProfile { org_id } => cloud.set_cloud_profile(org_id.as_deref()).await,
+    CloudAction::SaveOrgCloudSettings {
+      org_id,
+      allow_managed,
+      allow_byos,
+      org_cap_usd,
+      member_cap_usd,
+    } => {
+      cloud
+        .save_org_cloud_settings(crate::core::cloud_catalog::OrgCloudSettings {
+          org_id,
+          allow_managed,
+          allow_byos,
+          org_cap_usd,
+          member_cap_usd,
+        })
+        .await
+    }
+    CloudAction::SaveOrgProviderKey { org_id, kind, key } => {
+      cloud.save_org_provider_key(&org_id, &kind, &key.0).await
+    }
+    CloudAction::RemoveOrgProviderKey { org_id, kind } => {
+      cloud.remove_org_provider_key(&org_id, &kind).await
+    }
   }
   Ok(())
 }

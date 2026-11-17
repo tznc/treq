@@ -10,8 +10,11 @@
 //!
 //! [`pr_review_data`]: super::pr_review_data
 
+use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use crate::result_ext::ResultExt;
+use gpui_kit::base::TestSupportExt as _;
 use std::{
   cell::RefCell,
   ops::Range,
@@ -30,6 +33,7 @@ use tauri_plugin_gpui::gpui::{
 use super::{
   changes::{pr::PrTarget, ChangesView},
   changes_data::{review_prompt_for, split_path},
+  changes_review::count_label,
   pr_review_data::{
     can_submit, comments_to_review, files_label, finish_text, review_summary, Event, PrReviewHost,
     OWN_PR_HINT, TARGET,
@@ -39,7 +43,6 @@ use super::{
 use crate::{
   github::GhPullRequest,
   gpui_shell::{
-    native::{NativeEvent, ToastTone},
     popup::{self, PopupSink, Side, TooltipContent},
     theme::{self, Palette},
     tooltips::{HasTooltips, Tooltips},
@@ -160,26 +163,16 @@ impl PrReviewView {
       let value = cx
         .background_spawn(async move { work(host.as_ref()) })
         .await;
-      let _ = this.update(cx, |view, cx| {
-        if view.route == route {
-          apply(view, value, cx);
-          cx.notify();
-        }
-      });
+      this
+        .update(cx, |view, cx| {
+          if view.route == route {
+            apply(view, value, cx);
+            cx.notify();
+          }
+        })
+        .ignore_closed();
     })
     .detach();
-  }
-
-  fn toast(&self, tone: ToastTone, title: &str, description: impl Into<String>) {
-    super::workspace_data::WorkspaceHost::notify(
-      self.host.as_ref(),
-      NativeEvent::Toast {
-        title: title.into(),
-        description: description.into(),
-        tone,
-        action: None,
-      },
-    );
   }
 
   fn send(&self, action: ScreenAction, cx: &mut App) {
@@ -289,7 +282,12 @@ impl PrReviewView {
       |view, result, _cx| {
         view.starting = false;
         if let Err(err) = result {
-          view.toast(ToastTone::Error, "Failed to start review", err);
+          super::workspace_data::WorkspaceHost::notify(
+            view.host.as_ref(),
+            Toast::error("Failed to start review")
+              .description(err)
+              .into(),
+          );
         }
       },
       cx,
@@ -342,13 +340,25 @@ impl PrReviewView {
                 c.read_drafts(cx);
               });
             }
-            view.toast(
-              ToastTone::Success,
-              "Review submitted",
-              format!("#{number}: {}", event.label()),
+            super::workspace_data::WorkspaceHost::notify(
+              view.host.as_ref(),
+              Toast::success("Review submitted")
+                .description(format!("#{number}: {}", event.label()))
+                .into(),
+            );
+            view.send(
+              ScreenAction::Press {
+                id: "prReview.submitted".into(),
+              },
+              cx,
             );
           }
-          Err(err) => view.toast(ToastTone::Error, "Failed to submit review", err),
+          Err(err) => super::workspace_data::WorkspaceHost::notify(
+            view.host.as_ref(),
+            Toast::error("Failed to submit review")
+              .description(err)
+              .into(),
+          ),
         }
       },
       cx,
@@ -395,7 +405,11 @@ impl Render for PrReviewView {
     self.ensure_summary_input(window, cx);
     let p = theme::palette(self.dark);
     let page = div()
+      .id("pr-review-page")
       .debug_selector(|| "pr-review-page".into())
+      .role(gpui::Role::Main)
+      .aria_label("Pull request review")
+      .test_support()
       .size_full()
       .bg(p.background)
       .text_color(p.foreground);
@@ -435,8 +449,18 @@ impl PrReviewView {
       .map_or_else(|| format!("Pull request #{number}"), |pr| pr.title.clone());
     let mono = |text: String| div().font_family(theme::MONO_FONT).child(text);
     let subtitle = self.pr.as_ref().map(|pr| {
-      ui::text(div(), TextSize::Xs)
+      ui::text(div(), TextSize::Sm)
+        .id("pr-review-subtitle")
         .debug_selector(|| "pr-review-subtitle".into())
+        .role(gpui::Role::Label)
+        .aria_label(format!(
+          "{} wants to merge {} into {} · {}",
+          pr.author.login,
+          pr.head_ref_name,
+          pr.base_ref_name,
+          files_label(files)
+        ))
+        .test_support()
         .flex()
         .gap_1()
         .overflow_hidden()
@@ -510,7 +534,11 @@ impl PrReviewView {
           .flex_1()
           .child(
             ui::text(div(), TextSize::Sm)
+              .id("pr-review-title")
               .debug_selector(|| "pr-review-title".into())
+              .role(gpui::Role::Heading)
+              .aria_label(format!("{title} #{number}"))
+              .test_support()
               .flex()
               .gap_1()
               .overflow_hidden()
@@ -594,44 +622,95 @@ impl PrReviewView {
 
   fn nav_rows(&mut self, range: Range<usize>, cx: &mut Context<Self>) -> Vec<gpui::AnyElement> {
     let p = theme::palette(self.dark);
-    let accent = p.accent;
-    let files: Vec<_> = self
+    let (files, counts) = self
       .changes
       .as_ref()
-      .and_then(|c| {
-        c.read(cx)
+      .map(|c| {
+        let c = c.read(cx);
+        let files = c
           .snapshot
           .as_ref()
-          .and_then(|s| s.files.get(range).map(<[_]>::to_vec))
+          .and_then(|s| s.files.get(range).map(<[_]>::to_vec));
+        (files.unwrap_or_default(), c.comment_counts())
       })
       .unwrap_or_default();
     files
       .into_iter()
       .map(|file| {
-        let (name, _) = split_path(&file.path);
+        let (name, dir) = split_path(&file.path);
         let path = file.path.clone();
         let active = self.active.as_deref() == Some(file.path.as_str());
-        let row = ui::text(div(), TextSize::Xs)
-          .id(SharedString::from(format!("pr-file-{}", file.path)))
-          .debug_selector({
-            let id = format!("pr-file-{}", file.path);
-            move || id
-          })
+        let row = ui::Row::new(SharedString::from(format!("pr-file-{}", file.path)), &p)
+          .label(file.path.clone())
+          .selected(active)
           .w_full()
-          .flex()
-          .items_center()
-          .gap_2()
           .px_3()
-          .py_1()
-          .cursor_pointer()
-          .hover(move |s| s.bg(accent))
-          .when(active, |this| this.bg(accent))
-          .child(ui::icon(theme::ICON_FILE_TEXT, 12., p.muted_foreground).flex_none())
-          .child(div().truncate().flex_1().child(name))
+          .rounded_none()
           .child(
-            ui::text(div(), TextSize::Xs)
-              .text_color(p.muted_foreground)
-              .child(file.status.clone()),
+            div()
+              .flex_1()
+              .flex()
+              .items_center()
+              .gap_2()
+              .min_w_0()
+              .child(
+                ui::text(div(), TextSize::Sm)
+                  .min_w_0()
+                  .truncate()
+                  .font_weight(FontWeight::MEDIUM)
+                  .text_color(p.foreground)
+                  .id(SharedString::from(format!("pr-file-name-{}", file.path)))
+                  .role(gpui::Role::Label)
+                  .aria_label(name.clone())
+                  .test_support()
+                  .child(name),
+              )
+              .when_some(dir, |this, dir| {
+                this.child(
+                  ui::text(div(), TextSize::Sm)
+                    .min_w_0()
+                    .flex_1()
+                    .truncate()
+                    .text_color(p.muted_foreground.opacity(0.6))
+                    .id(SharedString::from(format!("pr-file-dir-{}", file.path)))
+                    .role(gpui::Role::Label)
+                    .aria_label(dir.clone())
+                    .test_support()
+                    .child(dir),
+                )
+              }),
+          )
+          .trailing(
+            div()
+              .flex()
+              .items_center()
+              .gap_2()
+              .when_some(counts.get(&file.path).copied(), |this, count| {
+                let comments = format!("pr-file-comments-{}", file.path);
+                this.child(
+                  // Short label (comment count): 11px is fine.
+                  // ast-grep-ignore: gpui-text-xs-short-label-only
+                  ui::text(div(), TextSize::Xs)
+                    .id(SharedString::from(comments.clone()))
+                    .debug_selector(move || comments)
+                    .role(gpui::Role::Label)
+                    .aria_label(count_label(count, "review comment"))
+                    .test_support()
+                    .flex()
+                    .items_center()
+                    .gap_0p5()
+                    .text_color(p.muted_foreground)
+                    .child(ui::icon(theme::ICON_MESSAGE, 12., p.muted_foreground))
+                    .child(count.to_string()),
+                )
+              })
+              .child(
+                // Short label (status letter): 11px is fine.
+                // ast-grep-ignore: gpui-text-xs-short-label-only
+                ui::text(div(), TextSize::Xs)
+                  .text_color(p.muted_foreground)
+                  .child(file.status.clone()),
+              ),
           )
           .on_click(cx.listener(move |view, _, _, cx| view.show_file(&path, cx)));
         let tip = file.path.clone();
@@ -694,6 +773,13 @@ impl PrReviewView {
             let id = format!("pr-review-event-{}", event.value());
             move || id
           })
+          .role(gpui::Role::RadioButton)
+          .aria_label(event.label())
+          .aria_toggled(if checked {
+            gpui::accesskit::Toggled::True
+          } else {
+            gpui::accesskit::Toggled::False
+          })
           .flex()
           .items_start()
           .gap_2()
@@ -707,14 +793,18 @@ impl PrReviewView {
           })
           .child(dot.when(disabled, |this| this.opacity(0.5)))
           .child(
+            // flex_1 + min_w_0 so a long hint wraps inside the popover.
             div()
+              .flex_1()
+              .min_w_0()
               .child(div().font_weight(FontWeight::MEDIUM).child(event.label()))
               .child(
-                ui::text(div(), TextSize::Xs)
+                ui::text(div(), TextSize::Sm)
                   .text_color(p.muted_foreground)
                   .child(if disabled { OWN_PR_HINT } else { event.hint() }),
               ),
-          ),
+          )
+          .test_support(),
       );
     }
     let enabled = !self.submitting && can_submit(self.event, &self.summary, postable.len());
