@@ -3305,7 +3305,7 @@ impl ChangesView {
           ),
       );
     let mut right = div().flex().items_center().gap_2();
-    if !committed && !self.read_only() {
+    if !self.read_only() {
       right = right.child(
         self.tip(
           format!("add-file-comment-tip-{path}"),
