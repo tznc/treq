@@ -431,7 +431,9 @@ fn pr_review_author_can_only_comment(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn pr_review_starts_an_ai_review_in_the_home_repository_without_leaving_the_pr(cx: &mut TestAppContext) {
+fn pr_review_starts_an_ai_review_in_the_home_repository_without_leaving_the_pr(
+  cx: &mut TestAppContext,
+) {
   let (mut h, host) = workspace_harness(cx, pr_host(), pr_route());
   h.click("pr-review-ai-review");
   h.cx.run_until_parked();
