@@ -92,7 +92,10 @@ pub enum NativeEvent {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum OpenRequest {
-  BranchSwitcher,
+  #[serde(rename_all = "camelCase")]
+  BranchSwitcher {
+    repo_path: String,
+  },
   /// The add-supporting-repository flow.
   AddRepository,
   #[serde(rename_all = "camelCase")]

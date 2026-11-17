@@ -31,7 +31,8 @@ pub enum MenuAction {
   /// Opens a URL, such as an editor's `cursor://file/...`.
   OpenUrl(String),
   /// The window's branch switcher.
-  OpenBranchSwitcher,
+  /// Switch the branch of the repository at this path.
+  OpenBranchSwitcher(String),
   AddRepository,
   OpenRepoSettings(String),
   LocateRepo(String),
@@ -169,8 +170,6 @@ pub struct HomeMenu {
   pub repo_path: String,
   /// The folder is gone: no path items.
   pub missing: bool,
-  /// The repository on screen, whose branch can be switched.
-  pub on_screen: bool,
   /// A supporting repository (not the window's main one).
   pub supporting: bool,
   /// The window can let this repository go.
@@ -181,9 +180,10 @@ pub struct HomeMenu {
 pub fn home_items(menu: &HomeMenu, editors: EditorApps) -> Vec<MenuItem> {
   let path = &menu.repo_path;
   let mut items = Vec::new();
-  if menu.on_screen {
+  if !menu.missing {
     items.push(
-      MenuItem::item("Switch Branch...", MenuAction::OpenBranchSwitcher).icon(MenuIcon::GitBranch),
+      MenuItem::item("Switch Branch...", MenuAction::OpenBranchSwitcher(path.clone()))
+        .icon(MenuIcon::GitBranch),
     );
     items.push(MenuItem::Separator);
   }
@@ -703,10 +703,22 @@ mod tests {
   }
 
   #[test]
+  fn switches_branch_of_a_supporting_repository() {
+    let menu = HomeMenu {
+      repo_path: "/s".into(),
+      supporting: true,
+      ..Default::default()
+    };
+    assert!(matches!(
+      &home_items(&menu, NO_EDITORS)[0],
+      MenuItem::Item { action: MenuAction::OpenBranchSwitcher(path), .. } if path == "/s"
+    ));
+  }
+
+  #[test]
   fn matches_the_react_home_row_menu() {
     let menu = HomeMenu {
       repo_path: "/r".into(),
-      on_screen: true,
       ..Default::default()
     };
     assert_eq!(
@@ -730,7 +742,6 @@ mod tests {
       missing: true,
       supporting: true,
       removable: true,
-      on_screen: false,
     };
     let items = home_items(&menu, NO_EDITORS);
     assert_eq!(labels(&items), ["---", "Locate…", "Remove Repository"]);
@@ -749,7 +760,7 @@ mod tests {
     };
     let items = home_items(&menu, NO_EDITORS);
     assert_eq!(
-      labels(&items)[3..],
+      labels(&items)[5..],
       ["---", "Add Repository…", "Remove Repository"]
     );
     let fixed = HomeMenu {

@@ -87,7 +87,6 @@ pub fn handle(
       let menu = HomeMenu {
         repo_path: repo_path.clone(),
         missing: snapshot.repos[index].missing,
-        on_screen: repo_path == &active.path,
         supporting: index > 0,
         // Any local repository can leave; the next takes over the window,
         // or the project shows empty. A remote window's one repository stays.
@@ -321,7 +320,7 @@ fn show(app: &AppHandle, label: &str, backend: Arc<Backend>, items: Vec<context_
 fn run(app: &AppHandle, backend: Arc<Backend>, action: MenuAction) {
   let open = |what| WorkspaceHost::notify(&*backend, NativeEvent::Open { what });
   match action {
-    MenuAction::OpenBranchSwitcher => open(OpenRequest::BranchSwitcher),
+    MenuAction::OpenBranchSwitcher(repo_path) => open(OpenRequest::BranchSwitcher { repo_path }),
     MenuAction::SaveProject => open(OpenRequest::SaveProject { closing: false }),
     MenuAction::ProjectContext => open(OpenRequest::ProjectContext),
     MenuAction::SetProjectOwner(org_id) => {

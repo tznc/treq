@@ -1069,7 +1069,10 @@ impl Model {
   /// `openGpuiRequest`: what a GPUI menu or button asks to open.
   fn open_request(&mut self, what: &OpenRequest, data: &Data) -> Vec<Effect> {
     match what {
-      OpenRequest::BranchSwitcher => self.dialogs.branch_switcher = true,
+      OpenRequest::BranchSwitcher { repo_path } => {
+        self.activate_repo(repo_path, data);
+        self.dialogs.branch_switcher = true;
+      }
       OpenRequest::AddRepository if self.has_repo() || self.empty_project.is_some() => {
         return vec![Effect::PickFolder(FolderPurpose::AddSupporting)]
       }
@@ -1902,6 +1905,21 @@ mod tests {
     );
     assert_eq!(model.menu(Menu::ViewLogs, &data), [Effect::OpenLogDir]);
   }
+  #[test]
+  fn switching_branch_of_an_unselected_repo_activates_it_first() {
+    let (mut model, mut data) = (model(), data());
+    data.set_supporting(vec![crate::core::supporting_repos::SupportingRepo {
+      path: "/other".into(),
+      exists: true,
+    }]);
+    let what = OpenRequest::BranchSwitcher {
+      repo_path: "/other".into(),
+    };
+    model.open_request(&what, &data);
+    assert_eq!(model.repo(), "/other");
+    assert!(model.dialogs.branch_switcher);
+  }
+
   fn removing(model: &mut Model, data: &Data, terminals: Value) -> Confirm {
     model.screen_action(&field("terminal.summaries", terminals), data);
     let what = OpenRequest::RemoveRepo {
