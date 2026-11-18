@@ -438,6 +438,9 @@ if (group === "api" && command === "graphql") {
       },
     });
   }
+  if (query.includes("resolveReviewThread")) {
+    out({ data: {} });
+  }
   if (query.includes("addReaction") || query.includes("removeReaction")) {
     out({ data: {} });
   }
