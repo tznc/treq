@@ -1261,7 +1261,10 @@ impl Render for CodeView {
           .children(self.readme(&p)),
       );
     div()
+      .id("workspace-code")
       .debug_selector(|| "workspace-code".into())
+      .role(gpui::Role::Group)
+      .aria_label("Code")
       .size_full()
       .flex()
       .bg(p.background)
@@ -1275,6 +1278,7 @@ impl Render for CodeView {
           .bg(p.muted.opacity(0.2))
           .child(self.history(&p, window, cx)),
       )
+      .test_support()
   }
 }
 
@@ -1389,7 +1393,10 @@ impl CodeView {
   /// and Go to file on the right.
   fn action_row(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     div()
+      .id("code-action-row")
       .debug_selector(|| "code-action-row".into())
+      .role(gpui::Role::Toolbar)
+      .aria_label("Code actions")
       .flex()
       .items_center()
       .gap_2()
@@ -1397,6 +1404,7 @@ impl CodeView {
       .child(div().flex_1())
       .children(self.status_button(p, cx))
       .child(self.go_to_file(p))
+      .test_support()
   }
 
   /// Every alert behind one button that counts them by severity; it opens
@@ -1444,6 +1452,7 @@ impl CodeView {
     let popover = self.status_open.then(|| {
       let items: Vec<AnyElement> = alerts.iter().map(|a| self.alert(a, p, cx)).collect();
       ui::Popover::new("code-status-popover", p)
+        .aria_label("Alerts")
         .w(zpx(420.))
         .gap_2()
         .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -1638,14 +1647,17 @@ impl CodeView {
       return None;
     }
     let card = section(p)
+      .id("workspace-about")
       .debug_selector(|| "workspace-about".into())
+      .role(gpui::Role::Group)
+      .aria_label("About")
       .px_4()
       .py_3()
       .flex()
       .flex_col()
       .gap_3()
       .when(draft, |card| card.child(self.about_tabs(p, cx)));
-    Some(card.children(body).children(footer))
+    Some(card.children(body).children(footer).test_support())
   }
 
   fn about_tabs(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1687,16 +1699,21 @@ impl CodeView {
   /// The pull request's title and body as GitHub has them, read-only.
   fn github_text(&self, p: &Palette) -> impl IntoElement {
     let panel = div()
+      .id("workspace-about-github")
       .debug_selector(|| "workspace-about-github".into())
+      .role(gpui::Role::Group)
+      .aria_label("Pull request on GitHub")
       .flex()
       .flex_col()
       .gap_3();
     let Some((title, body)) = self.pr_text.clone() else {
-      return panel.child(
-        ui::text(div(), TextSize::Sm)
-          .text_color(p.muted_foreground)
-          .child("Reading the pull request…"),
-      );
+      return panel
+        .child(
+          ui::text(div(), TextSize::Sm)
+            .text_color(p.muted_foreground)
+            .child("Reading the pull request…"),
+        )
+        .test_support();
     };
     panel
       .child(
@@ -1718,6 +1735,7 @@ impl CodeView {
           .child(body)
           .into_any_element()
       })
+      .test_support()
   }
 
   fn description(
@@ -1728,7 +1746,10 @@ impl CodeView {
   ) -> Option<impl IntoElement> {
     let text = self.parent.workspace.as_ref().and_then(description)?;
     let card = div()
+      .id("workspace-description")
       .debug_selector(|| "workspace-description".into())
+      .role(gpui::Role::Group)
+      .aria_label("Description")
       .relative();
     let Some(draft) = self.description_draft.clone() else {
       let shown = if looks_like_markdown(&text) {
@@ -1768,6 +1789,7 @@ impl CodeView {
               ),
           )
           .child(shown)
+          .test_support()
           .into_any_element(),
       );
     };
@@ -1798,7 +1820,7 @@ impl CodeView {
             .child(
               ui::text(div(), TextSize::Sm)
                 .debug_selector(|| "workspace-description-input".into())
-                .child(Textarea::new(&draft)),
+                .child(Textarea::new(&draft).aria_label("Workspace description")),
             )
             .child(
               div()
@@ -1826,6 +1848,7 @@ impl CodeView {
                 )),
             ),
         )
+        .test_support()
         .into_any_element(),
     )
   }
@@ -2277,9 +2300,14 @@ impl CodeView {
       let synced = entry.submodule_synced.unwrap_or(false);
       let path = entry.name.clone();
       let syncing = self.syncing_submodule;
+      let row_label = format!("Submodule {}", entry.name);
       list = list.child(
         div()
+          .id(SharedString::from(format!("code-entry-row-{}", entry.name)))
           .debug_selector(move || selector)
+          .when(submodule, |row| {
+            row.role(gpui::Role::Group).aria_label(row_label)
+          })
           .when(divided, |this| this.border_t_1().border_color(p.border))
           .when(
             count > ENTRIES_ALL && (i == shown.start || i == 1),
@@ -2364,7 +2392,8 @@ impl CodeView {
                 )
               }),
             )
-          }),
+          })
+          .test_support(),
       );
     }
     // The toggle closes the list when nothing drawn follows it; one scrolled
@@ -2886,7 +2915,8 @@ impl CodeView {
       )
       .on_click(cx.listener(move |view, _, _, cx| {
         view.field("code.commit", change.clone().into(), cx);
-      }));
+      }))
+      .test_support();
     div()
       .relative()
       .flex()
