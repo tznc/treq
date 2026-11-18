@@ -374,6 +374,12 @@ struct HoveredTerminal(Option<String>);
 
 impl gpui::Global for HoveredTerminal {}
 
+/// Whether a terminal in `dir` runs in the workspace at `path`, which the
+/// database may keep absolute or relative to the repository.
+fn runs_in(dir: &str, path: &str) -> bool {
+  !path.is_empty() && (dir == path || dir.ends_with(&format!("/{}", path.trim_start_matches("./"))))
+}
+
 /// Marks the workspace whose terminal, in `dir`, the pointer rests on.
 pub fn set_hovered_terminal(dir: Option<String>, cx: &mut App) {
   if cx.try_global::<HoveredTerminal>().map(|h| &h.0) != Some(&dir) {
@@ -1615,7 +1621,11 @@ impl Sidebar {
       });
 
     let interactive = repo_active && !row.archiving;
-    let peek = !row.selected && self.peek.as_deref() == Some(row.path.as_str()) && !row.path.is_empty();
+    let peek = !row.selected
+      && self
+        .peek
+        .as_deref()
+        .is_some_and(|dir| runs_in(dir, &row.path));
     let row_el = ui::Row::new(selector, palette)
       .role(Role::Button)
       .label(label.clone())

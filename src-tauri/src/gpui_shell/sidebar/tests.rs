@@ -139,7 +139,8 @@ impl Harness {
       let popups = popups.clone();
       Rc::new(move |request, _| popups.borrow_mut().push(request))
     };
-    let (sidebar, cx) = cx.add_window_view(|_, cx| Sidebar::new(snapshot, sink, popup_sink).watch_terminals(cx));
+    let (sidebar, cx) =
+      cx.add_window_view(|_, cx| Sidebar::new(snapshot, sink, popup_sink).watch_terminals(cx));
     let cx = cx.clone();
     Self {
       cx,
@@ -1326,9 +1327,16 @@ fn project_button_draws_for_saved_and_unsaved_projects(cx: &mut TestAppContext) 
 fn hovering_a_terminal_peeks_its_workspace_row(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, snapshot(vec![row(7, "feat-a", 0), row(8, "feat-b", 0)]));
   assert!(h.bounds("workspace-peek-7").is_none());
-  h.cx.update(|_, cx| super::set_hovered_terminal(Some("/wt/feat-a".into()), cx));
+  h.cx
+    .update(|_, cx| super::set_hovered_terminal(Some("/wt/feat-a".into()), cx));
   assert!(h.bounds("workspace-peek-7").is_some());
   assert!(h.bounds("workspace-peek-8").is_none());
   h.cx.update(|_, cx| super::set_hovered_terminal(None, cx));
   assert!(h.bounds("workspace-peek-7").is_none());
+  // The database keeps the path relative to the repository's workspaces.
+  h.update(|s| s.repos[0].workspaces[1].path = "2-feat-b".into());
+  h.cx.update(|_, cx| {
+    super::set_hovered_terminal(Some("/src/treq/.treq/workspaces/2-feat-b".into()), cx)
+  });
+  assert!(h.bounds("workspace-peek-8").is_some());
 }

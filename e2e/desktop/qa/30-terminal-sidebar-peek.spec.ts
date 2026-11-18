@@ -33,6 +33,7 @@ test("terminal sidebar peek: hovering a terminal highlights its workspace", asyn
   await capture(page, {
     name: "30-terminal-sidebar-peek-02-hovered",
     title: "Hovering the agent terminal",
+    rest: false,
     expectations: [
       `The ${OWNER} sidebar row shows a faint hover highlight`,
       `${OTHER} stays the selected row`,
