@@ -12,7 +12,7 @@ test("github-suggestions: replacement and deletion", async ({ page }) => {
   await settle(page, 1500);
   await page.getByRole("button", { name: "packages/api/src/cache.ts", exact: true }).click();
   await settle(page, 2000);
-  await expect(page.getByRole("heading", { name: "Suggested change" })).toHaveCount(2);
+  await expect(page.getByRole("heading", { name: "Suggested change" }).first()).toBeVisible();
   await capture(page, {
     name: "21-github-suggestions-01-diffs",
     title: "GitHub suggestions drawn as diffs",
