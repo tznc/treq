@@ -320,6 +320,14 @@ pub fn suggestion_diff(original: Option<&str>, suggested: &str) -> Option<Vec<Ro
   (!rows.is_empty()).then_some(rows)
 }
 
+/// How many lines a review thread's comment covers: `startLine..=line`.
+pub fn suggestion_span(thread: &GhReviewThread) -> usize {
+  match (thread.start_line, thread.line) {
+    (Some(start), Some(end)) if end >= start => usize::try_from(end - start + 1).unwrap_or(1),
+    _ => 1,
+  }
+}
+
 /// The `lines` a GitHub suggestion replaces: the last lines of the
 /// comment's `diffHunk`, which GitHub ends on the commented line.
 pub fn github_suggestion_original(diff_hunk: &str, lines: usize) -> Option<String> {
@@ -541,6 +549,16 @@ mod tests {
     let hunk = "@@ -1,3 +1,3 @@\n a\n+b\n+c";
     assert_eq!(github_suggestion_original(hunk, 2).as_deref(), Some("b\nc"));
     assert_eq!(github_suggestion_original(hunk, 4), None);
+  }
+
+  #[test]
+  fn suggestion_span_counts_start_line_to_line() {
+    let mut t = thread("a.rs", Some(4), "RIGHT");
+    assert_eq!(suggestion_span(&t), 1);
+    t.start_line = Some(2);
+    assert_eq!(suggestion_span(&t), 3);
+    t.start_line = Some(9);
+    assert_eq!(suggestion_span(&t), 1);
   }
 
   #[test]

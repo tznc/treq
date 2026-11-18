@@ -20,7 +20,7 @@ use crate::{
     changes_review::{count_label, number_and_side, Pending, Quote, Side},
     changes_threads::{
       agent_by_line, comment_date, github_suggestion_original, original_text, place_threads,
-      preview, suggestion_diff, Placed, RowKind,
+      preview, suggestion_diff, suggestion_span, Placed, RowKind,
     },
     commits_data::LineRef,
     reactions::{self, Reacts},
@@ -563,10 +563,7 @@ impl ChangesView {
         .rounded(radius::MD)
         .border_1()
         .border_color(p.border.opacity(0.6));
-      let lines = match (thread.start_line, thread.line) {
-        (Some(start), Some(end)) if end >= start => usize::try_from(end - start + 1).unwrap_or(1),
-        _ => 1,
-      };
+      let lines = suggestion_span(thread);
       for (i, comment) in thread.comments.iter().enumerate() {
         let id = comment.id.clone();
         let mut c = div()
