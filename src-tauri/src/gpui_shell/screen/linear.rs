@@ -576,7 +576,9 @@ impl LinearView {
         Ok(url) => host.open_url(&url),
         Err(err) => super::workspace_data::WorkspaceHost::notify(
           host.as_ref(),
-          Toast::error("Couldn't connect Linear").description(err).into(),
+          Toast::error("Couldn't connect Linear")
+            .description(err)
+            .into(),
         ),
       }
     })
