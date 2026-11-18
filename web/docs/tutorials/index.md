@@ -1,5 +1,6 @@
 ---
 sidebar_position: 1
+description: "Step-by-step walkthroughs of Treq's core workflows: workspaces, terminal sessions, commits, code review, and merging."
 ---
 
 import DocCardList from '@theme/DocCardList';
