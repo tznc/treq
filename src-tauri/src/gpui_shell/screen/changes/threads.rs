@@ -436,7 +436,11 @@ impl ChangesView {
     // Expanded: a compact pill above the comments. Collapsed: a full-width row
     // holding the preview.
     toggle = if collapsed {
-      toggle.w_full().px_3().py_1p5().hover(move |s| s.bg(p.hover()))
+      toggle
+        .w_full()
+        .px_3()
+        .py_1p5()
+        .hover(move |s| s.bg(p.hover()))
     } else {
       toggle
         .flex_none()
@@ -447,7 +451,11 @@ impl ChangesView {
         .bg(sky(p, 0.1))
         .hover(move |s| s.bg(sky(p, 0.18)))
     };
-    let muted = if collapsed { muted } else { Tone::Primary.text(p) };
+    let muted = if collapsed {
+      muted
+    } else {
+      Tone::Primary.text(p)
+    };
     toggle = toggle
       .on_click(cx.listener(move |view, _, _, cx| view.toggle_thread(&id, cx)))
       .child(ui::icon(
