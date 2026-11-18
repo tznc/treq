@@ -73,6 +73,11 @@ test("comment-reactions: review thread", async ({ page }) => {
   await settle(page, 1500);
   await page.getByRole("button", { name: "packages/web/src/lib/client.ts", exact: true }).click();
   await settle(page, 1500);
+  await capture(page, {
+    name: "16-reactions-04-review-thread-collapsed",
+    title: "Collapsed review threads in the Changes tab",
+    expectations: ["Collapsed threads are full-width rows with avatar, author and a muted preview"],
+  });
   await page.getByRole("button", { name: "Show review thread" }).first().click(); // the resolved one
   await settle(page, 800);
   await expect(page.getByRole("button", { name: "Rocket (1, you reacted)" })).toBeVisible();
@@ -81,6 +86,7 @@ test("comment-reactions: review thread", async ({ page }) => {
     title: "A review comment's reactions in the Changes tab",
     expectations: [
       "Under octocat's review comment: add-reaction button, 👍 2 and a highlighted 🚀 1",
+      "The thread header is a small tinted pill (chevron + 'N comment(s)') with no grey full-width bar or outer box",
     ],
   });
 });

@@ -428,15 +428,27 @@ impl ChangesView {
         "Hide review thread"
       })
       .aria_expanded(!collapsed)
-      .w_full()
       .min_w_0()
       .flex()
       .items_center()
       .gap_2()
-      .px_3()
-      .py_1p5()
-      .cursor_pointer()
-      .hover(move |s| s.bg(p.hover()))
+      .cursor_pointer();
+    // Expanded: a compact pill above the comments. Collapsed: a full-width row
+    // holding the preview.
+    toggle = if collapsed {
+      toggle.w_full().px_3().py_1p5().hover(move |s| s.bg(p.hover()))
+    } else {
+      toggle
+        .flex_none()
+        .gap_1()
+        .px_2()
+        .py_0p5()
+        .rounded(radius::SM)
+        .bg(sky(p, 0.1))
+        .hover(move |s| s.bg(sky(p, 0.18)))
+    };
+    let muted = if collapsed { muted } else { Tone::Primary.text(p) };
+    toggle = toggle
       .on_click(cx.listener(move |view, _, _, cx| view.toggle_thread(&id, cx)))
       .child(ui::icon(
         if collapsed {
@@ -494,15 +506,20 @@ impl ChangesView {
     let mut card = div()
       .min_w_0()
       .max_w(zpx(CARD_MAX_W))
-      .rounded(radius::MD)
-      .border_1()
-      .border_color(sky(p, 0.3))
-      .bg(sky(p, 0.05))
-      .overflow_hidden()
-      .font_family(theme::SANS_FONT)
-      .child(toggle.test_support());
+      .font_family(theme::SANS_FONT);
+    if collapsed {
+      card = card
+        .rounded(radius::MD)
+        .border_1()
+        .border_color(sky(p, 0.3))
+        .bg(sky(p, 0.05))
+        .overflow_hidden();
+    } else {
+      card = card.flex().flex_col().items_start().gap_1p5();
+    }
+    card = card.child(toggle.test_support());
     if !collapsed {
-      let mut body = div().px_3().pb_3().flex().flex_col().gap_2();
+      let mut body = div().w_full().flex().flex_col().gap_2();
       for comment in &thread.comments {
         body = body.child(self.thread_comment(comment, path, anchor.clone(), line, side, p, cx));
       }
