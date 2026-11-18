@@ -19,7 +19,7 @@ use crate::{
   gpui_shell::screen::{
     changes_review::{count_label, number_and_side, Pending, Quote, Side},
     changes_threads::{
-      agent_by_line, comment_date, original_text, place_threads, preview, suggestion_diff, Placed,
+      agent_by_line, comment_date, github_suggestion_original, original_text, place_threads, preview, suggestion_diff, Placed,
       RowKind,
     },
     commits_data::LineRef,
@@ -511,6 +511,31 @@ impl ChangesView {
     card.into_any_element()
   }
 
+  /// A GitHub comment's text, its ```` ```suggestion ```` block drawn as a
+  /// diff against the line it replaces rather than as a code block.
+  fn github_comment_body(&self, comment: &GhReviewComment, p: &Palette) -> Div {
+    let md = |key: &str, text: &str| {
+      super::super::code::markdown(
+        format!("github-comment-{}{key}", comment.id),
+        text,
+        TextSize::Code.metrics().0,
+        self.dark,
+      )
+    };
+    let body = div().debug_selector(|| "github-comment-body".into());
+    let Some(s) = crate::core::review::parse_suggestion(&comment.body) else {
+      return body.child(md("", &comment.body));
+    };
+    let original = github_suggestion_original(&comment.diff_hunk);
+    body
+      .flex()
+      .flex_col()
+      .gap_2()
+      .when(!s.before.is_empty(), |b| b.child(md("-before", &s.before)))
+      .child(suggestion_box(original.as_deref(), &s.suggested, p))
+      .when(!s.after.is_empty(), |b| b.child(md("-after", &s.after)))
+  }
+
   /// `GithubCommentBody`: author, date and text, with a Quote button.
   #[expect(
     clippy::too_many_arguments,
@@ -559,14 +584,7 @@ impl ChangesView {
           )
           .child(ui::icon(theme::ICON_GITHUB, 14., Tone::Primary.text(p))),
       )
-      .child(div().debug_selector(|| "github-comment-body".into()).child(
-        super::super::code::markdown(
-          format!("github-comment-{}", comment.id),
-          &comment.body,
-          TextSize::Code.metrics().0,
-          self.dark,
-        ),
-      ))
+      .child(self.github_comment_body(comment, p))
       .child(reactions::bar(
         &self.tips,
         self.threads.reaction_picker.as_deref(),
