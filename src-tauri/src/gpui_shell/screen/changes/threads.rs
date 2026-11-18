@@ -672,19 +672,21 @@ impl ChangesView {
           .right_2()
           .opacity(0.)
           .group_hover("github-comment", |s| s.opacity(1.))
-          .child(self.tip(
-            format!("quote-{}", comment.id),
-            "Quote this comment",
-            Button::new(SharedString::from(format!("quote-{}", comment.id)), p)
-              .variant(Variant::Ghost)
-              .size(Size::IconXs)
-              .aria_label("Quote")
-              .child(ui::icon(theme::ICON_QUOTE, 14., p.muted_foreground))
-              .on_click(cx.listener(move |view, _, _, cx| {
-                view.quote(&quoted, &file, anchor.clone(), line, side, cx)
-              })),
-            cx,
-          )),
+          .child(
+            self.tip(
+              format!("quote-{}", comment.id),
+              "Quote this comment",
+              Button::new(SharedString::from(format!("quote-{}", comment.id)), p)
+                .variant(Variant::Ghost)
+                .size(Size::IconXs)
+                .aria_label("Quote")
+                .child(ui::icon(theme::ICON_QUOTE, 14., p.muted_foreground))
+                .on_click(cx.listener(move |view, _, _, cx| {
+                  view.quote(&quoted, &file, anchor.clone(), line, side, cx)
+                })),
+              cx,
+            ),
+          ),
       )
       .test_support()
   }
