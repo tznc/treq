@@ -75,6 +75,12 @@ pub struct SidebarSnapshot {
   /// sidebar; `None` with no modal open.
   #[serde(default)]
   pub modal: Option<f32>,
+  /// The title bar's back arrow has somewhere to go.
+  #[serde(default)]
+  pub can_back: bool,
+  /// The title bar's forward arrow has somewhere to go.
+  #[serde(default)]
+  pub can_forward: bool,
 }
 
 /// One repository: its home row and its workspaces.
@@ -234,6 +240,10 @@ pub enum SidebarAction {
   OpenProjectHome,
   OpenGithub,
   OpenLinear,
+  /// The title bar's back arrow.
+  Back,
+  /// The title bar's forward arrow.
+  Forward,
   /// The Open button beside WORKSPACES: opens workspaces from branches,
   /// links and pull requests.
   OpenWorkspaces,
@@ -830,9 +840,7 @@ impl Render for Sidebar {
       .pr_px()
       // The traffic lights sit here; the edge line runs past them to the
       // window's top edge.
-      .when(title_bar::SHOWN, |this| {
-        this.child(title_bar::drag_area("sidebar-title-bar"))
-      })
+      .child(self.title_bar(&palette))
       .child(header);
 
     // With several repositories each group header is its repository's home
@@ -1015,6 +1023,49 @@ impl Sidebar {
       palette,
       cx,
     )
+  }
+
+  /// The strip the traffic lights sit in on macOS, with the back and
+  /// forward arrows at its end; elsewhere, a strip of its own.
+  fn title_bar(&self, palette: &Palette) -> impl IntoElement {
+    let arrow = |id: &'static str, icon, label: &'static str, can: bool, action| {
+      ui::IconButton::new(id, icon, label, palette)
+        .disabled(!can)
+        .when(can, |this| this.on_click(self.on_action(action)))
+    };
+    div()
+      .relative()
+      .flex_none()
+      .w_full()
+      .h(px(title_bar::HEIGHT))
+      .when(title_bar::SHOWN, |this| {
+        this.child(title_bar::drag_area("sidebar-title-bar"))
+      })
+      .child(
+        div()
+          .absolute()
+          .top_0()
+          .right_0()
+          .h_full()
+          .pr_2()
+          .flex()
+          .items_center()
+          .gap_1()
+          .child(arrow(
+            "nav-back",
+            theme::ICON_ARROW_LEFT,
+            "Back",
+            self.snapshot.can_back,
+            SidebarAction::Back,
+          ))
+          .child(arrow(
+            "nav-forward",
+            theme::ICON_ARROW_RIGHT,
+            "Forward",
+            self.snapshot.can_forward,
+            SidebarAction::Forward,
+          )),
+      )
   }
 
   /// A square header button with a tooltip below it.

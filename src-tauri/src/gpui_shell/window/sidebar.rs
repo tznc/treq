@@ -259,6 +259,8 @@ pub fn snapshot(model: &Model, data: &Data) -> Option<SidebarSnapshot> {
     project_home: Some(matches!(model.page, Page::ProjectHome)),
     repos,
     modal: None,
+    can_back: model.history.can_go(true),
+    can_forward: model.history.can_go(false),
   })
 }
 
@@ -282,6 +284,8 @@ fn without_repos(model: &Model, data: &Data, name: &str) -> SidebarSnapshot {
     project_home: Some(matches!(model.page, Page::ProjectHome)),
     repos: Vec::new(),
     modal: None,
+    can_back: model.history.can_go(true),
+    can_forward: model.history.can_go(false),
   }
 }
 
