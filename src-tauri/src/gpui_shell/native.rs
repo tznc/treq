@@ -92,21 +92,16 @@ pub enum NativeEvent {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum OpenRequest {
-  BranchSwitcher,
+  #[serde(rename_all = "camelCase")]
+  BranchSwitcher { repo_path: String },
   /// The add-supporting-repository flow.
   AddRepository,
   #[serde(rename_all = "camelCase")]
-  RepoSettings {
-    repo_path: String,
-  },
+  RepoSettings { repo_path: String },
   #[serde(rename_all = "camelCase")]
-  LocateRepo {
-    repo_path: String,
-  },
+  LocateRepo { repo_path: String },
   #[serde(rename_all = "camelCase")]
-  RemoveRepo {
-    repo_path: String,
-  },
+  RemoveRepo { repo_path: String },
   /// The rename dialog for a workspace.
   #[serde(rename_all = "camelCase")]
   RenameWorkspace {
@@ -121,16 +116,11 @@ pub enum OpenRequest {
   },
   /// The Save project dialog; `closing` when the window is closing and
   /// asks first.
-  SaveProject {
-    closing: bool,
-  },
+  SaveProject { closing: bool },
   /// The Project instructions dialog of this window's saved project.
   ProjectContext,
   /// The pull request in Treq's PR view (`onViewPrInApp`).
-  PrReview {
-    number: u64,
-    state: String,
-  },
+  PrReview { number: u64, state: String },
 }
 
 /// A toast's button: `label`, running the action registered as `id`.
