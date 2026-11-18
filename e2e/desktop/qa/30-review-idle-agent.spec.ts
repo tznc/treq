@@ -2,7 +2,7 @@
 // templated review to the workspace's idle agent as one message. The fake
 // agent runs in paste mode (qa/fake-paste-agent.mjs): it asks for bracketed
 // paste and prints each message it receives with its line count.
-import { readdirSync, statSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
@@ -47,13 +47,16 @@ test("review: finish with an idle agent sends the whole review", async ({ page }
   await openTab(page, "Changes");
   await settle(page, 1500);
 
-  await comment(page, 277, "First comment: rename level");
-  await comment(page, 320, "Second comment: add a test");
+  await comment(page, 237, "First comment: rename level");
+  await comment(page, 333, "Second comment: add a test");
 
   await page.getByRole("button", { name: "Finish review" }).click();
-  const idle = page.getByRole("checkbox", { name: "Use an idle agent" });
-  await expect(idle).toBeVisible();
-  await idle.click();
+  await settle(page, 600);
+  // The popover's summary and checkbox are not observable, so by place in
+  // the 1400x900 window.
+  await page.mouse.click(1220, 245);
+  await page.keyboard.type("Overall: looks close");
+  await page.mouse.click(1088, 311);
   await settle(page, 400);
   await capture(page, {
     name: "30-review-idle-01-finish-popover",
@@ -66,6 +69,19 @@ test("review: finish with an idle agent sends the whole review", async ({ page }
 
   await page.getByRole("button", { name: "Edit", exact: true }).click();
   await settle(page, 2500);
+  const received = readFileSync(join(fixtureRoot(), "paste-agent.log"), "utf8")
+    .trim()
+    .split("\n")
+    .map((l) => JSON.parse(l) as string);
+  expect(received).toHaveLength(1);
+  expect(received[0]).toContain("First comment: rename level");
+  expect(received[0]).toContain("Second comment: add a test");
+  expect(received[0]).toContain("Overall: looks close");
+  await page.getByRole("button", { name: "Maximize" }).click();
+  await settle(page, 800);
+  await page.mouse.move(800, 400);
+  await page.mouse.wheel(0, -3000);
+  await settle(page, 600);
   await capture(page, {
     name: "30-review-idle-02-agent-received",
     title: "The idle agent receives the review as one message",

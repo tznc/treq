@@ -3,6 +3,11 @@
 // they do. Text between the paste markers is one draft; a bare Enter
 // submits the draft. It prints each message it received, so a capture shows
 // whether a multi-line message arrived whole or one line per submit.
+import { appendFileSync } from "node:fs";
+
+// Each received message is also appended to the log file named by its first argument, one JSON
+// string per line, for specs to assert on.
+const log = process.argv[2];
 process.stdin.setRawMode(true);
 process.stdout.write("\x1b[?2004h\x1b[1m> Waiting for input\x1b[0m\r\n\r\n");
 let draft = "";
@@ -37,6 +42,7 @@ process.stdin.on("data", (chunk) => {
           lines.map((l) => `  \x1b[2m│\x1b[0m ${l}`).join("\r\n") +
           "\r\n\r\n",
       );
+      if (log) appendFileSync(log, `${JSON.stringify(draft)}\n`);
       draft = "";
     } else if (ch === "\x03") {
       process.exit(0);

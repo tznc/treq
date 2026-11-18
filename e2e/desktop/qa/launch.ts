@@ -44,7 +44,7 @@ writeBin(
   "claude",
   `#!/bin/sh
 printf '%s\\n' "$*" >> '${fixture.agentLog}'
-[ -f '${join(fixture.root, "paste-agent")}' ] && exec '${process.execPath}' '${pasteAgent}'
+[ -f '${join(fixture.root, "paste-agent")}' ] && exec '${process.execPath}' '${pasteAgent}' '${join(fixture.root, "paste-agent.log")}'
 printf '\\033[1m> Handle empty event_message in postEvent\\033[0m\\n\\n'
 printf '\\033[32m●\\033[0m Read packages/web/src/lib/client.ts\\n'
 printf '  \\033[2m└ Updated client.ts (+6 -1)\\033[0m\\n\\n'
