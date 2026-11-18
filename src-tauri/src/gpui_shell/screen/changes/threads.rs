@@ -19,8 +19,8 @@ use crate::{
   gpui_shell::screen::{
     changes_review::{count_label, number_and_side, Pending, Quote, Side},
     changes_threads::{
-      agent_by_line, comment_date, github_suggestion_original, original_text, place_threads, preview, suggestion_diff, Placed,
-      RowKind,
+      agent_by_line, comment_date, github_suggestion_original, original_text, place_threads,
+      preview, suggestion_diff, Placed, RowKind,
     },
     commits_data::LineRef,
     reactions::{self, Reacts},
