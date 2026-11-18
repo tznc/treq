@@ -88,6 +88,41 @@ const CLAUDE_CODE_FEATURE: &str = "ghcr.io/anthropics/devcontainer-features/clau
 const CLAUDE_CONFIG_VOLUME: &str = "treq-claude-config";
 pub const CLAUDE_CONFIG_DIR: &str = "/treq/claude-config";
 
+/// Volume holding every agent account profile's config directory, shared by
+/// every repository's container like the Claude Code config volume.
+const AGENT_PROFILES_VOLUME: &str = "treq-agent-profiles";
+pub const AGENT_PROFILES_DIR: &str = "/treq/agent-profiles";
+
+/// Where agent profiles' config directories live for an agent: in the
+/// profiles volume inside a container, else under the app data directory.
+pub fn agent_profiles_base(in_container: bool, app_data_dir: Option<PathBuf>) -> Option<PathBuf> {
+  if in_container {
+    Path::new(AGENT_PROFILES_DIR)
+      .parent()
+      .map(Path::to_path_buf)
+  } else {
+    app_data_dir
+  }
+}
+
+/// `docker exec` arguments that create the volumes' directories and give
+/// them to the container's remote user.
+fn volume_owner_args(container_id: &str, remote_user: &str, claude_code: bool) -> Vec<String> {
+  use crate::core::remote::shell_quote;
+  let dirs: Vec<String> = std::iter::once(AGENT_PROFILES_DIR)
+    .chain(claude_code.then_some(CLAUDE_CONFIG_DIR))
+    .map(shell_quote)
+    .collect();
+  let dirs = dirs.join(" ");
+  let script = format!(
+    "mkdir -p {dirs} && chown -R {} {dirs}",
+    shell_quote(remote_user)
+  );
+  ["exec", "-u", "root", container_id, "sh", "-c", &script]
+    .map(str::to_string)
+    .to_vec()
+}
+
 /// Features Treq adds to the repository's own so agents can run: Claude Code,
 /// plus Node (which the Claude Code feature needs) unless the config has it.
 /// Features the config already names are left to the config.
@@ -117,6 +152,8 @@ pub fn up_args(repo_path: &str, temp_dir: &str, claude_code: Option<&str>) -> Ve
     bind_mount(repo_path),
     "--mount".into(),
     bind_mount(temp_dir),
+    "--mount".into(),
+    format!("type=volume,source={AGENT_PROFILES_VOLUME},target={AGENT_PROFILES_DIR}"),
   ];
   if let Some(config_json) = claude_code {
     args.push("--mount".into());
@@ -212,9 +249,7 @@ pub fn up(repo_path: &str, claude_code: bool) -> Result<DevcontainerStatus, Stri
   if !output.status.success() {
     return Err(up_failure_message(&output.stdout, &output.stderr));
   }
-  if claude_code {
-    give_config_volume_to_remote_user(&output.stdout)?;
-  }
+  give_volumes_to_remote_user(&output.stdout, claude_code)?;
   // The container still works without the CLI, so a failed install only
   // logs: agents lose `treq` commands, not their terminal.
   if let Some((container_id, _)) = up_result(&output.stdout) {
@@ -464,22 +499,20 @@ fn fetch_all(urls: &[&str]) -> Result<Vec<Vec<u8>>, String> {
   })
 }
 
-/// Docker creates the config volume owned by root; the container's remote
-/// user must own it for Claude Code to save its sign-in.
-fn give_config_volume_to_remote_user(up_stdout: &[u8]) -> Result<(), String> {
+/// Docker creates volumes owned by root; the container's remote user must
+/// own them for agents to save their sign-in.
+fn give_volumes_to_remote_user(up_stdout: &[u8], claude_code: bool) -> Result<(), String> {
   let Some((container_id, remote_user)) = up_result(up_stdout) else {
     return Ok(());
   };
   let output = Command::new("docker")
-    .args(["exec", "-u", "root", &container_id, "chown", "-R"])
-    .arg(&remote_user)
-    .arg(CLAUDE_CONFIG_DIR)
+    .args(volume_owner_args(&container_id, &remote_user, claude_code))
     .env("PATH", crate::binary_paths::get_extended_path())
     .output()
-    .map_err(|e| format!("Failed to prepare the Claude Code config volume: {e}"))?;
+    .map_err(|e| format!("Failed to prepare the agent config volumes: {e}"))?;
   if !output.status.success() {
     return Err(format!(
-      "Failed to prepare the Claude Code config volume: {}",
+      "Failed to prepare the agent config volumes: {}",
       String::from_utf8_lossy(&output.stderr).trim()
     ));
   }
@@ -609,7 +642,42 @@ mod tests {
         "type=bind,source=/src/app,target=/src/app",
         "--mount",
         "type=bind,source=/tmp,target=/tmp",
+        "--mount",
+        "type=volume,source=treq-agent-profiles,target=/treq/agent-profiles",
       ]
+    );
+  }
+
+  #[test]
+  fn agent_profiles_live_in_the_volume_inside_a_container() {
+    let profile = crate::core::agent_profiles::AgentProfile {
+      agent: "claude".into(),
+      name: "work".into(),
+    };
+    let base = agent_profiles_base(true, Some(Path::new("/host/data").into())).unwrap();
+    let dir = crate::core::agent_profiles::config_dir(&base, &profile);
+    assert_eq!(dir, Path::new("/treq/agent-profiles/claude/work"));
+    assert!(dir.starts_with(AGENT_PROFILES_DIR));
+    // On the host they stay under the app data directory.
+    assert_eq!(
+      agent_profiles_base(false, Some(Path::new("/host/data").into())),
+      Some(Path::new("/host/data").into())
+    );
+    assert_eq!(agent_profiles_base(false, None), None);
+  }
+
+  #[test]
+  fn hands_the_volumes_to_the_remote_user() {
+    let args = volume_owner_args("c1", "node", true);
+    assert_eq!(&args[..5], ["exec", "-u", "root", "c1", "sh"]);
+    assert_eq!(
+      args[6],
+      "mkdir -p '/treq/agent-profiles' '/treq/claude-config' && chown -R 'node' '/treq/agent-profiles' '/treq/claude-config'"
+    );
+    // Without Claude Code there is no config volume to hand over.
+    assert_eq!(
+      volume_owner_args("c1", "node", false)[6],
+      "mkdir -p '/treq/agent-profiles' && chown -R 'node' '/treq/agent-profiles'"
     );
   }
 
@@ -617,7 +685,7 @@ mod tests {
   fn up_adds_claude_code_and_config_volume() {
     let args = up_args("/src/app", "/tmp", Some(r#"{"image":"debian"}"#));
     assert_eq!(
-      &args[9..],
+      &args[11..],
       [
         "--mount",
         "type=volume,source=treq-claude-config,target=/treq/claude-config",
