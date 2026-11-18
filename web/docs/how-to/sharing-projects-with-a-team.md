@@ -1,5 +1,6 @@
 ---
 sidebar_position: 10
+description: Move a saved Treq project to a Team organization so it syncs to every member, switch between personal and team projects, and see what syncs.
 ---
 
 # Sharing Projects with a Team
