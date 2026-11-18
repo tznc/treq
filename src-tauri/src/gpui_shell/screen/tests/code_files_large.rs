@@ -10,7 +10,7 @@ use std::{collections::HashMap, time::Duration};
 
 use gpui::{Modifiers, TestAppContext};
 
-use super::changes_large::{frame, leak, report, timed};
+use super::changes_large::{frame, report, timed};
 use super::*;
 
 const BASE: &str = "/repo/.treq/workspaces/login";
@@ -144,11 +144,27 @@ fn hover(h: &mut Harness, origin: gpui::Point<gpui::Pixels>, n: usize) -> Vec<Du
 fn a_large_root_and_file_draw_only_the_rows_on_screen(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, large_host(), route(true));
   h.cx.run_until_parked();
-  assert!(h.drawn("file-tree-big"));
-  assert!(!h.drawn("file-tree-zz_04999.txt"), "far below the window");
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("big")),
+  )
+  .to_be_visible();
+  assert!(
+    screen
+      .query_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("zz_04999.txt"))
+      .is_none(),
+    "far below the window"
+  );
   h.click("file-tree-big.rs");
-  assert!(h.drawn("code-line-1"));
-  assert!(!h.drawn(leak(format!("code-line-{}", file_lines()))));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("Line 1")),
+  )
+  .to_be_visible();
+  let last = format!("Line {}", file_lines());
+  assert!(screen
+    .query_by_role(gpui_testing_library::by::role(gpui::Role::Button).name(last))
+    .is_none());
 }
 
 #[gpui::test]
@@ -157,8 +173,17 @@ fn the_code_tab_draws_the_root_entries_near_the_viewport(cx: &mut TestAppContext
   host.overview.readme = Some("# Short".into());
   let (mut h, _) = workspace_harness(cx, host, route(false));
   h.cx.run_until_parked();
-  assert!(h.drawn("code-entry-zz_00000.txt"));
-  assert!(!h.drawn("code-entry-zz_04999.txt"), "far below the window");
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("zz_00000.txt")),
+  )
+  .to_be_visible();
+  assert!(
+    screen
+      .query_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("zz_04999.txt"))
+      .is_none(),
+    "far below the window"
+  );
   let first = h.cx.debug_bounds("code-entry-zz_00000.txt").expect("row");
   let second = h.cx.debug_bounds("code-entry-zz_00001.txt").expect("row");
   let third = h.cx.debug_bounds("code-entry-zz_00002.txt").expect("row");
@@ -166,9 +191,17 @@ fn the_code_tab_draws_the_root_entries_near_the_viewport(cx: &mut TestAppContext
   // Scrolled to the bottom: the last rows follow the rows not drawn, at the
   // height they would take. A workspace's Code tab draws no README.
   scroll_by(&mut h, at, 150, -2000.);
-  assert!(h.drawn("code-entry-zz_04999.txt"));
-  assert!(!h.drawn("code-entry-zz_00000.txt"));
-  assert!(!h.drawn("code-readme"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("zz_04999.txt")),
+  )
+  .to_be_visible();
+  assert!(screen
+    .query_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("zz_00000.txt"))
+    .is_none());
+  assert!(screen
+    .query_by_role(gpui_testing_library::by::role(gpui::Role::Heading).name("README.md"))
+    .is_none());
   // Every row but the first has a top border.
   let pitch = third.top() - second.top();
   let last = h.cx.debug_bounds("code-entry-zz_04999.txt").expect("row");
@@ -176,7 +209,11 @@ fn the_code_tab_draws_the_root_entries_near_the_viewport(cx: &mut TestAppContext
   assert_eq!(last.top() - before.top(), pitch);
   // Back at the top, the first rows are where they started.
   scroll_by(&mut h, at, 150, 2000.);
-  assert!(h.drawn("code-entry-zz_00000.txt"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("zz_00000.txt")),
+  )
+  .to_be_visible();
   assert_eq!(h.cx.debug_bounds("code-entry-zz_00000.txt"), Some(first));
 }
 
@@ -185,7 +222,11 @@ fn a_long_line_is_drawn(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, large_host(), route(true));
   h.cx.run_until_parked();
   h.click("file-tree-min.js");
-  assert!(h.drawn("code-line-1"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("Line 1")),
+  )
+  .to_be_visible();
 }
 
 #[gpui::test]
@@ -194,7 +235,11 @@ fn code_files_perf(cx: &mut TestAppContext) {
   // The Code tab: the root's entries and the README, in one scroll.
   let (mut h, _) = workspace_harness(cx, large_host(), route(false));
   h.cx.run_until_parked();
-  assert!(h.drawn("code-readme"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Heading).name("README.md")),
+  )
+  .to_be_visible();
   println!("-- code tab: {} root entries, README", entries() + 4);
   let mut full: Vec<_> = (0..5).map(|_| frame(&mut h)).collect();
   report("full frame", &mut full);
@@ -212,7 +257,11 @@ fn code_files_perf(cx: &mut TestAppContext) {
 fn file_browser_perf(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, large_host(), route(true));
   h.cx.run_until_parked();
-  assert!(h.drawn("file-tree-big"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("big")),
+  )
+  .to_be_visible();
 
   println!("-- tree: {} root entries", entries() + 4);
   let mut expand: Vec<Duration> = Vec::new();

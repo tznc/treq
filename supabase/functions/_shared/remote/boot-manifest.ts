@@ -118,16 +118,23 @@ export function manifestForVersion(version: number): BootManifest | null {
   return MANIFESTS[version] ?? null;
 }
 
+/** Every manifest up to the current one, oldest first. */
+export function allManifests(): BootManifest[] {
+  return Object.values(MANIFESTS).filter((m) => m.manifest_version <= CURRENT_MANIFEST_VERSION);
+}
+
 // The exec entrypoint installed as a Fly machine's `init.exec`, so a
 // machine created through this Edge Function boots with an idempotent
 // bootstrap script.
-export function bootstrapCommand(manifestVersion: number): string[] {
-  return ["/bin/sh", "-c", bootstrapScript(manifestVersion)];
+export function bootstrapCommand(manifestVersion: number, overrides: BootstrapOverrides = {}): string[] {
+  return ["/bin/sh", "-c", bootstrapScript(manifestVersion, overrides)];
 }
 
 export interface BootstrapOverrides {
   /** The treq version an image build bakes in, so install_treq finds it and skips the download. */
   treqVersion?: string;
+  /** Digests for that version (treq-release.ts resolves both at boot). */
+  treqSha256?: TreqSha256;
 }
 
 export function bootstrapScript(requestedVersion: number, overrides: BootstrapOverrides = {}): string {
@@ -147,8 +154,8 @@ set -eu
 
 TREQ_MANIFEST_VERSION="${manifestVersion}"
 TREQ_VERSION="${overrides.treqVersion ?? manifest.treq_version}"
-TREQ_SHA256_X86_64="${manifest.treq_sha256.x86_64}"
-TREQ_SHA256_AARCH64="${manifest.treq_sha256.aarch64}"
+TREQ_SHA256_X86_64="${(overrides.treqSha256 ?? manifest.treq_sha256).x86_64}"
+TREQ_SHA256_AARCH64="${(overrides.treqSha256 ?? manifest.treq_sha256).aarch64}"
 JJ_VERSION="${manifest.jj_version}"
 JJ_SHA256_X86_64="${manifest.jj_sha256.x86_64}"
 JJ_SHA256_AARCH64="${manifest.jj_sha256.aarch64}"

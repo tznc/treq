@@ -1,0 +1,21 @@
+id: no-node-test-runner-ts
+valid:
+  - |
+    import { describe, expect, it } from "@jest/globals";
+  - |
+    test("adds", () => { expect(1 + 1).toBe(2); });
+  - |
+    import { readFile } from "node:fs/promises";
+  - |
+    const path = require("node:path");
+invalid:
+  - |
+    import assert from "node:assert/strict";
+  - |
+    import assert from "assert";
+  - |
+    import { test } from "node:test";
+  - |
+    const assert = require("node:assert");
+  - |
+    const test = require("node:test");

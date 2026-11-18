@@ -237,6 +237,18 @@ pub fn resize_pair(left: f32, right: f32, delta: f32, min: f32) -> (f32, f32) {
   (next_left, next_right)
 }
 
+/// Lines a selection drag at `y` scrolls a view spanning `top..bottom`:
+/// up (positive) past the top, down past the bottom, as xterm does.
+pub fn edge_scroll(y: f32, top: f32, bottom: f32) -> i32 {
+  if y < top {
+    1
+  } else if y > bottom {
+    -1
+  } else {
+    0
+  }
+}
+
 /// The pane height for a drag to `y` in a view spanning `top..bottom`.
 pub fn drag_height(top: f32, bottom: f32, y: f32) -> f32 {
   let height = bottom - top;
@@ -1070,6 +1082,8 @@ impl TerminalView {
         .size(ui::Size::Xs)
         .h_6()
         .px_2(),
+      // Short label (['button label']): 11px is fine.
+      // ast-grep-ignore: gpui-text-xs-short-label-only
       TextSize::Xs,
     )
     .label("Deliver")
@@ -1367,23 +1381,39 @@ impl TerminalView {
     }
   }
 
-  fn on_mouse_move(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
+  fn on_mouse_move(&mut self, event: &MouseMoveEvent, _: &mut Window, _: &mut Context<Self>) {
     let button = match event.pressed_button {
       Some(pressed) => mouse_button(pressed),
       None => Some(terminal_emu::Button::None),
     };
-    if !self.selecting {
-      if let Some(button) = button {
-        if self.report(button, MouseAction::Move, event.position, event.modifiers) {
-          return;
-        }
-      }
+    if let (false, Some(button)) = (self.selecting, button) {
+      self.report(button, MouseAction::Move, event.position, event.modifiers);
     }
-    if !self.selecting || event.pressed_button != Some(MouseButton::Left) {
+  }
+
+  /// Extends the selection to the mouse anywhere in the window, scrolling
+  /// when it is dragged past the top or bottom edge.
+  fn drag_select(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+    if event.pressed_button != Some(MouseButton::Left) {
+      self.selecting = false;
       return;
     }
+    let Some(bounds) = self.bounds.get() else {
+      return;
+    };
+    let top = f32::from(bounds.origin.y);
+    let lines = edge_scroll(
+      f32::from(event.position.y),
+      top,
+      top + f32::from(bounds.size.height),
+    );
     if let Some((row, col, right)) = self.cell_at(event.position) {
-      self.with_emulator(|e| e.select_extend(row, col, right));
+      self.with_emulator(|e| {
+        if lines != 0 && !e.alt_screen() {
+          e.scroll(lines);
+        }
+        e.select_extend(row, col, right);
+      });
       cx.notify();
     }
   }
@@ -1881,6 +1911,26 @@ impl Render for TerminalView {
       .on_mouse_up(MouseButton::Right, cx.listener(Self::on_mouse_up))
       .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
       .on_scroll_wheel(cx.listener(Self::on_scroll))
+      // A selection drag follows the mouse out of the terminal.
+      .when(self.selecting, |d| {
+        let view = cx.entity().downgrade();
+        d.child(
+          gpui::canvas(
+            |_, _, _| {},
+            move |_, _, window, _| {
+              window.on_mouse_event(move |e: &MouseMoveEvent, phase, _, cx| {
+                if phase == gpui::DispatchPhase::Bubble {
+                  view
+                    .update(cx, |view, cx| view.drag_select(e, cx))
+                    .ignore_closed();
+                }
+              });
+            },
+          )
+          .absolute()
+          .size_0(),
+        )
+      })
       .child(
         gpui::canvas(
           move |b, _, cx| {
@@ -2504,9 +2554,15 @@ impl TerminalPane {
     let moved = self.place.working_directory != place.working_directory;
     self.adopt_due |= self.place.repo_path != place.repo_path;
     self.place = place;
-    // A newly selected workspace's first terminal becomes the active one.
-    if moved && !self.collapsed {
-      let dir = &self.place.working_directory;
+    // A newly selected workspace's first terminal becomes the active one,
+    // unless the active one is already there (a click on it switched
+    // workspace): the row then stays where the click left it.
+    let dir = &self.place.working_directory;
+    let active_here = self
+      .columns
+      .iter()
+      .any(|c| self.active.as_deref() == Some(c.id.as_str()) && self.column_key(c) == *dir);
+    if moved && !self.collapsed && !active_here {
       let id = self
         .columns
         .iter()
@@ -3222,7 +3278,7 @@ impl TerminalPane {
             .rounded(radius::MD),
         )
       } else {
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
           .size_full()
           .px_1()
           .flex()
@@ -3266,6 +3322,7 @@ impl TerminalPane {
           let id = id.clone();
           move || format!("terminal-send-preview-{id}")
         })
+        .test_support()
         .relative()
         .flex_none()
         .h_20()
@@ -3420,7 +3477,8 @@ impl TerminalPane {
             cx.stop_propagation();
             cx.notify();
           }),
-        ),
+        )
+        .test_support(),
     )
   }
 
@@ -3653,11 +3711,30 @@ impl TerminalPane {
     let place = self.place.clone();
     let label = |name: String, main: bool, key: String, react: ActionSink| {
       let tones = if on_dark { &d } else { p };
+      let changes = (key.clone(), react.clone());
       let loc = place.workspace_loc(&key).map(|loc| {
+        let (key, react) = changes;
         div()
+          .id(SharedString::from(format!("terminal-workspace-loc-{id}")))
+          .role(gpui::Role::Button)
+          .aria_label("Open changes")
           .flex()
           .flex_none()
           .gap_1()
+          .rounded_sm()
+          .cursor_pointer()
+          .hover(|s| s.underline())
+          .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+          .on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            react(
+              ScreenAction::Field {
+                field: "terminal.navigate".into(),
+                value: serde_json::json!({ "key": key, "isMainRepo": main, "tab": "changes" }),
+              },
+              cx,
+            )
+          })
           .debug_selector(|| "terminal-workspace-loc".into())
           .child(super::workspace::loc_count(
             format!("+{}", loc.insertions),
@@ -3668,12 +3745,14 @@ impl TerminalPane {
             ui::Tone::DiffRemoved.text(tones),
           ))
       });
+      // Short label (['workspace label']): 11px is fine.
+      // ast-grep-ignore: gpui-text-xs-short-label-only
       ui::text(div(), TextSize::Xs)
         .id(SharedString::from(format!("terminal-workspace-label-{id}")))
         .role(gpui::Role::Button)
-        .aria_label(name.clone())
+        .aria_label(format!("Go to {name}"))
         .debug_selector(|| "terminal-workspace-label".into())
-        .max_w(zpx(200.))
+        .max_w(zpx(360.))
         .flex()
         .items_center()
         .gap_2()
@@ -3701,7 +3780,8 @@ impl TerminalPane {
           )
         })
         .child(div().min_w_0().truncate().child(name))
-        .children(loc)
+        .children(loc.map(|loc| loc.test_support()))
+        .test_support()
     };
     let close_id = column.id.clone();
     let close = div()
@@ -3806,7 +3886,7 @@ impl TerminalPane {
                 Some(TooltipContent::Text(label_name.clone().into())),
                 label(
                   label_name,
-                  workspace_name.is_none(),
+                  workspace_path.is_none(),
                   key,
                   self.react.clone(),
                 ),
@@ -3841,6 +3921,8 @@ impl TerminalPane {
             .disabled(stopping)
             .h_6()
             .px_2(),
+          // Short label (['button label']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
           TextSize::Xs,
         )
         .label("Stop")
@@ -3896,6 +3978,8 @@ impl TerminalPane {
                 )
                 .child(self.title(&column.id, column_title(&column.kind), muted, cx))
                 .children(ended.map(|status| {
+                  // Short label (['status label']): 11px is fine.
+                  // ast-grep-ignore: gpui-text-xs-short-label-only
                   ui::text(div(), TextSize::Xs)
                     .debug_selector(|| "remote-terminal-ended".into())
                     .text_color(ui::Tone::Warning.text(p))
@@ -4135,7 +4219,7 @@ pub(super) fn send_asset_icon(asset: &SendAsset) -> &'static str {
 impl Render for SendAssetDrag {
   fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
     let d = theme::palette(true);
-    ui::text(div(), TextSize::Xs)
+    ui::text(div(), TextSize::Sm)
       .px_2()
       .py_1()
       .rounded(radius::MD)
@@ -4526,6 +4610,7 @@ impl Render for TerminalPane {
     }
     let row_bounds = self.row.clone();
     let row_scroll = self.row_scroll.clone();
+    let measured_scroll = self.row_scroll.clone();
     let scrollbar = self.row_scrollbar(&p, cx);
     let controls = self.controls(&p, cx);
     let maximized = self.maximized;
@@ -4646,7 +4731,14 @@ impl Render for TerminalPane {
               // what `scroll_to_item` counts.
               .child(
                 gpui::canvas(
-                  move |b, _, _| row_bounds.set(Some(b)),
+                  // Inside the scrolled row: undo the scroll so the bounds stay the
+                  // row's own, not its scrolled content's.
+                  move |b, _, _| {
+                    row_bounds.set(Some(Bounds::new(
+                      b.origin - measured_scroll.offset(),
+                      b.size,
+                    )))
+                  },
                   move |b, _, window, _| {
                     // Painted inside the scrolled row: undo the scroll to get
                     // the row's own bounds.
@@ -4801,6 +4893,13 @@ mod tests {
     assert_eq!(resize_pair(400., 400., 50., 300.), (450., 350.));
     assert_eq!(resize_pair(400., 400., 150., 300.), (550., 300.));
     assert_eq!(resize_pair(400., 400., -200., 300.), (300., 500.));
+  }
+
+  #[test]
+  fn scrolls_a_selection_dragged_past_an_edge() {
+    assert_eq!(edge_scroll(50., 100., 400.), 1);
+    assert_eq!(edge_scroll(450., 100., 400.), -1);
+    assert_eq!(edge_scroll(200., 100., 400.), 0);
   }
 
   #[test]

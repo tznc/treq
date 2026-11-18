@@ -100,13 +100,14 @@ pub enum Op {
   Rebase,
   DeleteWorkspace,
   RemoveHost,
+  DeleteMachine,
 }
 
 impl Op {
   pub fn ask(self) -> Ask {
     match self {
       Op::Push | Op::Rebase => Ask::OneTap,
-      Op::DeleteWorkspace | Op::RemoveHost => Ask::Sheet,
+      Op::DeleteWorkspace | Op::RemoveHost | Op::DeleteMachine => Ask::Sheet,
     }
   }
 }
@@ -152,7 +153,7 @@ mod tests {
     for op in [Op::Push, Op::Rebase] {
       assert_eq!(op.ask(), Ask::OneTap, "{op:?}");
     }
-    for op in [Op::DeleteWorkspace, Op::RemoveHost] {
+    for op in [Op::DeleteWorkspace, Op::RemoveHost, Op::DeleteMachine] {
       assert_eq!(op.ask(), Ask::Sheet, "{op:?}");
     }
   }

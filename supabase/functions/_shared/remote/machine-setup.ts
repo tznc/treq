@@ -8,6 +8,7 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2.95.3";
 import { recordAuditEvent } from "./audit.ts";
 import { scrubErrorText } from "./error-scrub.ts";
 import { bootstrapCommand, CURRENT_MANIFEST_VERSION } from "./boot-manifest.ts";
+import { resolveTreqRelease, type ResolvedTreqRelease } from "./treq-release.ts";
 import { recordEndpointHostKey, updateInstance } from "./instance-store.ts";
 import { provisionManagedSshd, readManagedHostKeys } from "./managed-sshd.ts";
 import type { MachineSetup, MigrationRow, PlacementRow } from "./migration-engine.ts";
@@ -121,13 +122,19 @@ export async function reensureServicesAfterWake(
   }
 }
 
-/** Runs the boot manifest. Throws a ProviderError when it fails. */
+/**
+ * Runs the boot manifest with the treq release `resolveRelease` picks (the
+ * newest published one, treq-release.ts). Throws a ProviderError when it fails.
+ */
 export async function runBootManifest(
   provider: ManagedComputeProvider,
   providerResourceId: string,
   label = "bootstrap",
+  resolveRelease: () => Promise<ResolvedTreqRelease> = resolveTreqRelease,
 ): Promise<void> {
-  const out = await provider.execOnMachine(providerResourceId, bootstrapCommand(CURRENT_MANIFEST_VERSION), 300);
+  const release = await resolveRelease();
+  const command = bootstrapCommand(CURRENT_MANIFEST_VERSION, { treqVersion: release.version, treqSha256: release.sha256 });
+  const out = await provider.execOnMachine(providerResourceId, command, 300);
   if (out.exitCode !== 0) {
     throw new ProviderError("other", `machine ${label} exited ${out.exitCode}: ${out.stderr || out.stdout}`);
   }

@@ -97,6 +97,8 @@ impl RenderOnce for Kbd {
   fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
     let p = &self.palette;
     let shown = Kbd::shown(crate::theme::Density::current(cx));
+    // Short label (['kbd hint']): 11px is fine.
+    // ast-grep-ignore: gpui-text-xs-short-label-only
     text(div(), TextSize::Xs)
       .when(!shown, |el| el.hidden())
       .flex()

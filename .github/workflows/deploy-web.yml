@@ -22,6 +22,7 @@ on:
     paths:
       - "web/**"
       - ".github/workflows/deploy-web.yml"
+      - ".github/actions/skills-catalog/**"
       - ".github/scripts/check_readability.py"
       - "biome.json"
 
@@ -158,6 +159,12 @@ jobs:
           key: ${{ runner.os }}-docs-build-${{ hashFiles('web/package-lock.json') }}
       - name: Install dependencies
         run: npm ci
+      # Typecheck and the build read it. Main runs share it with later runs.
+      - name: Skills catalog
+        uses: ./.github/actions/skills-catalog
+        with:
+          github-token: ${{ github.token }}
+          upload: ${{ github.event_name != 'pull_request' }}
       # PR checks, formerly Web CI. They reuse this job's checkout and npm ci;
       # the build below covers what Web CI built.
       - name: Typecheck
@@ -169,13 +176,13 @@ jobs:
       - name: Install uv
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-      - name: Lint e2e tests (ast-grep)
+      - name: Lint e2e tests and content (ast-grep)
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         working-directory: ${{ github.workspace }}
         # Matches the root lockfile's @ast-grep/cli, without a root npm ci.
         run: |
           uvx --from ast-grep-cli==0.38.7 ast-grep test --skip-snapshot-tests
-          uvx --from ast-grep-cli==0.38.7 ast-grep scan web/e2e
+          uvx --from ast-grep-cli==0.38.7 ast-grep scan web/e2e web/docs web/learn web/compare
       - name: Lint (Biome)
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         working-directory: ${{ github.workspace }}

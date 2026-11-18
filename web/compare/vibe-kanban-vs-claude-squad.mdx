@@ -1,0 +1,62 @@
+---
+sidebar_position: 32
+title: Vibe Kanban vs Claude Squad Compared (2026)
+description: Vibe Kanban vs Claude Squad. A browser app with diff comments against a tmux terminal manager, compared for running coding agents in parallel.
+---
+
+# Vibe Kanban vs Claude Squad
+
+_Both give each agent its own git worktree. Vibe Kanban wraps that in a browser UI with diff review. Claude Squad keeps it in a terminal UI over tmux._
+
+Vibe Kanban and Claude Squad are both free, open source and local. Each one starts coding agents in separate [git worktrees](/learn/concepts/git/git-worktrees), so the agents never share a checkout. They differ in where you watch and review the work. Facts were checked against each project's readme, docs, blog and commit history in November 2026.
+
+## At a Glance
+
+| | Vibe Kanban | Claude Squad |
+| --- | --- | --- |
+| Form | Local web app, opened in your browser | Terminal UI |
+| Start it with | `npx vibe-kanban` | `cs`, installed with Homebrew or a script |
+| Needs | Node.js and a signed-in coding agent | tmux and the GitHub CLI |
+| Isolation | Git worktrees, one workspace can span several repositories | One git worktree and tmux session per agent |
+| Agents | Claude Code, Codex, Gemini CLI, Copilot, Amp, Cursor, OpenCode, Droid, CCR and Qwen Code | Claude Code by default, plus Codex, Gemini, Aider or any command you pass |
+| Review | Diff view with inline comments sent to the agent | Diff tab in the terminal UI |
+| Ship | Opens PRs with generated descriptions, then merges | `s` commits and pushes the branch |
+| Extras | Dev server per workspace, built-in browser preview with devtools | Pause and resume sessions, experimental auto-accept mode |
+| License | Apache 2.0 | AGPL-3.0 |
+| Status | Company closed in April 2026, commits continue | Version 1.0.20 in August 2026, commits continue |
+
+## Project Status
+
+Vibe Kanban's company, bloop, [shut down on April 10, 2026](https://vibekanban.com/blog/shutdown). Its hosted services, which held kanban issues, comments, projects and organizations, ran for 30 more days. Local workspaces keep working, and the project continues as open source. The readme still says "Vibe Kanban is sunsetting," but commits landed through November 2026, including Copilot sign-in and agent installs from the ACP registry.
+
+Claude Squad has no such history. Its latest version, 1.0.20, landed in August 2026, and a push fix followed in November.
+
+## How Review Works
+
+In Vibe Kanban you review each workspace's diff in the browser and leave inline comments. The comments go straight to the agent, so your next prompt is your review. A built-in browser shows the running app, and a PR button opens the pull request with a generated description.
+
+In Claude Squad you switch to the diff tab for the selected session and read the changes in the terminal. To ask for changes, you attach to the session with `o` and type to the agent. When you are happy, `s` commits and pushes the branch, and you open the pull request yourself.
+
+## Who Should Choose Which
+
+Choose **Vibe Kanban** if you:
+
+- Want line comments on a diff to become the agent's next prompt.
+- Want a preview browser and a PR button in the same window.
+- Accept a community-maintained project after the company's closure.
+
+Choose **Claude Squad** if you:
+
+- Already work in tmux and want to stay in the terminal.
+- Want a small tool that only manages sessions and worktrees.
+- Are fine with an `AGPL-3.0` license for the tool you run.
+
+## Stacking Agent Work
+
+Neither tool links one agent's branch to another. When a task builds on another task's branch, you rebase it by hand each time the lower branch changes. [Treq vs Vibe Kanban](./treq-vs-vibe-kanban.mdx) and [Treq vs Claude Squad](./treq-vs-claude-squad.mdx) cover how Treq stacks dependent workspaces and rebases them automatically.
+
+## Next Steps
+
+- [How to Run Multiple Claude Code Sessions](/learn/how-to/how-to-run-multiple-claude-code-sessions): the manual setup both tools automate
+- [Best Tools for Running AI Coding Agents in Parallel](./best-parallel-agent-tools.mdx): the wider field
+- [Best Git Worktree Managers](./best-git-worktree-managers.mdx): tools that manage worktrees without running agents

@@ -154,7 +154,11 @@ fn workspace_header_controls_share_one_height(cx: &mut TestAppContext) {
   }
   assert_eq!(toolbar, gpui::px(crate::gpui_shell::ui::theme::CONTROL_MD));
   // The pip names what it signals.
-  assert!(h.drawn("workspace-sync-pip"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(screen.get_by_role(
+    gpui_testing_library::by::role(gpui::Role::Button).name("Sync with remote: 2 to push"),
+  ))
+  .to_be_visible();
 }
 
 /// Presses the left button on `at` with `clicks` clicks, as a fast repeat does.

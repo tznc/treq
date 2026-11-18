@@ -6,6 +6,7 @@ use std::{
 };
 
 use gpui::{Entity, Modifiers, TestAppContext, VisualTestContext};
+use gpui_testing_library::Queries as _;
 
 use super::*;
 use code_data::Agent;
@@ -24,6 +25,10 @@ type ExitSink = Arc<dyn Fn(Option<u32>) + Send + Sync>;
 /// The backend, as the screens see it, recording what they asked of it.
 #[derive(Default)]
 struct FakeHost {
+  /// How many times a screen listed machines and projects.
+  listings: std::sync::atomic::AtomicUsize,
+  /// Team organizations the save-project dialog offers, as (id, name).
+  project_teams: Vec<(String, String)>,
   /// Repositories whose folder is gone from disk (Home shows them missing).
   gone: Vec<&'static str>,
   /// Saving repository settings fails, as a full disk would.
@@ -177,6 +182,10 @@ struct FakeHost {
   oauth: Option<Result<String, crate::core::supabase::ApiError>>,
   /// Why deleting the account fails; `None` deletes it.
   account_deletion: Option<crate::core::supabase::ApiError>,
+  /// What the Teams section reads; none by default.
+  team: Option<Result<crate::core::teams::TeamData, crate::core::supabase::ApiError>>,
+  /// What the organizations function answers; `{}` by default.
+  organization_reply: Option<Result<serde_json::Value, crate::core::supabase::ApiError>>,
   /// What the agent launches read and did: each new session's start data
   /// by pane id, the `treq send` attachments, the prompt dialog's tasks
   /// (and whether starting fails), and the sessions started.
@@ -311,6 +320,9 @@ impl FakeHost {
 
 impl machines::MachinesHost for FakeHost {
   fn listing(&self) -> machines::Listing {
+    self
+      .listings
+      .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     self.listing.clone()
   }
 
@@ -1757,6 +1769,21 @@ impl account_data::AccountHost for FakeHost {
     self.account_deletion.clone().map_or(Ok(()), Err)
   }
 
+  fn team(&self) -> Result<crate::core::teams::TeamData, crate::core::supabase::ApiError> {
+    self.team.clone().unwrap_or_else(|| Ok(Default::default()))
+  }
+
+  fn organization_action(
+    &self,
+    body: &serde_json::Value,
+  ) -> Result<serde_json::Value, crate::core::supabase::ApiError> {
+    self.record(format!("organizations {body}"));
+    self
+      .organization_reply
+      .clone()
+      .unwrap_or_else(|| Ok(serde_json::json!({})))
+  }
+
   fn cloud_action(&self, action: account_data::CloudAction) {
     match action {
       account_data::CloudAction::Refresh => self.record("read cloud workspace".into()),
@@ -1879,19 +1906,39 @@ impl Harness {
     self.cx.debug_bounds(selector).is_some()
   }
 
+  /// The window as the user sees it, once everything pending has run.
+  fn rendered(&mut self) -> gpui_testing_library::Screen {
+    self.cx.run_until_parked();
+    let window = self.cx.update(|window, _| window.window_handle());
+    let screen = gpui_testing_library::Screen::new(&self.cx, window);
+    screen.redraw();
+    screen
+  }
+
+  /// Whether the user sees an element of `role` named `name`.
+  fn shows(&mut self, role: gpui::Role, name: &str) -> bool {
+    !self
+      .rendered()
+      .query_all_by_role(
+        gpui_testing_library::by::role(role).name(gpui_testing_library::normalize(name)),
+      )
+      .is_empty()
+  }
+
   /// Clicks `button` in the confirmation on screen, found by role and
   /// name, as the user would.
   fn answer(&mut self, button: &str) {
     use gpui_testing_library::prelude::*;
-    assert!(
-      self.drawn(crate::gpui_shell::confirm::ID),
-      "no confirmation"
-    );
-    let window = self.cx.update(|window, _| window.window_handle());
-    let screen = gpui_testing_library::Screen::new(&self.cx, window);
-    screen.redraw();
+    let screen = self.rendered();
     // The row behind it may hold a button of the same name.
     let panel = gpui::ElementId::from(format!("{}-panel", crate::gpui_shell::confirm::ID));
+    assert!(
+      screen
+        .query_all_by_role(by::role(gpui::Role::Dialog))
+        .iter()
+        .any(|d| d.path().contains(&panel)),
+      "no confirmation"
+    );
     let target = screen
       .get_all_by_role(by::role(gpui::Role::Button).name(button))
       .into_iter()
@@ -1956,6 +2003,7 @@ fn onboarding() -> ScreenSnapshot {
 fn listing() -> machines::Listing {
   use machines::{Machine, Place, Recent};
   machines::Listing {
+    teams: Vec::new(),
     machines: vec![
       Machine {
         id: "local".into(),
@@ -2186,6 +2234,15 @@ fn feature_host() -> FakeHost {
 }
 
 /// The workspace screen in a window as wide as the app's default.
+/// The window's accessibility tree, as the e2e suite's Playwright sees it.
+fn a11y_screen(h: &mut Harness) -> gpui_testing_library::Screen {
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  screen
+}
+
 fn workspace_harness(
   cx: &mut TestAppContext,
   host: FakeHost,
@@ -2313,7 +2370,11 @@ fn merge_plan(retargeted: &[&str], can_rollup: bool) -> crate::core::MergeLandin
 fn merge_harness(cx: &mut TestAppContext, host: FakeHost) -> (Harness, Arc<FakeHost>) {
   let host = Arc::new(host);
   let mut h = Harness::with_host(cx, merge_route(), host.clone());
-  assert!(h.drawn("merge-confirm"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("Confirm merge")),
+  )
+  .to_be_visible();
   (h, host)
 }
 
@@ -2453,7 +2514,11 @@ fn selected_lines(h: &mut Harness) -> Option<(String, Vec<(usize, usize)>)> {
 /// Comments line `+b` of a.rs with `text`.
 fn comment_line(h: &mut Harness, text: &str) {
   h.click("add-comment-a.rs-0-1");
-  assert!(h.drawn("comment-input"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(screen.get_by_role(
+    gpui_testing_library::by::role(gpui::Role::MultilineTextInput).name("Add a comment…"),
+  ))
+  .to_be_visible();
   h.click("comment-input");
   h.cx.simulate_input(text);
   h.click("comment-submit");
@@ -2815,8 +2880,15 @@ impl Harness {
 }
 
 impl workspace_dialog_data::WorkspaceDialogHost for FakeHost {
-  fn save_project(&self, name: &str) -> Result<(), String> {
-    self.record(format!("save project {name:?}"));
+  fn project_teams(&self) -> Vec<(String, String)> {
+    self.project_teams.clone()
+  }
+
+  fn save_project(&self, name: &str, org_id: Option<&str>) -> Result<(), String> {
+    match org_id {
+      Some(org) => self.record(format!("save project {name:?} to {org}")),
+      None => self.record(format!("save project {name:?}")),
+    }
     if self.failing.contains(&"save_project") {
       return Err("save failed".into());
     }
@@ -3038,6 +3110,7 @@ mod settings_screen;
 mod skills_screen;
 mod stack_panel;
 mod tab_badges;
+mod team_screen;
 mod terminal_perf;
 mod terminal_screen;
 mod testing_library;

@@ -108,7 +108,6 @@ fn sidebar() -> impl Strategy<Value = SidebarAction> {
     gpui::proptest::option::of(id()).prop_map(|id| SidebarAction::StartAgent { id }),
     gpui::proptest::option::of(id()).prop_map(|id| SidebarAction::OpenShell { id }),
     gpui::proptest::option::of(id()).prop_map(|id| SidebarAction::Stack { id }),
-    Just(SidebarAction::BulkArchive),
     Just(SidebarAction::DismissModal),
     (id(), gpui::proptest::option::of(id()))
       .prop_map(|(id, onto)| SidebarAction::MoveWorkspace { id, onto }),

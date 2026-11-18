@@ -39,6 +39,7 @@ Follow the skeleton the existing docs use.
 ```markdown
 ---
 sidebar_position: N
+description: 50 to 160 characters, leading with the query a reader searches for.
 ---
 
 import DefinitionCard from '...'
@@ -68,6 +69,54 @@ Opening paragraph, 2 to 3 sentences. No lists here.
 
 Prose inside every section must follow `explain-to-me`.
 
+## Answers: hub and spoke pages
+
+`web/learn/answers/` holds short pages that each answer one exact search
+query, such as an error message or "how do I X". They use a hub and spoke
+model:
+
+- **Hub:** `web/learn/answers/<topic>.md`. A short intro and `<DocCardList />`,
+  which lists every spoke in the folder automatically. Hubs exist for
+  `worktrees`, `rebasing-and-stacks` and `agents-and-git`. Add a hub only when
+  a new topic has at least three spokes.
+- **Spoke:** `web/learn/answers/<topic>/<query-slug>.md`. The sidebar picks it
+  up automatically. Name the file after the query people type.
+
+Every spoke uses this skeleton, 300 to 600 words:
+
+```markdown
+---
+sidebar_position: N
+description: The answer in one sentence, with the exact error text or query.
+---
+
+# Fix "<error>" | <Task phrased as the query>
+
+_The answer in one or two sentences._
+
+## The Fix
+Commands first, copy-pasteable.
+
+## Why It Happens
+The mechanism, 1 to 2 short paragraphs. Quote the exact error message.
+
+## How Treq Handles It
+One paragraph, shipped behavior only, linked to the doc that covers it.
+
+## Related
+2 to 3 links: sibling spokes first, then the concept article.
+```
+
+Rules for spokes:
+
+- Lead with the fix. A reader who stops after `## The Fix` should be done.
+- Run every command and copy every error message from a real Git run. Name
+  the Git version when output differs between versions.
+- `## How Treq Handles It` states only what the docs under `web/docs/` say
+  ships today. Leave the section out rather than stretch a claim.
+- Link each spoke to at least one sibling spoke, so spokes link across, not
+  only up to the hub.
+
 ## Interlinking across the content site
 
 Treat every article as a node in the site, not a standalone page. Readers
@@ -84,7 +133,7 @@ of how good the prose is.
 tool, or workflow that has its own article elsewhere on the site, link it the
 first time it appears in the body, not every time it recurs.
 
-> Use [separate clones](./git-worktrees-vs-clones) when tasks need
+> Use [separate clones](./git-worktrees-vs-clones.mdx) when tasks need
 > independent refs, remotes, or repository configuration.
 
 This is a real sentence doing real work. The link is not bolted on. Do not
@@ -98,7 +147,7 @@ each a link plus a one-clause description of what the reader gets:
 ```markdown
 ## Next Steps
 
-- [What are Stacked PRs?](./stacked-prs): manage branches that depend on one another
+- [What are Stacked PRs?](./stacked-prs.mdx): manage branches that depend on one another
 - [Stacked PR Workflow](/learn/workflows/git/stacked-pr): apply rebasing to a pull-request stack
 ```
 
@@ -107,8 +156,10 @@ already made in prose, add the adjacent articles a reader would want next.
 
 ### Link syntax
 
-- Same directory or a near sibling: relative, no extension:
-  `[text](./git-worktrees-vs-clones)`.
+- Same directory or a near sibling: relative, with the file extension:
+  `[text](./git-worktrees-vs-clones.mdx)`. With `trailingSlash: true`, an
+  extensionless `./page` resolves under the current page and breaks; the
+  `no-extensionless-relative-links-web` ast-grep rule rejects it.
 - Anywhere else on the site: absolute from the content root, no extension:
   `[text](/learn/concepts/git/git-worktrees)`, `[text](/docs/concepts/workspaces)`.
 - Never link a bare URL or write "click here". The anchor text is the term or

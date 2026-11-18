@@ -105,6 +105,12 @@ pub fn pr_diff(repo: &str, number: u64) -> Result<String, String> {
   github::gh_pr_diff_impl(&gh, repo, number, &path)
 }
 
+/// `path` as it is at the head of pull request `number`.
+pub fn pr_file(repo: &str, number: u64, path: &str) -> Result<String, String> {
+  let (gh, env_path) = gh()?;
+  github::gh_pr_file_impl(&gh, repo, number, path, &env_path)
+}
+
 pub fn pr_checks(repo: &str, number: u64) -> Result<Option<PrCiStatus>, String> {
   let (gh, path) = gh()?;
   github::get_pr_checks_for_pr_impl(&gh, repo, number, &path)

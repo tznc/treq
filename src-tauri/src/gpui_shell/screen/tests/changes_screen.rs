@@ -1169,6 +1169,19 @@ fn changes_tab_finds_text_in_the_diff(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn escape_closes_the_find_bar_after_focus_leaves_it(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  h.click("file-card-a.rs");
+  h.cx.simulate_keystrokes("cmd-f");
+  assert!(h.drawn("diff-search"));
+  // Clicking the diff takes focus out of the bar.
+  h.click("file-card-a.rs");
+  h.cx.simulate_keystrokes("escape");
+  h.cx.run_until_parked();
+  assert!(!h.drawn("diff-search"));
+}
+
+#[gpui::test]
 fn changes_tab_shows_review_threads_on_their_line(cx: &mut TestAppContext) {
   let mut host = changes_host();
   host.threads = vec![gh_thread("t1", 2, false), gh_thread("t2", 40, true)];
@@ -1418,14 +1431,6 @@ fn the_discard_review_confirmation_keeps_on_escape_and_discards_on_enter(cx: &mu
   h.cx.simulate_keystrokes("enter");
   assert!(!h.drawn("discard-review-dialog"));
   assert!(!h.drawn("review-action-bar"));
-}
-
-fn a11y_screen(h: &mut Harness) -> gpui_testing_library::Screen {
-  h.cx.run_until_parked();
-  let window = h.cx.update(|window, _| window.window_handle());
-  let screen = gpui_testing_library::Screen::new(&h.cx, window);
-  screen.redraw();
-  screen
 }
 
 /// The review toolbar's discard says what it discards, and its

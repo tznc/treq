@@ -83,6 +83,8 @@ pub fn keys(p: &Palette, keys: &[&str]) -> gpui::Div {
         .gap_1()
         .when(i > 0, |this| {
           this.child(
+            // Short label (['kbd separator']): 11px is fine.
+            // ast-grep-ignore: gpui-text-xs-short-label-only
             ui::text(div(), TextSize::Xs)
               .text_color(p.muted_foreground)
               .child("+"),

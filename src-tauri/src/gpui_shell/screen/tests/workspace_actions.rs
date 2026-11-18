@@ -195,7 +195,10 @@ fn keeps_the_workspace_when_delete_is_declined(cx: &mut TestAppContext) {
   h.click("workspace-more");
   h.pick("Delete workspace");
   h.answer("Cancel");
-  assert!(!h.drawn("confirm"));
+  let screen = h.rendered();
+  assert!(screen
+    .query_by_role(gpui_testing_library::by::role(gpui::Role::Dialog))
+    .is_none());
   assert!(!host
     .calls()
     .iter()
@@ -238,7 +241,10 @@ fn keeps_local_work_when_reset_is_declined(cx: &mut TestAppContext) {
   h.click("workspace-more");
   h.pick("Reset to remote");
   h.answer("Cancel");
-  assert!(!h.drawn("confirm"));
+  let screen = h.rendered();
+  assert!(screen
+    .query_by_role(gpui_testing_library::by::role(gpui::Role::Dialog))
+    .is_none());
   assert!(calls_starting(&host, &["reset"]).is_empty());
 }
 
@@ -299,8 +305,17 @@ fn a_merged_pull_request_hides_create_pr(cx: &mut TestAppContext) {
     pr.state = "MERGED".into();
   }
   let (mut h, _) = workspace_harness(cx, host, workspace_route());
-  assert!(h.drawn("workspace-view-pr"));
-  assert!(!h.drawn("workspace-create-pr"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(
+      gpui_testing_library::by::role(gpui::Role::Button)
+        .name(gpui_testing_library::TextMatch::regex(r"^View PR \(#42, ")),
+    ),
+  )
+  .to_be_visible();
+  assert!(screen
+    .query_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("Create PR"))
+    .is_none());
 }
 
 #[gpui::test]
@@ -310,8 +325,17 @@ fn a_merged_pull_request_offers_archive_instead_of_merge(cx: &mut TestAppContext
     pr.state = "MERGED".into();
   }
   let (mut h, host) = workspace_harness(cx, host, workspace_route());
-  assert!(!h.drawn("workspace-merge"), "no Merge… once the PR merged");
-  assert!(h.drawn("workspace-archive"));
+  let screen = h.rendered();
+  assert!(
+    screen
+      .query_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("Merge…"))
+      .is_none(),
+    "no Merge… once the PR merged"
+  );
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("Archive")),
+  )
+  .to_be_visible();
   h.click("workspace-archive");
   h.cx.run_until_parked();
   assert!(host.calls().contains(&"archive workspace 7".to_string()));
@@ -320,8 +344,14 @@ fn a_merged_pull_request_offers_archive_instead_of_merge(cx: &mut TestAppContext
 #[gpui::test]
 fn an_open_pull_request_keeps_merge(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, feature_host(), workspace_route());
-  assert!(h.drawn("workspace-merge"));
-  assert!(!h.drawn("workspace-archive"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("Merge…")),
+  )
+  .to_be_visible();
+  assert!(screen
+    .query_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("Archive"))
+    .is_none());
 }
 
 #[gpui::test]
@@ -331,6 +361,16 @@ fn a_closed_pull_request_can_be_replaced(cx: &mut TestAppContext) {
     pr.state = "CLOSED".into();
   }
   let (mut h, _) = workspace_harness(cx, host, workspace_route());
-  assert!(h.drawn("workspace-view-pr"));
-  assert!(h.drawn("workspace-create-pr"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(
+      gpui_testing_library::by::role(gpui::Role::Button)
+        .name(gpui_testing_library::TextMatch::regex(r"^View PR \(#42, ")),
+    ),
+  )
+  .to_be_visible();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("Create PR")),
+  )
+  .to_be_visible();
 }

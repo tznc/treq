@@ -55,9 +55,16 @@ pub(super) fn reads(host: &FakeHost, prefix: &str) -> usize {
 #[gpui::test]
 fn commits_tab_draws_at_once_when_shown_again(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, commits_host(), commits_route());
-  assert!(h.drawn("commit-row-a"));
+  let screen = h.rendered();
+  assert!(!screen
+    .query_all_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("work"))
+    .is_empty());
   set_tab(&mut h, "changes");
-  assert!(h.drawn("changes-diff-viewer"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Status).name("No changes")),
+  )
+  .to_be_visible();
   let before = reads(&host, "read log");
   set_tab(&mut h, "commits");
   first_frame(&mut h);
@@ -71,9 +78,16 @@ fn commits_tab_draws_at_once_when_shown_again(cx: &mut TestAppContext) {
 #[gpui::test]
 fn changes_tab_draws_at_once_when_shown_again(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
-  assert!(h.drawn("file-card-a.rs"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Heading).name("a.rs")),
+  )
+  .to_be_visible();
   set_tab(&mut h, "commits");
-  assert!(h.drawn("workspace-commits"));
+  let screen = h.rendered();
+  assert!(!screen
+    .query_all_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("work"))
+    .is_empty());
   let before = reads(&host, "read workspace diff");
   set_tab(&mut h, "changes");
   first_frame(&mut h);
@@ -87,9 +101,16 @@ fn changes_tab_draws_at_once_when_shown_again(cx: &mut TestAppContext) {
 #[gpui::test]
 fn hidden_changes_tab_stops_polling(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
-  assert!(h.drawn("file-card-a.rs"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Heading).name("a.rs")),
+  )
+  .to_be_visible();
   set_tab(&mut h, "commits");
-  assert!(h.drawn("workspace-commits"));
+  let screen = h.rendered();
+  assert!(!screen
+    .query_all_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("work"))
+    .is_empty());
   let before = reads(&host, "read agent comments");
   h.cx
     .executor()
@@ -103,7 +124,10 @@ fn commits_tab_keeps_the_last_workspace_until_the_next_one_reads(cx: &mut TestAp
   let mut host = commits_host();
   host.workspaces = vec![workspace(7), workspace(8)];
   let (mut h, _) = workspace_harness(cx, host, commits_route());
-  assert!(h.drawn("commit-row-a"));
+  let screen = h.rendered();
+  assert!(!screen
+    .query_all_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("work"))
+    .is_empty());
   // A workspace not shown before: the last one stays drawn, dimmed.
   set_workspace(&mut h, 8);
   first_frame(&mut h);
@@ -127,7 +151,11 @@ fn changes_tab_draws_a_workspace_shown_again_at_once(cx: &mut TestAppContext) {
   let mut host = changes_host();
   host.workspaces = vec![workspace(7), workspace(8)];
   let (mut h, _) = workspace_harness(cx, host, changes_route());
-  assert!(h.drawn("file-card-a.rs"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Heading).name("a.rs")),
+  )
+  .to_be_visible();
   set_workspace(&mut h, 8);
   first_frame(&mut h);
   assert!(!drawn_now(&mut h, "changes-loading-skeleton"));
@@ -146,7 +174,10 @@ fn a_stand_in_tab_takes_no_clicks(cx: &mut TestAppContext) {
   let mut host = commits_host();
   host.workspaces = vec![workspace(7), workspace(8)];
   let (mut h, _) = workspace_harness(cx, host, commits_route());
-  assert!(h.drawn("commit-row-a"));
+  let screen = h.rendered();
+  assert!(!screen
+    .query_all_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("work"))
+    .is_empty());
   set_workspace(&mut h, 8);
   first_frame(&mut h);
   let row = h.cx.debug_bounds("commit-row-a").expect("row");
@@ -163,11 +194,25 @@ fn a_stand_in_tab_takes_no_clicks(cx: &mut TestAppContext) {
 #[gpui::test]
 fn hidden_changes_tab_ignores_cmd_f(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
-  assert!(h.drawn("file-card-a.rs"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Heading).name("a.rs")),
+  )
+  .to_be_visible();
   set_tab(&mut h, "commits");
-  assert!(h.drawn("workspace-commits"));
+  let screen = h.rendered();
+  assert!(!screen
+    .query_all_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("work"))
+    .is_empty());
   h.cx.simulate_keystrokes("cmd-f");
   set_tab(&mut h, "changes");
-  assert!(h.drawn("file-card-a.rs"));
-  assert!(!h.drawn("diff-search"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Heading).name("a.rs")),
+  )
+  .to_be_visible();
+  let screen = h.rendered();
+  assert!(screen
+    .query_by_role(gpui_testing_library::by::role(gpui::Role::TextInput).name("Find"))
+    .is_none());
 }

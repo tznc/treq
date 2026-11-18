@@ -232,7 +232,7 @@ fn build_resolve_target(
   }
 
   let (workspace_name, resolve_path) =
-    jj::create_resolve_workspace(repo_path, &commit.change_id, workspace_slug)
+    jj::create_resolve_workspace(repo_path, &commit.commit_id, workspace_slug)
       .map_err(|e| e.to_string())?;
   let conflicted_files = conflicted_files_or_empty(&resolve_path);
 
@@ -418,7 +418,10 @@ fn cleanup_resolve_workspace(
       .warn_on_err("jj detach resolve workspace wc");
   }
 
-  jj::remove_workspace(repo_path, &full_path_str).warn_on_err("remove workspace");
+  // The jj name (`_resolve-…`) differs from the directory name, so forget by name.
+  jj::forget_workspace_by_name(repo_path, &workspace.workspace_name)
+    .warn_on_err("forget resolve workspace");
+  jj::remove_workspace_directory_only(&full_path_str).warn_on_err("remove resolve directory");
   if workspace.id >= 0 {
     local_db::delete_workspace(repo_path, workspace.id).warn_on_err("delete workspace");
   }

@@ -1,0 +1,27 @@
+id: gpui-text-xs-short-label-only
+language: rust
+severity: error
+message: >
+  `TextSize::Xs` (11px) is for short labels only. Use `TextSize::Sm` for long
+  text: body copy, filenames, paths, descriptions, subtext and comment text.
+note: >
+  Badges, counts, status letters, kbd hints, timestamps and tiny tags may stay
+  at 11px. Mark each one on the line above with a short reason and
+  `// ast-grep-ignore: gpui-text-xs-short-label-only`.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+  - "src-tauri/src/mobile/**/*.rs"
+  - "crates/treq-ui/src/**/*.rs"
+ignores:
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+rule:
+  kind: scoped_identifier
+  regex: (^|::)TextSize::Xs$
+  not:
+    inside:
+      kind: mod_item
+      has:
+        field: name
+        regex: ^tests$
+      stopBy: end

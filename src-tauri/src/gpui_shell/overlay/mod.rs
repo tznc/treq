@@ -783,7 +783,12 @@ impl Overlay {
         let command = &commands[index];
         let keys = (!command.keys.is_empty()).then(|| {
           let id = SharedString::from(format!("overlay-item-{index}-keys"));
-          shortcuts::keys(p, command.keys).debug_selector(move || id.to_string())
+          shortcuts::keys(p, command.keys)
+            .id(id.clone())
+            .debug_selector(move || id.to_string())
+            .role(gpui::Role::Label)
+            .aria_label(command.keys.join(" "))
+            .test_support()
         });
         base
           .py_1p5()
@@ -845,9 +850,13 @@ impl Overlay {
           .child(two_lines(&row.branch.name, None, row.group == 0))
           .children(tag.map(|tag| {
             ui::text(div(), TextSize::Sm)
+              .id(SharedString::from(tag_id.clone()))
+              .role(gpui::Role::Label)
+              .aria_label(tag.clone())
               .text_color(p.muted_foreground)
               .when(in_workspace, |this| this.debug_selector(move || tag_id))
               .child(tag)
+              .test_support()
           }))
       }
       _ => base,
@@ -978,6 +987,8 @@ impl Overlay {
   fn item(&mut self, ix: usize, cx: &mut Context<Self>) -> gpui::AnyElement {
     let p = theme::palette(self.dark);
     match self.items.get(ix).copied() {
+      // Short label (['group heading']): 11px is fine.
+      // ast-grep-ignore: gpui-text-xs-short-label-only
       Some(Item::Heading(g)) => ui::text(div(), TextSize::Xs)
         .px_3()
         .py_2()
@@ -988,7 +999,11 @@ impl Overlay {
         .into_any_element(),
       Some(Item::Entry(index)) => {
         let selected = self.selected == Some(index);
-        self.row(&p, index, selected, cx).into_any_element()
+        // A `list` item sizes to its content; stretch it like the column rows.
+        self
+          .row(&p, index, selected, cx)
+          .w_full()
+          .into_any_element()
       }
       None => div().into_any_element(),
     }

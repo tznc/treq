@@ -15,6 +15,7 @@ import {
 } from "./byos.ts";
 import type { MachineTypeRow } from "./migration-engine.ts";
 import { establishSshTrust, reensureServicesAfterWake, runBootManifest } from "./machine-setup.ts";
+import { manifestTreqRelease, resolveTreqRelease } from "./treq-release.ts";
 import {
   cancelOpenMigration,
   createActivePlacement,
@@ -135,6 +136,9 @@ function serializeInstance(row: InstanceRow | null) {
 const kindOf = (instance: InstanceRow) => instance.provider_kind as ProviderKind;
 const providerOf = (deps: RemoteInstanceDeps, instance: InstanceRow) =>
   deps.provider(kindOf(instance), instance.active_placement_id);
+
+// The stub runs no bootstrap script, so it never fetches treq.dev/releases.json.
+const treqReleaseFor = (deps: RemoteInstanceDeps) => deps.stub ? manifestTreqRelease : resolveTreqRelease;
 
 // `size_preset` predates tiers; it stays filled for existing readers.
 function sizePresetForTier(tierId: string): SizePreset {
@@ -449,7 +453,7 @@ async function ensureOnce(body: Record<string, unknown>, deps: RemoteInstanceDep
       if (target.active_placement_id) {
         await updatePlacement(supabase, target.active_placement_id, { provider_resource_id: resourceId });
       }
-      await runBootManifest(provider, resourceId);
+      await runBootManifest(provider, resourceId, "bootstrap", treqReleaseFor(deps));
 
       const observed = await provider.getInstance(resourceId);
       await advance(["bootstrapping"], observed.state, {
@@ -549,7 +553,7 @@ export async function handleReprovision(body: Record<string, unknown>, deps: Rem
         idempotencyKey,
       });
       const newResourceId = replaced.providerResourceId;
-      await runBootManifest(provider, newResourceId, "repair");
+      await runBootManifest(provider, newResourceId, "repair", treqReleaseFor(deps));
       const observed = await provider.getInstance(newResourceId);
       await setInstanceStatus(supabase, instance, observed.state, {
         generation,

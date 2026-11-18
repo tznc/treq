@@ -4,6 +4,7 @@
 use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
+use gpui_kit::base::TestSupportExt as _;
 use tauri_plugin_gpui::gpui::{
   deferred, div, prelude::*, AnyElement, Context, Div, FontWeight, SharedString, Window,
 };
@@ -431,6 +432,7 @@ impl GithubView {
                     .child(ws.target_branch.clone().unwrap_or_else(|| default.clone())),
                 ),
             )
+            .test_support()
         }))
         .into_any_element(),
     };
@@ -652,7 +654,7 @@ impl GithubView {
             )
             .child(div().font_weight(FontWeight::MEDIUM).child(item))
             .child(
-              ui::text(div(), TextSize::Xs)
+              ui::text(div(), TextSize::Sm)
                 .text_color(p.muted_foreground)
                 .child(description),
             )

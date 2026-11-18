@@ -201,7 +201,11 @@ fn input_latency_file_picker(cx: &mut TestAppContext) {
   };
   h.screen
     .update(&mut h.cx, |s, cx| s.set_file_picker(Some(scope), cx));
-  assert!(h.drawn("file-picker"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::TextInput).name("Go to file…")),
+  )
+  .to_be_visible();
   report("file picker: keystroke", typing(&mut h, 30));
 }
 
@@ -357,12 +361,20 @@ fn input_latency_find_bar_many_files(cx: &mut TestAppContext) {
 #[ignore = "benchmark"]
 fn input_latency_review_comment(cx: &mut TestAppContext) {
   let mut h = changes_large::expanded_with(cx, changes_large::reviewed_host());
-  assert!(h.drawn("inline-comment-card"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("Edit comment")),
+  )
+  .to_be_visible();
   report("reviewed diff: idle frame", idle(&mut h, 10));
   report("reviewed diff: full refresh", full(&mut h, 5));
   // A new comment on the first line of the first file (hover shows the +).
   h.click("add-comment-src/module_0.rs-0-1");
-  assert!(h.drawn("comment-input"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(screen.get_by_role(
+    gpui_testing_library::by::role(gpui::Role::MultilineTextInput).name("Add a comment…"),
+  ))
+  .to_be_visible();
   h.click("comment-input");
   report("review comment draft: keystroke", typing(&mut h, 20));
 }
@@ -379,7 +391,12 @@ fn input_latency_caret_blink_idle(cx: &mut TestAppContext) {
     status.remote_sync = crate::core::RemoteSyncStatus::InSync;
   }
   let (mut h, host, frames) = super::idle::counted(cx, host, changes_route());
-  assert!(h.drawn("commit-message"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen
+      .get_by_role(gpui_testing_library::by::role(gpui::Role::MultilineTextInput).name("Message")),
+  )
+  .to_be_visible();
   let idle = super::idle::idle_for;
   idle(&mut h, &host, &frames, 10);
   let blurred = idle(&mut h, &host, &frames, 20);

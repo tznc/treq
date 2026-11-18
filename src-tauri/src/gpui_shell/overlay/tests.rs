@@ -1,3 +1,4 @@
+use gpui_testing_library::Queries as _;
 use std::{cell::RefCell, rc::Rc, sync::Mutex};
 
 use gpui::{Entity, Modifiers, TestAppContext, VisualTestContext};
@@ -221,9 +222,13 @@ impl Harness {
     }
   }
 
-  fn drawn(&mut self, selector: &'static str) -> bool {
+  /// The window as the user sees it, once everything pending has run.
+  fn rendered(&mut self) -> gpui_testing_library::Screen {
     self.cx.run_until_parked();
-    self.cx.debug_bounds(selector).is_some()
+    let window = self.cx.update(|window, _| window.window_handle());
+    let screen = gpui_testing_library::Screen::new(&self.cx, window);
+    screen.redraw();
+    screen
   }
 
   fn click(&mut self, selector: &'static str) {
@@ -321,7 +326,11 @@ fn serializes_overlay_actions_as_react_reads_them() {
 #[gpui::test]
 fn palette_runs_the_first_command_on_enter(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, palette_json(false), FakeHost::default());
-  assert!(h.drawn("overlay-dialog"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(screen.get_by_role(
+    gpui_testing_library::by::role(gpui::Role::TextInput).name("Type a command or search…"),
+  ))
+  .to_be_visible();
   assert_eq!(h.selected().as_deref(), Some("Go to home"));
   h.keys("enter");
   assert_eq!(h.sent(), vec![press("palette.dashboard")]);
@@ -621,7 +630,17 @@ fn branch_switcher_groups_main_tree_workspaces_local_and_remote(cx: &mut TestApp
     o.entries().iter().map(|e| e.group).collect::<Vec<_>>()
   });
   assert_eq!(groups, vec![Some(0), Some(1), Some(2), Some(2), Some(3)]);
-  assert!(h.drawn("overlay-branch-workspace-1"));
+  let screen = h.rendered();
+  let row = screen
+    .get_by_role(gpui_testing_library::by::role(gpui::Role::ListBoxOption).name("feat/alpha"));
+  gpui_testing_library::expect(row.clone()).to_be_visible();
+  assert!(
+    screen
+      .within(&row)
+      .query_by_role(gpui_testing_library::by::role(gpui::Role::Label))
+      .is_some(),
+    "names its workspace"
+  );
 }
 
 #[gpui::test]
@@ -640,7 +659,11 @@ fn palette_offers_go_to_file_when_no_command_matches(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, palette_json(false), FakeHost::default());
   h.type_text("zzzz");
   assert!(h.shown().is_empty());
-  assert!(h.drawn("overlay-go-to-file"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(screen.get_by_role(
+    gpui_testing_library::by::role(gpui::Role::ListBoxOption).name("Go to file \"zzzz\""),
+  ))
+  .to_be_visible();
   h.keys("enter");
   assert_eq!(h.sent(), vec![field("palette.goToFile", "zzzz".into())]);
 }
@@ -649,15 +672,29 @@ fn palette_offers_go_to_file_when_no_command_matches(cx: &mut TestAppContext) {
 fn palette_rows_show_their_shortcuts(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, palette_json(false), FakeHost::default());
   // 5 is Go to file (Ctrl/⌘ + P); 0 is Go to home, which has none.
-  assert!(h.drawn("overlay-item-5-keys"));
-  assert!(!h.drawn("overlay-item-0-keys"));
+  let screen = h.rendered();
+  let option = |name: &str| {
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::ListBoxOption).name(name))
+  };
+  let keys = |name: &str| {
+    screen
+      .within(&option(name))
+      .query_by_role(gpui_testing_library::by::role(gpui::Role::Label))
+  };
+  assert!(keys("Go to file").is_some());
+  assert!(keys("Go to home").is_none());
 }
 
 #[gpui::test]
 fn keyboard_shortcuts_close_on_escape_and_question_mark(cx: &mut TestAppContext) {
   let json = serde_json::json!({"kind": "keyboardShortcuts", "dark": false});
   let mut h = Harness::new(cx, json, FakeHost::default());
-  assert!(h.drawn("keyboard-shortcuts-modal"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen
+      .get_by_role(gpui_testing_library::by::role(gpui::Role::Dialog).name("Keyboard shortcuts")),
+  )
+  .to_be_visible();
   h.keys("escape");
   h.keys("shift-?");
   assert_eq!(

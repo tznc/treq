@@ -292,6 +292,15 @@ fn agent_prompt_starts_the_session_in_the_backend(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn agent_prompt_starts_the_session_on_secondary_enter(cx: &mut TestAppContext) {
+  let (mut h, host) = modal_harness(cx, FakeHost::default(), agent_modal());
+  h.cx.simulate_keystrokes("secondary-enter");
+  h.cx.run_until_parked();
+  assert_eq!(tasks(&mut h, &host).len(), 1);
+  assert!(agent_view(&h, |v| v.submitting()));
+}
+
+#[gpui::test]
 fn agent_prompt_toasts_a_failed_start_and_allows_another(cx: &mut TestAppContext) {
   let host = FakeHost {
     task_error: Some("jj failed".into()),
@@ -1154,4 +1163,32 @@ fn a_refused_login_shows_on_the_form(cx: &mut TestAppContext) {
   });
   assert!(h.drawn("remote-probe-error"));
   assert!(h.drawn("remote-continue"));
+}
+
+#[gpui::test]
+fn save_project_without_teams_shows_no_owner_picker(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = Harness::with_host(cx, save_project_screen(false), host);
+  assert!(!h.drawn("save-project-owner"));
+}
+
+#[gpui::test]
+fn save_project_assigns_the_team_picked(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    project_teams: vec![("o1".into(), "Acme".into())],
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, save_project_screen(false), host.clone());
+  assert!(h.drawn("save-project-owner"));
+  assert!(!h.drawn("save-project-owner-menu"), "closed until clicked");
+  h.click("save-project-owner");
+  assert!(h.drawn("save-project-owner-menu"));
+  h.click("save-project-owner-o1");
+  assert!(
+    !h.drawn("save-project-owner-menu"),
+    "picking closes the menu"
+  );
+  h.click("save-project-submit");
+  h.cx.run_until_parked();
+  assert_eq!(project_calls(&host), ["save project \"web + api\" to o1"]);
 }

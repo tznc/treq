@@ -1,5 +1,6 @@
 ---
 sidebar_position: 2
+description: "Change Treq settings: repository, application, account, machines, integrations, skills, and Feature Preview."
 ---
 
 # Customizing Settings
@@ -86,7 +87,7 @@ Set **file watching** to ignore the paths you never need, such as `node_modules/
 
 ## Account
 
-Settings → Account shows the signed-in Treq account, its plan, and the cloud workspace. **Sign Out** ends the session on this computer.
+Settings → Account shows the signed-in Treq account and its plan; Settings → Machines shows the cloud workspace. **Sign Out** ends the session on this computer.
 
 To delete the account, select **Delete Account** in the **Delete account** section, type your email in the **Delete your Treq account?** dialog, and select **Delete Account**. Your Pro subscription is cancelled at once, without a refund, and your [cloud workspace](/docs/how-to/cloud-workspaces) machine and disk are deleted. Treq keeps billing records. Repositories and workspaces on your computer stay as they are. While you are the last owner of any organization, the dialog refuses: make another member an owner, or delete the organization, first.
 

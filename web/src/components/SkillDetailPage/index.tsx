@@ -6,33 +6,28 @@ import { Highlight, themes } from 'prism-react-renderer';
 import { FileTree } from './FileTree';
 import { MobileFileSelect } from './MobileFileSelect';
 import { MarkdownPreview } from './MarkdownPreview';
-import type { Skill, SkillFile } from './types';
+import { SkillPageSections } from './SkillPageSections';
+import type { Skill, SkillFile, SkillPageProps } from './types';
 import { formatBytes, getPrismLanguage, skillInstallDeepLink } from './utils';
 import styles from './styles.module.css';
-
-const SOURCE_LABELS: Record<string, string> = {
-  anthropic: 'Anthropic',
-  openai: 'OpenAI',
-  mattpocock: 'Matt Pocock',
-  vercel: 'Vercel',
-  microsoft: 'Microsoft',
-  superpowers: 'Superpowers',
-  caveman: 'Caveman',
-  prisma: 'Prisma',
-};
 
 // Files above this size aren't fetched for inline preview — the GitHub link
 // still works, this just avoids pulling multi-MB blobs into the browser.
 const MAX_PREVIEW_BYTES = 500 * 1024;
 
-function pickDefaultFile(files: SkillFile[]): SkillFile | null {
-  return files.find((f) => f.path === 'SKILL.md') ?? files.find((f) => !f.binary) ?? null;
+// When the page already shows SKILL.md, the browser opens on another file,
+// skipping the license file when there is anything else to show.
+function pickDefaultFile(files: SkillFile[], bodyShown: boolean): SkillFile | null {
+  const text = files.filter((f) => !f.binary);
+  if (!bodyShown) return text.find((f) => f.path === 'SKILL.md') ?? text[0] ?? null;
+  const others = text.filter((f) => f.path !== 'SKILL.md');
+  return others.find((f) => !/^license/i.test(f.path)) ?? others[0] ?? null;
 }
 
-export default function SkillDetailPage({ skill }: { skill: Skill }) {
+export default function SkillDetailPage(props: SkillPageProps) {
   return (
-    <Layout title={skill.name} description={skill.description ?? undefined}>
-      <SkillDetailContent skill={skill} />
+    <Layout title={props.title} description={props.metaDescription}>
+      <SkillDetailContent {...props} />
     </Layout>
   );
 }
@@ -40,8 +35,9 @@ export default function SkillDetailPage({ skill }: { skill: Skill }) {
 // useColorMode() needs a ColorModeProvider ancestor, which <Layout> only
 // establishes for its *children* — so this must be a component Layout
 // renders, not the component that renders Layout.
-function SkillDetailContent({ skill }: { skill: Skill }) {
-  const [selected, setSelected] = useState<SkillFile | null>(() => pickDefaultFile(skill.files));
+function SkillDetailContent(props: SkillPageProps) {
+  const { skill, author, authorRoute, body } = props;
+  const [selected, setSelected] = useState<SkillFile | null>(() => pickDefaultFile(skill.files, body !== null));
   const [content, setContent] = useState<string | null>(null);
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [tab, setTab] = useState<'preview' | 'code'>('preview');
@@ -50,8 +46,8 @@ function SkillDetailContent({ skill }: { skill: Skill }) {
   const language = selected ? getPrismLanguage(selected.path) : null;
   const isMarkdown = language === 'markdown';
 
-  // File contents are fetched live from GitHub's raw CDN when a file is
-  // selected — never bundled into the site or indexed for search.
+  // Other files are fetched live from GitHub's raw CDN when selected. Only the
+  // SKILL.md body, when its license allows, is part of the static page.
   useEffect(() => {
     setContent(null);
     setTab('preview');
@@ -80,14 +76,16 @@ function SkillDetailContent({ skill }: { skill: Skill }) {
     };
   }, [selected]);
 
-  const sourceLabel = SOURCE_LABELS[skill.source] ?? skill.source;
+  const sourceLabel = author;
+  // With SKILL.md shown above, a browser holding only SKILL.md adds nothing.
+  const showBrowser = body === null || skill.files.some((f) => f.path !== 'SKILL.md');
 
   return (
     <div className={styles.page}>
       <div className={styles.breadcrumbs}>
         <Link to="/skills">Skills Library</Link>
         <span className={styles.sep}>/</span>
-        <span>{sourceLabel}</span>
+        {authorRoute ? <Link to={authorRoute}>{sourceLabel}</Link> : <span>{sourceLabel}</span>}
         <span className={styles.sep}>/</span>
         <span>{skill.name}</span>
       </div>
@@ -122,7 +120,7 @@ function SkillDetailContent({ skill }: { skill: Skill }) {
         </div>
       </div>
 
-      {skill.proprietary ? (
+      {skill.proprietary && (
         <div className={styles.callout} data-testid="proprietary-callout" role="note">
           <strong className={styles.calloutTitle}>Proprietary license</strong>
           <p className={styles.calloutBody}>
@@ -140,20 +138,23 @@ function SkillDetailContent({ skill }: { skill: Skill }) {
             View on GitHub ↗
           </a>
         </div>
-      ) : (
-        <SkillFileBrowser
-          skill={skill}
-          selected={selected}
-          onSelect={setSelected}
-          content={content}
-          status={status}
-          tab={tab}
-          onTabChange={setTab}
-          language={language}
-          isMarkdown={isMarkdown}
-          dark={colorMode === 'dark'}
-        />
       )}
+      <SkillPageSections {...props}>
+        {!skill.proprietary && showBrowser && (
+          <SkillFileBrowser
+            skill={skill}
+            selected={selected}
+            onSelect={setSelected}
+            content={content}
+            status={status}
+            tab={tab}
+            onTabChange={setTab}
+            language={language}
+            isMarkdown={isMarkdown}
+            dark={colorMode === 'dark'}
+          />
+        )}
+      </SkillPageSections>
     </div>
   );
 }

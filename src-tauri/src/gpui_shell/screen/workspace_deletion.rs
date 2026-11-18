@@ -4,6 +4,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::input::{Escape, InputEvent, InputState, MoveDown, MoveUp};
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
@@ -255,6 +256,7 @@ impl Render for WorkspaceDeletion {
             .role(tauri_plugin_gpui::gpui::Role::ListBoxOption)
             .aria_label(row.workspace.branch_name.clone())
             .debug_selector(move || selector)
+            .test_support()
             .px_3()
             .py_1p5()
             .mx_2()
@@ -281,6 +283,8 @@ impl Render for WorkspaceDeletion {
                     .child(row.workspace.branch_name.clone())
                     .when(row.current, |this| {
                       this.child(
+                        // Short label (['tag']): 11px is fine.
+                        // ast-grep-ignore: gpui-text-xs-short-label-only
                         ui::text(div(), TextSize::Xs)
                           .ml_2()
                           .font_weight(FontWeight::NORMAL)
@@ -395,7 +399,11 @@ impl Render for WorkspaceDeletion {
       .when(no_deletable, |this| {
         this.child(
           ui::text(div(), TextSize::Sm)
+            .id("workspace-deletion-home")
             .debug_selector(|| "workspace-deletion-home".into())
+            .role(tauri_plugin_gpui::gpui::Role::Status)
+            .aria_label("Home repository cannot be deleted")
+            .test_support()
             .px_4()
             .py_3()
             .border_t_1()

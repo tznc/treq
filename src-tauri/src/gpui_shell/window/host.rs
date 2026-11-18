@@ -115,6 +115,12 @@ pub trait WindowHost: RemoteHost + Send + Sync {
   fn open_in_new_window(&self, path: &str);
   fn add_supporting(&self, main_repo: &str, path: &str) -> Result<String, String>;
   fn remove_supporting(&self, main_repo: &str, path: &str) -> Result<(), String>;
+  /// The name of the project the window keeps its repositories in.
+  fn project_name(&self) -> Option<String> {
+    None
+  }
+  /// Forgets the window's repository but keeps its project.
+  fn clear_repo(&self) {}
   fn launch(&self, request: &LaunchRequest, select: bool) -> Result<(), String>;
   /// Shows `toast` in the window.
   fn show_toast(&self, toast: Toast);
@@ -405,9 +411,10 @@ impl WindowHost for Backend {
     if Backend::remote(self, main_repo).is_some() {
       return Vec::new();
     }
-    // A saved project lists its repositories; an unsaved one keeps the
-    // main repository's supporting list, as before projects.
-    if let Some(project) = crate::gpui_shell::projects::window_project(self.app(), self.label()) {
+    // The window's project, saved or draft, lists its repositories.
+    if let Some(project) =
+      crate::gpui_shell::projects::window_repos_project(self.app(), self.label())
+    {
       return project
         .repos
         .into_iter()
@@ -418,7 +425,7 @@ impl WindowHost for Backend {
         })
         .collect();
     }
-    supporting_repos::list(main_repo).unwrap_or_default()
+    Vec::new()
   }
 
   fn project(&self) -> Option<crate::core::projects::Project> {
@@ -432,7 +439,7 @@ impl WindowHost for Backend {
   fn flags(&self) -> Flags {
     self.with_db(|db| Flags {
       linear: feature_preview::is_enabled(db, PreviewFeature::LinearIntegration),
-      logs: feature_preview::is_enabled(db, PreviewFeature::Logs),
+      logs: true,
       remote_ssh: feature_preview::is_enabled(db, PreviewFeature::RemoteSsh),
     })
   }
@@ -523,25 +530,39 @@ impl WindowHost for Backend {
   }
 
   fn add_supporting(&self, main_repo: &str, path: &str) -> Result<String, String> {
-    if let Some(project) = self.project() {
-      let added = std::fs::canonicalize(path)
-        .map_err(|e| format!("Cannot open '{path}': {e}"))?
-        .to_string_lossy()
-        .to_string();
-      core::init(&added).map_err(|err| err.to_string())?;
-      self.with_db(|db| crate::core::projects::add_repo(db.conn(), &project.id, &added))?;
-      return Ok(added);
-    }
-    let added = supporting_repos::add(main_repo, path)?;
+    let project = crate::gpui_shell::projects::window_repos_project(self.app(), self.label())
+      .ok_or("This window has no project to add a repository to")?;
+    let added = supporting_repos::validate(main_repo, path)?;
     core::init(&added).map_err(|err| err.to_string())?;
+    let inserted =
+      self.with_db(|db| crate::core::projects::add_repo(db.conn(), &project.id, &added))?;
+    if !inserted {
+      return Err("This repository is already added".to_string());
+    }
     Ok(added)
   }
 
-  fn remove_supporting(&self, main_repo: &str, path: &str) -> Result<(), String> {
-    if let Some(project) = self.project() {
-      return self.with_db(|db| crate::core::projects::remove_repo(db.conn(), &project.id, path));
-    }
-    supporting_repos::remove(main_repo, path)
+  fn remove_supporting(&self, _main_repo: &str, path: &str) -> Result<(), String> {
+    let project = crate::gpui_shell::projects::window_repos_project(self.app(), self.label())
+      .ok_or("This window has no project to remove a repository from")?;
+    self.with_db(|db| crate::core::projects::remove_repo(db.conn(), &project.id, path))
+  }
+
+  fn project_name(&self) -> Option<String> {
+    crate::gpui_shell::projects::window_repos_project(self.app(), self.label()).map(|p| p.name)
+  }
+
+  fn clear_repo(&self) {
+    let state = self.app().state::<AppState>();
+    state
+      .window_repo_paths
+      .lock_or_recover()
+      .remove(self.label());
+    state
+      .window_supporting_repo_paths
+      .lock_or_recover()
+      .remove(self.label());
+    crate::unwatch_unshown_repos(self.app());
   }
 
   fn launch(&self, request: &LaunchRequest, select: bool) -> Result<(), String> {
@@ -659,7 +680,8 @@ impl WindowHost for Backend {
         Ok(events) => {
           let mut changed = false;
           for path in events.iter().flat_map(|e| e.paths.iter()) {
-            let op = ops.as_deref().is_some_and(|ops| path.starts_with(ops));
+            let op = ops.as_deref().is_some_and(|ops| path.starts_with(ops))
+              || path.ends_with(".git/HEAD");
             if !changes_matter(path, ops.as_deref()) || !op && gitignore.ignores(path) {
               continue;
             }
@@ -699,6 +721,16 @@ impl WindowHost for Backend {
         .watch(&ops, notify::RecursiveMode::NonRecursive)
       {
         log::warn!("Failed to watch {}: {err}", ops.display());
+      }
+    }
+    // `.git/HEAD` moves on a `git checkout` that bypasses jj.
+    let git_dir = Path::new(path).join(".git");
+    if git_dir.is_dir() {
+      if let Err(err) = checkout
+        .debouncer
+        .watch(&git_dir, notify::RecursiveMode::NonRecursive)
+      {
+        log::warn!("Failed to watch {}: {err}", git_dir.display());
       }
     }
     if checkout.watched.is_empty() {
@@ -965,7 +997,7 @@ fn op_heads_dir(checkout: &Path) -> Option<PathBuf> {
 /// Whether a write under the watch is one to read again for: a new jj
 /// operation, or a file nobody ignores.
 fn changes_matter(path: &Path, ops: Option<&Path>) -> bool {
-  ops.is_some_and(|ops| path.starts_with(ops)) || !is_ignored(path)
+  ops.is_some_and(|ops| path.starts_with(ops)) || path.ends_with(".git/HEAD") || !is_ignored(path)
 }
 
 /// Writes nobody reviews: jj's and git's own state (jj writes `.jj` on
@@ -1138,6 +1170,14 @@ mod watch_tests {
     ));
     assert!(changes_matter(&workspace.join("src.rs"), Some(&heads)));
     assert_eq!(op_heads_dir(tempfile::tempdir().unwrap().path()), None);
+  }
+
+  /// A `git checkout` outside treq writes only `.git/HEAD`.
+  #[test]
+  fn a_git_checkout_counts_as_a_change() {
+    let repo = Path::new("/repo");
+    assert!(changes_matter(&repo.join(".git/HEAD"), None));
+    assert!(!changes_matter(&repo.join(".git/index"), None));
   }
 
   #[test]

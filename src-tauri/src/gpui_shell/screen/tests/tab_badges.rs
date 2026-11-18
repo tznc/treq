@@ -16,7 +16,11 @@ fn inside(h: &mut Harness, inner: &'static str, outer: &'static str) -> bool {
 #[gpui::test]
 fn the_tab_row_shows_the_loc_marker_and_change_count(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, feature_host(), workspace_route());
-  assert!(h.drawn("workspace-tab-row"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Tab).name("Code")),
+  )
+  .to_be_visible();
   assert!(inside(&mut h, "loc-diff-marker", "workspace-tab-row"));
   assert!(inside(
     &mut h,
@@ -42,9 +46,22 @@ fn a_workspace_without_changes_shows_neither_badge(cx: &mut TestAppContext) {
     ..FakeHost::default()
   };
   let (mut h, _) = workspace_harness(cx, host, workspace_route());
-  assert!(h.drawn("workspace-tab-changes"));
-  assert!(!h.drawn("loc-diff-marker"));
-  assert!(!h.drawn("workspace-tab-changes-count"));
+  let screen = h.rendered();
+  let changes = screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Tab).name("Changes"));
+  gpui_testing_library::expect(changes.clone()).to_be_visible();
+  assert!(
+    screen
+      .within(&changes)
+      .query_by_role(gpui_testing_library::by::role(gpui::Role::Image))
+      .is_none(),
+    "no count"
+  );
+  assert!(screen
+    .query_by_role(
+      gpui_testing_library::by::role(gpui::Role::Image)
+        .name(gpui_testing_library::TextMatch::regex(r"lines added")),
+    )
+    .is_none());
 }
 
 /// `sumWorkspaceLocFromLog`: the workspace's commits and its tentative
@@ -104,7 +121,11 @@ fn the_commits_badge_counts_the_commits_list() {
 #[gpui::test]
 fn the_tab_badges_read_again_when_the_checkout_changes(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, feature_host(), workspace_route());
-  assert!(h.drawn("workspace-tab-row"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Tab).name("Code")),
+  )
+  .to_be_visible();
   let reads = count_calls(&host, "read workspace 0");
   bump_changes_revision(&mut h);
   assert_eq!(count_calls(&host, "read workspace 0"), reads + 1);
@@ -115,7 +136,10 @@ fn the_tab_badges_read_again_when_the_checkout_changes(cx: &mut TestAppContext) 
 #[gpui::test]
 fn the_shown_commits_list_reads_again_when_the_checkout_changes(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, commits_host(), commits_route());
-  assert!(h.drawn("workspace-commits"));
+  let screen = h.rendered();
+  assert!(!screen
+    .query_all_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("work"))
+    .is_empty());
   let reads = count_calls(&host, "read log Some(7)");
   bump_changes_revision(&mut h);
   assert_eq!(count_calls(&host, "read log Some(7)"), reads + 1);
@@ -147,6 +171,14 @@ fn a_failed_status_read_draws_no_placeholder(cx: &mut TestAppContext) {
     ..FakeHost::default()
   };
   let (mut h, _) = workspace_harness(cx, host, workspace_route());
-  assert!(h.drawn("workspace-tab-row"));
-  assert!(!h.drawn("workspace-status-skeleton"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Tab).name("Code")),
+  )
+  .to_be_visible();
+  assert!(screen
+    .query_by_role(gpui_testing_library::by::role(
+      gpui::Role::ProgressIndicator
+    ))
+    .is_none());
 }

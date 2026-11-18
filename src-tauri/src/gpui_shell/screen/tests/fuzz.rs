@@ -953,7 +953,11 @@ fn projects_save_nothing_unconfirmed() {
 fn double_clicking_save_project_saves_once(cx: &mut TestAppContext) {
   let host = Arc::new(FakeHost::default());
   let mut h = Harness::with_host(cx, project_home(None, project_modal(1)), host.clone());
-  assert!(h.drawn("save-project-submit"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("Save project")),
+  )
+  .to_be_visible();
   let at = h.cx.debug_bounds("save-project-submit").unwrap().center();
   h.cx.simulate_click(at, gpui::Modifiers::none());
   h.cx.simulate_click(at, gpui::Modifiers::none());
@@ -970,7 +974,11 @@ fn double_clicking_save_instructions_saves_once(cx: &mut TestAppContext) {
     project_home(Some("Checkout"), project_modal(3)),
     host.clone(),
   );
-  assert!(h.drawn("project-context-save"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("Save")),
+  )
+  .to_be_visible();
   let at = h.cx.debug_bounds("project-context-save").unwrap().center();
   h.cx.simulate_click(at, gpui::Modifiers::none());
   h.cx.simulate_click(at, gpui::Modifiers::none());

@@ -5,6 +5,7 @@
 //! [`super::pr_review_logic`].
 
 use crate::mobile::ui::widgets::{Caption as _, TouchButton as _};
+use gpui_kit::component::Selectable as _;
 use std::{collections::HashSet, rc::Rc};
 
 use crate::{
@@ -537,13 +538,8 @@ impl PrReviewScreen {
           .h(px(TAP))
           .small()
           .label(format!("{} {}", emoji(&content), group.count))
-          .map(|b| {
-            if group.viewer_has_reacted {
-              b.primary()
-            } else {
-              b.outline()
-            }
-          })
+          .outline()
+          .selected(group.viewer_has_reacted)
           .when_some(known, |b, content| {
             b.on_click(cx.listener(move |this, _, _, cx| this.react(id.clone(), content, cx)))
           })
