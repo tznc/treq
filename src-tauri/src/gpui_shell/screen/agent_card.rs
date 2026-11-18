@@ -87,6 +87,8 @@ pub fn agent_comment_card(
     .flex_col()
     .gap_1p5()
     .child(
+      // Pre-existing mixed sizes, to triage.
+      // ast-grep-ignore: gpui-row-one-text-size
       div()
         .id(SharedString::from(format!("{header}-{id}")))
         .debug_selector(move || header)

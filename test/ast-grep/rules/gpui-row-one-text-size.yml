@@ -1,0 +1,42 @@
+id: gpui-row-one-text-size
+language: rust
+severity: error
+message: >
+  One row, one text size: this `.child(...)` chain puts `TextSize::Xs` text
+  next to `TextSize::Sm`/`Base` text, so the two read as a mismatch.
+note: >
+  Give siblings in a row the same `TextSize`; a pill or badge with its own
+  background or border may stay at 11px. Helpers that draw text inside
+  rows (a username, a date) should take the size from the caller rather than
+  fix one.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+  - "src-tauri/src/mobile/**/*.rs"
+  - "crates/treq-ui/src/**/*.rs"
+ignores:
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+utils:
+  xs-child:
+    kind: arguments
+    regex: '^\((\s*//[^\n]*)*\s*[\w:]+\([^()]*(\([^()]*\))?[^()]*TextSize::Xs\b'
+    # A pill or badge (its own background or border) may be smaller.
+    not: { regex: '\.(bg|border_1|rounded)\(' }
+  big-child:
+    kind: arguments
+    regex: '^\((\s*//[^\n]*)*\s*[\w:]+\([^()]*(\([^()]*\))?[^()]*TextSize::(Sm|Base)\b'
+rule:
+  kind: call_expression
+  pattern: $ROW.child($$$)
+  # A row is a flex chain; columns stack a title over a smaller caption on
+  # purpose, and plain blocks stack too.
+  has: { kind: field_identifier, regex: '^flex$', stopBy: { kind: arguments } }
+  not:
+    has: { kind: field_identifier, regex: '^flex_col$', stopBy: { kind: arguments } }
+  any:
+    - all:
+        - has: { field: arguments, matches: xs-child }
+        - has: { field: function, has: { matches: big-child, stopBy: { kind: arguments } } }
+    - all:
+        - has: { field: arguments, matches: big-child }
+        - has: { field: function, has: { matches: xs-child, stopBy: { kind: arguments } } }

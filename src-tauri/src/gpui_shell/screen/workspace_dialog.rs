@@ -1696,6 +1696,8 @@ impl WorkspaceDialog {
           } else {
             commit.message
           };
+          // Pre-existing mixed sizes, to triage.
+          // ast-grep-ignore: gpui-row-one-text-size
           div()
             .id(id)
             .role(gpui::Role::CheckBox)
@@ -1811,6 +1813,8 @@ impl WorkspaceDialog {
           let state = self.file_state(&path);
           let (letter, color) = file_status(&file.status, &p);
           let fg = p.foreground;
+          // Pre-existing mixed sizes, to triage.
+          // ast-grep-ignore: gpui-row-one-text-size
           let row = div()
             .id(SharedString::from(format!("dialog-file-{i}")))
             .flex()

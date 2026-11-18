@@ -479,7 +479,7 @@ impl ChangesView {
     if let (true, Some(first)) = (collapsed, first) {
       toggle = toggle
         .child(avatar(&first.author.login, 20., p))
-        .child(profile_link(&first.author.login, p, cx));
+        .child(profile_link(&first.author.login, TextSize::Sm, p, cx));
     }
     // Expanded threads show the badge beside the pill rather than inside it.
     let resolved = thread.is_resolved.then(|| {
@@ -642,7 +642,14 @@ impl ChangesView {
           .gap_2()
           .mb_1p5()
           .child(avatar(&comment.author.login, 32., p))
-          .child(profile_link(&comment.author.login, p, cx))
+          .child(profile_link(
+            &comment.author.login,
+            // Short label (['username']), beside the 11px date.
+            // ast-grep-ignore: gpui-text-xs-short-label-only
+            TextSize::Xs,
+            p,
+            cx,
+          ))
           .child(
             // Short label (['timestamp']): 11px is fine.
             // ast-grep-ignore: gpui-text-xs-short-label-only
@@ -722,6 +729,8 @@ impl ChangesView {
       .flex_col()
       .gap_2()
       .child(
+        // Pre-existing mixed sizes, to triage.
+        // ast-grep-ignore: gpui-row-one-text-size
         div()
           .flex()
           .items_center()
@@ -846,11 +855,15 @@ fn avatar(login: &str, size: f32, p: &Palette) -> impl IntoElement {
 }
 
 /// `AuthorProfileLink`: "@login", opening the GitHub profile.
-fn profile_link(login: &str, p: &Palette, cx: &mut Context<ChangesView>) -> impl IntoElement {
+/// `@login`, at the size of the text beside it.
+fn profile_link(
+  login: &str,
+  size: TextSize,
+  p: &Palette,
+  cx: &mut Context<ChangesView>,
+) -> impl IntoElement {
   let url = format!("https://github.com/{login}");
-  // Short label (['username']): 11px is fine.
-  // ast-grep-ignore: gpui-text-xs-short-label-only
-  ui::text(div(), TextSize::Xs)
+  ui::text(div(), size)
     .id(SharedString::from(format!("profile-{login}")))
     .role(gpui::Role::Link)
     .aria_label(format!("@{login}"))
