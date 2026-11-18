@@ -1392,6 +1392,33 @@ fn changes_tab_resolves_an_agent_comment(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn changes_tab_marks_a_sent_review_comment_and_resolves_it(cx: &mut TestAppContext) {
+  let host = changes_host();
+  let mut sent = agent_comment(None);
+  sent.source = "sent-review".into();
+  *host.agent.lock().unwrap() = vec![sent];
+  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  assert!(h.drawn("sent-review-badge"));
+  assert!(!h.drawn("agent-delete-ag"));
+  assert!(!h.drawn("agent-send-ag"));
+  h.click("agent-resolve-ag");
+  h.cx.run_until_parked();
+  assert!(host
+    .writes()
+    .contains(&"resolve agent comment ag".to_string()));
+  assert!(!h.drawn("agent-review-comment-card"));
+}
+
+#[gpui::test]
+fn changes_tab_marks_an_agent_comment_as_local(cx: &mut TestAppContext) {
+  let host = changes_host();
+  *host.agent.lock().unwrap() = vec![agent_comment(None)];
+  let (mut h, _) = workspace_harness(cx, host, changes_route());
+  assert!(!h.drawn("sent-review-badge"));
+  assert!(h.drawn("agent-delete-ag"));
+}
+
+#[gpui::test]
 fn changes_tab_counts_open_agent_comments(cx: &mut TestAppContext) {
   let host = changes_host();
   *host.agent.lock().unwrap() = vec![agent_comment(None)];

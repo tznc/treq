@@ -690,6 +690,13 @@ impl ChangesView {
   ) -> impl IntoElement {
     let busy = self.threads.busy.contains(&comment.id);
     let muted = p.muted_foreground;
+    // A comment from a review the user sent to an agent, not the agent's.
+    let sent = comment.source == crate::core::agent_review::SENT_REVIEW_SOURCE;
+    let (icon, tone, label) = if sent {
+      (theme::ICON_SEND, Tone::Primary, "Sent to agent")
+    } else {
+      (theme::ICON_BOT, Tone::GitMerged, "Local")
+    };
     let range = if comment.end_line != comment.start_line {
       format!("{}-{}", comment.start_line, comment.end_line)
     } else {
@@ -721,13 +728,20 @@ impl ChangesView {
           .flex()
           .items_center()
           .gap_2()
-          .child(ui::icon(theme::ICON_BOT, 14., Tone::GitMerged.color(p)))
           .child(
-            // Short label (tag). ast-grep-ignore: gpui-text-xs-short-label-only
-            ui::text(div(), TextSize::Xs)
-              .font_weight(FontWeight::MEDIUM)
-              .text_color(Tone::GitMerged.color(p))
-              .child("Local"),
+            div()
+              .flex()
+              .items_center()
+              .gap_2()
+              .when(sent, |d| d.debug_selector(|| "sent-review-badge".into()))
+              .child(ui::icon(icon, 14., tone.color(p)))
+              .child(
+                // Short label (tag). ast-grep-ignore: gpui-text-xs-short-label-only
+                ui::text(div(), TextSize::Xs)
+                  .font_weight(FontWeight::MEDIUM)
+                  .text_color(tone.color(p))
+                  .child(label),
+              ),
           )
           .child(
             ui::text(div(), TextSize::Sm)
@@ -759,18 +773,22 @@ impl ChangesView {
           ),
       );
     }
-    let sent = comment.clone();
+    let comment_sent = comment.clone();
     actions = actions
-      .child(
-        Button::new(SharedString::from(format!("agent-send-{id}")), p)
-          .variant(Variant::Outline)
-          .size(Size::Sm)
-          .gap_1p5()
-          .disabled(busy)
-          .icon(theme::ICON_TERMINAL, 12.)
-          .label("Send to agent")
-          .on_click(cx.listener(move |view, _, _, cx| view.send_agent_comment(&sent, cx))),
-      )
+      .when(!sent, |a| {
+        a.child(
+          Button::new(SharedString::from(format!("agent-send-{id}")), p)
+            .variant(Variant::Outline)
+            .size(Size::Sm)
+            .gap_1p5()
+            .disabled(busy)
+            .icon(theme::ICON_TERMINAL, 12.)
+            .label("Send to agent")
+            .on_click(
+              cx.listener(move |view, _, _, cx| view.send_agent_comment(&comment_sent, cx)),
+            ),
+        )
+      })
       .child({
         let id = id.clone();
         Button::new(SharedString::from(format!("agent-resolve-{id}")), p)
@@ -784,19 +802,21 @@ impl ChangesView {
             cx.listener(move |view, _, _, cx| view.agent_action(&id, AgentAction::Resolve, cx)),
           )
       })
-      .child(
-        Button::new(SharedString::from(format!("agent-delete-{id}")), p)
-          .variant(Variant::Ghost)
-          .size(Size::Sm)
-          .gap_1p5()
-          .text_color(muted)
-          .disabled(busy)
-          .icon(theme::ICON_TRASH, 12.)
-          .label("Delete")
-          .on_click(
-            cx.listener(move |view, _, _, cx| view.agent_action(&id, AgentAction::Delete, cx)),
-          ),
-      );
+      .when(!sent, |a| {
+        a.child(
+          Button::new(SharedString::from(format!("agent-delete-{id}")), p)
+            .variant(Variant::Ghost)
+            .size(Size::Sm)
+            .gap_1p5()
+            .text_color(muted)
+            .disabled(busy)
+            .icon(theme::ICON_TRASH, 12.)
+            .label("Delete")
+            .on_click(
+              cx.listener(move |view, _, _, cx| view.agent_action(&id, AgentAction::Delete, cx)),
+            ),
+        )
+      });
     card.child(actions).test_support()
   }
 }
