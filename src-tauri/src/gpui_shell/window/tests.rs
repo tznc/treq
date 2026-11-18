@@ -256,6 +256,9 @@ impl WindowHost for FakeHost {
       "launch {} {:?} {select}",
       request.repo_path, request.workspace_id
     ));
+    if let Some(profile) = &request.profile {
+      self.record(format!("launch profile {profile}"));
+    }
     Ok(())
   }
 
@@ -1803,6 +1806,7 @@ fn deep_link(branch: &str, request_id: &str) -> crate::core::agent_launch::Agent
     mode: "acceptEdits".into(),
     agent: "claude".into(),
     request_id: request_id.into(),
+    profile: None,
   }
 }
 
@@ -1829,6 +1833,17 @@ fn deep_links_start_on_their_branch_or_toast_that_it_is_missing() {
     .lock()
     .unwrap()
     .is_processed("window-test-found"));
+}
+
+#[test]
+fn deep_links_start_on_their_profile() {
+  let host = repo_host();
+  let request = crate::core::agent_launch::AgentDeepLinkRequest {
+    profile: Some("work".into()),
+    ..deep_link("b", "window-test-profile")
+  };
+  crate::gpui_shell::launch::start_deep_link(&*host, &request);
+  assert_eq!(host.calls().last().unwrap(), "launch profile work");
 }
 
 /// A remote poll reads every workspace's status in one request, not one

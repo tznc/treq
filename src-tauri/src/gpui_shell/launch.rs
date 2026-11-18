@@ -297,7 +297,7 @@ pub(super) fn start_deep_link(host: &dyn WindowHost, request: &AgentDeepLinkRequ
     mode: Some(request.mode.clone()),
     agent: Some(request.agent.clone()),
     session_name: None,
-    profile: None,
+    profile: request.profile.clone(),
   };
   match host.launch(&launched, true) {
     Ok(()) => launch::deep_links()

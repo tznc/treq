@@ -1307,9 +1307,18 @@ mod tests {
       prompt: "hello".to_string(),
       mode: "plan".to_string(),
       agent: "codex".to_string(),
+      profile: None,
     };
     let url = build_agent_deep_link_url(&request);
     let parsed = parse_agent_request_from_url(&url).expect("request should parse");
     assert_eq!(parsed, request);
+    let request = crate::agent_dispatch::AgentDispatchRequest {
+      profile: Some("work".to_string()),
+      ..request
+    };
+    let url = build_agent_deep_link_url(&request);
+    assert_eq!(parse_agent_request_from_url(&url), Some(request));
+    let link = crate::core::agent_launch::parse_agent_deep_link_url(&url).expect("deep link");
+    assert_eq!(link.profile.as_deref(), Some("work"));
   }
 }

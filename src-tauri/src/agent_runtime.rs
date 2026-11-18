@@ -121,12 +121,18 @@ pub(crate) fn parse_agent_request_from_url(
     prompt: values.get("prompt")?.clone(),
     mode: values.get("mode")?.clone(),
     agent: values.get("agent")?.clone(),
+    profile: values.get("profile").cloned(),
   })
 }
 
 pub(crate) fn build_agent_deep_link_url(request: &agent_dispatch::AgentDispatchRequest) -> String {
+  let profile = request
+    .profile
+    .as_deref()
+    .map(|p| format!("&profile={}", urlencoding::encode(p)))
+    .unwrap_or_default();
   format!(
-    "treq://agent/start?repo={}&branch={}&prompt={}&mode={}&agent={}&request_id={}",
+    "treq://agent/start?repo={}&branch={}&prompt={}&mode={}&agent={}&request_id={}{profile}",
     urlencoding::encode(&request.repo),
     urlencoding::encode(&request.branch),
     urlencoding::encode(&request.prompt),
