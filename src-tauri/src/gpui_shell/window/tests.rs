@@ -977,7 +977,9 @@ fn back_and_forward_walk_the_places_shown(cx: &mut TestAppContext) {
       .read_with(cx, |c, _| c.model().page.clone())
   };
   let go = |cx: &mut TestAppContext, shortcut| {
-    window.controller.update(cx, |c, cx| c.shortcut(shortcut, cx));
+    window
+      .controller
+      .update(cx, |c, cx| c.shortcut(shortcut, cx));
     cx.run_until_parked();
   };
   go(cx, Shortcut::Back);
