@@ -2253,7 +2253,7 @@ fn changes_tab_applies_a_github_suggestion_and_resolves_it(cx: &mut TestAppConte
 fn changes_tab_commits_a_github_suggestion_with_its_author(cx: &mut TestAppContext) {
   let mut host = changes_host_with_committed();
   host.threads = vec![suggestion_thread("c.rs", 1)];
-  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  let (mut h, host) = workspace_harness(cx, host, committed_route(true));
   h.click("gh-commit-t1-c");
   h.cx.run_until_parked();
   let writes = host.writes();
