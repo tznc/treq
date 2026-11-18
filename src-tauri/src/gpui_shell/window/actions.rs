@@ -1640,6 +1640,7 @@ mod tests {
           created_at: String::new(),
           last_accessed: String::new(),
           model: None,
+          link_url: None,
         }]),
         ..RepoRead::default()
       },
@@ -1690,6 +1691,7 @@ mod tests {
           created_at: String::new(),
           last_accessed: String::new(),
           model: None,
+          link_url: None,
         }]),
         ..RepoRead::default()
       },

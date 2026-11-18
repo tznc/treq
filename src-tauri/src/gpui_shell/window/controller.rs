@@ -556,6 +556,7 @@ impl WindowController {
           mode,
           agent,
           session_name: name,
+          link: None,
         };
         self.background(
           move |host| host.launch(&request, select),
