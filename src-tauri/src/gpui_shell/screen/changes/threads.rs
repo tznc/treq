@@ -472,25 +472,31 @@ impl ChangesView {
         .child(avatar(&first.author.login, 20., p))
         .child(profile_link(&first.author.login, p, cx));
     }
-    if thread.is_resolved {
-      toggle = toggle.child(
-        // Short label (['status pill']): 11px is fine.
-        // ast-grep-ignore: gpui-text-xs-short-label-only
-        ui::text(div(), TextSize::Xs)
-          .flex_none()
-          .flex()
-          .items_center()
-          .gap_1()
-          .px_1p5()
-          .py_0p5()
-          .rounded(radius::SM)
-          .bg(p.muted)
-          .text_color(muted)
-          .font_weight(FontWeight::MEDIUM)
-          .child(ui::icon(theme::ICON_CIRCLE_CHECK, 12., muted))
-          .child("Resolved"),
-      );
-    }
+    // Expanded threads show the badge beside the pill rather than inside it.
+    let resolved = thread.is_resolved.then(|| {
+      let grey = p.muted_foreground;
+      // Short label (['status pill']): 11px is fine.
+      // ast-grep-ignore: gpui-text-xs-short-label-only
+      ui::text(div(), TextSize::Xs)
+        .flex_none()
+        .flex()
+        .items_center()
+        .gap_1()
+        .px_1p5()
+        .py_0p5()
+        .rounded(radius::SM)
+        .bg(p.muted)
+        .text_color(grey)
+        .font_weight(FontWeight::MEDIUM)
+        .child(ui::icon(theme::ICON_CIRCLE_CHECK, 12., grey))
+        .child("Resolved")
+    });
+    let resolved = if collapsed {
+      toggle = toggle.children(resolved);
+      None
+    } else {
+      resolved
+    };
     if let (true, Some(first)) = (collapsed, first) {
       toggle = toggle.child(
         ui::text(div(), TextSize::Sm)
@@ -525,7 +531,14 @@ impl ChangesView {
     } else {
       card = card.flex().flex_col().items_start().gap_1p5();
     }
-    card = card.child(toggle.test_support());
+    card = card.child(
+      div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .child(toggle.test_support())
+        .children(resolved),
+    );
     if !collapsed {
       let mut body = div().w_full().flex().flex_col().gap_2();
       for comment in &thread.comments {

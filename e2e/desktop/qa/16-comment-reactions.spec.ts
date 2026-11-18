@@ -86,7 +86,7 @@ test("comment-reactions: review thread", async ({ page }) => {
     title: "A review comment's reactions in the Changes tab",
     expectations: [
       "Under octocat's review comment: add-reaction button, 👍 2 and a highlighted 🚀 1",
-      "The thread header is a small tinted pill (chevron + 'N comment(s)') with no grey full-width bar or outer box",
+      "The thread header is a small tinted pill (chevron + 'N comment(s)') with the Resolved badge beside it, no grey full-width bar or outer box",
     ],
   });
 });
