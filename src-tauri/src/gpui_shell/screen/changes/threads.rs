@@ -666,6 +666,7 @@ impl ChangesView {
         // Positioned here: the tooltip wrapper is `relative`, so an
         // absolute button inside it would sit below the card.
         div()
+          .debug_selector(|| "github-comment-quote".into())
           .absolute()
           .top_2()
           .right_2()
@@ -678,7 +679,6 @@ impl ChangesView {
               .variant(Variant::Ghost)
               .size(Size::IconXs)
               .aria_label("Quote")
-              .debug_selector(|| "github-comment-quote".into())
               .child(ui::icon(theme::ICON_QUOTE, 14., p.muted_foreground))
               .on_click(cx.listener(move |view, _, _, cx| {
                 view.quote(&quoted, &file, anchor.clone(), line, side, cx)
