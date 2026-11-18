@@ -568,6 +568,23 @@ impl LinearView {
     self.host.open_url(url);
   }
 
+  /// Opens Linear's OAuth page, or toasts why not.
+  fn connect_linear(&mut self, cx: &mut Context<Self>) {
+    let host = self.host.clone();
+    cx.background_spawn(async move {
+      match host.linear_connect_url() {
+        Ok(url) => host.open_url(&url),
+        Err(err) => super::workspace_data::WorkspaceHost::notify(
+          host.as_ref(),
+          Toast::error("Couldn't connect Linear")
+            .description(err)
+            .into(),
+        ),
+      }
+    })
+    .detach();
+  }
+
   fn popup(&self, request: PopupRequest, cx: &mut App) {
     let popups = self.popups.clone();
     cx.defer(move |cx| popups(request, cx));
@@ -1491,7 +1508,8 @@ impl LinearView {
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
-    let title = if error == crate::linear::NOT_CONNECTED {
+    let not_connected = error == crate::linear::NOT_CONNECTED;
+    let title = if not_connected {
       "Connect Linear"
     } else {
       "Linear rejected the API key"
@@ -1507,14 +1525,27 @@ impl LinearView {
       .child(
         ui::EmptyState::new("linear-connection-state", title, p)
           .icon(theme::ICON_LINEAR)
-          .error(error != crate::linear::NOT_CONNECTED)
+          .error(!not_connected)
           .message(error)
           .action(
-            Button::new("linear-open-settings", p)
-              .variant(Variant::Outline)
-              .size(Size::Sm)
-              .label("Open settings")
-              .on_click(cx.listener(|view, _, _, cx| view.open_settings(cx))),
+            div()
+              .flex()
+              .gap_2()
+              .when(not_connected, |row| {
+                row.child(
+                  Button::new("linear-connect", p)
+                    .size(Size::Sm)
+                    .label("Connect Linear")
+                    .on_click(cx.listener(|view, _, _, cx| view.connect_linear(cx))),
+                )
+              })
+              .child(
+                Button::new("linear-open-settings", p)
+                  .variant(Variant::Outline)
+                  .size(Size::Sm)
+                  .label("Open settings")
+                  .on_click(cx.listener(|view, _, _, cx| view.open_settings(cx))),
+              ),
           ),
       )
   }
