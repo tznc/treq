@@ -1136,6 +1136,7 @@ pub(super) fn capitalize(text: &str) -> String {
 /// A tab strip of `items` (value, id suffix, label), each tab's id `{prefix}-{suffix}`.
 fn tab_strip<V: Copy + PartialEq + 'static>(
   prefix: &'static str,
+  label: &'static str,
   items: Vec<(V, &'static str, &'static str)>,
   active: V,
   p: &Palette,
@@ -1143,6 +1144,7 @@ fn tab_strip<V: Copy + PartialEq + 'static>(
 ) -> ui::Tabs {
   let values: Vec<V> = items.iter().map(|(value, ..)| *value).collect();
   ui::Tabs::new(format!("{prefix}s"), p)
+    .aria_label(label)
     .tabs(
       items
         .into_iter()
@@ -1300,6 +1302,13 @@ impl LinearView {
         // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .debug_selector(move || chip)
+          .id(SharedString::from(format!("linear-filter-chip-{key}")))
+          .role(gpui::Role::Group)
+          .aria_label(format!(
+            "{}: {}",
+            group.label,
+            group.value_label().unwrap_or_default()
+          ))
           .flex()
           .items_center()
           .gap_1()
@@ -1334,6 +1343,7 @@ impl LinearView {
                 }
               }))
           })
+          .test_support()
       })
       .collect::<Vec<_>>();
     div()
@@ -1541,6 +1551,9 @@ impl Render for LinearView {
     if let Some(error) = connection {
       return div()
         .debug_selector(|| "linear-panel".into())
+        .id("linear-panel")
+        .role(tauri_plugin_gpui::gpui::Role::Group)
+        .aria_label("Linear")
         .size_full()
         .flex()
         .flex_col()
@@ -1548,6 +1561,7 @@ impl Render for LinearView {
         .text_color(p.foreground)
         .child(header)
         .child(self.connection_state(error, &p, cx))
+        .test_support()
         .into_any_element();
     }
     let sections = div()
@@ -1556,6 +1570,7 @@ impl Render for LinearView {
       .flex_none()
       .child(div().flex().child(tab_strip(
         "linear-section",
+        "Sections",
         vec![
           (Section::Issues, "issues", "Issues"),
           (Section::Projects, "projects", "Projects"),
@@ -1573,6 +1588,9 @@ impl Render for LinearView {
       .or_else(|| self.document_dialog(&p, window, cx));
     div()
       .debug_selector(|| "linear-panel".into())
+      .id("linear-panel")
+      .role(tauri_plugin_gpui::gpui::Role::Group)
+      .aria_label("Linear")
       .size_full()
       .flex()
       .flex_col()
@@ -1582,12 +1600,18 @@ impl Render for LinearView {
       .child(sections)
       .child(body)
       .children(dialog)
+      .test_support()
       .into_any_element()
   }
 }
 
 impl LinearView {
-  fn issues_section(&mut self, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> Div {
+  fn issues_section(
+    &mut self,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> AnyElement {
     let fetch = self.issues.get(&self.team).cloned().unwrap_or_default();
     let loading = fetch.is_loading();
     let all = fetch.data.clone().unwrap_or_default();
@@ -1599,10 +1623,12 @@ impl LinearView {
       .as_ref()
       .and_then(|id| all.iter().find(|i| &i.id == id));
     if self.new_issue.is_some() {
-      return self.new_issue_page(p, window, cx);
+      return self.new_issue_page(p, window, cx).into_any_element();
     }
     if let Some(issue) = open.cloned() {
-      return self.issue_page(&issue, &all, p, window, cx);
+      return self
+        .issue_page(&issue, &all, p, window, cx)
+        .into_any_element();
     }
     let f = &self.issue_filters;
     let groups = vec![
@@ -1650,6 +1676,7 @@ impl LinearView {
       .flex_wrap()
       .child(tab_strip(
         "linear-mode",
+        "Layout",
         vec![
           (IssueMode::List, "list", "List"),
           (IssueMode::Kanban, "kanban", "Kanban"),
@@ -1758,6 +1785,7 @@ impl LinearView {
       .flex_col()
       .child(toolbar)
       .child(content)
+      .into_any_element()
   }
 
   /// `LinearIssuesList`: roots, each followed by its shown sub-issues, a
@@ -1865,7 +1893,7 @@ impl LinearView {
     p: &Palette,
     window: &mut Window,
     cx: &mut Context<Self>,
-  ) -> Div {
+  ) -> impl IntoElement {
     let editing = self.editing.is_some();
     let parent = issue
       .parent_id
@@ -1954,6 +1982,12 @@ impl LinearView {
     let selector = format!("linear-issue-page-{}", issue.id);
     div()
       .debug_selector(move || selector)
+      .id(SharedString::from(format!(
+        "linear-issue-page-{}",
+        issue.id
+      )))
+      .role(tauri_plugin_gpui::gpui::Role::Article)
+      .aria_label(format!("{} {}", issue.identifier, issue.title))
       .flex_1()
       .min_h_0()
       .flex()
@@ -1997,6 +2031,7 @@ impl LinearView {
               }),
           ),
       )
+      .test_support()
   }
 
   /// The New issue page: a back button over the form.
@@ -2038,7 +2073,12 @@ impl LinearView {
   }
 
   /// The open issue's title and description, editable.
-  fn edit_form(&mut self, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> Div {
+  fn edit_form(
+    &mut self,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
     let (title, description) = self.editing.clone().unwrap_or_default();
     let title_state = self.input("linear.edit.title", &title, "Title", window, cx);
     let body_state = self.textarea(
@@ -2051,6 +2091,9 @@ impl LinearView {
     let saving = self.saving;
     div()
       .debug_selector(|| "linear-issue-edit-form".into())
+      .id("linear-issue-edit-form")
+      .role(tauri_plugin_gpui::gpui::Role::Form)
+      .aria_label("Edit issue")
       .flex()
       .flex_col()
       .gap_2()
@@ -2093,6 +2136,7 @@ impl LinearView {
               })),
           ),
       )
+      .test_support()
   }
 
   /// "New issue": a team, a title and a description.
@@ -2132,6 +2176,9 @@ impl LinearView {
     let pending = form.pending;
     div()
       .debug_selector(|| "linear-new-issue-form".into())
+      .id("linear-new-issue-form")
+      .role(tauri_plugin_gpui::gpui::Role::Form)
+      .aria_label("New issue")
       .p_4()
       .flex()
       .flex_col()
@@ -2208,6 +2255,7 @@ impl LinearView {
           .whitespace_normal()
           .child(err)
       }))
+      .test_support()
   }
 
   /// The delete confirmation for the open issue.
@@ -2315,6 +2363,9 @@ impl LinearView {
         let column = name.clone();
         div()
           .debug_selector(move || selector)
+          .id(SharedString::from(format!("linear-kanban-column-{name}")))
+          .role(tauri_plugin_gpui::gpui::Role::Group)
+          .aria_label(name.clone())
           .flex_none()
           .w(zpx(320.))
           .bg(p.muted.opacity(0.3))
@@ -2344,6 +2395,7 @@ impl LinearView {
                 .size_full(),
               ),
           )
+          .test_support()
       }))
   }
 
@@ -2609,6 +2661,7 @@ impl LinearView {
                       .child(format!("{}%", data::percent(project.progress))),
                   ),
               )
+              .test_support()
           })),
       );
     let left = div()
@@ -2640,11 +2693,15 @@ impl LinearView {
       });
     div()
       .debug_selector(|| "linear-projects-section".into())
+      .id("linear-projects-section")
+      .role(tauri_plugin_gpui::gpui::Role::Group)
+      .aria_label("Projects")
       .flex_1()
       .flex()
       .min_h_0()
       .child(left)
       .child(right)
+      .test_support()
   }
 
   fn project_detail(
@@ -2740,6 +2797,9 @@ impl LinearView {
     };
     div()
       .debug_selector(|| "linear-project-detail".into())
+      .id("linear-project-detail")
+      .role(tauri_plugin_gpui::gpui::Role::Article)
+      .aria_label(project.name.clone())
       .p_4()
       .child(
         div()
@@ -2773,6 +2833,7 @@ impl LinearView {
           .border_color(p.border)
           .child(self.commented(target, CommentPlacement::Inline, p, cx)),
       )
+      .test_support()
   }
 
   /// `DocumentDialog`: the document and its comments, over the window.
@@ -2965,6 +3026,9 @@ impl LinearView {
     let below = (show_comments || !body_comments.is_empty()).then(|| {
       div()
         .debug_selector(|| "linear-comments-column".into())
+        .id("linear-comments-column")
+        .role(tauri_plugin_gpui::gpui::Role::Group)
+        .aria_label("Comments")
         .w_full()
         .flex()
         .flex_col()
@@ -2976,6 +3040,9 @@ impl LinearView {
           this.child(
             div()
               .debug_selector(|| "linear-agent-review-body".into())
+              .id("linear-agent-review-body")
+              .role(tauri_plugin_gpui::gpui::Role::Group)
+              .aria_label("Agent review")
               .flex()
               .flex_col()
               .gap_3()
@@ -2984,7 +3051,8 @@ impl LinearView {
                 body_comments
                   .iter()
                   .map(|c| self.agent_card(&of, c, "Description".into(), p, cx)),
-              ),
+              )
+              .test_support(),
           )
         })
         .when(show_comments, |this| {
@@ -3046,6 +3114,7 @@ impl LinearView {
                 }),
             )
         })
+        .test_support()
     });
     div()
       .debug_selector(|| "linear-commented-content".into())
@@ -3067,7 +3136,7 @@ impl LinearView {
     quote: bool,
     p: &Palette,
     cx: &mut Context<Self>,
-  ) -> Div {
+  ) -> impl IntoElement {
     let author = comment
       .user
       .as_ref()
@@ -3077,6 +3146,9 @@ impl LinearView {
     let quote_border = ui::Tone::Warning.border(p);
     div()
       .debug_selector(move || selector)
+      .id(SharedString::from(format!("linear-comment-{}", comment.id)))
+      .role(tauri_plugin_gpui::gpui::Role::Article)
+      .aria_label(format!("{author}: {}", comment.body))
       .flex()
       .flex_col()
       .gap_1p5()
@@ -3125,6 +3197,7 @@ impl LinearView {
           .filter(|c| c.file_path == file)
           .map(|c| self.agent_card(of, c, format!("Comment by {author}"), p, cx)),
       )
+      .test_support()
   }
 
   /// The shared agent card, with Resolve and no "Send to agent".
