@@ -1,0 +1,69 @@
+---
+sidebar_position: 30
+title: Orca vs Superset (Paradev) Compared (2026)
+description: Orca vs Superset, now Paradev. Two MIT-licensed desktop apps for parallel coding agents, compared on platforms, remote work and price.
+---
+
+# Orca vs Superset
+
+_Both run any CLI agent in its own worktree under MIT. Orca is free on every desktop OS. Superset, now Paradev, is Mac-first and sells paid team tiers._
+
+Superset is now called Paradev. Its old site redirects to paradev.com, and its CLI is still `superset`. Orca is built by Stably AI and lives at orca.dev. Both are desktop apps that give each coding agent its own [git worktree](/learn/concepts/git/git-worktrees), terminal and diff view. Facts were checked against each project's own site, docs and GitHub repository in November 2026.
+
+## At a Glance
+
+| | Orca | Superset, now Paradev |
+| --- | --- | --- |
+| Form | Desktop app, CLI and mobile app | Desktop app, CLI, TypeScript SDK, MCP server and mobile app |
+| Desktop platforms | macOS, Windows and Linux | macOS, with an experimental Linux AppImage. No Windows build |
+| Mobile | iOS and Android | iPhone and iPad, on the Pro plan |
+| Isolation | One git worktree per task | One git worktree and branch per task |
+| Agents | Any CLI agent | Any CLI agent, with 21 fully supported |
+| Review | Diff view with line notes sent back to the agent | Changes pane for review, commit and push, plus a PR pane for checks, review threads and merge |
+| Stacked PRs | Branch a worktree from another branch, rebase by hand | PR pane shows GitHub stacks, merges a stack, restacks after a lower layer merges |
+| Remote work | SSH hosts, a cloud VM per worktree, or a self-hosted Orca server | Remote hosts, remote access on Pro, cloud workspaces on Team and above |
+| Automations | Scheduled prompts | Schedules and events, on Pro |
+| License | MIT | MIT |
+| Price | Free. Enterprise rollout by contact | Free, Pro $20, Team $60, Ultra $200 per user per month, Enterprise custom |
+
+## What They Share
+
+Both apps start from the same idea. Each task gets its own worktree, so two agents never edit the same checkout. You bring your own agent subscriptions in both. Paradev's repository adds a caveat that applies to both: worktrees separate files, but they do not sandbox processes or prevent merge conflicts.
+
+Both also ship a built-in browser for previewing a dev server, a CLI that agents can drive, and Linear integration, which is a Pro feature on Paradev. Neither documents automatic rebasing of dependent worktrees. In Orca you can branch a new worktree from another one to stack work, then rebase it by hand. Paradev's PR pane shows GitHub stacks, merges a whole stack, and offers a restack after a lower layer merges.
+
+## Where Orca Differs
+
+Orca runs on all three desktop operating systems, and its mobile companion covers Android as well as iOS. Its remote options are part of the free app. You can point a worktree at any SSH host, give it a cloud VM, or run an always-on Orca server inside your own network.
+
+Orca's browser has a design mode that copies an element's HTML, styles and selector for the agent to work from. Its review flow lets you leave notes on exact changed lines and send them to the agent. Orca can also run coordinator agents that hand work to worker agents.
+
+## Where Paradev Differs
+
+Paradev is built as a product with paid tiers. Pro at $20 per user per month adds remote access, automations, Slack, Linear and the mobile app. Team at $60 adds hosted cloud workspaces with 150 hours per seat each month. Ultra at $200 raises that to 500 hours. Enterprise adds single sign-on, automated user provisioning, audit logs and a SOC 2 Type II report.
+
+Its plugins connect agents to GitHub, Sentry, Slack, Notion and other services. Paradev also publishes migration guides for Conductor and Conductor Cloud users. The desktop app targets macOS first, so Windows teams cannot use it today.
+
+## Who Should Choose Which
+
+Choose **Orca** if you:
+
+- Work on Windows or Linux, or want an Android companion.
+- Want SSH hosts and per-worktree cloud VMs in the free app.
+- Want to self-host the whole setup inside your own network.
+
+Choose **Paradev** if you:
+
+- Work on a Mac and want a vendor-run plan with support and hosted cloud workspaces.
+- Need single sign-on and audit logs from a published Enterprise tier.
+- Want event-driven automations and plugins for services such as Sentry and Notion.
+
+## Stacking Agent Work
+
+In both apps, a local branch that depends on another agent's branch stays where it is when the lower branch changes, and you rebase it yourself. [Treq vs Orca](./treq-vs-orca.mdx) and [Treq vs Superset](./treq-vs-superset.mdx) cover how Treq stacks dependent workspaces and rebases them automatically.
+
+## Next Steps
+
+- [Conductor vs Superset](./conductor-vs-superset.mdx): Paradev against a Mac-only alternative
+- [Best Tools for Running AI Coding Agents in Parallel](./best-parallel-agent-tools.mdx): the wider field
+- [Parallel Coding Agents](/learn/parallel-coding-agents): why each agent needs its own working copy

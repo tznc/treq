@@ -1,0 +1,17 @@
+id: no-extensionless-relative-links-web
+language: html
+severity: error
+message: >
+  With trailingSlash: true, ./other-page resolves against /section/this-page/
+  and points at a child path that does not exist. Name the file instead:
+  ./other-page.md or ./other-page.mdx.
+files:
+  - "web/docs/**/*.md"
+  - "web/docs/**/*.mdx"
+  - "web/learn/**/*.md"
+  - "web/learn/**/*.mdx"
+  - "web/compare/**/*.md"
+  - "web/compare/**/*.mdx"
+rule:
+  kind: text
+  regex: '\]\(\./[A-Za-z0-9_-]+/?(#[^)]*)?\)'

@@ -1,5 +1,6 @@
 ---
 sidebar_position: 6
+description: Merge a Treq workspace back into your main branch once its changes are committed, reviewed, and ready to land.
 ---
 
 # Merging Workspaces

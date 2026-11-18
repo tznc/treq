@@ -2558,9 +2558,15 @@ impl TerminalPane {
     let moved = self.place.working_directory != place.working_directory;
     self.adopt_due |= self.place.repo_path != place.repo_path;
     self.place = place;
-    // A newly selected workspace's first terminal becomes the active one.
-    if moved && !self.collapsed {
-      let dir = &self.place.working_directory;
+    // A newly selected workspace's first terminal becomes the active one,
+    // unless the active one is already there (a click on it switched
+    // workspace): the row then stays where the click left it.
+    let dir = &self.place.working_directory;
+    let active_here = self
+      .columns
+      .iter()
+      .any(|c| self.active.as_deref() == Some(c.id.as_str()) && self.column_key(c) == *dir);
+    if moved && !self.collapsed && !active_here {
       let id = self
         .columns
         .iter()
@@ -3709,11 +3715,30 @@ impl TerminalPane {
     let place = self.place.clone();
     let label = |name: String, main: bool, key: String, react: ActionSink| {
       let tones = if on_dark { &d } else { p };
+      let changes = (key.clone(), react.clone());
       let loc = place.workspace_loc(&key).map(|loc| {
+        let (key, react) = changes;
         div()
+          .id(SharedString::from(format!("terminal-workspace-loc-{id}")))
+          .role(gpui::Role::Button)
+          .aria_label("Open changes")
           .flex()
           .flex_none()
           .gap_1()
+          .rounded_sm()
+          .cursor_pointer()
+          .hover(|s| s.underline())
+          .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+          .on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            react(
+              ScreenAction::Field {
+                field: "terminal.navigate".into(),
+                value: serde_json::json!({ "key": key, "isMainRepo": main, "tab": "changes" }),
+              },
+              cx,
+            )
+          })
           .debug_selector(|| "terminal-workspace-loc".into())
           .child(super::workspace::loc_count(
             format!("+{}", loc.insertions),
@@ -3729,9 +3754,9 @@ impl TerminalPane {
       ui::text(div(), TextSize::Xs)
         .id(SharedString::from(format!("terminal-workspace-label-{id}")))
         .role(gpui::Role::Button)
-        .aria_label(name.clone())
+        .aria_label(format!("Go to {name}"))
         .debug_selector(|| "terminal-workspace-label".into())
-        .max_w(zpx(200.))
+        .max_w(zpx(360.))
         .flex()
         .items_center()
         .gap_2()
@@ -3759,7 +3784,8 @@ impl TerminalPane {
           )
         })
         .child(div().min_w_0().truncate().child(name))
-        .children(loc)
+        .children(loc.map(|loc| loc.test_support()))
+        .test_support()
     };
     let close_id = column.id.clone();
     let close = div()
@@ -3864,7 +3890,7 @@ impl TerminalPane {
                 Some(TooltipContent::Text(label_name.clone().into())),
                 label(
                   label_name,
-                  workspace_name.is_none(),
+                  workspace_path.is_none(),
                   key,
                   self.react.clone(),
                 ),
@@ -4588,6 +4614,7 @@ impl Render for TerminalPane {
     }
     let row_bounds = self.row.clone();
     let row_scroll = self.row_scroll.clone();
+    let measured_scroll = self.row_scroll.clone();
     let scrollbar = self.row_scrollbar(&p, cx);
     let controls = self.controls(&p, cx);
     let maximized = self.maximized;
@@ -4708,7 +4735,14 @@ impl Render for TerminalPane {
               // what `scroll_to_item` counts.
               .child(
                 gpui::canvas(
-                  move |b, _, _| row_bounds.set(Some(b)),
+                  // Inside the scrolled row: undo the scroll so the bounds stay the
+                  // row's own, not its scrolled content's.
+                  move |b, _, _| {
+                    row_bounds.set(Some(Bounds::new(
+                      b.origin - measured_scroll.offset(),
+                      b.size,
+                    )))
+                  },
                   move |b, _, window, _| {
                     // Painted inside the scrolled row: undo the scroll to get
                     // the row's own bounds.

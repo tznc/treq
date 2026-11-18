@@ -1,5 +1,6 @@
 ---
 sidebar_position: 10
+description: The Treq desktop workspace sidebar is drawn natively with GPUI, while the rest of the window runs in a web view beside it.
 ---
 
 # GPUI sidebar
