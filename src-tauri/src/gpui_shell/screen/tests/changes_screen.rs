@@ -1250,12 +1250,12 @@ fn escape_closes_the_find_bar_after_focus_leaves_it(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
   h.click("file-card-a.rs");
   h.cx.simulate_keystrokes("cmd-f");
-  assert!(h.drawn("diff-search"));
+  assert!(h.shows(gpui::Role::Search, "Find"));
   // Clicking the diff takes focus out of the bar.
   h.click("file-card-a.rs");
   h.cx.simulate_keystrokes("escape");
   h.cx.run_until_parked();
-  assert!(!h.drawn("diff-search"));
+  assert!(!h.shows(gpui::Role::Search, "Find"));
 }
 
 #[gpui::test]
