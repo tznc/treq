@@ -182,8 +182,11 @@ pub fn home_items(menu: &HomeMenu, editors: EditorApps) -> Vec<MenuItem> {
   let mut items = Vec::new();
   if !menu.missing {
     items.push(
-      MenuItem::item("Switch Branch...", MenuAction::OpenBranchSwitcher(path.clone()))
-        .icon(MenuIcon::GitBranch),
+      MenuItem::item(
+        "Switch Branch...",
+        MenuAction::OpenBranchSwitcher(path.clone()),
+      )
+      .icon(MenuIcon::GitBranch),
     );
     items.push(MenuItem::Separator);
   }
