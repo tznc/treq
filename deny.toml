@@ -10,6 +10,7 @@ all-features = true
 unmaintained = "workspace"
 ignore = [
   { id = "RUSTSEC-2023-0071", reason = "rsa Marvin attack: no fixed release; pulled in by russh" },
+  { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained: no replacement release; pulled in by gpui, jj-lib and russh" },
   { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained: no replacement release; pulled in by jj-lib and gpui" },
 ]
 
