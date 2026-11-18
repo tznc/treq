@@ -406,7 +406,7 @@ impl PrReviewScreen {
     thread: &GhReviewThread,
     comment: &GhReviewComment,
     cx: &mut Context<Self>,
-  ) -> Option<Button> {
+  ) -> Option<AnyElement> {
     let action = commit_suggestion_action(thread, comment, self.number)?;
     let thread_id = thread.id.clone();
     Some(
@@ -423,7 +423,8 @@ impl PrReviewScreen {
       .on_click(cx.listener(move |this, _, window, cx| {
         this.commit_suggestion(action.clone(), thread_id.clone(), window, cx)
       }))
-      .touch(),
+      .touch()
+      .into_any_element(),
     )
   }
 
@@ -1094,7 +1095,8 @@ impl PrReviewScreen {
         .label(label)
         .loading(self.busy == Some("pr-review-submit"))
         .on_click(cx.listener(|this, _, _, cx| this.open_submit(cx)))
-        .touch(),
+        .touch()
+        .into_any_element(),
     )
   }
 }
