@@ -196,6 +196,12 @@ pub fn resolve_review_thread(thread_id: &str) -> Result<(), String> {
   github::gh_resolve_review_thread_impl(&gh, thread_id, &path)
 }
 
+/// Commits a review suggestion to its pull request's head branch.
+pub fn commit_suggestion(repo: &str, c: &github::SuggestionCommit) -> Result<(), String> {
+  let (gh, path) = gh()?;
+  github::gh_commit_suggestion_impl(&gh, repo, c, &path)
+}
+
 pub fn create_issue(repo: &str, title: &str, body: &str) -> Result<u64, String> {
   let (gh, path) = gh()?;
   github::gh_create_issue_impl(&gh, repo, title, body, &path)

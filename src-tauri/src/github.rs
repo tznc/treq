@@ -2352,6 +2352,116 @@ pub fn gh_resolve_review_thread_impl(
   check_graphql_errors(&check_gh_output(out)?)
 }
 
+/// A review suggestion to commit straight to a pull request's head branch,
+/// as GitHub's own "Commit suggestion" does.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SuggestionCommit {
+  pub number: u64,
+  pub path: String,
+  pub start_line: u32,
+  pub end_line: u32,
+  /// The lines being replaced, as the reviewer saw them.
+  pub original: Vec<String>,
+  pub suggested: String,
+  pub message: String,
+}
+
+/// `text` with lines `start..=end` replaced by `suggested`, keeping its line
+/// endings; refused when those lines no longer read `original`.
+pub fn splice_suggestion(
+  text: &str,
+  (start, end): (u32, u32),
+  original: &[String],
+  suggested: &str,
+) -> Result<String, String> {
+  let newline = if text.contains("\r\n") { "\r\n" } else { "\n" };
+  let mut lines: Vec<&str> = text.lines().collect();
+  let (from, to) = (start as usize, end as usize);
+  if from < 1 || to < from || to > lines.len() {
+    return Err(format!(
+      "Suggestion lines {start}..{end} are outside the file"
+    ));
+  }
+  if lines[from - 1..to] != original.iter().map(String::as_str).collect::<Vec<_>>()[..] {
+    return Err("The suggested lines changed since the review; pull and apply it locally".into());
+  }
+  lines.splice(from - 1..to, suggested.lines());
+  let mut out = lines.join(newline);
+  if text.ends_with('\n') {
+    out.push_str(newline);
+  }
+  Ok(out)
+}
+
+/// The contents-API path of `path` in `repo`, each segment escaped.
+pub(crate) fn contents_path(repo: &str, path: &str) -> String {
+  let segments: Vec<String> = path
+    .split('/')
+    .map(|s| urlencoding::encode(s).into_owned())
+    .collect();
+  format!("repos/{repo}/contents/{}", segments.join("/"))
+}
+
+/// A pull request's head branch and the repository it lives in.
+pub(crate) fn pr_head(pr: &serde_json::Value) -> Result<(String, String), String> {
+  let branch = pr["head"]["ref"].as_str();
+  let repo = pr["head"]["repo"]["full_name"].as_str();
+  match (branch, repo) {
+    (Some(b), Some(r)) => Ok((b.to_string(), r.to_string())),
+    _ => Err("The pull request's head branch is gone".into()),
+  }
+}
+
+/// The new contents-API body for a file with the suggestion spliced in.
+pub(crate) fn suggestion_put_body(
+  c: &SuggestionCommit,
+  file: &serde_json::Value,
+  branch: &str,
+) -> Result<serde_json::Value, String> {
+  use base64::Engine as _;
+  let b64 = base64::engine::general_purpose::STANDARD;
+  let encoded: String = file["content"]
+    .as_str()
+    .ok_or("GitHub returned no file contents")?
+    .split_whitespace()
+    .collect();
+  let bytes = b64
+    .decode(encoded)
+    .map_err(|e| format!("Bad file contents: {e}"))?;
+  let text = String::from_utf8(bytes).map_err(|_| "The file is not text".to_string())?;
+  let spliced = splice_suggestion(&text, (c.start_line, c.end_line), &c.original, &c.suggested)?;
+  Ok(serde_json::json!({
+    "message": c.message,
+    "content": b64.encode(spliced),
+    "sha": file["sha"],
+    "branch": branch,
+  }))
+}
+
+/// Commits a suggestion to the pull request's head branch through `gh api`.
+pub fn gh_commit_suggestion_impl(
+  gh_path: &str,
+  repo: &str,
+  c: &SuggestionCommit,
+  extended_path: &str,
+) -> Result<(), String> {
+  let get = |path: &str| -> Result<serde_json::Value, String> {
+    let bytes = check_gh_output(run_gh(gh_path, &["api", path], extended_path)?)?;
+    serde_json::from_slice(&bytes).map_err(|e| format!("Failed to parse gh output: {e}"))
+  };
+  let (branch, head) = pr_head(&get(&format!("repos/{repo}/pulls/{}", c.number))?)?;
+  let path = contents_path(&head, &c.path);
+  let file = get(&format!("{path}?ref={}", urlencoding::encode(&branch)))?;
+  let body = suggestion_put_body(c, &file, &branch)?;
+  let out = run_gh_with_stdin(
+    gh_path,
+    &["api", "--method", "PUT", &path, "--input", "-"],
+    &body.to_string(),
+    extended_path,
+  )?;
+  check_gh_output(out).map(|_| ())
+}
+
 /// The message for a commit that applies a reviewer's suggestion, crediting
 /// them the way GitHub's own "Commit suggestion" does.
 pub fn suggestion_commit_message(login: &str, user_id: Option<u64>) -> String {
@@ -4145,6 +4255,70 @@ esac
     assert_eq!(
       suggestion_commit_message("zoe", None),
       "Apply suggestion from @zoe\n\nCo-authored-by: zoe <zoe@users.noreply.github.com>"
+    );
+  }
+
+  #[test]
+  fn splice_suggestion_replaces_the_lines_and_keeps_line_endings() {
+    let original = vec!["old".to_string()];
+    assert_eq!(
+      splice_suggestion("x\nold\ny\n", (2, 2), &original, "B\nC").unwrap(),
+      "x\nB\nC\ny\n"
+    );
+    assert_eq!(
+      splice_suggestion("x\r\nold", (2, 2), &original, "B").unwrap(),
+      "x\r\nB"
+    );
+  }
+
+  #[test]
+  fn splice_suggestion_refuses_lines_that_moved() {
+    let original = vec!["old".to_string()];
+    assert!(splice_suggestion("x\nnew\n", (2, 2), &original, "B").is_err());
+    assert!(splice_suggestion("x\n", (2, 2), &original, "B").is_err());
+  }
+
+  #[test]
+  #[cfg(unix)]
+  fn test_gh_commit_suggestion_puts_the_spliced_file_on_the_head_branch() {
+    use base64::Engine as _;
+    let bin_dir = TempDir::new().unwrap();
+    let dir = bin_dir.path().display();
+    let file = base64::engine::general_purpose::STANDARD.encode("x\nold\n");
+    let script = format!(
+      r#"case "$*" in
+  *"--method PUT"*) cat > {dir}/put; echo '{{}}' ;;
+  *contents*) echo '{{"content":"{file}","sha":"S1"}}' ;;
+  *pulls/5*) echo '{{"head":{{"ref":"feat","repo":{{"full_name":"fork/r"}}}}}}' ;;
+esac
+"#
+    );
+    let gh_path = write_fake_gh(&bin_dir, &script);
+
+    gh_commit_suggestion_impl(
+      &gh_path,
+      "o/r",
+      &SuggestionCommit {
+        number: 5,
+        path: "src/a b.rs".into(),
+        start_line: 2,
+        end_line: 2,
+        original: vec!["old".into()],
+        suggested: "B".into(),
+        message: "Apply suggestion from @zoe".into(),
+      },
+      "/usr/bin:/bin",
+    )
+    .unwrap();
+
+    let put: serde_json::Value =
+      serde_json::from_str(&fs::read_to_string(bin_dir.path().join("put")).unwrap()).unwrap();
+    assert_eq!(put["branch"], "feat");
+    assert_eq!(put["sha"], "S1");
+    assert_eq!(put["message"], "Apply suggestion from @zoe");
+    assert_eq!(
+      put["content"],
+      base64::engine::general_purpose::STANDARD.encode("x\nB\n")
     );
   }
 
