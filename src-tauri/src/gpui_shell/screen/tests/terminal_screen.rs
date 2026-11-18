@@ -1749,4 +1749,33 @@ fn terminal_workspace_label_click_navigates_by_path(cx: &mut TestAppContext) {
     value,
     Some(serde_json::json!({ "key": "/repo/.treq/workspaces/b", "isMainRepo": false }))
   );
+#[gpui::test]
+fn terminal_agent_header_links_to_what_it_reviews(cx: &mut TestAppContext) {
+  let mut host = terminal_host();
+  host.sessions[0].link_url = Some("https://github.com/o/r/pull/4305".into());
+  let (mut h, host) = workspace_harness(cx, host, terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  assert!(h.drawn("terminal-workspace-label"));
+  h.click("terminal-link-label");
+  assert!(
+    host
+      .calls()
+      .contains(&"open https://github.com/o/r/pull/4305".to_string()),
+    "{:?}",
+    host.calls()
+  );
+}
+
+#[gpui::test]
+fn terminal_agent_header_has_no_link_without_one(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  assert!(h.drawn("terminal-workspace-label"));
+  assert!(!h.drawn("terminal-link-label"));
+}
+
+#[test]
+fn terminal_link_labels_name_the_pull_request() {
+  assert_eq!(super::super::terminal::link_label("https://github.com/o/r/pull/4305"), "#4305");
+  assert_eq!(super::super::terminal::link_label("https://linear.app/x/issue/ENG-1"), "linear.app");
 }
