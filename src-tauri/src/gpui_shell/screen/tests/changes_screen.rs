@@ -1783,3 +1783,36 @@ fn the_file_list_width_is_saved_and_restored(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, host, changes_route());
   assert_eq!(file_list_width(&mut h), 410.);
 }
+
+/// Resting on a diff line's + button keeps its "Add comment" tooltip open:
+/// small pointer moves over the button must not hide and re-show it.
+#[gpui::test]
+fn the_add_comment_tooltip_stays_open_while_hovered(cx: &mut TestAppContext) {
+  use crate::gpui_shell::popup::PopupRequest;
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  h.cx.run_until_parked();
+  let at = h
+    .cx
+    .debug_bounds("add-comment-a.rs-0-1")
+    .expect("+ button")
+    .center();
+  for i in 0..20 {
+    let jitter = gpui::point(gpui::px((i % 2) as f32), gpui::px(0.));
+    h.cx.simulate_mouse_move(at + jitter, None, Modifiers::none());
+    h.cx
+      .executor()
+      .advance_clock(std::time::Duration::from_millis(100));
+    h.cx.run_until_parked();
+  }
+  let log: Vec<&str> = h
+    .popups
+    .borrow()
+    .iter()
+    .filter_map(|p| match p {
+      PopupRequest::ShowTooltip { .. } => Some("show"),
+      PopupRequest::HideTooltip => Some("hide"),
+      _ => None,
+    })
+    .collect();
+  assert_eq!(log, vec!["show"], "tooltip popup requests: {log:?}");
+}
