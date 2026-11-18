@@ -116,6 +116,8 @@ pub struct SessionStart {
   /// `plan` or `acceptEdits`.
   pub permission_mode: Option<String>,
   pub agent: Option<String>,
+  /// The agent's account profile; `None` uses the default.
+  pub profile: Option<String>,
 }
 
 impl SessionStart {
@@ -125,6 +127,7 @@ impl SessionStart {
       permission_mode: self.permission_mode.clone(),
       agent: self.agent.clone(),
       workspace_path: self.workspace_path.clone(),
+      profile: self.profile.clone(),
     }
   }
 }
@@ -137,6 +140,7 @@ pub struct PendingSession {
   pub permission_mode: Option<String>,
   pub agent: Option<String>,
   pub workspace_path: Option<String>,
+  pub profile: Option<String>,
 }
 
 impl PendingSession {
@@ -274,6 +278,7 @@ pub struct TaskRequest {
   pub agent: String,
   pub mode: String,
   pub save_as_repo_default: bool,
+  pub profile: Option<String>,
 }
 
 /// `startAgentTask`: saves the agent as the repository's default when
@@ -313,6 +318,7 @@ pub fn start_agent_task(
       pending_prompt: Some(prompt),
       permission_mode: Some(task.mode.clone()),
       agent: Some(task.agent.clone()),
+      profile: task.profile.clone(),
     },
     toasts,
   )))
@@ -330,6 +336,7 @@ pub struct LaunchRequest {
   pub agent: Option<String>,
   /// Default: `<Agent> <n>`, numbered across the repository's workspaces.
   pub session_name: Option<String>,
+  pub profile: Option<String>,
 }
 
 /// Creates the session `request` asks for.
@@ -360,6 +367,7 @@ pub fn launch_session(
     pending_prompt: request.prompt.clone(),
     permission_mode: request.mode.clone(),
     agent: request.agent.clone(),
+    profile: request.profile.clone(),
   })
 }
 
@@ -1041,6 +1049,27 @@ mod tests {
     assert_eq!(start.permission_mode.as_deref(), Some("plan"));
     assert_eq!(start.agent.as_deref(), Some("codex"));
     assert_eq!(start.workspace_id, Some(3));
+  }
+
+  #[test]
+  fn carries_the_chosen_profile_to_the_terminal() {
+    let store = FakeStore::default();
+    let task = TaskRequest {
+      repo_path: "/repo".into(),
+      text: "fix it".into(),
+      agent: "claude".into(),
+      profile: Some("work".into()),
+      ..Default::default()
+    };
+    let (start, _) = start_agent_task(&store, &task).unwrap().unwrap();
+    assert_eq!(start.pending().profile.as_deref(), Some("work"));
+    let request = LaunchRequest {
+      repo_path: "/repo".into(),
+      profile: Some("personal".into()),
+      ..Default::default()
+    };
+    let launched = launch_session(&store, &request).unwrap();
+    assert_eq!(launched.pending().profile.as_deref(), Some("personal"));
   }
 
   #[test]

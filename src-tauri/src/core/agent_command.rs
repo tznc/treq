@@ -201,6 +201,8 @@ pub struct AutoCommand<'a> {
   pub session_model: Option<&'a str>,
   pub pending_prompt: Option<&'a str>,
   pub treq_bin_dir: Option<&'a str>,
+  /// Exported inside the agent's subshell, such as a profile's config dir.
+  pub env: &'a [(String, String)],
 }
 
 /// The PTY auto-command for an agent CLI.
@@ -291,8 +293,13 @@ pub fn build_auto_command(
   };
 
   let quoted: Vec<String> = cleanup.iter().map(|p| shell_quote(p)).collect();
+  let exports: String = options
+    .env
+    .iter()
+    .map(|(key, value)| format!("export {key}={}; ", shell_quote(value)))
+    .collect();
   command = format!(
-    "( trap \"rm -rf {}\" EXIT; {}{command} ); {NOTIFY_ON_AGENT_EXIT}",
+    "( trap \"rm -rf {}\" EXIT; {exports}{}{command} ); {NOTIFY_ON_AGENT_EXIT}",
     quoted.join(" "),
     files
       .task_path
@@ -430,10 +437,31 @@ mod tests {
       session_model: None,
       pending_prompt: None,
       treq_bin_dir: None,
+      env: &[],
     }
   }
 
   const NONE: &[String] = &[];
+
+  #[test]
+  fn exports_profile_env_inside_the_agent_subshell() {
+    let env = [("CLAUDE_CONFIG_DIR".to_string(), "/data/it's".to_string())];
+    let command = build_auto_command(
+      &AutoCommand {
+        env: &env,
+        ..opts("claude")
+      },
+      &files(),
+    )
+    .unwrap();
+    let export = "export CLAUDE_CONFIG_DIR='/data/it'\\''s'; claude ";
+    assert!(command.contains(export), "{command}");
+    // Inside the subshell, so the terminal's own shell keeps its config.
+    assert!(command.find(" EXIT; ").unwrap() < command.find(export).unwrap());
+    assert!(!build_auto_command(&opts("claude"), &files())
+      .unwrap()
+      .contains("export CLAUDE_CONFIG_DIR"));
+  }
 
   #[test]
   fn appends_prompts_as_positional_arguments() {

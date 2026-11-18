@@ -284,6 +284,7 @@ fn agent_prompt_starts_the_session_in_the_backend(cx: &mut TestAppContext) {
       agent: "claude".into(),
       mode: "acceptEdits".into(),
       save_as_repo_default: false,
+      profile: None,
     }]
   );
   // Started: React closes the dialog; nothing else goes to React.

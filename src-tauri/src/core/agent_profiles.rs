@@ -132,6 +132,24 @@ pub fn resolve(
     })
 }
 
+/// [`resolve`] from settings: the profiles and app default from the app
+/// settings, the repository default from the repository's.
+pub fn session_profile(
+  app_setting: impl Fn(&str) -> Option<String>,
+  repo_setting: impl Fn(&str) -> Option<String>,
+  agent: &str,
+  chosen: Option<&str>,
+) -> Option<AgentProfile> {
+  let key = default_setting(agent);
+  resolve(
+    &parse(app_setting(PROFILES_SETTING).as_deref()),
+    agent,
+    chosen,
+    repo_setting(&key).as_deref(),
+    app_setting(&key).as_deref(),
+  )
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -243,5 +261,25 @@ mod tests {
     );
     // Another agent's profile never applies.
     assert_eq!(resolve(&profiles, "claude", Some("solo"), None, None), None);
+  }
+
+  #[test]
+  fn session_profile_reads_profiles_and_defaults_from_settings() {
+    let json = to_json(&[profile("claude", "work"), profile("claude", "personal")]);
+    let app = |key: &str| match key {
+      PROFILES_SETTING => Some(json.clone()),
+      "default_profile_claude" => Some("personal".to_string()),
+      _ => None,
+    };
+    let repo = |key: &str| (key == "default_profile_claude").then(|| "work".to_string());
+    assert_eq!(
+      session_profile(app, repo, "claude", None),
+      Some(profile("claude", "work"))
+    );
+    assert_eq!(
+      session_profile(app, |_| None, "claude", None),
+      Some(profile("claude", "personal"))
+    );
+    assert_eq!(session_profile(app, repo, "codex", None), None);
   }
 }
