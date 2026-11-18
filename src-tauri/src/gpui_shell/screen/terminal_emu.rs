@@ -771,7 +771,13 @@ pub struct Key<'a> {
 pub fn encode_key(key: Key<'_>, app_cursor: bool) -> Option<Vec<u8>> {
   if key.platform {
     // Cmd+Backspace: macOS "delete to line start", sent as readline's Ctrl+U.
-    return (key.key == "backspace").then(|| b"\x15".to_vec());
+    // Cmd+←/→: line start/end, sent as readline's Ctrl+A / Ctrl+E.
+    return match key.key {
+      "backspace" => Some(b"\x15".to_vec()),
+      "left" => Some(b"\x01".to_vec()),
+      "right" => Some(b"\x05".to_vec()),
+      _ => None,
+    };
   }
   let modifier = 1 + u8::from(key.shift) + 2 * u8::from(key.alt) + 4 * u8::from(key.ctrl);
   let cursor = |code: char| -> Vec<u8> {
@@ -1267,6 +1273,21 @@ mod tests {
       false,
     );
     assert_eq!(bytes.as_deref(), Some(&b"\x15"[..]));
+  }
+
+  #[test]
+  fn cmd_arrows_jump_to_line_start_and_end() {
+    let cmd = |name| {
+      encode_key(
+        Key {
+          platform: true,
+          ..key(name)
+        },
+        false,
+      )
+    };
+    assert_eq!(cmd("left").as_deref(), Some(&b"\x01"[..]));
+    assert_eq!(cmd("right").as_deref(), Some(&b"\x05"[..]));
   }
 
   #[test]

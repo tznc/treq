@@ -39,6 +39,27 @@ const sidebars: SidebarsConfig = {
         'jj-vs-git',
       ],
     },
+    {
+      type: 'category',
+      label: 'Models',
+      items: [
+        'best-llms-for-coding-agents',
+        'claude-vs-gpt-for-coding',
+        'claude-vs-gemini-for-coding',
+        'best-open-weight-coding-models',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'Coding Agents',
+      items: [
+        'best-coding-agent-clis',
+        'claude-code-vs-codex-cli',
+        'claude-code-vs-gemini-cli',
+        'opencode-vs-claude-code',
+        'cursor-vs-claude-code',
+      ],
+    },
   ],
 };
 

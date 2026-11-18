@@ -255,6 +255,8 @@ pub enum SidebarAction {
   /// Right-click on one of several selected workspace rows: the menu acts
   /// on every selected workspace.
   WorkspacesMenu,
+  /// Backspace with several workspace rows selected: archives them all.
+  ArchiveSelected,
   /// A click on the modal backdrop drawn over the sidebar.
   DismissModal,
   /// A workspace row dropped onto another row, to stack it there, or onto
@@ -662,20 +664,21 @@ impl Sidebar {
   }
 }
 
-/// Indentation of a row's content, matching the React sidebar's
-/// `16 + (depth - 1) * 6` px.
 /// How far a grouped repository's workspace rows sit right of a lone
 /// repository's, so their branch text (not their icon) starts under the
 /// group header's repository name.
 const GROUP_INDENT: f32 = 4.;
 
+/// Indentation of a row's content: one 12px icon per level, so a child's
+/// icon starts past its parent's.
 fn row_indent(depth: u32) -> f32 {
-  16. + (depth as f32 - 1.) * 6.
+  10. + depth as f32 * 12.
 }
 
-/// Where a nested row's stack guide line sits, matching the React sidebar.
+/// Where a nested row's elbow starts: under its parent's icon centre, so it
+/// runs from the parent into the row's own icon.
 fn guide_left(depth: u32) -> f32 {
-  8. + depth.saturating_sub(2) as f32 * 6.
+  row_indent(depth.saturating_sub(1)) + 5.
 }
 
 fn status_color(color: StatusColor, palette: &Palette) -> Hsla {

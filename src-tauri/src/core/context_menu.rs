@@ -5,6 +5,9 @@
 
 use crate::local_db::Workspace;
 
+/// Archives the sidebar's selected workspaces.
+pub const ARCHIVE_SELECTION_KEY: &str = "backspace";
+
 /// The lucide icon beside an item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuIcon {
@@ -31,7 +34,8 @@ pub enum MenuAction {
   /// Opens a URL, such as an editor's `cursor://file/...`.
   OpenUrl(String),
   /// The window's branch switcher.
-  OpenBranchSwitcher,
+  /// Switch the branch of the repository at this path.
+  OpenBranchSwitcher(String),
   AddRepository,
   OpenRepoSettings(String),
   LocateRepo(String),
@@ -82,6 +86,8 @@ pub enum MenuItem {
     text: String,
     icon: Option<MenuIcon>,
     destructive: bool,
+    /// The key that runs the item without the menu, as GPUI binds it.
+    shortcut: Option<String>,
     action: MenuAction,
   },
   Separator,
@@ -98,8 +104,16 @@ impl MenuItem {
       text: text.into(),
       icon: None,
       destructive: false,
+      shortcut: None,
       action,
     }
+  }
+
+  fn shortcut(mut self, key: &str) -> Self {
+    if let MenuItem::Item { shortcut, .. } = &mut self {
+      *shortcut = Some(key.into());
+    }
+    self
   }
 
   fn icon(mut self, value: MenuIcon) -> Self {
@@ -169,8 +183,6 @@ pub struct HomeMenu {
   pub repo_path: String,
   /// The folder is gone: no path items.
   pub missing: bool,
-  /// The repository on screen, whose branch can be switched.
-  pub on_screen: bool,
   /// A supporting repository (not the window's main one).
   pub supporting: bool,
   /// The window can let this repository go.
@@ -181,9 +193,13 @@ pub struct HomeMenu {
 pub fn home_items(menu: &HomeMenu, editors: EditorApps) -> Vec<MenuItem> {
   let path = &menu.repo_path;
   let mut items = Vec::new();
-  if menu.on_screen {
+  if !menu.missing {
     items.push(
-      MenuItem::item("Switch Branch...", MenuAction::OpenBranchSwitcher).icon(MenuIcon::GitBranch),
+      MenuItem::item(
+        "Switch Branch...",
+        MenuAction::OpenBranchSwitcher(path.clone()),
+      )
+      .icon(MenuIcon::GitBranch),
     );
     items.push(MenuItem::Separator);
   }
@@ -347,11 +363,13 @@ pub fn workspaces_items(
           text,
           icon,
           destructive,
+          shortcut,
           action,
         } => MenuItem::Item {
           text,
           icon,
           destructive,
+          shortcut,
           action: MenuAction::Each(
             full
               .iter()
@@ -382,6 +400,7 @@ pub fn workspaces_items(
       },
     )
     .icon(MenuIcon::Archive)
+    .shortcut(ARCHIVE_SELECTION_KEY)
     .destructive(),
   );
   items
@@ -703,10 +722,22 @@ mod tests {
   }
 
   #[test]
+  fn switches_branch_of_a_supporting_repository() {
+    let menu = HomeMenu {
+      repo_path: "/s".into(),
+      supporting: true,
+      ..Default::default()
+    };
+    assert!(matches!(
+      &home_items(&menu, NO_EDITORS)[0],
+      MenuItem::Item { action: MenuAction::OpenBranchSwitcher(path), .. } if path == "/s"
+    ));
+  }
+
+  #[test]
   fn matches_the_react_home_row_menu() {
     let menu = HomeMenu {
       repo_path: "/r".into(),
-      on_screen: true,
       ..Default::default()
     };
     assert_eq!(
@@ -730,7 +761,6 @@ mod tests {
       missing: true,
       supporting: true,
       removable: true,
-      on_screen: false,
     };
     let items = home_items(&menu, NO_EDITORS);
     assert_eq!(labels(&items), ["---", "Locate…", "Remove Repository"]);
@@ -749,7 +779,7 @@ mod tests {
     };
     let items = home_items(&menu, NO_EDITORS);
     assert_eq!(
-      labels(&items)[3..],
+      labels(&items)[5..],
       ["---", "Add Repository…", "Remove Repository"]
     );
     let fixed = HomeMenu {
@@ -771,7 +801,7 @@ mod tests {
     };
     let items = home_items(&menu, NO_EDITORS);
     assert_eq!(
-      labels(&items)[3..],
+      labels(&items)[5..],
       ["---", "Repository Settings", "Remove Repository"]
     );
   }
@@ -832,6 +862,10 @@ mod tests {
       MenuItem::Item { action, .. } => action.clone(),
       _ => panic!("not an item"),
     };
+    assert!(matches!(
+      &items[5],
+      MenuItem::Item { shortcut: Some(key), .. } if key == ARCHIVE_SELECTION_KEY
+    ));
     assert_eq!(action(0), MenuAction::Copy("feat/a\nfeat/b".into()));
     assert_eq!(
       action(1),

@@ -828,9 +828,10 @@ impl CommitsView {
         p,
       ))
       .collect();
-    let styled = highlight::styled_marked(
+    let spans = highlight::language(path).map(|lang| highlight::hunk_spans(lang, &hunk.lines));
+    let styled = highlight::styled_spans_marked(
       line.get(1..).unwrap_or(""),
-      highlight::language(path),
+      spans.as_ref().and_then(|s| s.get(l)),
       p.dark,
       &picked,
     );

@@ -27,6 +27,11 @@ pub fn create_session(
   Ok(id)
 }
 
+/// Links the session to what it works on.
+pub fn set_session_link(repo_path: &str, session_id: i64, url: &str) -> Result<(), String> {
+  local_db::set_session_link(repo_path, session_id, url)
+}
+
 /// The repo's agent sessions, oldest first.
 pub fn list_sessions(repo_path: &str) -> Result<Vec<Session>, String> {
   local_db::get_sessions(repo_path)

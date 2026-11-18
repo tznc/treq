@@ -129,6 +129,7 @@ impl Shell {
     }
     let label = self.label.to_string();
     let handle = window.window_handle();
+    let app = self.app.clone();
     self.shortcuts = Some(cx.intercept_keystrokes(move |event, window, cx| {
       if window.window_handle() != handle {
         return;
@@ -139,6 +140,16 @@ impl Shell {
       // An open dialog (the palette, the shortcuts sheet, a picker) takes
       // every key, its own Escape included.
       if within(overlay::KEY_CONTEXT) {
+        return;
+      }
+      if shortcuts::archives_selection(
+        &keystroke.key,
+        m.modified(),
+        within("Input"),
+        within(screen::TERMINAL_CONTEXT),
+      ) {
+        popup::hide_menus();
+        action_sink(app.clone(), label.clone())(SidebarAction::ArchiveSelected, cx);
         return;
       }
       let found = shortcuts::app_shortcut(
@@ -735,6 +746,11 @@ pub fn menu_event(app: &AppHandle, label: &str, event: &str, payload: Option<Str
 /// confirmation for catalog skill `skill_id`. Any thread.
 pub fn skill_install_link(app: &AppHandle, label: &str, skill_id: String) {
   window::skill_install_link(app, label, skill_id);
+}
+
+/// A `treq://pr/open` link for window `label`: it shows PR `number`. Any thread.
+pub fn pr_open_link(app: &AppHandle, label: &str, number: u64) {
+  window::pr_open_link(app, label, number);
 }
 
 /// Types `keystroke` (GPUI's notation, e.g. "cmd-v") into the focused GPUI
