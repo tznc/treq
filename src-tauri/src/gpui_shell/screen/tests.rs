@@ -40,6 +40,8 @@ struct FakeHost {
   gone: Vec<&'static str>,
   /// Saving repository settings fails, as a full disk would.
   fail_repo_settings: bool,
+  /// Applying a review suggestion fails, as a moved line would.
+  fail_apply: bool,
   /// The tuning agent's proposed review prompt edits.
   prompt_edits: std::sync::Mutex<Vec<crate::local_db::AgentReviewComment>>,
   /// What the folder picker returns, and why starting a dev container fails.
@@ -1214,6 +1216,9 @@ impl changes_data::ChangesHost for FakeHost {
     original: &[String],
     suggested: &str,
   ) -> Result<(), String> {
+    if self.fail_apply {
+      return Err("lines moved".into());
+    }
     self.record(format!(
       "apply suggestion {workspace_path} {path} {start}..{end} {original:?} -> {suggested:?}"
     ));
