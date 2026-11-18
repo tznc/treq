@@ -175,6 +175,8 @@ pub enum NativeMenuItem {
     /// A `DropdownMenuCheckboxItem`, checked or not: picking it toggles
     /// the check and keeps the menu open.
     check: Option<bool>,
+    /// The key that runs the item without the menu, in a `Kbd` at the end.
+    shortcut: Option<String>,
     on_select: Pick,
   },
   Separator,
@@ -197,6 +199,7 @@ impl NativeMenuItem {
       destructive: false,
       radio: None,
       check: None,
+      shortcut: None,
       on_select: Rc::new(on_select),
     }
   }
@@ -242,6 +245,14 @@ impl NativeMenuItem {
     self
   }
 
+  /// Shows `key` (as GPUI binds it, such as `backspace`) at the row's end.
+  pub fn shortcut(mut self, key: impl Into<String>) -> Self {
+    if let NativeMenuItem::Item { shortcut, .. } = &mut self {
+      *shortcut = Some(key.into());
+    }
+    self
+  }
+
   pub fn destructive(mut self) -> Self {
     if let NativeMenuItem::Item { destructive, .. } = &mut self {
       *destructive = true;
@@ -265,6 +276,7 @@ pub fn native_entries(items: Vec<NativeMenuItem>) -> Vec<MenuEntry> {
           destructive,
           radio,
           check,
+          shortcut,
           on_select,
         } => {
           let id = *next;
@@ -277,6 +289,7 @@ pub fn native_entries(items: Vec<NativeMenuItem>) -> Vec<MenuEntry> {
             destructive,
             radio,
             check,
+            shortcut,
           }
         }
         NativeMenuItem::Separator => MenuEntry::Separator,
@@ -415,6 +428,9 @@ pub enum MenuEntry {
     /// A checkbox item (`pl-8`, its check drawn when `true`).
     #[serde(default)]
     check: Option<bool>,
+    /// A key that runs the item, in a `Kbd` at the row's end (`ml-auto`).
+    #[serde(default)]
+    shortcut: Option<String>,
   },
   Separator,
   Submenu {
@@ -626,6 +642,14 @@ fn entry_width(cx: &App, entry: &MenuEntry) -> f32 {
     if radio.is_some() || check.is_some() {
       width += RADIO_INSET - ITEM_PADDING_X;
     }
+  }
+  if let MenuEntry::Item {
+    shortcut: Some(key),
+    ..
+  } = entry
+  {
+    let label = ui::Kbd::label(key);
+    width += DETAIL_GAP + kbd_width(text_width_at(cx, &label, theme::SANS_FONT, 12.));
   }
   if let MenuEntry::Submenu {
     detail: Some(detail),
@@ -897,6 +921,7 @@ impl PopupView {
           destructive,
           radio,
           check,
+          shortcut,
         } => {
           let id = *id;
           let checkable = check.is_some();
@@ -907,6 +932,14 @@ impl PopupView {
           };
           menu_row(format!("item-{index}"), text, *icon, color, &palette, false)
             .debug_selector(move || format!("menu-item-{id}"))
+            .when_some(shortcut.as_deref(), |row, key| {
+              row.child(
+                div()
+                  .ml_auto()
+                  .pl(zpx(DETAIL_GAP))
+                  .child(ui::Kbd::new(key, &palette)),
+              )
+            })
             .when_some(*radio, |row, checked| {
               menu_indicator(row, checked.then(|| radio_dot(color)))
             })
@@ -1749,6 +1782,7 @@ mod tests {
           destructive: false,
           radio: None,
           check: None,
+          shortcut: None,
         }],
       }
     );

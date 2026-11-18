@@ -129,6 +129,7 @@ impl Shell {
     }
     let label = self.label.to_string();
     let handle = window.window_handle();
+    let app = self.app.clone();
     self.shortcuts = Some(cx.intercept_keystrokes(move |event, window, cx| {
       if window.window_handle() != handle {
         return;
@@ -139,6 +140,16 @@ impl Shell {
       // An open dialog (the palette, the shortcuts sheet, a picker) takes
       // every key, its own Escape included.
       if within(overlay::KEY_CONTEXT) {
+        return;
+      }
+      if shortcuts::archives_selection(
+        &keystroke.key,
+        m.modified(),
+        within("Input"),
+        within(screen::TERMINAL_CONTEXT),
+      ) {
+        popup::hide_menus();
+        action_sink(app.clone(), label.clone())(SidebarAction::ArchiveSelected, cx);
         return;
       }
       let found = shortcuts::app_shortcut(

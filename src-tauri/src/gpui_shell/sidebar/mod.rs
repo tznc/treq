@@ -255,6 +255,8 @@ pub enum SidebarAction {
   /// Right-click on one of several selected workspace rows: the menu acts
   /// on every selected workspace.
   WorkspacesMenu,
+  /// Backspace with several workspace rows selected: archives them all.
+  ArchiveSelected,
   /// A click on the modal backdrop drawn over the sidebar.
   DismissModal,
   /// A workspace row dropped onto another row, to stack it there, or onto

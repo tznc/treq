@@ -35,6 +35,7 @@ pub fn handles(action: &SidebarAction) -> bool {
       | SidebarAction::ProjectMenu
       | SidebarAction::WorkspaceMenu { .. }
       | SidebarAction::WorkspacesMenu
+      | SidebarAction::ArchiveSelected
       | SidebarAction::RepoWorkspaceMenu { .. }
       | SidebarAction::MoveWorkspace { .. }
   )
@@ -125,6 +126,14 @@ pub fn handle(
           show(app, &label, backend, items);
         });
       });
+      true
+    }
+    SidebarAction::ArchiveSelected => {
+      let ids = selected_ids(active);
+      if ids.len() < 2 {
+        return false;
+      }
+      archive_all(app, backend, active.path.clone(), ids);
       true
     }
     SidebarAction::MoveWorkspace { id, onto } => {
