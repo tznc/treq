@@ -1749,6 +1749,8 @@ fn terminal_workspace_label_click_navigates_by_path(cx: &mut TestAppContext) {
     value,
     Some(serde_json::json!({ "key": "/repo/.treq/workspaces/b", "isMainRepo": false }))
   );
+}
+
 #[gpui::test]
 fn terminal_agent_header_links_to_what_it_reviews(cx: &mut TestAppContext) {
   let mut host = terminal_host();
