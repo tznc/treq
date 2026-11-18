@@ -307,7 +307,7 @@ test("changes: filter menu picks what the lists show", async ({ page }) => {
     title: "The list's filter row",
     expectations: [
       "The funnel button sits in its own right-aligned row above the lists",
-      "The Committed header has no Show button",
+      "The Committed header has a Hide checkbox, unchecked",
     ],
   });
   await page.getByRole("button", { name: "Filter changes" }).click();
@@ -317,8 +317,21 @@ test("changes: filter menu picks what the lists show", async ({ page }) => {
     title: "The list's filter menu",
     screen: true,
     rest: false,
-    expectations: ["The menu lists Generated files and Committed, both checked"],
+    expectations: ["The menu lists only Generated files, checked"],
   });
   await page.keyboard.press("Escape");
+  await settle(page, 500);
+  // The Hide toggle is not observable: click its fixed point (1400x900 window).
+  await page.mouse.click(463, 423);
+  await settle(page, 500);
+  await capture(page, {
+    name: "05-changes-committed-hidden",
+    title: "Committed group hidden",
+    expectations: [
+      "The Committed header shows a checked Hide checkbox and its count",
+      "No committed file rows are listed under it",
+    ],
+  });
+  await page.mouse.click(463, 423);
   await settle(page, 500);
 });
