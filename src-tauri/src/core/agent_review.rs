@@ -34,6 +34,41 @@ pub fn workspace_comments(
   Ok(comments)
 }
 
+/// `source` of a comment the user wrote in a review and sent to an agent.
+pub const SENT_REVIEW_SOURCE: &str = "sent-review";
+
+/// Keeps the line comments of a review sent to an agent on the workspace's
+/// diff, so they show until resolved. File-level comments have no line and
+/// are left out.
+pub fn keep_sent_comments(
+  repo_path: &str,
+  workspace_id: i64,
+  comments: &[crate::core::review::LineComment],
+) -> Result<(), String> {
+  let id = workspace_id.to_string();
+  for c in comments.iter().filter(|c| !c.is_file()) {
+    let side = match c.line_side {
+      Some(crate::core::review::Side::Old) => "old",
+      _ => "new",
+    };
+    local_db::create_agent_review_comment(
+      repo_path,
+      crate::core::agent_launch::REVIEW_TARGET,
+      &id,
+      &c.file_path,
+      Some(&c.hunk_id),
+      i64::from(c.start_line),
+      i64::from(c.end_line),
+      Some(side),
+      &c.text,
+      None,
+      SENT_REVIEW_SOURCE,
+      Some(&c.line_content.join("\n")),
+    )?;
+  }
+  Ok(())
+}
+
 pub fn resolve_comment(repo_path: &str, id: &str) -> Result<(), String> {
   local_db::resolve_agent_review_comment(repo_path, id)
 }
@@ -279,6 +314,52 @@ mod tests {
       .map(|c| c.file_path)
       .collect();
     assert_eq!(files, ["a.rs", "b.rs"]);
+  }
+
+  fn line(file: &str, hunk: &str) -> crate::core::review::LineComment {
+    crate::core::review::LineComment {
+      id: "c".into(),
+      file_path: file.into(),
+      hunk_id: hunk.into(),
+      start_line: 2,
+      end_line: 3,
+      line_content: vec!["a".into(), "b".into()],
+      text: "Rename this".into(),
+      created_at: String::new(),
+      line_side: Some(crate::core::review::Side::Old),
+      source: None,
+      github_author: None,
+      github_avatar_url: None,
+      github_comment_url: None,
+    }
+  }
+
+  #[test]
+  fn sent_comments_show_on_the_workspace_diff_until_resolved() {
+    let root = tempfile::TempDir::new().unwrap();
+    let repo = root.path().to_str().unwrap();
+    let file = line("b.rs", crate::core::review::FILE_HUNK);
+    keep_sent_comments(repo, 3, &[line("a.rs", "h1"), file]).unwrap();
+
+    let kept = workspace_comments(repo, 3).unwrap();
+    assert_eq!(kept.len(), 1);
+    let c = &kept[0];
+    assert_eq!(c.source, SENT_REVIEW_SOURCE);
+    assert_eq!((c.file_path.as_str(), c.start_line, c.end_line), ("a.rs", 2, 3));
+    assert_eq!(c.side.as_deref(), Some("old"));
+    assert_eq!(c.comment_text, "Rename this");
+    assert_eq!(c.quoted_text.as_deref(), Some("a\nb"));
+
+    resolve_comment(repo, &c.id).unwrap();
+    assert_eq!(workspace_comments(repo, 3).unwrap()[0].status, "resolved");
+  }
+
+  #[test]
+  fn sent_comments_are_not_counted_as_agent_comments_in_review_history() {
+    let root = tempfile::TempDir::new().unwrap();
+    let repo = root.path().to_str().unwrap();
+    keep_sent_comments(repo, 3, &[line("a.rs", "h1")]).unwrap();
+    assert!(local_db::list_review_history(repo, 10).unwrap().is_empty());
   }
 
   #[test]
