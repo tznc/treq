@@ -621,7 +621,6 @@ impl ChangesView {
   ) -> impl IntoElement {
     use chrono::Datelike;
     let this_year = chrono::Local::now().year();
-    let fg = p.foreground;
     let quoted = comment.clone();
     let file = path.to_string();
     div()
@@ -664,29 +663,28 @@ impl ChangesView {
         cx,
       ))
       .child(
-        self.tip(
-          format!("quote-{}", comment.id),
-          "Quote this comment",
-          div()
-            .id(SharedString::from(format!("quote-{}", comment.id)))
-            .role(gpui::Role::Button)
-            .aria_label("Quote")
-            .debug_selector(|| "github-comment-quote".into())
-            .absolute()
-            .top_2()
-            .right_2()
-            .p_1()
-            .rounded(radius::SM)
-            .cursor_pointer()
-            .opacity(0.)
-            .group_hover("github-comment", |s| s.opacity(1.))
-            .hover(move |s| s.bg(p.hover()).text_color(fg))
-            .child(ui::icon(theme::ICON_QUOTE, 14., p.muted_foreground))
-            .on_click(cx.listener(move |view, _, _, cx| {
-              view.quote(&quoted, &file, anchor.clone(), line, side, cx)
-            })),
-          cx,
-        ),
+        // Positioned here: the tooltip wrapper is `relative`, so an
+        // absolute button inside it would sit below the card.
+        div()
+          .absolute()
+          .top_2()
+          .right_2()
+          .opacity(0.)
+          .group_hover("github-comment", |s| s.opacity(1.))
+          .child(self.tip(
+            format!("quote-{}", comment.id),
+            "Quote this comment",
+            Button::new(SharedString::from(format!("quote-{}", comment.id)), p)
+              .variant(Variant::Ghost)
+              .size(Size::IconXs)
+              .aria_label("Quote")
+              .debug_selector(|| "github-comment-quote".into())
+              .child(ui::icon(theme::ICON_QUOTE, 14., p.muted_foreground))
+              .on_click(cx.listener(move |view, _, _, cx| {
+                view.quote(&quoted, &file, anchor.clone(), line, side, cx)
+              })),
+            cx,
+          )),
       )
       .test_support()
   }
