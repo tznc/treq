@@ -2687,6 +2687,8 @@ impl ChangesView {
     .selected(active)
     .gap_1()
     .px_0()
+    // Matches the left inset: 2px border + 4px margin.
+    .pr_1p5()
     .rounded_none()
     .border_l_2()
     .border_color(gpui::transparent_black())
