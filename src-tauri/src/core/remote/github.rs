@@ -189,6 +189,10 @@ pub enum GithubAction {
     content: String,
     on: bool,
   },
+  ResolveReviewThread {
+    thread_id: String,
+  },
+  CommitSuggestion(crate::github::SuggestionCommit),
 }
 
 /// [`GithubQuery::Context`]'s result.
@@ -293,5 +297,7 @@ pub(super) fn github_write(repo: &str, action: GithubAction) -> Result<serde_jso
       content,
       on,
     } => done(gh::set_reaction(&comment_id, &content, on)),
+    GithubAction::ResolveReviewThread { thread_id } => done(gh::resolve_review_thread(&thread_id)),
+    GithubAction::CommitSuggestion(c) => done(gh::commit_suggestion(name, &c)),
   }
 }

@@ -101,6 +101,24 @@ pub async fn github_write(
       };
       done(gh.graphql(mutation, json!({ "id": id })).await)
     }
+    GithubAction::ResolveReviewThread { thread_id } => done(
+      gh.graphql(
+        github::RESOLVE_REVIEW_THREAD_MUTATION,
+        json!({ "id": thread_id }),
+      )
+      .await,
+    ),
+    GithubAction::CommitSuggestion(c) => {
+      let pr = gh
+        .rest(Method::GET, &format!("{repo}/pulls/{}", c.number), None)
+        .await?;
+      let (branch, head) = github::pr_head(&pr)?;
+      let path = format!("/{}", github::contents_path(&head, &c.path));
+      let at = format!("{path}?ref={}", urlencoding::encode(&branch));
+      let file = gh.rest(Method::GET, &at, None).await?;
+      let body = github::suggestion_put_body(&c, &file, &branch)?;
+      done(gh.rest(Method::PUT, &path, Some(&body)).await)
+    }
     GithubAction::ReplyToReviewThread { thread_id, body } => {
       let variables = json!({ "threadId": thread_id, "body": body });
       done(gh.graphql(github::REPLY_THREAD_MUTATION, variables).await)
@@ -408,6 +426,58 @@ mod tests {
       number: 5,
       draft: false,
     };
+    assert_eq!(github_write(&gh, "o/r", action).await.unwrap(), Value::Null);
+  }
+
+  #[tokio::test]
+  async fn resolve_review_thread_resolves_it() {
+    let (server, gh) = start().await;
+    expect_graphql(&server, "resolveReviewThread", json!({ "id": "T_1" })).await;
+    let action = GithubAction::ResolveReviewThread {
+      thread_id: "T_1".into(),
+    };
+    assert_eq!(github_write(&gh, "o/r", action).await.unwrap(), Value::Null);
+  }
+
+  #[tokio::test]
+  async fn commit_suggestion_puts_the_spliced_file_on_the_head_branch() {
+    use base64::Engine as _;
+    let b64 = |s: &str| base64::engine::general_purpose::STANDARD.encode(s);
+    let (server, gh) = start().await;
+    Mock::given(method("GET"))
+      .and(path("/repos/o/r/pulls/5"))
+      .respond_with(ok(
+        json!({ "head": { "ref": "feat", "repo": { "full_name": "fork/r" } } }),
+      ))
+      .mount(&server)
+      .await;
+    Mock::given(method("GET"))
+      .and(path("/repos/fork/r/contents/src/a.rs"))
+      .respond_with(ok(json!({ "content": b64("x\nold\n"), "sha": "S1" })))
+      .mount(&server)
+      .await;
+    expect_rest(
+      &server,
+      "PUT",
+      "/repos/fork/r/contents/src/a.rs",
+      json!({
+        "message": "Apply suggestion from @zoe",
+        "content": b64("x\nB\n"),
+        "sha": "S1",
+        "branch": "feat",
+      }),
+      json!({}),
+    )
+    .await;
+    let action = GithubAction::CommitSuggestion(github::SuggestionCommit {
+      number: 5,
+      path: "src/a.rs".into(),
+      start_line: 2,
+      end_line: 2,
+      original: vec!["old".into()],
+      suggested: "B".into(),
+      message: "Apply suggestion from @zoe".into(),
+    });
     assert_eq!(github_write(&gh, "o/r", action).await.unwrap(), Value::Null);
   }
 
