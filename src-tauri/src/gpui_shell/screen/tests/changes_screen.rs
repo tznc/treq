@@ -1350,7 +1350,8 @@ fn changes_tab_sends_an_agent_comment_to_the_idle_agent(cx: &mut TestAppContext)
     .advance_clock(std::time::Duration::from_millis(500));
   h.cx.run_until_parked();
   let writes = pty_writes(&host);
-  let text = format!("write {} {:?}", agent_pty(), prompt);
+  // Pasted, newlines as a terminal sends them.
+  let text = format!("write {} {:?}", agent_pty(), prompt.replace('\n', "\r"));
   let enter = format!("write {} {:?}", agent_pty(), "\r");
   let at = writes
     .iter()
@@ -1369,6 +1370,10 @@ fn changes_tab_sends_an_agent_comment_to_the_idle_agent(cx: &mut TestAppContext)
 fn changes_tab_pastes_multi_line_text_into_a_bracketed_idle_agent(cx: &mut TestAppContext) {
   let (mut h, host) = changes_with_terminal(cx);
   host.output(&agent_pty(), "\x1b[?2004h");
+  // Output marks the agent writing until it has been quiet a while.
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_secs(10));
   h.cx.run_until_parked();
   h.click("agent-send-ag");
   h.cx
@@ -1376,7 +1381,11 @@ fn changes_tab_pastes_multi_line_text_into_a_bracketed_idle_agent(cx: &mut TestA
     .advance_clock(std::time::Duration::from_millis(500));
   h.cx.run_until_parked();
   let prompt = "Please address this review comment.\n\na.rs:2\n> Use one line\n\nSuggested change:\n```\none()\n```\n";
-  let pasted = format!("write {} {:?}", agent_pty(), format!("\x1b[200~{prompt}\x1b[201~"));
+  let pasted = format!(
+    "write {} {:?}",
+    agent_pty(),
+    format!("\x1b[200~{}\x1b[201~", prompt.replace('\n', "\r"))
+  );
   let enter = format!("write {} {:?}", agent_pty(), "\r");
   let writes = pty_writes(&host);
   let at = writes.iter().position(|w| *w == pasted).expect("pasted");
