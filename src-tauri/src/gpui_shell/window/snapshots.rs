@@ -234,8 +234,8 @@ fn workspace_view(model: &Model, data: &Data) -> Value {
   let workspace = model.selected_workspace(data);
   let home_branch = model.default_branch(data);
   let view = &model.view;
-  // `defaultTargetBranch`: the home branch, which has nothing committed.
-  let committed_toggle = workspace.is_some_and(|w| w.branch_name != home_branch);
+  let committed_toggle =
+    workspace.is_some_and(crate::gpui_shell::screen::workspace_data::has_committed_changes);
   let source = workspace.map_or(HOME_MOVE_ENDPOINT, |w| w.branch_name.as_str());
   let move_targets: Vec<Value> = std::iter::once(json!({
     "branch": HOME_MOVE_ENDPOINT,
@@ -559,6 +559,31 @@ mod tests {
     let terminal = route.terminal.unwrap();
     assert_eq!(terminal.commands.len(), 1);
     assert_eq!(terminal.commands[0].kind, "newShell");
+  }
+
+  #[test]
+  fn a_workspace_keeps_committed_changes_when_home_checks_out_its_branch() {
+    let mut data = data();
+    data.apply(
+      "/repo",
+      RepoRead {
+        branch: Some(Some(RepoBranch {
+          current_branch: Some("login".into()),
+          display_ref: "login".into(),
+          is_detached: false,
+        })),
+        ..RepoRead::default()
+      },
+    );
+    let mut model = Model::new(Some("/repo".into()));
+    model.selected = Some(1);
+    let View::Workspace(route) = screen(&model, &data).unwrap().view else {
+      panic!("not the workspace view");
+    };
+    assert!(
+      route.show_committed.is_some(),
+      "diffs against main, not home"
+    );
   }
 
   #[test]
