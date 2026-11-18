@@ -30,6 +30,11 @@ writeBin(
 );
 symlinkSync(appBinary, join(fixture.bin, "treq"));
 
+// A `paste-agent` file in the fixture root makes new agents read their
+// prompt as agent TUIs do (./fake-paste-agent.mjs).
+const pasteAgent = join(fixture.root, "fake-paste-agent.mjs");
+copyFileSync(join(here, "fake-paste-agent.mjs"), pasteAgent);
+
 // The agent the terminal pane shows: a short transcript, then a rule as
 // wide as the PTY says the terminal is, redrawn in place on every resize
 // the way a TUI redraws. A PTY wider than the grid wraps the rule, and the
@@ -39,6 +44,7 @@ writeBin(
   "claude",
   `#!/bin/sh
 printf '%s\\n' "$*" >> '${fixture.agentLog}'
+[ -f '${join(fixture.root, "paste-agent")}' ] && exec '${process.execPath}' '${pasteAgent}'
 printf '\\033[1m> Handle empty event_message in postEvent\\033[0m\\n\\n'
 printf '\\033[32m●\\033[0m Read packages/web/src/lib/client.ts\\n'
 printf '  \\033[2m└ Updated client.ts (+6 -1)\\033[0m\\n\\n'
