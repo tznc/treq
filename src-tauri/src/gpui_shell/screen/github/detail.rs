@@ -332,7 +332,7 @@ impl GithubView {
   }
 
   /// The scrolling detail page around its `px-4 py-3 space-y-4` column,
-  /// capped at `CONTENT_MAX_WIDTH`.
+  /// capped at `CONTENT_MAX_WIDTH` and centered.
   fn scroll(column: Div) -> gpui::Stateful<Div> {
     div()
       .id("github-detail-scroll")
@@ -346,6 +346,7 @@ impl GithubView {
     div()
       .w_full()
       .max_w(zpx(theme::CONTENT_MAX_WIDTH))
+      .mx_auto()
       .px_4()
       .py_3()
       .flex()

@@ -418,7 +418,8 @@ fn github_detail_markdown_links_open_in_the_browser(cx: &mut TestAppContext) {
   );
   assert!(h.shows(gpui::Role::Heading, "Add comment"));
   // The body, a link across its width, sits just above the comments.
-  let detail = h.cx.debug_bounds("github-detail").expect("detail");
+  // Both share the centered content column, so aim from the heading's left
+  // edge, not the pane's: in a wide pane the column has margins on each side.
   let heading = h
     .cx
     .debug_bounds("github-comments-heading")
@@ -428,7 +429,7 @@ fn github_detail_markdown_links_open_in_the_browser(cx: &mut TestAppContext) {
       .calls()
       .contains(&"open https://example.com/docs".to_string())
   };
-  let x = detail.left() + gpui::px(60.);
+  let x = heading.left() + gpui::px(60.);
   let mut y = heading.top() - gpui::px(8.);
   while !opened() && y > heading.top() - gpui::px(160.) {
     h.cx
