@@ -7,9 +7,34 @@ use crate::{
     remote::GithubAction,
     review::{line_at, pending_for_selection, LineRef, Side},
   },
-  github::{GhDraftReviewComment, GhReviewThread},
+  github::{GhDraftReviewComment, GhReviewComment, GhReviewThread},
   jj::JjDiffHunk,
 };
+
+/// GitHub's "Commit suggestion" for a review comment: its suggestion
+/// committed to the PR's head branch, crediting the reviewer. `None` when the
+/// comment has no suggestion or its thread is resolved.
+pub fn commit_suggestion_action(
+  thread: &GhReviewThread,
+  comment: &GhReviewComment,
+  number: u64,
+) -> Option<GithubAction> {
+  if thread.is_resolved {
+    return None;
+  }
+  let s = crate::github::github_suggestion(thread, comment)?;
+  Some(GithubAction::CommitSuggestion(
+    crate::github::SuggestionCommit {
+      number,
+      path: thread.path.clone(),
+      start_line: s.lines.0,
+      end_line: s.lines.1,
+      original: s.original,
+      suggested: s.suggested,
+      message: crate::github::suggestion_commit_message(&comment.author.login, comment.author_id),
+    },
+  ))
+}
 
 /// One file of the PR's diff.
 #[derive(Debug, Clone, PartialEq)]
@@ -290,6 +315,36 @@ deleted file mode 100644
         reactions: Vec::new(),
       }],
     }
+  }
+
+  #[core::prelude::v1::test]
+  fn a_suggestion_becomes_a_commit_crediting_its_reviewer() {
+    let mut t = thread("src/a.rs", Some(2), "RIGHT", false);
+    t.comments[0].author.login = "zoe".into();
+    t.comments[0].author_id = Some(42);
+    t.comments[0].body = "Try:\n```suggestion\nB\n```".into();
+    t.comments[0].diff_hunk = "@@ -1,2 +1,2 @@\n one\n+old".into();
+    let action = commit_suggestion_action(&t, &t.comments[0], 5).expect("suggestion");
+    let GithubAction::CommitSuggestion(c) = action else {
+      panic!("{action:?}");
+    };
+    assert_eq!((c.number, c.path.as_str()), (5, "src/a.rs"));
+    assert_eq!((c.start_line, c.end_line), (2, 2));
+    assert_eq!(c.original, vec!["old".to_string()]);
+    assert_eq!(c.suggested, "B");
+    assert!(c
+      .message
+      .contains("Co-authored-by: zoe <42+zoe@users.noreply.github.com>"));
+  }
+
+  #[core::prelude::v1::test]
+  fn a_plain_or_resolved_comment_offers_no_commit() {
+    let mut t = thread("src/a.rs", Some(2), "RIGHT", false);
+    t.comments[0].diff_hunk = "@@ -1 +1 @@\n+old".into();
+    assert!(commit_suggestion_action(&t, &t.comments[0], 5).is_none());
+    t.comments[0].body = "```suggestion\nB\n```".into();
+    t.is_resolved = true;
+    assert!(commit_suggestion_action(&t, &t.comments[0], 5).is_none());
   }
 
   #[core::prelude::v1::test]
