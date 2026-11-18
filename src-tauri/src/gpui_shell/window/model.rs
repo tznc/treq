@@ -243,6 +243,8 @@ pub struct Prefs {
   pub sidebar_width: f32,
   /// `default_agent`, which a remote repository's sessions start.
   pub default_agent: Option<String>,
+  /// The agent profiles and each agent's default profile, by setting key.
+  pub agent_settings: std::collections::HashMap<String, String>,
 }
 
 impl Default for Prefs {
@@ -253,6 +255,7 @@ impl Default for Prefs {
       zoom: DEFAULT_ZOOM,
       sidebar_width: DEFAULT_SIDEBAR_WIDTH,
       default_agent: None,
+      agent_settings: Default::default(),
     }
   }
 }
@@ -1062,6 +1065,9 @@ impl Model {
       self.prefs.sidebar_width = width.round().clamp(MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH);
     }
     self.prefs.default_agent = get("default_agent").filter(|a| !a.is_empty());
+    self.prefs.agent_settings = profile_setting_keys()
+      .filter_map(|key| Some((key.clone(), get(&key)?)))
+      .collect();
     self.collapsed = get(&collapsed_key(&self.main_repo))
       .and_then(|raw| serde_json::from_str(&raw).ok())
       .unwrap_or_default();
@@ -1082,6 +1088,17 @@ impl Model {
 /// A workspace's checkout (`getFullWorkspacePath`).
 pub fn full_path(workspace: &Workspace) -> String {
   crate::core::context_menu::full_workspace_path(workspace)
+}
+
+/// The settings that name agent profiles and each agent's default profile.
+pub fn profile_setting_keys() -> impl Iterator<Item = String> {
+  use crate::core::agent_profiles;
+  std::iter::once(agent_profiles::PROFILES_SETTING.to_string()).chain(
+    crate::core::agent_launch::AGENTS
+      .iter()
+      .filter(|(id, _)| agent_profiles::supports_profiles(id))
+      .map(|(id, _)| agent_profiles::default_setting(id)),
+  )
 }
 
 /// The setting the folded groups of a main repository are kept under.
