@@ -138,3 +138,23 @@ test("pull request detail and review", async () => {
     "Previous, Files and Next above Submit review; Previous and Next are disabled (one file)",
   ]);
 });
+
+test("review suggestion: commit and resolve", async () => {
+  await page.getByRole("button", { name: "Files" }).click();
+  await page.waitForTimeout(800);
+  // zoe's thread is on a file outside this diff, so it lists under the files.
+  await page.getByText(/^zoe/).first().scrollIntoViewIfNeeded();
+  const commit = page.getByRole("button", { name: "Commit suggestion" });
+  await expect(commit).toBeVisible();
+  await commit.scrollIntoViewIfNeeded();
+  await shot("07-suggestion", "A review suggestion", [
+    "zoe's comment shows the suggestion, with a filled Commit suggestion on the right of its reaction row",
+    "Resolve sits beside Reply under the open thread",
+  ]);
+  await commit.click();
+  await expect(page.getByText(/Suggestion committed\.|Thread resolved\./)).toBeVisible();
+  await shot("08-committed", "Committed and resolved", [
+    "A 'Suggestion committed.' or 'Thread resolved.' notice shows",
+    "(The fake gh keeps its threads unresolved, so the thread reads as before)",
+  ]);
+});

@@ -412,6 +412,25 @@ if (group === "pr" && command === "diff") {
   if (file) process.stdout.write(readFileSync(file, "utf8"));
   process.exit(0);
 }
+// "Commit suggestion": the PR's head, the file at it, and the new contents.
+const apiPath = group === "api" ? args.find((a) => a.startsWith("repos/")) : undefined;
+if (apiPath && /\/pulls\/\d+$/.test(apiPath)) {
+  out({ head: { ref: "feat/empty-event-message", repo: { full_name: "lorem-ipsum/event-bus" } } });
+}
+if (apiPath?.includes("/contents/")) {
+  if (args.includes("PUT")) {
+    readFileSync(0, "utf8");
+    out({ commit: { sha: "c0ffee" } });
+  }
+  const file = reviewThreads[418]
+    .flatMap((t) => t.comments.nodes)
+    .find((c) => c.id === "PRRC_client_suggestion")
+    .diffHunk.split("\n")
+    .slice(1)
+    .map((l) => l.slice(1))
+    .join("\n");
+  out({ content: Buffer.from(`${file}\n`).toString("base64"), sha: "S1" });
+}
 if (group === "api" && /^repos\/[^/]+\/[^/]+\/pulls\/\d+\/reviews$/.test(command ?? "")) {
   out({ id: 1, state: "COMMENTED" });
 }
