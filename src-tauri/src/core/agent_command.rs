@@ -158,8 +158,86 @@ pub fn claude_filesystem_settings(paths: &AgentPaths<'_>) -> Value {
   }
 }
 
-/// Read-only commands Treq's prompts ask agents to run, allowed without a prompt.
-const CLAUDE_ALLOWED_TOOLS: &[&str] = &["Bash(gh pr diff:*)"];
+/// Adds `rules` to `permissions.allow`, keeping existing rules and skipping duplicates.
+/// The rules allow read-only commands Treq's prompts ask agents to run.
+fn add_allow_rules(settings: &mut Map<String, Value>, rules: &[&str]) {
+  let permissions = settings.entry("permissions").or_insert_with(|| json!({}));
+  if let Value::Object(permissions) = permissions {
+    let allow = permissions.entry("allow").or_insert_with(|| json!([]));
+    if let Value::Array(allow) = allow {
+      for rule in rules {
+        if !allow.iter().any(|v| v == rule) {
+          allow.push(json!(rule));
+        }
+      }
+    }
+  }
+}
+
+const CODEX_RULE_PATH: &str = ".codex/rules/treq.rules";
+
+/// Allows `gh pr diff` in a Treq-owned Codex project rule, kept out of
+/// commits through `.git/info/exclude`. Codex loads it in trusted projects.
+fn allow_codex_commands(cwd: &str) -> Result<(), String> {
+  let path = Path::new(cwd).join(CODEX_RULE_PATH);
+  if let Some(dir) = path.parent() {
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+  }
+  std::fs::write(
+    &path,
+    "prefix_rule(\n  pattern = [\"gh\", \"pr\", \"diff\"],\n  decision = \"allow\",\n)\n",
+  )
+  .map_err(|e| e.to_string())?;
+  let Ok(out) = std::process::Command::new("git")
+    .args([
+      "-C",
+      cwd,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-common-dir",
+    ])
+    .output()
+  else {
+    return Ok(());
+  };
+  if !out.status.success() {
+    return Ok(());
+  }
+  let exclude = Path::new(String::from_utf8_lossy(&out.stdout).trim()).join("info/exclude");
+  let entry = format!("/{CODEX_RULE_PATH}");
+  let existing = std::fs::read_to_string(&exclude).unwrap_or_default();
+  if existing.lines().any(|line| line == entry) {
+    return Ok(());
+  }
+  if let Some(dir) = exclude.parent() {
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+  }
+  let sep = if existing.is_empty() || existing.ends_with('\n') {
+    ""
+  } else {
+    "\n"
+  };
+  std::fs::write(&exclude, format!("{existing}{sep}{entry}\n")).map_err(|e| e.to_string())
+}
+
+/// Allows `gh pr diff` in Devin's local (uncommitted) project config.
+fn allow_devin_commands(cwd: &str) -> Result<(), String> {
+  let path = Path::new(cwd).join(".devin/config.local.json");
+  let mut config = std::fs::read_to_string(&path)
+    .ok()
+    .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+    .and_then(|value| match value {
+      Value::Object(map) => Some(map),
+      _ => None,
+    })
+    .unwrap_or_default();
+  add_allow_rules(&mut config, &["Exec(gh pr diff)"]);
+  if let Some(dir) = path.parent() {
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+  }
+  let json = serde_json::to_string_pretty(&Value::Object(config)).map_err(|e| e.to_string())?;
+  std::fs::write(&path, json).map_err(|e| e.to_string())
+}
 
 /// Overlay Treq filesystem restrictions onto `.claude/settings.local.json`, without sandbox.
 pub fn merge_claude_local_settings(
@@ -169,19 +247,7 @@ pub fn merge_claude_local_settings(
   let mut settings = existing.unwrap_or_default();
   settings.remove("sandbox");
   settings.insert("filesystem".into(), filesystem);
-  let permissions = settings
-    .entry("permissions")
-    .or_insert_with(|| json!({}));
-  if let Value::Object(permissions) = permissions {
-    let allow = permissions.entry("allow").or_insert_with(|| json!([]));
-    if let Value::Array(allow) = allow {
-      for rule in CLAUDE_ALLOWED_TOOLS {
-        if !allow.iter().any(|v| v == rule) {
-          allow.push(json!(rule));
-        }
-      }
-    }
-  }
+  add_allow_rules(&mut settings, &["Bash(gh pr diff:*)"]);
   Value::Object(settings)
 }
 
@@ -272,7 +338,7 @@ pub fn build_auto_command(
         "auto_edit"
       };
       format!(
-        "gemini --approval-mode {mode} -i \"{}\"",
+        "gemini --approval-mode {mode} --allowed-tools 'run_shell_command(gh pr diff)' -i \"{}\"",
         shell_cat(&files.prompt_path)
       )
     }
@@ -338,6 +404,11 @@ pub fn prepare_auto_command(
   // Writing skills would recreate a deleted workspace as an empty folder.
   if !Path::new(cwd).is_dir() {
     return Err(format!("Workspace folder no longer exists: {cwd}"));
+  }
+  match options.agent {
+    "devin" => allow_devin_commands(cwd)?,
+    "codex" => allow_codex_commands(cwd)?,
+    _ => {}
   }
   let system = system_prompt(paths);
   let (prompt, settings) = match options.agent {
@@ -830,8 +901,10 @@ mod tests {
     let prompt = "\"$(cat -- '/tmp/treq-agent-1/prompt.txt')\"";
     assert!(plan("devin").contains(&format!("devin --permission-mode plan -- {prompt}")));
     assert!(edit("devin").contains(&format!("devin -- {prompt}")));
-    assert!(plan("gemini").contains(&format!("gemini --approval-mode plan -i {prompt}")));
-    assert!(edit("gemini").contains(&format!("gemini --approval-mode auto_edit -i {prompt}")));
+    assert!(plan("gemini").contains(&format!(
+      "gemini --approval-mode plan --allowed-tools 'run_shell_command(gh pr diff)' -i {prompt}"
+    )));
+    assert!(edit("gemini").contains(&format!("gemini --approval-mode auto_edit --allowed-tools 'run_shell_command(gh pr diff)' -i {prompt}")));
   }
 
   #[test]
@@ -892,6 +965,63 @@ mod tests {
     assert_eq!(written["extra"], 1);
     assert!(written.get("sandbox").is_none());
     super::super::agent_cli::cleanup_agent_cli_files(&prepared.file_paths).unwrap();
+  }
+
+  #[test]
+  fn allows_gh_pr_diff_in_devin_local_config() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().to_str().unwrap();
+    std::fs::create_dir_all(dir.path().join(".devin")).unwrap();
+    let config = dir.path().join(".devin/config.local.json");
+    std::fs::write(
+      &config,
+      r#"{"extra":1,"permissions":{"allow":["Exec(ls)"]}}"#,
+    )
+    .unwrap();
+    let paths = AgentPaths {
+      workspace_path: None,
+      repo_path: cwd,
+      supporting_repo_paths: NONE,
+      project: None,
+      app_instructions: None,
+      repo_instructions: None,
+    };
+    for _ in 0..2 {
+      let prepared = prepare_auto_command(&paths, &opts("devin")).unwrap();
+      super::super::agent_cli::cleanup_agent_cli_files(&prepared.file_paths).unwrap();
+    }
+    let written: Value = serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+    assert_eq!(
+      written,
+      json!({ "extra": 1, "permissions": { "allow": ["Exec(ls)", "Exec(gh pr diff)"] } })
+    );
+  }
+
+  #[test]
+  fn allows_gh_pr_diff_in_a_git_excluded_codex_rule() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().to_str().unwrap();
+    std::process::Command::new("git")
+      .args(["init", "-q", cwd])
+      .status()
+      .unwrap();
+    let paths = AgentPaths {
+      workspace_path: None,
+      repo_path: cwd,
+      supporting_repo_paths: NONE,
+      project: None,
+      app_instructions: None,
+      repo_instructions: None,
+    };
+    for _ in 0..2 {
+      let prepared = prepare_auto_command(&paths, &opts("codex")).unwrap();
+      super::super::agent_cli::cleanup_agent_cli_files(&prepared.file_paths).unwrap();
+    }
+    let rule = std::fs::read_to_string(dir.path().join(".codex/rules/treq.rules")).unwrap();
+    assert!(rule.contains(r#"pattern = ["gh", "pr", "diff"]"#));
+    assert!(rule.contains(r#"decision = "allow""#));
+    let exclude = std::fs::read_to_string(dir.path().join(".git/info/exclude")).unwrap();
+    assert_eq!(exclude.matches("/.codex/rules/treq.rules").count(), 1);
   }
 
   /// A fresh shell reads typed input in canonical mode, which caps a line
