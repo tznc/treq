@@ -313,5 +313,16 @@ test("changes: filter menu picks what the lists show", async ({ page }) => {
     expectations: ["The menu lists only Generated files, checked"],
   });
   await page.keyboard.press("Escape");
+  await settle(page, 500);  await page.getByRole("checkbox", { name: "Hide" }).click();
+  await settle(page, 500);
+  await capture(page, {
+    name: "05-changes-committed-hidden",
+    title: "Committed group hidden",
+    expectations: [
+      "The Committed header shows a checked Hide checkbox and its count",
+      "No committed file rows are listed under it",
+    ],
+  });
+  await page.getByRole("checkbox", { name: "Hide" }).click();
   await settle(page, 500);
 });
