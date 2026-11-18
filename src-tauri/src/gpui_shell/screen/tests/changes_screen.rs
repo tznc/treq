@@ -1556,11 +1556,18 @@ fn the_changes_section_header_is_a_heading(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn a_committed_file_takes_a_file_comment(cx: &mut TestAppContext) {
-  let (mut h, _) =
-    workspace_harness(cx, changes_host_committed_only(), committed_route(true));
-  h.click("add-file-comment-button");
-  h.click("comment-input");
-  h.cx.simulate_input("Split this");
-  h.click("comment-submit");
-  assert!(h.drawn("file-comment-card"));
+  use gpui::Role;
+  use gpui_testing_library::prelude::*;
+  let (mut h, _) = workspace_harness(cx, changes_host_committed_only(), committed_route(true));
+  let screen = h.rendered();
+  let user = screen.user();
+  user.click(&screen.get_by_role(by::role(Role::Button).name("Add file comment on c.rs")));
+  user.keyboard("Split this");
+  user.click(&screen.get_by_role(by::role(Role::Button).name("Add comment")));
+  h.cx.run_until_parked();
+  expect(
+    h.rendered()
+      .get_by_role(by::role(Role::Button).name("Edit comment")),
+  )
+  .to_be_visible();
 }
