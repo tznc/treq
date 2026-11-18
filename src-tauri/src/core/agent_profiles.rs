@@ -19,7 +19,7 @@ pub struct AgentProfile {
 
 /// The variable an agent reads its config directory from; `None` when the
 /// agent has no profiles.
-fn config_dir_var(agent: &str) -> Option<&'static str> {
+pub fn config_dir_var(agent: &str) -> Option<&'static str> {
   match agent {
     "claude" => Some("CLAUDE_CONFIG_DIR"),
     "codex" => Some("CODEX_HOME"),

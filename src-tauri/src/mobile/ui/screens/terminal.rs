@@ -249,7 +249,11 @@ impl Program {
   fn launch(self, args: Vec<String>) -> PtyLaunchSpec {
     match self {
       Self::Shell => PtyLaunchSpec::Shell,
-      Self::Agent(agent) => PtyLaunchSpec::Agent { agent, args },
+      Self::Agent(agent) => PtyLaunchSpec::Agent {
+        agent,
+        args,
+        profile: None,
+      },
     }
   }
 
