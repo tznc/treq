@@ -58,7 +58,7 @@ pub struct SidebarSnapshot {
   /// Why "Open shell" is unavailable here, or `None` when it works.
   #[serde(default)]
   pub shell_unavailable: Option<String>,
-  /// The "Archive N workspaces" button's count, or `None` to hide it.
+  /// How many workspaces are multi-selected, or `None` with none.
   #[serde(default)]
   pub bulk_archive: Option<u32>,
   /// The window's repositories: the main one first.
@@ -231,6 +231,8 @@ pub enum SidebarAction {
   /// The Open button beside WORKSPACES: opens workspaces from branches,
   /// links and pull requests.
   OpenWorkspaces,
+  /// The empty project's "Add Repository…".
+  AddRepository,
   StartAgent {
     id: Option<i64>,
   },
@@ -241,7 +243,6 @@ pub enum SidebarAction {
   Stack {
     id: Option<i64>,
   },
-  BulkArchive,
   /// Right-click on a repository's home row: React pops its native menu.
   #[serde(rename_all = "camelCase")]
   HomeMenu {
@@ -251,6 +252,9 @@ pub enum SidebarAction {
   WorkspaceMenu {
     id: i64,
   },
+  /// Right-click on one of several selected workspace rows: the menu acts
+  /// on every selected workspace.
+  WorkspacesMenu,
   /// A click on the modal backdrop drawn over the sidebar.
   DismissModal,
   /// A workspace row dropped onto another row, to stack it there, or onto
@@ -365,17 +369,12 @@ enum Item {
   Skeleton(usize, usize),
   /// Workspace row `.1` of the repository.
   Row(usize, usize),
-  /// "Archive N workspaces", under the active repository's rows.
-  BulkArchive(usize),
 }
 
 impl Item {
   fn repo(self) -> usize {
     match self {
-      Item::Label(repo)
-      | Item::Skeleton(repo, _)
-      | Item::Row(repo, _)
-      | Item::BulkArchive(repo) => repo,
+      Item::Label(repo) | Item::Skeleton(repo, _) | Item::Row(repo, _) => repo,
     }
   }
 }
@@ -394,9 +393,6 @@ fn items(snapshot: &SidebarSnapshot) -> Vec<Item> {
       items.extend((0..6).map(|i| Item::Skeleton(index, i)));
     }
     items.extend((0..repo.workspaces.len()).map(|row| Item::Row(index, row)));
-    if repo.active && snapshot.bulk_archive.is_some() {
-      items.push(Item::BulkArchive(index));
-    }
   }
   items
 }
@@ -666,20 +662,21 @@ impl Sidebar {
   }
 }
 
-/// Indentation of a row's content, matching the React sidebar's
-/// `16 + (depth - 1) * 6` px.
 /// How far a grouped repository's workspace rows sit right of a lone
 /// repository's, so their branch text (not their icon) starts under the
 /// group header's repository name.
 const GROUP_INDENT: f32 = 4.;
 
+/// Indentation of a row's content: one 12px icon per level, so a child's
+/// icon starts past its parent's.
 fn row_indent(depth: u32) -> f32 {
-  16. + (depth as f32 - 1.) * 6.
+  10. + depth as f32 * 12.
 }
 
-/// Where a nested row's stack guide line sits, matching the React sidebar.
+/// Where a nested row's elbow starts: under its parent's icon centre, so it
+/// runs from the parent into the row's own icon.
 fn guide_left(depth: u32) -> f32 {
-  8. + depth.saturating_sub(2) as f32 * 6.
+  row_indent(depth.saturating_sub(1)) + 5.
 }
 
 fn status_color(color: StatusColor, palette: &Palette) -> Hsla {
@@ -836,6 +833,8 @@ impl Render for Sidebar {
           .pt_3()
           .pb_1()
           .child(
+            // Short label (['section heading']): 11px is fine.
+            // ast-grep-ignore: gpui-text-xs-short-label-only
             ui::text(div(), TextSize::Xs)
               .font_weight(gpui::FontWeight::MEDIUM)
               .text_color(palette.sidebar_foreground.opacity(0.7))
@@ -845,6 +844,9 @@ impl Render for Sidebar {
             this.child(self.open_workspaces_button(&palette))
           }),
       )
+      .when(snapshot.repos.is_empty(), |this| {
+        this.child(self.no_repositories(&palette))
+      })
       .child(list)
       .child(
         div()
@@ -903,6 +905,7 @@ const PALETTE_TOOLTIP: &str = "Command palette (Ctrl+K)";
 
 /// The WORKSPACES heading's create button.
 pub(super) const OPEN_WORKSPACES_LABEL: &str = "New workspace…";
+const ADD_REPOSITORY_LABEL: &str = "Add repository…";
 
 /// A row's stack button: a new workspace on the home row, one stacked on the
 /// workspace elsewhere.
@@ -915,7 +918,24 @@ pub(super) fn stack_label(id: Option<i64>) -> &'static str {
 
 impl Sidebar {
   /// The WORKSPACES heading's Open button.
+  /// A project with no repository: says so, and offers to add one.
+  fn no_repositories(&self, palette: &Palette) -> impl IntoElement {
+    div().px_2().py_2().child(
+      ui::EmptyState::new("no-repositories", "No repositories", palette)
+        .icon(theme::ICON_FOLDER_PLUS)
+        .message("Add one to start a workspace.")
+        .action(
+          ui::Button::new("add-repository", palette)
+            .size(ui::Size::Sm)
+            .label(ADD_REPOSITORY_LABEL)
+            .on_click(self.on_action(SidebarAction::AddRepository)),
+        ),
+    )
+  }
+
   fn open_workspaces_button(&self, palette: &Palette) -> impl IntoElement {
+    // Short label (['button label']): 11px is fine.
+    // ast-grep-ignore: gpui-text-xs-short-label-only
     ui::text(div(), TextSize::Xs)
       .id("open-workspaces")
       .debug_selector(|| "open-workspaces".into())
@@ -1028,6 +1048,16 @@ impl Sidebar {
           this.hover_tooltip(key.clone(), *hovered, cx)
         }),
       )
+      // A click closes the tooltip, as base-ui's does: the dialog or menu
+      // the button opens would otherwise sit under it.
+      .on_mouse_down(
+        gpui::MouseButton::Left,
+        cx.listener(|this, _, _, cx| {
+          if this.tooltip.take().is_some() {
+            cx.notify();
+          }
+        }),
+      )
       .when(self.tooltip_shown(&id), |this| {
         this.child(self.tooltip_anchor(
           id.clone(),
@@ -1121,7 +1151,7 @@ impl Sidebar {
           repo.home_ref.clone().filter(|_| !repo.missing),
           |this, home_ref| {
             this.child(
-              ui::text(div(), TextSize::Xs)
+              ui::text(div(), TextSize::Sm)
                 .min_w_0()
                 .truncate()
                 .font_family(theme::MONO_FONT)
@@ -1173,6 +1203,8 @@ impl Sidebar {
       .child(title)
       .when(repo.missing, |this| {
         this.child(
+          // Short label (['tag']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .flex_none()
             .text_color(palette.muted_foreground)
@@ -1257,10 +1289,12 @@ impl Sidebar {
                   .border_color(palette.muted_foreground)
                   .text_color(palette.muted_foreground)
               })
+              // Short label (['avatar initial']): 11px is fine.
+              // ast-grep-ignore: gpui-text-xs-short-label-only
               .child(ui::text(div(), TextSize::Xs).child(initial)),
           )
           .child(
-            ui::text(div(), TextSize::Xs)
+            ui::text(div(), TextSize::Sm)
               .min_w_0()
               .truncate()
               .font_weight(gpui::FontWeight::MEDIUM)
@@ -1438,12 +1472,6 @@ impl Sidebar {
           .into_any_element(),
         None => div().into_any_element(),
       },
-      Item::BulkArchive(_) => {
-        bulk_archive_button(self.snapshot.bulk_archive.unwrap_or(0), &palette)
-          .on_click(self.on_action(SidebarAction::BulkArchive))
-          .test_support()
-          .into_any_element()
-      }
     };
     // Each repository's rows sit in their own element, so workspace ids,
     // which are per repository, do not collide.
@@ -1577,7 +1605,7 @@ impl Sidebar {
             .w(zpx(6.))
             .border_l_1()
             .border_b_1()
-            .border_color(palette.border)
+            .border_color(palette.stack_connector())
             .rounded_bl(ui::radius::SM),
         )
       })
@@ -1674,7 +1702,9 @@ impl Sidebar {
       .on_mouse_down(
         MouseButton::Right,
         self.on_menu(
-          if repo_active {
+          if repo_active && row.selected && self.snapshot.bulk_archive.is_some_and(|n| n > 1) {
+            SidebarAction::WorkspacesMenu
+          } else if repo_active {
             SidebarAction::WorkspaceMenu { id }
           } else {
             SidebarAction::RepoWorkspaceMenu {
@@ -1721,35 +1751,4 @@ fn skeleton_row(index: usize, palette: &Palette) -> impl IntoElement {
         .rounded_md()
         .bg(palette.muted),
     )
-}
-
-/// "Archive N workspaces", shown while workspaces are multi-selected.
-fn bulk_archive_button(count: u32, palette: &Palette) -> gpui::Stateful<gpui::Div> {
-  let label = if count == 1 {
-    "Archive 1 workspace".to_string()
-  } else {
-    format!("Archive {count} workspaces")
-  };
-  div()
-    .id("bulk-archive")
-    .debug_selector(|| "bulk-archive".into())
-    .role(Role::Button)
-    .aria_label(label.clone())
-    .flex()
-    .items_center()
-    .justify_center()
-    .gap_2()
-    .mt_2()
-    .h(zpx(32.))
-    .rounded_md()
-    .bg(palette.destructive)
-    .text_color(palette.destructive_foreground)
-    .cursor_pointer()
-    .hover(|style| style.opacity(0.9))
-    .child(icon(
-      theme::ICON_ARCHIVE,
-      14.,
-      palette.destructive_foreground,
-    ))
-    .child(label)
 }

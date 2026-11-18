@@ -1,5 +1,6 @@
 ---
 sidebar_position: 1
+description: "Guides to Git workflows and coding agents: worktrees, stacked PRs, rebasing, and reviewing AI-generated code."
 ---
 
 # Learn
@@ -8,6 +9,7 @@ AI agents move quickly. The Git workflows around them change just as fast. This 
 
 These guides define the category:
 
+- [The Complete Guide to Running AI Coding Agents in Parallel](/learn/guides/parallel-ai-coding-agents)
 - [Parallel Coding Agents](/learn/parallel-coding-agents)
 - [Human in the Loop AI Code Review](/learn/ai-code-review)
 - [Git Worktrees for AI](/learn/git-worktrees-for-ai)
@@ -20,6 +22,6 @@ These guides answer specific workflow questions:
 - [Auto-Rebasing AI Workspaces](/learn/how-to/auto-rebase-ai-branches)
 - [Review AI-Generated PRs](/learn/how-to/review-ai-generated-prs)
 - [Fix Merge Conflicts from Coding Agents](/learn/how-to/merge-conflicts-with-coding-agents)
-- [Git Worktrees vs Clones for Agents](/learn/how-to/git-worktrees-vs-clones-for-agents)
+- [Git Worktrees vs Clones](/learn/concepts/git/git-worktrees-vs-clones)
 
 For the Treq product, see the [Product Documentation overview](/docs/).

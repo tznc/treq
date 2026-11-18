@@ -140,6 +140,8 @@ pub enum TextSize {
 impl TextSize {
   pub fn metrics(self) -> (f32, f32) {
     match self {
+      // Short label (["the type scale's own definition"]): 11px is fine.
+      // ast-grep-ignore: gpui-text-xs-short-label-only
       TextSize::Xs => (11., 16.),
       TextSize::Sm => (13., 20.),
       TextSize::Lg => (15., 22.),
@@ -616,7 +618,7 @@ impl RenderOnce for Button {
         Size::Xs => text(b.h(zpx(24.)).px_2(), TextSize::Sm),
       })
       .when(self.variant == Variant::Command, |b| {
-        b.gap_3().px_4().rounded(radius::LG)
+        b.justify_start().gap_3().px_4().rounded(radius::LG)
       })
       .when(filled && !disabled, |b| b.shadow_sm())
       .when_some(self.on_click.filter(|_| !disabled), |b, f| {
@@ -891,6 +893,16 @@ pub fn card(p: &Palette) -> Div {
     .border_color(p.border.opacity(0.5))
     .bg(p.card)
     .text_color(p.card_foreground)
+}
+
+/// A card's action row for a hand-built [`card`]: buttons pulled right at
+/// their own width, like a dialog footer. [`Card`] does this via [`CardFooter`].
+pub fn card_actions() -> Div {
+  div()
+    .flex()
+    .items_center()
+    .justify_end()
+    .gap(zpx(theme::space::SM))
 }
 
 #[cfg(test)]

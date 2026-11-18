@@ -11,6 +11,7 @@ use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
 use std::{collections::HashSet, rc::Rc, sync::Arc, time::Duration};
 
+use gpui_kit::base::TestSupportExt as _;
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, AnyElement, Context, FontWeight, Role, SharedString, Window,
@@ -25,8 +26,9 @@ pub(super) mod account;
 )]
 pub use account::{
   AccountRoute, AccountTab, CloudCard, CloudEndpoint, CloudInstance, CloudRoute, CloudUsage,
-  DeleteAccountDialog, GithubSection, IntegrationsTab, LinearSection, ProcessRow, ProviderKeyRow,
-  ProviderKeysSection, SignedIn, SizeOption, StatusTone, Subscription, UsageReport, User,
+  DeleteAccountDialog, GithubSection, IntegrationsTab, InviteRow, LinearSection, MachinesTab,
+  MemberRow, OrgCard, ProcessRow, ProviderKeyRow, ProviderKeysSection, SignedIn, SizeOption,
+  StatusTone, Subscription, TeamSection, UsageReport, User,
 };
 
 use super::{
@@ -65,6 +67,7 @@ pub enum Tab {
   Repository,
   Application,
   Account,
+  Machines,
   Integrations,
   Skills,
   Preview,
@@ -76,6 +79,7 @@ impl Tab {
       Tab::Repository => "Repository",
       Tab::Application => "Application",
       Tab::Account => "Account",
+      Tab::Machines => "Machines",
       Tab::Integrations => "Integrations",
       Tab::Skills => "Skills",
       Tab::Preview => "Feature preview",
@@ -87,6 +91,7 @@ impl Tab {
       Tab::Repository => theme::ICON_FOLDER_GIT,
       Tab::Application => theme::ICON_SETTINGS,
       Tab::Account => theme::ICON_USER,
+      Tab::Machines => theme::ICON_SERVER,
       Tab::Integrations => theme::ICON_PLUG,
       Tab::Skills => theme::ICON_BOOK_OPEN,
       Tab::Preview => theme::ICON_FLASK,
@@ -98,6 +103,7 @@ impl Tab {
       Tab::Repository => "repository",
       Tab::Application => "application",
       Tab::Account => "account",
+      Tab::Machines => "machines",
       Tab::Integrations => "integrations",
       Tab::Skills => "skills",
       Tab::Preview => "preview",
@@ -128,6 +134,7 @@ pub struct Settings {
   pub preview: Option<Preview>,
   pub skills: Option<SkillsTab>,
   pub account: Option<AccountTab>,
+  pub machines: Option<MachinesTab>,
   pub integrations: Option<IntegrationsTab>,
 }
 
@@ -489,6 +496,10 @@ pub struct SettingsView {
   /// each wait: a newer edit restarts it.
   pending: std::collections::HashMap<String, u64>,
   edits: u64,
+  /// Held by the page itself so Escape, with no field or dialog focused,
+  /// goes back.
+  focus: gpui::FocusHandle,
+  focused_once: bool,
   /// An Application save is running; `app_again` holds fields edited
   /// meanwhile, which save once it finishes.
   app_saving: bool,
@@ -550,6 +561,8 @@ impl SettingsView {
       marks: Default::default(),
       pending: Default::default(),
       edits: 0,
+      focus: cx.focus_handle(),
+      focused_once: false,
       app_saving: false,
       app_again: Vec::new(),
       repo_again: Vec::new(),
@@ -1617,6 +1630,7 @@ impl SettingsView {
       Tab::Repository,
       Tab::Application,
       Tab::Account,
+      Tab::Machines,
       Tab::Integrations,
     ];
     if self.preview_on(PreviewFeature::SkillsInstallation) {
@@ -1738,6 +1752,11 @@ impl SettingsView {
         let mut merged: Vec<(&str, CustomSkillLevel)> = Vec::new();
         let (mut labelled, mut rest) = (Vec::new(), Vec::new());
         for view in data::filter_skills(catalog, &skills.query) {
+          // The registry can't install proprietary skills, so only list
+          // ones already installed.
+          if view.skill.proprietary && view.installed.is_none() {
+            continue;
+          }
           let mut labels = Vec::new();
           let mut customized = view.customized;
           if let Some(installed) = &view.installed {
@@ -1872,6 +1891,7 @@ impl SettingsView {
       preview,
       skills,
       account: (tab == Tab::Account).then(|| self.account_tab()),
+      machines: (tab == Tab::Machines).then(|| self.machines_tab()),
       integrations: (tab == Tab::Integrations).then(|| self.integrations_tab()),
     }
   }
@@ -1944,28 +1964,38 @@ struct Mark {
 
 impl Mark {
   /// "✓ Saved", muted, next to the label.
-  fn tick(&self, p: &Palette) -> Option<gpui::Div> {
+  fn tick(&self, p: &Palette) -> Option<gpui::AnyElement> {
     self.saved.then(|| {
       let id = format!("settings-saved-{}", self.key);
       ui::text(div(), TextSize::Sm)
+        .id(SharedString::from(id.clone()))
         .debug_selector(move || id)
+        .role(gpui::Role::Status)
+        .aria_label("Saved")
         .flex()
         .items_center()
         .gap_1()
         .text_color(p.muted_foreground)
         .child(ui::icon(theme::ICON_CHECK, 12., p.muted_foreground))
         .child("Saved")
+        .test_support()
+        .into_any_element()
     })
   }
 
   /// The save error, under the control.
-  fn error(&self, p: &Palette) -> Option<gpui::Div> {
+  fn error(&self, p: &Palette) -> Option<gpui::AnyElement> {
     self.error.clone().map(|text| {
       let id = format!("settings-error-{}", self.key);
       ui::text(div().mt_1(), TextSize::Sm)
+        .id(SharedString::from(id.clone()))
         .debug_selector(move || id)
+        .role(gpui::Role::Alert)
+        .aria_label(text.clone())
         .text_color(ui::Tone::Danger.text(p))
         .child(text)
+        .test_support()
+        .into_any_element()
     })
   }
 }
@@ -2115,6 +2145,10 @@ impl Render for SettingsView {
         Some(account) => self.account(account, &p, window, cx),
         None => div().into_any_element(),
       },
+      Tab::Machines => match &s.machines {
+        Some(machines) => self.machines(machines, &p, cx),
+        None => div().into_any_element(),
+      },
       Tab::Integrations => match &s.integrations {
         Some(integrations) => self
           .integrations(integrations, &p, window, cx)
@@ -2132,30 +2166,46 @@ impl Render for SettingsView {
       .as_ref()
       .and_then(|skills| skills.confirm.clone())
       .map(|confirm| self.skill_confirm_dialog(&confirm, &p));
-    let delete_dialog = match &s.account {
-      Some(AccountTab::SignedIn(signed_in))
-        if signed_in
-          .cloud
-          .as_ref()
-          .is_some_and(|c| c.confirming_delete) =>
-      {
+    let delete_dialog = match (&s.account, &s.machines) {
+      (_, Some(MachinesTab::SignedIn(card))) if card.confirming_delete => {
         Some(self.cloud_delete_dialog(&p).into_any_element())
       }
-      Some(AccountTab::SignedIn(signed_in)) => signed_in.delete_account.as_ref().map(|dialog| {
-        let email = signed_in.email.clone().unwrap_or_default();
-        self
-          .delete_account_dialog(dialog, &email, &p, window, cx)
-          .into_any_element()
-      }),
+      (Some(AccountTab::SignedIn(signed_in)), _) => {
+        signed_in.delete_account.as_ref().map(|dialog| {
+          let email = signed_in.email.clone().unwrap_or_default();
+          self
+            .delete_account_dialog(dialog, &email, &p, window, cx)
+            .into_any_element()
+        })
+      }
       _ => None,
     };
+    let delete_dialog = delete_dialog.or_else(|| self.team_confirm_dialog(&p));
 
+    if !std::mem::replace(&mut self.focused_once, true) {
+      window.focus(&self.focus, cx);
+    }
+    let open = dialog.is_some() || confirm.is_some() || delete_dialog.is_some();
     div()
       .relative()
       .size_full()
       .flex()
       .flex_col()
       .bg(p.background)
+      .track_focus(&self.focus)
+      .on_key_down(
+        cx.listener(move |view, e: &gpui::KeyDownEvent, window, cx| {
+          if ui::is_escape(&e.keystroke) && !open && view.focus.is_focused(window) {
+            (view.sink)(
+              ScreenAction::Press {
+                id: "settings.close".into(),
+              },
+              cx,
+            );
+            cx.stop_propagation();
+          }
+        }),
+      )
       .child(header)
       .child(
         div()
@@ -2166,7 +2216,7 @@ impl Render for SettingsView {
           .overflow_y_scroll()
           .child(
             div()
-              .max_w(zpx(896.))
+              .max_w(zpx(1088.))
               .mx_auto()
               .p_6()
               .flex()
@@ -2737,8 +2787,12 @@ impl SettingsView {
       .debug_selector(|| "settings-repo-name".into())
       .child(
         ui::text(div(), TextSize::Xl)
+          .id("settings-repo-name")
+          .role(gpui::Role::Heading)
+          .aria_label(repo.name.clone())
           .font_weight(FontWeight::SEMIBOLD)
-          .child(repo.name.clone()),
+          .child(repo.name.clone())
+          .test_support(),
       )
       .child(
         ui::text(div().mt_1(), TextSize::Sm)
@@ -2981,6 +3035,8 @@ impl SettingsView {
                 )
                 .when(!row.source.is_empty(), |this| {
                   this.child(
+                    // Short label (['source tag']): 11px is fine.
+                    // ast-grep-ignore: gpui-text-xs-short-label-only
                     ui::text(div(), TextSize::Xs)
                       .text_color(p.muted_foreground)
                       .child(row.source.clone()),
@@ -2992,6 +3048,8 @@ impl SettingsView {
                     LABEL_CUSTOM_REPO | LABEL_CUSTOM_GLOBAL => p.warning,
                     _ => p.muted_foreground,
                   };
+                  // Short label (['tag']): 11px is fine.
+                  // ast-grep-ignore: gpui-text-xs-short-label-only
                   ui::text(div(), TextSize::Xs)
                     .flex_none()
                     .px_1p5()
@@ -3017,8 +3075,8 @@ impl SettingsView {
       .child(self.skill_actions(row, level, p))
   }
 
-  /// A skill row's bottom line: Customise and Docs on the left; the install
-  /// level, its select and Uninstall (or Install…) on the right.
+  /// A skill row's bottom line: Docs, Customise and the install level, its
+  /// select and Uninstall (or Install…), all on the right.
   fn skill_actions(
     &self,
     row: &SkillRow,
@@ -3039,10 +3097,12 @@ impl SettingsView {
       });
     let docs = row.has_url.then(|| {
       Button::new(format!("skill-source-{id}"), p)
-        .variant(Variant::Link)
+        // Ghost tinted as a link, so the label is not underlined.
+        .variant(Variant::Ghost)
         .size(Size::Sm)
+        .text_color(p.primary)
         .aria_label(format!("Docs for {}", row.name))
-        .icon(theme::ICON_EXTERNAL_LINK, 14.)
+        .icon(theme::ICON_BOOK_OPEN, 14.)
         .label("Docs")
         .on_click(self.press(&format!("skills.source:{id}")))
     });
@@ -3072,7 +3132,7 @@ impl SettingsView {
           )))
           .child(
             Button::new(format!("skill-uninstall-{id}"), p)
-              .aria_label("Uninstall")
+              .aria_label(format!("Uninstall {}", row.name))
               .variant(Variant::DestructiveOutline)
               .size(Size::IconSm)
               .disabled(row.busy)
@@ -3090,21 +3150,29 @@ impl SettingsView {
           .into_any_element(),
       )
     };
+    // The proprietary note stays on the left; every action sits on the right.
+    let (note, right) = if row.proprietary {
+      (right, None)
+    } else {
+      (None, right)
+    };
     div()
       .w_full()
       .flex()
       .items_center()
-      .justify_between()
+      .justify_end()
       .gap_2()
+      .when(note.is_some(), |el| el.justify_between())
+      .children(note)
       .child(
         div()
           .flex()
           .items_center()
           .gap_2()
+          .children(docs)
           .children(customise)
-          .children(docs),
+          .children(right),
       )
-      .children(right)
   }
 
   /// The install dialog: where to store the skill.
@@ -3222,7 +3290,7 @@ impl SettingsView {
                 ),
             )
             .child(
-              ui::text(div(), TextSize::Xs)
+              ui::text(div(), TextSize::Sm)
                 .text_color(p.muted_foreground)
                 .child("Treq verifies the downloaded files against this checksum before installing."),
             )
@@ -3269,9 +3337,10 @@ impl SettingsView {
 /// A skill card's Install…, before its click handler.
 pub(super) fn install_button(row: &SkillRow, p: &Palette) -> Button {
   Button::new(format!("skill-install-{}", row.id), p)
-    .variant(Variant::Outline)
+    .variant(Variant::Default)
     .size(Size::Sm)
     .disabled(row.busy)
+    .aria_label(format!("Install {}…", row.name))
     .label("Install…")
 }
 

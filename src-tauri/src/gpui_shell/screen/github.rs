@@ -1305,9 +1305,15 @@ impl GithubView {
       Tab::Issues => 0,
       Tab::Prs => 1,
     };
+    fn with_total<T>(tab: ui::Tab, pages: &Pages<T>) -> ui::Tab {
+      match pages.pages.first().and_then(|p| p.total_count) {
+        Some(total) => tab.count(total as usize),
+        None => tab,
+      }
+    }
     let tabs = vec![
-      ui::Tab::new("github-tab-issues", "Issues"),
-      ui::Tab::new("github-tab-prs", "Pull requests"),
+      with_total(ui::Tab::new("github-tab-issues", "Issues"), &self.issues),
+      with_total(ui::Tab::new("github-tab-prs", "Pull requests"), &self.prs),
     ];
     div().flex().items_center().gap_2().child(
       ui::Tabs::new("github-tabs", p)

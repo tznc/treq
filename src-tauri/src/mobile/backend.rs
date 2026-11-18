@@ -89,6 +89,8 @@ pub struct Backend {
   pub ptys: RemotePtyManager,
   pub supabase: Arc<Supabase>,
   pub auth: Arc<Auth>,
+  /// The signed-in user's GitHub token, for GitHub calls made as them.
+  pub github_tokens: Arc<crate::core::github_user_token::GithubUserTokens>,
   connections: Mutex<Connections>,
   events: mpsc::UnboundedSender<AppEvent>,
 }
@@ -160,6 +162,9 @@ pub fn init(
     db: Mutex::new(db),
     pool,
     auth: supabase.auth.clone(),
+    github_tokens: Arc::new(crate::core::github_user_token::GithubUserTokens::new(
+      supabase.clone(),
+    )),
     supabase,
     connections: Mutex::new(Connections::default()),
     events,

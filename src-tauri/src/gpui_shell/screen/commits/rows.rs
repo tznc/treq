@@ -18,11 +18,11 @@ use tauri_plugin_gpui::gpui::{
   MouseButton, MouseMoveEvent, Pixels, SharedString, Window,
 };
 
-use super::{CommitsView, Kind};
+use super::{search, CommitsView, Kind};
 use crate::{
   gpui_shell::{
     screen::{
-      commits_data::{line_kind, line_numbers, History, LineKind},
+      commits_data::{headline, line_kind, line_numbers, History, LineKind},
       highlight,
     },
     theme::{self, Palette},
@@ -410,6 +410,55 @@ impl CommitsView {
     feed.list = self.feed.list.clone();
     feed.rem = self.feed.rem;
     self.feed = feed;
+    self.hits.stale = true;
+  }
+
+  /// Each row's searchable text, in the list's order: commit headlines and
+  /// open diff lines.
+  pub(super) fn searchable(&self, mut f: impl FnMut(usize, search::Hit, &str)) {
+    for (ix, (row, _)) in self.feed.rows.iter().enumerate() {
+      match *row {
+        Row::Commit(e) => {
+          let commit = &self.feed.entries[e].commit;
+          f(
+            ix,
+            search::Hit::Message(commit.commit_id.clone()),
+            &headline(commit),
+          );
+        }
+        Row::Line(e, fi, h, l) => {
+          let commit = &self.feed.entries[e].commit;
+          let Some(diff) = self
+            .diffs
+            .get(&commit.commit_id)
+            .and_then(|s| s.diff.as_ref())
+          else {
+            continue;
+          };
+          let Some(file) = diff.committed_files.get(fi) else {
+            continue;
+          };
+          let Some(line) = self
+            .file_diff(&commit.commit_id, &file.path)
+            .and_then(|d| d.hunks.get(h))
+            .and_then(|hunk| hunk.lines.get(l))
+          else {
+            continue;
+          };
+          let hit = search::Hit::Line(commit.commit_id.clone(), file.path.clone(), (h, l));
+          f(ix, hit, line.get(1..).unwrap_or(""));
+        }
+        _ => {}
+      }
+    }
+  }
+
+  /// A commit's headline with its find matches marked.
+  pub(super) fn marked_headline(&self, commit: &JjLogCommit, p: &Palette) -> gpui::StyledText {
+    let text = headline(commit);
+    let hit = search::Hit::Message(commit.commit_id.clone());
+    let marks = self.find_marks(&hit, &text, p);
+    highlight::styled_marked(&text, None, p.dark, &marks)
   }
 
   /// Nothing to list: no commits, or none read yet.
@@ -484,16 +533,23 @@ impl CommitsView {
           .commit(&commit, kind, label.as_ref(), &p, cx)
           .into_any_element()
       }
-      Row::OwnEmpty => div()
-        .debug_selector(|| "own-commits-empty".into())
-        .pl_7()
-        .text_color(p.muted_foreground)
-        .child(if self.home() {
+      Row::OwnEmpty => {
+        let message = if self.home() {
           "There are no commits on this branch yet."
         } else {
           "There are no commits within this workspace branch yet."
-        })
-        .into_any_element(),
+        };
+        div()
+          .id("own-commits-empty")
+          .debug_selector(|| "own-commits-empty".into())
+          .role(gpui::Role::Status)
+          .aria_label(message)
+          .pl_7()
+          .text_color(p.muted_foreground)
+          .child(message)
+          .test_support()
+          .into_any_element()
+      }
       Row::LoadMore(target) => self.load_more_row(target, &p, cx).into_any_element(),
       Row::Divider => {
         let branch = self
@@ -733,7 +789,10 @@ impl CommitsView {
           div()
             .id(SharedString::from(format!("add-comment-{h}-{l}")))
             .role(gpui::Role::Button)
-            .aria_label("Add comment")
+            .aria_label(format!(
+              "Add comment on {path} line {}",
+              new.or(old).unwrap_or_default()
+            ))
             .debug_selector(move || format!("add-comment-{h}-{l}"))
             .p_px()
             .rounded(radius::SM)
@@ -746,7 +805,8 @@ impl CommitsView {
             .on_click(cx.listener(move |view, _, _, cx| {
               cx.stop_propagation();
               view.add_comment(&c, &file, at, cx);
-            })),
+            }))
+            .test_support(),
         )
     };
     let (id, file) = (commit.commit_id.clone(), path.to_string());
@@ -762,6 +822,11 @@ impl CommitsView {
       .filter(|r| !r.is_empty())
       .map(|r| (r, p.selected()))
       .into_iter()
+      .chain(self.find_marks(
+        &search::Hit::Line(commit.commit_id.clone(), path.to_string(), at),
+        line.get(1..).unwrap_or(""),
+        p,
+      ))
       .collect();
     let styled = highlight::styled_marked(
       line.get(1..).unwrap_or(""),
@@ -777,6 +842,8 @@ impl CommitsView {
     div()
       .id(SharedString::from(format!("diff-line-{h}-{l}")))
       .debug_selector(move || selector)
+      .role(gpui::Role::Row)
+      .aria_label(line.to_string())
       .group("diff-line")
       .flex()
       .when_some(bg, |this, bg| this.bg(bg))
@@ -825,5 +892,6 @@ impl CommitsView {
             .size_0(),
           ),
       )
+      .test_support()
   }
 }

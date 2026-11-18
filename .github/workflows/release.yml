@@ -63,7 +63,7 @@ jobs:
             target: "x86_64-pc-windows-msvc"
             args: "--target x86_64-pc-windows-msvc"
     runs-on: ${{ matrix.platform }}
-    timeout-minutes: 20
+    timeout-minutes: 45
     environment: prod
     steps:
       - uses: actions/checkout@v7
@@ -132,6 +132,8 @@ jobs:
   # against musl, so it runs on any distro, Alpine included.
   linux-cli:
     needs: release
+    # A failed desktop bundle must not block the CLI the cloud machines install.
+    if: ${{ !cancelled() }}
     permissions:
       contents: write
     strategy:
@@ -191,6 +193,7 @@ jobs:
   # Base sandbox image for this version (sandbox-image/), on GHCR.
   sandbox-image:
     needs: release
+    if: ${{ !cancelled() }}
     permissions:
       contents: read
       packages: write
@@ -203,6 +206,7 @@ jobs:
   # release's own .sha256, so the pin goes through review.
   boot-manifest:
     needs: linux-cli
+    if: ${{ !cancelled() && needs.linux-cli.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

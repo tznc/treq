@@ -158,7 +158,11 @@ fn workspace_header_syncs_itself(cx: &mut TestAppContext) {
 #[gpui::test]
 fn workspace_header_reads_again_when_the_model_refreshes(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, feature_host(), workspace_route());
-  assert!(h.drawn("workspace-sync"));
+  let screen = h.rendered();
+  gpui_testing_library::expect(screen.get_by_role(
+    gpui_testing_library::by::role(gpui::Role::Button).name("Sync with remote: 2 to push"),
+  ))
+  .to_be_visible();
   h.update(|s| s.dark = true);
   h.update(|s| match &mut s.view {
     View::Workspace(route) => route.revision = 3,
@@ -177,10 +181,25 @@ fn workspace_header_reads_again_when_the_model_refreshes(cx: &mut TestAppContext
 #[gpui::test]
 fn workspace_tabs_switch_through_react(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, feature_host(), workspace_route());
-  assert!(h.drawn("workspace-tab-commits-count"));
-  assert!(h.drawn("workspace-tab-changes-count"));
-  assert!(h.drawn("loc-diff-marker"));
-  assert!(!h.drawn("workspace-tab-logs"));
+  use gpui_testing_library::{by, expect, TextMatch};
+  let screen = h.rendered();
+  let count = || TextMatch::regex(r"^\d+$");
+  for tab in ["Commits", "Changes"] {
+    let tab = screen.get_by_role(by::role(gpui::Role::Tab).name(tab));
+    expect(
+      screen
+        .within(&tab)
+        .get_by_role(by::role(gpui::Role::Image).name(count())),
+    )
+    .to_be_visible();
+  }
+  expect(screen.get_by_role(
+    by::role(gpui::Role::Image).name(TextMatch::regex(r"^\d+ lines added, \d+ lines removed$")),
+  ))
+  .to_be_visible();
+  assert!(screen
+    .query_by_role(by::role(gpui::Role::Tab).name("Logs"))
+    .is_none());
   h.click("workspace-tab-changes");
   h.cx.run_until_parked();
   assert_eq!(h.sent(), vec![field("workspace.tab", "changes".into())]);

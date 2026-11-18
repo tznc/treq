@@ -400,6 +400,21 @@ fn snapshot_fresh_working_copy(
   Ok(())
 }
 
+/// Moves `repo` to the operation head under the repo's op lock, so a
+/// snapshot commits on top of a sibling workspace's concurrent op instead of
+/// forking the shared operation log. Keeps `repo` when the head moved this
+/// workspace's working-copy commit (the caller's snapshot would be stale).
+fn reload_for_snapshot(
+  repo: &Arc<ReadonlyRepo>,
+  workspace_name: &jj_lib::ref_name::WorkspaceName,
+  wc_commit: &Commit,
+) -> Arc<ReadonlyRepo> {
+  match block_on(repo.loader().load_at_head()) {
+    Ok(head) if head.view().get_wc_commit_id(workspace_name) == Some(wc_commit.id()) => head,
+    _ => repo.clone(),
+  }
+}
+
 /// Snapshots a fresh, locked working copy into `wc_commit`, finishes the
 /// lock and returns the snapshotted tree. `repo` moves to the snapshot
 /// operation when the tree changed.
@@ -415,6 +430,9 @@ fn snapshot_locked_working_copy(
   let (new_tree, _) = block_on(locked_ws.locked_wc().snapshot(&opts))
     .map_err(|e| JjError::IoError(format!("Failed to snapshot working copy: {e}")))?;
   if new_tree.tree_ids() != wc_commit.tree_ids() {
+    let op_lock = remote::repo_op_lock(ignore_root);
+    let _op_guard = op_lock.lock().unwrap_or_else(|p| p.into_inner());
+    *repo = reload_for_snapshot(repo, &workspace_name, wc_commit);
     let mut tx = repo.start_transaction();
     let rewritten = block_on(
       tx.repo_mut()
@@ -789,6 +807,9 @@ fn snapshot_loaded_working_copy_inner(
     .map_err(|e| JjError::IoError(format!("Failed to snapshot working copy: {e}")))?;
 
   if new_tree.tree_ids_and_labels() != wc_commit.tree().tree_ids_and_labels() {
+    let op_lock = remote::repo_op_lock(workspace_path);
+    let _op_guard = op_lock.lock().unwrap_or_else(|p| p.into_inner());
+    loaded.repo = reload_for_snapshot(&loaded.repo, &workspace_name, &wc_commit);
     let mut tx = loaded.repo.start_transaction();
     let rewritten = block_on(
       tx.repo_mut()
@@ -4324,6 +4345,52 @@ pub fn jj_workspace_parent_descends_from_target(
     .index()
     .is_ancestor(target_commit.id(), workspace_parent.id())
     .map_err(|e| JjError::IoError(format!("Failed ancestry check: {}", e)))
+}
+
+/// Whether `workspace_branch`'s changes are already on `target_branch`:
+/// applying the stack's net diff (merge base -> branch tip) onto the target
+/// changes nothing. Catches squash merges, whose upstream commits carry the
+/// same changes under new hashes, without asking GitHub. `false` when the
+/// branch has no commits of its own.
+pub fn jj_branch_changes_landed_on_target(
+  workspace_path: &str,
+  workspace_branch: &str,
+  target_branch: &str,
+) -> Result<bool, JjError> {
+  validate_branch_name(workspace_branch, "workspace")?;
+  validate_branch_name(target_branch, "target")?;
+  let loaded = load_workspace_repo(workspace_path)?;
+  let target_symbol = resolve_target_branch_symbol(&loaded, workspace_path, target_branch)?;
+  let branch = resolve_commit_by_revision(&loaded, workspace_branch)?;
+  let target = resolve_commit_by_revision(&loaded, &target_symbol)?;
+  let base_ids: Vec<_> = evaluate_revset(
+    &loaded,
+    &format!("heads(::({workspace_branch}) & ::({target_symbol}))"),
+  )?
+  .iter()
+  .collect::<Result<_, _>>()
+  .map_err(|e| JjError::IoError(format!("Failed to find merge base: {e}")))?;
+  let [base_id] = base_ids.as_slice() else {
+    return Ok(false);
+  };
+  if base_id == branch.id() {
+    return Ok(false);
+  }
+  let base = loaded
+    .repo
+    .store()
+    .get_commit(base_id)
+    .map_err(|e| JjError::IoError(format!("Failed to load merge base: {e}")))?;
+  let stack_diff = Diff::new(
+    (base.tree(), base.conflict_label()),
+    (branch.tree(), branch.conflict_label()),
+  );
+  let applied = block_on(MergedTree::merge(Merge::from_diffs(
+    (target.tree(), target.conflict_label()),
+    vec![stack_diff],
+  )))
+  .map_err(|e| JjError::IoError(format!("Failed to apply stack diff: {e}")))?;
+  Ok(applied.tree_ids() == target.tree_ids())
 }
 
 /// Result of [`rebase_snapshot`].

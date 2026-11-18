@@ -8,6 +8,7 @@ use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
+use gpui_kit::base::TestSupportExt as _;
 use std::{
   cell::Cell,
   collections::{HashMap, HashSet},
@@ -159,6 +160,8 @@ fn comment_card(comment: &LineComment, palette: &Palette) -> gpui::AnyElement {
     .font_family(theme::SANS_FONT)
     .text_color(palette.foreground)
     .child(
+      // Short label (['line range']): 11px is fine.
+      // ast-grep-ignore: gpui-text-xs-short-label-only
       ui::text(div(), TextSize::Xs)
         .text_color(palette.muted_foreground)
         .child(range),
@@ -920,6 +923,8 @@ impl Lightbox {
           }),
         )
         .child(
+          // Short label (['zoom level']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .debug_selector(|| "treq-send-zoom-level".into())
             .min_w_10()
@@ -1186,6 +1191,8 @@ impl Lightbox {
           .id(SharedString::from(format!("treq-send-text-line-{n}")))
           .cursor_text()
           .debug_selector(move || format!("treq-send-text-line-{n}"))
+          .role(gpui::Role::Row)
+          .aria_label(format!("Line {n}"))
           .flex()
           .w_full()
           .items_start()
@@ -1221,7 +1228,8 @@ impl Lightbox {
               } else {
                 line.to_string()
               }),
-          );
+          )
+          .test_support();
         self.annotated(row.into_any_element(), |c| c.start == n, None, &palette)
       }
       TextRow::Composer => self.composer_box(&palette, true, cx),
@@ -1383,7 +1391,7 @@ impl Lightbox {
     } else {
       source
     };
-    ui::text(div(), TextSize::Xs)
+    ui::text(div(), TextSize::Sm)
       .flex_none()
       .flex()
       .items_center()
@@ -1607,6 +1615,9 @@ impl Render for Lightbox {
     div()
       .id("treq-send-preview-lightbox")
       .debug_selector(|| "treq-send-preview-lightbox".into())
+      .role(gpui::Role::Dialog)
+      .aria_label("Preview")
+      .test_support()
       .track_focus(&self.focus)
       .relative()
       .w(viewport.width)

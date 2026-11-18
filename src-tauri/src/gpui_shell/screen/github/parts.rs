@@ -3,6 +3,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use gpui_kit::base::TestSupportExt as _;
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, App, Div, FontWeight, Hsla, SharedString, Stateful, Window,
 };
@@ -52,8 +53,12 @@ pub fn review_chip(pr: &crate::github::GhPullRequest, p: &Palette) -> Option<imp
   };
   Some(
     div()
+      .id("github-review-state")
       .debug_selector(|| "github-review-state".into())
-      .child(ui::Badge::new(state.label(), p).tone(tone)),
+      .role(gpui::Role::Status)
+      .aria_label(format!("Review: {}", state.label()))
+      .child(ui::Badge::new(state.label(), p).tone(tone))
+      .test_support(),
   )
 }
 
@@ -202,7 +207,7 @@ pub fn review_event(
   date: &str,
   image: Option<std::sync::Arc<gpui::Image>>,
   p: &Palette,
-) -> Div {
+) -> impl IntoElement {
   let login = review.author.login.clone();
   let approved = review.state == "APPROVED";
   let (icon, tone) = if approved {
@@ -216,6 +221,8 @@ pub fn review_event(
       .flex_none()
       .rounded_full()
       .into_any_element(),
+    // Short label (['avatar initial']): 11px is fine.
+    // ast-grep-ignore: gpui-text-xs-short-label-only
     None => ui::text(div(), TextSize::Xs)
       .size(zpx(20.))
       .flex_none()
@@ -237,8 +244,12 @@ pub fn review_event(
       )
       .into_any_element(),
   };
+  let name = format!("{login} {}", review.verdict().unwrap_or_default());
   ui::text(div(), TextSize::Sm)
+    .id(SharedString::from(format!("github-review-event-{login}")))
     .debug_selector(move || format!("github-review-event-{login}"))
+    .role(gpui::Role::Label)
+    .aria_label(name)
     .flex()
     .items_center()
     .gap_2()
@@ -256,6 +267,7 @@ pub fn review_event(
     .child(review.verdict().unwrap_or_default())
     .child("·")
     .child(date.to_string())
+    .test_support()
 }
 
 /// A dropdown menu's panel: `rounded-md border bg-popover p-1 shadow-md`.

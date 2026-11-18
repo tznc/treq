@@ -6,6 +6,7 @@ import BrowserOnly from "@docusaurus/BrowserOnly";
 import Link from "@docusaurus/Link";
 import useDocusaurusContext from "@docusaurus/useDocusaurusContext";
 import { supabase } from "../lib/supabase";
+import { checkoutReturnPlan } from "../lib/checkoutReturn";
 import { proRequiredMessage } from "../lib/pro-required";
 import { confirmsAccountDeletion, deleteAccount } from "../lib/account";
 import {
@@ -35,6 +36,7 @@ import {
   type OrganizationAction,
 } from "../lib/teams";
 import type { User, Session } from "@supabase/supabase-js";
+import MachinesTab from "../components/MachinesTab";
 
 interface GithubRepo {
   id: number;
@@ -46,14 +48,13 @@ interface GithubRepo {
   installation_id: number;
 }
 
-type Tab = "account" | "integrations";
+type Tab = "account" | "integrations" | "machines";
 
 // Older links (pricing, invite emails, GitHub callback) still say
 // ?tab=subscription or ?tab=team. Both now live on Account.
 function tabFromSearch(search: string): Tab {
-  return new URLSearchParams(search).get("tab") === "integrations"
-    ? "integrations"
-    : "account";
+  const tab = new URLSearchParams(search).get("tab");
+  return tab === "integrations" || tab === "machines" ? tab : "account";
 }
 
 // ── Repo row ─────────────────────────────────────────────────────────────────
@@ -334,9 +335,7 @@ function SubscriptionTab({
   const [checkoutReturn, setCheckoutReturn] = useState<
     "waiting" | "timed_out" | null
   >(() =>
-    new URLSearchParams(window.location.search).has("session_id")
-      ? "waiting"
-      : null,
+    checkoutReturnPlan(window.location.search) === "pro" ? "waiting" : null,
   );
   const [portalPending, setPortalPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -517,6 +516,7 @@ const TEAM_PERKS = [
   "Everything in Pro for every member",
   "Manage team-wide integrations",
   "Sandbox usage management",
+  "Projects shared with every member",
   "One bill for the whole team",
 ];
 
@@ -1254,7 +1254,7 @@ function TeamTab({
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [checkoutReturn, setCheckoutReturn] = useState<"waiting" | "timed_out" | null>(
-    () => (new URLSearchParams(window.location.search).has("session_id") ? "waiting" : null),
+    () => (checkoutReturnPlan(window.location.search) === "team" ? "waiting" : null),
   );
 
   const reload = useCallback(async () => {
@@ -1759,6 +1759,7 @@ function DashboardContent() {
             [
               ["account", "Account"],
               ["integrations", "Integrations"],
+              ["machines", "Machines"],
             ] as const
           ).map(([tab, label]) => (
             <button
@@ -1804,6 +1805,14 @@ function DashboardContent() {
 
         {activeTab === "integrations" && (
           <IntegrationsTab onUpgrade={() => setActiveTab("account")} />
+        )}
+
+        {activeTab === "machines" && (
+          <MachinesTab
+            isPro={isProSubscription(subscription)}
+            onUpgrade={() => setActiveTab("account")}
+            styles={styles}
+          />
         )}
       </div>
     </div>

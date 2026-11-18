@@ -36,6 +36,9 @@ use crate::gpui_shell::{
   ui::{self, Button, Size, TextSize, Tone, Variant},
 };
 
+mod team;
+pub use team::{InviteRow, MemberRow, OrgCard, TeamSection};
+
 /// The repository setting the Linear API key is stored under.
 const LINEAR_API_KEY: &str = "linear_api_key";
 /// Where Linear users create a personal API key.
@@ -50,6 +53,8 @@ struct IntegrationCard {
   /// One line on what connecting it does.
   purpose: &'static str,
   connected: bool,
+  /// Free plan: a "Requires Pro" badge replaces the status.
+  pro_required: bool,
   open: bool,
 }
 
@@ -253,6 +258,14 @@ pub enum AccountTab {
   SignedIn(Box<SignedIn>),
 }
 
+/// The Machines tab, as drawn: the Treq Cloud machine's card.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MachinesTab {
+  Loading,
+  SignedOut,
+  SignedIn(Box<CloudCard>),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct DevCallback {
   pub url: String,
@@ -270,7 +283,6 @@ pub struct SignedIn {
   /// What the period end means, and the date.
   pub period: Option<(String, String)>,
   pub manage_label: String,
-  pub cloud: Option<CloudCard>,
   /// The spend cap row, once the spend status is read.
   pub spend_cap: Option<SpendCapEditor>,
   /// "Provider keys", for Pro.
@@ -280,6 +292,12 @@ pub struct SignedIn {
   pub cloud_profile: Option<CloudProfileSection>,
   /// The cloud settings of each Team organization the user owns.
   pub org_cloud: Vec<OrgCloudSection>,
+  /// "Teams": the user's organizations, their members and invites.
+  pub team: Option<TeamSection>,
+  /// "Get Team": no team the user belongs to has Team.
+  pub team_upsell: bool,
+  /// What a failed payment or a cancellation means for Pro.
+  pub billing_note: Option<String>,
   /// The delete-account confirmation, while it is open.
   pub delete_account: Option<DeleteAccountDialog>,
 }
@@ -319,6 +337,9 @@ pub struct CloudCard {
   pub sign_in: bool,
   pub submitting: bool,
   pub confirming_delete: bool,
+  /// The account has a machine to delete, in any state: one that failed
+  /// before the provider made it too, which `instance` leaves out.
+  pub deletable: bool,
   /// The size picker, one option per tier.
   pub sizes: Vec<SizeOption>,
   /// "Resize" shows: a tier other than the instance's is picked.
@@ -460,6 +481,8 @@ pub struct SizeOption {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CloudInstanceView {
   pub label: String,
+  /// Its size and region: `Medium · US East`.
+  pub detail: Option<String>,
   pub endpoint: Option<String>,
   pub repairable: bool,
   pub usage: Option<CloudUsage>,
@@ -546,6 +569,11 @@ pub(super) struct State {
   linear_oauth_loading: bool,
   /// The cloud workspace was read for this sign-in.
   cloud_read: bool,
+  /// The user's organizations, once read for this sign-in, and whether a
+  /// read runs.
+  team: Option<Result<crate::core::teams::TeamData, String>>,
+  team_loading: bool,
+  team_actions: team::TeamActions,
   callback_url: String,
   /// "No token found in URL", from the last Go.
   callback_error: Option<String>,
@@ -691,6 +719,18 @@ fn stage_label(status: &str) -> String {
     other => other,
   }
   .to_string()
+}
+
+/// A region code (`_shared/remote/catalog.ts` `REGION_CODES`) as people
+/// read it.
+fn region_label(code: &str) -> &str {
+  match code {
+    "us_east" => "US East",
+    "us_west" => "US West",
+    "eu_west" => "EU West",
+    "ap_southeast" => "Asia Pacific (Southeast)",
+    other => other,
+  }
 }
 
 /// How `remoteFunctionError` stores a refusal for want of Pro.
@@ -872,8 +912,21 @@ pub(in crate::gpui_shell::screen) fn cloud_card(
     instance: instance.map(|instance| {
       let ready = instance.status == "ready";
       let endpoint = cloud.endpoint.as_ref();
+      let size = instance.tier_id.as_deref().map(|id| {
+        cloud
+          .tiers
+          .iter()
+          .find(|t| t.id == id)
+          .map_or(id, |t| t.label.as_str())
+      });
+      let detail = [size, instance.region.as_deref().map(region_label)]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ");
       CloudInstanceView {
         label: stage_label(&instance.status),
+        detail: (!detail.is_empty()).then_some(detail),
         endpoint: endpoint.map(|e| format!("{}@{}:{}", e.username, e.hostname, e.port)),
         repairable: ["degraded", "failed"].contains(&instance.status.as_str()),
         usage: ready.then(|| match (&cloud.usage_error, &cloud.usage) {
@@ -921,6 +974,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card(
     credential_invalid,
     submitting: cloud.submitting,
     confirming_delete,
+    deletable: record.is_some_and(|i| !["deleting", "deleted"].contains(&i.status.as_str())),
   }
 }
 
@@ -1136,6 +1190,22 @@ impl SettingsView {
       provider_keys,
       cloud_profile,
       org_cloud,
+      team: Some(team::section(state.team.as_ref(), &state.team_actions)),
+      team_upsell: team::upsell(state.team.as_ref()),
+      billing_note: subscription
+        .filter(|_| pro)
+        .and_then(|s| match s.status.as_str() {
+          "past_due" => {
+            Some("Your last payment failed. Update your payment method to keep Pro.".into())
+          }
+          "canceled" => s.current_period_end.as_deref().map(|end| {
+            format!(
+              "Your subscription is set to cancel. Pro stays on until {}.",
+              local_date(end)
+            )
+          }),
+          _ => None,
+        }),
       name: user.name.clone(),
       email: user.email.clone(),
       pro,
@@ -1159,9 +1229,6 @@ impl SettingsView {
         "Upgrade to Pro"
       }
       .into(),
-      cloud: cloud_route
-        .as_ref()
-        .map(|cloud| cloud_card(cloud, state.confirming_delete)),
       spend_cap: account
         .cloud
         .as_ref()
@@ -1180,6 +1247,17 @@ impl SettingsView {
         ..d.clone()
       }),
     }))
+  }
+
+  pub(super) fn machines_tab(&self) -> MachinesTab {
+    let Some(account) = self.account_route().filter(|a| !a.loading) else {
+      return MachinesTab::Loading;
+    };
+    if account.user.is_none() {
+      return MachinesTab::SignedOut;
+    }
+    let cloud = account.cloud.unwrap_or_default();
+    MachinesTab::SignedIn(Box::new(cloud_card(&cloud, self.account.confirming_delete)))
   }
 
   pub(super) fn integrations_tab(&self) -> IntegrationsTab {
@@ -1226,40 +1304,38 @@ impl SettingsView {
       }
     };
     let pro = self.signed_in_pro();
-    let linear = self
-      .preview_on(crate::core::feature_preview::PreviewFeature::LinearIntegration)
-      .then(|| {
-        let linear = self
-          .account
-          .linear
-          .as_ref()
-          .filter(|l| Some(&l.path) == self.route.repo_path.as_ref());
-        let key = linear.and_then(|l| l.key.clone());
-        LinearSection {
-          repo: self.repo.is_some(),
-          connected: key.is_some(),
-          description: if key.is_some() {
-            "Direct API access configured"
-          } else {
-            "Paste a Linear personal API key"
-          }
-          .into(),
-          editing: linear.is_some_and(|l| l.editing),
-          draft: linear.map(|l| l.draft.clone()).unwrap_or_default(),
-          saving: linear.is_some_and(|l| l.saving),
-          edit_label: format!("{} API key", if key.is_some() { "Update" } else { "Add" }),
-          oauth: pro && native::feature_flag("pro"),
-          upgrade: !pro && !crate::linear::e2e_pro(),
-          oauth_description: if key.is_some() {
-            "API key takes priority, but you can also connect via OAuth"
-          } else {
-            "Pro plan: connect via OAuth"
-          }
-          .into(),
-          oauth_loading: account.as_ref().is_some_and(|a| a.linear_oauth_loading),
-          key_priority_note: key.is_some() && pro,
+    let linear = Some({
+      let linear = self
+        .account
+        .linear
+        .as_ref()
+        .filter(|l| Some(&l.path) == self.route.repo_path.as_ref());
+      let key = linear.and_then(|l| l.key.clone());
+      LinearSection {
+        repo: self.repo.is_some(),
+        connected: key.is_some(),
+        description: if key.is_some() {
+          "Direct API access configured"
+        } else {
+          "Paste a Linear personal API key"
         }
-      });
+        .into(),
+        editing: linear.is_some_and(|l| l.editing),
+        draft: linear.map(|l| l.draft.clone()).unwrap_or_default(),
+        saving: linear.is_some_and(|l| l.saving),
+        edit_label: format!("{} API key", if key.is_some() { "Update" } else { "Add" }),
+        oauth: pro && native::feature_flag("pro"),
+        upgrade: !pro && !crate::linear::e2e_pro(),
+        oauth_description: if key.is_some() {
+          "API key takes priority, but you can also connect via OAuth"
+        } else {
+          "Pro plan: connect via OAuth"
+        }
+        .into(),
+        oauth_loading: account.as_ref().is_some_and(|a| a.linear_oauth_loading),
+        key_priority_note: key.is_some() && pro,
+      }
+    });
     IntegrationsTab {
       github_connected: matches!(github, GithubSection::SignedIn { .. }),
       github,
@@ -1396,18 +1472,23 @@ impl SettingsView {
       self.account.github = None;
       LAST_GITHUB.with(|last| *last.borrow_mut() = None);
       self.account.cloud_read = false;
+      self.account.team = None;
+      self.account.team_actions = team::TeamActions::default();
     }
     self.sync_avatar(cx);
     if !signed_in || self.account.rust.loading {
       return;
     }
     // `AccountSettings` reads the cloud workspace once per sign-in.
-    if self.route.tab == Tab::Account && !self.account.cloud_read {
+    if matches!(self.route.tab, Tab::Account | Tab::Machines) && !self.account.cloud_read {
       self.account.cloud_read = true;
       self.host.cloud_action(CloudAction::Refresh);
     }
     if self.route.tab == Tab::Integrations && self.account.github.is_none() {
       self.load_github(cx);
+    }
+    if self.route.tab == Tab::Account && self.account.team.is_none() && !self.account.team_loading {
+      self.load_team(cx);
     }
   }
 
@@ -1573,7 +1654,14 @@ impl SettingsView {
           .host
           .open_url(&format!("{web}/dashboard?tab=subscription"))
       }
-      "account.manage" | "cloud.upgrade" => self.host.open_url(&format!("{web}/dashboard")),
+      // The website creates the team and takes the payment.
+      "account.manage" | "cloud.upgrade" | "team.start" => {
+        self.host.open_url(&format!("{web}/dashboard"));
+      }
+      _ if id.starts_with("teams.") => self.press_team(id, cx),
+      "team.compare" => self
+        .host
+        .open_url(&format!("{web}/pricing#feature-comparison")),
       "github.manage" => self
         .host
         .open_url(&format!("{web}/dashboard?tab=integrations")),
@@ -1783,6 +1871,9 @@ impl SettingsView {
       "cloud.spendCap" => self.account.spend_cap_draft = text,
       "byos.key" => self.account.byos_key_draft = text,
       "team.key" => self.account.team_key_draft = text,
+      _ if field.starts_with("teams.inviteEmail.") => {
+        self.set_team_field(field, text);
+      }
       _ if field.starts_with("team.cap.org.") => {
         let org_id = field.strip_prefix("team.cap.org.").unwrap_or_default();
         self
@@ -1978,8 +2069,8 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
   cx: &mut Context<V>,
 ) -> impl IntoElement {
   let red = red(p);
-  let actions = c.instance.as_ref().map(|instance| {
-    let repair = instance.repairable.then(|| {
+  let actions = c.deletable.then(|| {
+    let repair = c.instance.as_ref().filter(|i| i.repairable).map(|_| {
       let button = Button::new("cloud-repair", p)
         .variant(Variant::Outline)
         .size(Size::Sm)
@@ -2066,12 +2157,18 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
   });
   let processes = (!c.processes.is_empty() || c.idle_stop.is_some()).then(|| {
     div()
+      .id("cloud-processes")
       .debug_selector(|| "cloud-processes".into())
+      .role(tauri_plugin_gpui::gpui::Role::Group)
+      .aria_label("Processes")
+      .test_support()
       .flex()
       .flex_col()
       .gap_1()
       .when_some(c.idle_stop.clone(), |this, eta| {
         this.child(
+          // Short label (['countdown']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .debug_selector(|| "cloud-idle-stop".into())
             .text_color(p.muted_foreground)
@@ -2105,7 +2202,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
           ),
           (None, false) => None,
         };
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
           .flex()
           .items_center()
           .gap_2()
@@ -2132,7 +2229,11 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
       _ => p.muted_foreground,
     };
     ui::text(div(), TextSize::Sm)
+      .id("cloud-billing")
       .debug_selector(|| "cloud-billing".into())
+      .role(tauri_plugin_gpui::gpui::Role::Status)
+      .aria_label(billing.clone())
+      .test_support()
       .flex()
       .flex_col()
       .gap_1()
@@ -2237,7 +2338,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
   let body: AnyElement = match (&c.instance, &c.create) {
     (Some(instance), _) => {
       let usage = instance.usage.as_ref().map(|usage| match usage {
-        CloudUsage::Error(error) => ui::text(div(), TextSize::Xs)
+        CloudUsage::Error(error) => ui::text(div(), TextSize::Sm)
           .truncate()
           .text_color(red)
           .child(error.clone())
@@ -2297,7 +2398,11 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
       });
       let deletion = instance.deletion.clone().map(|notice| {
         div()
+          .id("cloud-deletion-warning")
           .debug_selector(|| "cloud-deletion-warning".into())
+          .role(tauri_plugin_gpui::gpui::Role::Alert)
+          .aria_label(notice.clone())
+          .test_support()
           .text_color(p.warning)
           .child(notice)
       });
@@ -2369,7 +2474,10 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
   };
 
   div()
+    .id("cloud-workspace-card")
     .debug_selector(|| "cloud-workspace-card".into())
+    .role(gpui::Role::Group)
+    .aria_label("Cloud workspace")
     .rounded(radius::MD)
     .border_1()
     .border_color(p.border)
@@ -2427,7 +2535,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
     })
     .when_some(c.error.clone(), |this, error| {
       this.child(
-        ui::text(div().mt_3(), TextSize::Xs)
+        ui::text(div().mt_3(), TextSize::Sm)
           .id("cloud-error")
           .role(gpui::Role::Alert)
           .aria_label(SharedString::from(error.clone()))
@@ -2439,7 +2547,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
     })
     .when_some(c.error_details.clone(), |this, details| {
       this.child(
-        ui::text(div().mt_1(), TextSize::Xs)
+        ui::text(div().mt_1(), TextSize::Sm)
           .truncate()
           .text_color(p.muted_foreground)
           .child(details),
@@ -2456,6 +2564,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
         ),
       )
     })
+    .test_support()
 }
 
 /// The cloud workspace's delete confirmation (`AlertDialog`), pressing
@@ -2498,7 +2607,11 @@ impl SettingsView {
         .child(ui::Loading::new("account-loading", p).label("Loading account…"))
         .into_any_element(),
       AccountTab::SigningIn => centered(12.)
+        .id("account-signing-in")
         .debug_selector(|| "account-signing-in".into())
+        .role(tauri_plugin_gpui::gpui::Role::Status)
+        .aria_label("Signing you in…")
+        .test_support()
         .child(ui::spinner(
           "account-signing-in-spinner",
           24.,
@@ -2599,6 +2712,8 @@ impl SettingsView {
       .rounded(radius::MD)
       .bg(Tone::Warning.tint(p))
       .child(
+        // Short label (['section heading']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .mb_2()
           .font_weight(FontWeight::MEDIUM)
@@ -2626,7 +2741,7 @@ impl SettingsView {
       )
       .when_some(dev.error.clone(), |this, error| {
         this.child(
-          ui::text(div().mt_1(), TextSize::Xs)
+          ui::text(div().mt_1(), TextSize::Sm)
             .text_color(Tone::Danger.color(p))
             .child(error),
         )
@@ -2891,6 +3006,9 @@ impl SettingsView {
         let id = id.clone();
         move || format!("team-{id}")
       })
+      .role(tauri_plugin_gpui::gpui::Role::Group)
+      .aria_label(format!("{} cloud", org.name))
+      .test_support()
       .flex()
       .flex_col()
       .gap_2()
@@ -2998,7 +3116,7 @@ impl SettingsView {
       ))
       .when_some(editor.error.clone(), |this, error| {
         this.child(
-          ui::text(div(), TextSize::Xs)
+          ui::text(div(), TextSize::Sm)
             .text_color(p.destructive)
             .child(error),
         )
@@ -3111,20 +3229,25 @@ impl SettingsView {
           })
           .when_some(s.period.clone(), |this, (label, date)| {
             this.child(row(label, div().child(date).into_any_element()))
+          })
+          .when_some(s.billing_note.clone(), |this, note| {
+            this.child(
+              ui::text(div(), TextSize::Sm)
+                .text_color(p.muted_foreground)
+                .child(note),
+            )
           }),
       )
       .child(
-        div().mt_4().child(
+        ui::card_actions().mt_4().child(
           Button::new("account-manage-subscription", p)
             .variant(Variant::Outline)
             .size(Size::Sm)
-            .w_full()
             .child(ui::icon(theme::ICON_EXTERNAL_LINK, 12., p.foreground))
             .label(s.manage_label.clone())
             .on_click(self.press("account.manage")),
         ),
       );
-    let cloud = s.cloud.as_ref().map(|c| self.cloud_card(c, p, cx));
     let spend_cap = s
       .spend_cap
       .as_ref()
@@ -3142,17 +3265,20 @@ impl SettingsView {
       .iter()
       .map(|org| self.org_cloud(org, p, window, cx))
       .collect();
+    let teams = s.team.as_ref().and_then(|t| self.teams(t, p, window, cx));
+    let upsell = s.team_upsell.then(|| self.team_upsell(p));
     div()
       .flex()
       .flex_col()
       .gap_6()
       .child(user)
       .child(subscription)
-      .children(cloud)
       .children(spend_cap)
       .children(team_profile)
       .children(org_cloud)
       .children(provider_keys)
+      .children(teams)
+      .children(upsell)
       .child(
         div().flex().child(
           Button::new("account-sign-out", p)
@@ -3289,6 +3415,36 @@ impl SettingsView {
     )
   }
 
+  /// The Machines tab: the Treq Cloud machine, or sign-in to reach it.
+  pub(super) fn machines(
+    &mut self,
+    tab: &MachinesTab,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> AnyElement {
+    match tab {
+      MachinesTab::Loading => centered(0.)
+        .child(ui::Loading::new("machines-loading", p).label("Loading machines…"))
+        .into_any_element(),
+      MachinesTab::SignedOut => centered(16.)
+        .child(
+          div()
+            .flex()
+            .flex_col()
+            .items_center()
+            .child(heading("Sign in to Treq"))
+            .child(help(
+              "Sign in to create and manage your cloud machine",
+              p,
+              4.,
+            )),
+        )
+        .child(sign_in_button("machines-sign-in", self, p))
+        .into_any_element(),
+      MachinesTab::SignedIn(card) => self.cloud_card(card, p, cx).into_any_element(),
+    }
+  }
+
   /// `CloudWorkspaceCard`.
   fn cloud_card(&mut self, c: &CloudCard, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     cloud_card_element(c, p, &self.tips, &|id| Box::new(self.press(id)), cx)
@@ -3314,6 +3470,7 @@ impl SettingsView {
         name: "GitHub",
         purpose: "Pull requests, checks and reviews for your repositories",
         connected: tab.github_connected,
+        pro_required: false,
         open: open("github"),
       },
       open("github").then(|| self.github(&tab.github, p)),
@@ -3328,6 +3485,7 @@ impl SettingsView {
           name: "Linear",
           purpose: "Issues to start workspaces from",
           connected: linear.connected,
+          pro_required: linear.upgrade,
           open: open("linear"),
         },
         body,
@@ -3387,7 +3545,24 @@ impl SettingsView {
       .leading(ui::icon(card.icon, 20., p.foreground))
       .title(card.name)
       .meta(card.purpose)
-      .trailing(status)
+      .trailing(if card.pro_required {
+        div()
+          .id(SharedString::from(format!(
+            "integration-requires-pro-{}",
+            card.id
+          )))
+          .debug_selector({
+            let id = format!("integration-requires-pro-{}", card.id);
+            move || id
+          })
+          .role(tauri_plugin_gpui::gpui::Role::Label)
+          .aria_label("Requires Pro")
+          .test_support()
+          .child(ui::Badge::new("Requires Pro", p))
+          .into_any_element()
+      } else {
+        status.into_any_element()
+      })
       .trailing(ui::icon(
         if card.open {
           theme::ICON_CHEVRON_UP
@@ -3492,20 +3667,20 @@ impl SettingsView {
     window: &mut Window,
     cx: &mut Context<Self>,
   ) -> AnyElement {
+    if linear.upgrade {
+      let upgrade = Button::new("linear-upgrade", p)
+        .size(Size::Sm)
+        .child(ui::icon(theme::ICON_CREDIT_CARD, 12., p.primary_foreground))
+        .label("Upgrade to Pro")
+        .on_click(self.press("cloud.upgrade"));
+      return linear_paywall(p, upgrade);
+    }
     if !linear.repo {
       return div()
         .text_center()
         .py_8()
         .text_color(p.muted_foreground)
         .child("Select a repository to configure Linear integration")
-        .into_any_element();
-    }
-    if linear.upgrade {
-      let button = Button::new("linear-upgrade", p)
-        .size(Size::Sm)
-        .label("Upgrade to Pro")
-        .on_click(self.press("cloud.upgrade"));
-      return setting_row("Linear needs Pro", "Upgrade to use Linear", button, p)
         .into_any_element();
     }
     let key_control: AnyElement = if linear.editing {
@@ -3595,6 +3770,41 @@ impl SettingsView {
       })
       .into_any_element()
   }
+}
+
+/// The Linear card's body on the free plan: what Linear gives, and the
+/// upgrade button.
+fn linear_paywall(p: &Palette, upgrade: Button) -> AnyElement {
+  let benefits = [
+    "See your team's Linear issues in the sidebar",
+    "Start a workspace from an issue, on its suggested branch",
+    "Turn sub-issues into nested workspaces in one step",
+    "Keep each workspace linked to its issue",
+  ];
+  div()
+    .id("linear-paywall")
+    .debug_selector(|| "linear-paywall".into())
+    .role(tauri_plugin_gpui::gpui::Role::Group)
+    .aria_label("Linear is a Pro feature")
+    .test_support()
+    .flex()
+    .flex_col()
+    .gap_3()
+    .py_3()
+    .child(
+      ui::text(div(), TextSize::Sm)
+        .text_color(p.muted_foreground)
+        .child("Linear is a Pro feature. Connect it to work from your issues."),
+    )
+    .child(
+      ui::text(div(), TextSize::Sm)
+        .flex()
+        .flex_col()
+        .gap_1()
+        .children(benefits.map(|b| div().child(format!("• {b}")))),
+    )
+    .child(div().flex().justify_end().child(upgrade))
+    .into_any_element()
 }
 
 #[cfg(test)]

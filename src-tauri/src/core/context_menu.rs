@@ -45,6 +45,13 @@ pub enum MenuAction {
     repo_path: String,
     workspace_id: i64,
   },
+  /// Archives several workspaces of the repository at once.
+  ArchiveWorkspaces {
+    repo_path: String,
+    workspace_ids: Vec<i64>,
+  },
+  /// Runs each action in turn, such as opening several paths.
+  Each(Vec<MenuAction>),
   DeleteWorkspace {
     repo_path: String,
     workspace_id: i64,
@@ -62,6 +69,9 @@ pub enum MenuAction {
   SaveProject,
   /// Edits the saved project's agent instructions and context.
   ProjectContext,
+  /// Moves this window's saved project to a Team organization, or back to
+  /// personal with `None`.
+  SetProjectOwner(Option<String>),
   /// A new window on the welcome page, to open another project or repository.
   NewWindow,
 }
@@ -163,6 +173,8 @@ pub struct HomeMenu {
   pub on_screen: bool,
   /// A supporting repository (not the window's main one).
   pub supporting: bool,
+  /// The window can let this repository go.
+  pub removable: bool,
 }
 
 /// `homeMenuEntries`, with the items `useGpuiSidebar` passes handlers for.
@@ -198,7 +210,7 @@ pub fn home_items(menu: &HomeMenu, editors: EditorApps) -> Vec<MenuItem> {
       MenuItem::item("Locate…", MenuAction::LocateRepo(path.clone())).icon(MenuIcon::FolderSearch),
     );
   }
-  if menu.supporting {
+  if menu.removable {
     repo.push(
       MenuItem::item("Remove Repository", MenuAction::RemoveRepo(path.clone()))
         .icon(MenuIcon::Trash)
@@ -291,6 +303,90 @@ pub fn workspace_items(
   items
 }
 
+/// The menu for several selected workspaces of `repo_path`: every item
+/// acts on all of them, and copies join their texts with newlines.
+pub fn workspaces_items(
+  workspaces: &[Workspace],
+  repo_path: &str,
+  editors: EditorApps,
+) -> Vec<MenuItem> {
+  let lines = |text: fn(&Workspace, &str) -> String| {
+    workspaces
+      .iter()
+      .map(|w| text(w, repo_path))
+      .collect::<Vec<_>>()
+      .join("\n")
+  };
+  let full: Vec<String> = workspaces.iter().map(full_workspace_path).collect();
+  let mut items = vec![
+    MenuItem::item(
+      "Copy branch names",
+      MenuAction::Copy(lines(|w, _| w.branch_name.clone())),
+    )
+    .icon(MenuIcon::GitBranch),
+    MenuItem::item(
+      "Copy relative paths",
+      MenuAction::Copy(lines(|w, repo| {
+        workspace_relative_path(&w.workspace_path, repo)
+      })),
+    )
+    .icon(MenuIcon::Copy),
+    MenuItem::item("Copy full paths", MenuAction::Copy(full.join("\n"))).icon(MenuIcon::Copy),
+  ];
+  // The single-workspace "Open in…" items, each run for every path.
+  if let Some(MenuItem::Submenu {
+    text,
+    icon,
+    items: open,
+  }) = path_items("", "", editors).pop()
+  {
+    let open = open
+      .into_iter()
+      .map(|item| match item {
+        MenuItem::Item {
+          text,
+          icon,
+          destructive,
+          action,
+        } => MenuItem::Item {
+          text,
+          icon,
+          destructive,
+          action: MenuAction::Each(
+            full
+              .iter()
+              .map(|path| match &action {
+                MenuAction::Reveal(_) => MenuAction::Reveal(path.clone()),
+                MenuAction::OpenUrl(url) => MenuAction::OpenUrl(format!("{url}{path}")),
+                other => other.clone(),
+              })
+              .collect(),
+          ),
+        },
+        other => other,
+      })
+      .collect();
+    items.push(MenuItem::Submenu {
+      text,
+      icon,
+      items: open,
+    });
+  }
+  items.push(MenuItem::Separator);
+  items.push(
+    MenuItem::item(
+      &format!("Archive {} workspaces", workspaces.len()),
+      MenuAction::ArchiveWorkspaces {
+        repo_path: repo_path.into(),
+        workspace_ids: workspaces.iter().map(|w| w.id).collect(),
+      },
+    )
+    .icon(MenuIcon::Archive)
+    .destructive(),
+  );
+  items
+}
+
 /// The workspace header's More menu; Reset to remote only when the branch
 /// is on `origin`.
 pub fn workspace_more_items(repo_path: &str, workspace_id: i64, on_remote: bool) -> Vec<MenuItem> {
@@ -330,22 +426,44 @@ pub fn create_pr_items() -> Vec<MenuItem> {
 pub struct ProjectEntry {
   pub id: String,
   pub name: String,
+  /// The owning Team organization's name; `None` for personal.
+  pub team: Option<String>,
 }
 
 /// The sidebar's project menu: every saved project (this window's one
 /// marked), then Save or Rename, then a new window.
 pub fn project_items(projects: &[ProjectEntry], current: Option<&str>) -> Vec<MenuItem> {
+  let row = |p: &ProjectEntry| {
+    let text = if current == Some(p.id.as_str()) {
+      format!("✓ {}", p.name)
+    } else {
+      p.name.clone()
+    };
+    MenuItem::item(&text, MenuAction::SwitchProject(p.id.clone())).icon(MenuIcon::FolderOpen)
+  };
+  // Personal projects inline, then one submenu per team, in first-seen order.
   let mut items: Vec<MenuItem> = projects
     .iter()
-    .map(|p| {
-      let text = if current == Some(p.id.as_str()) {
-        format!("✓ {}", p.name)
-      } else {
-        p.name.clone()
-      };
-      MenuItem::item(&text, MenuAction::SwitchProject(p.id.clone())).icon(MenuIcon::FolderOpen)
-    })
+    .filter(|p| p.team.is_none())
+    .map(row)
     .collect();
+  let mut teams: Vec<&str> = Vec::new();
+  for team in projects.iter().filter_map(|p| p.team.as_deref()) {
+    if !teams.contains(&team) {
+      teams.push(team);
+    }
+  }
+  for team in teams {
+    items.push(MenuItem::Submenu {
+      text: team.to_string(),
+      icon: Some(MenuIcon::FolderOpen),
+      items: projects
+        .iter()
+        .filter(|p| p.team.as_deref() == Some(team))
+        .map(row)
+        .collect(),
+    });
+  }
   if !items.is_empty() {
     items.push(MenuItem::Separator);
   }
@@ -364,15 +482,74 @@ pub fn project_items(projects: &[ProjectEntry], current: Option<&str>) -> Vec<Me
   items
 }
 
+/// "Move to" for this window's saved project: Personal, then each Team
+/// organization as (id, name), the current owner marked. `None` without teams.
+pub fn project_owner_item(teams: &[(String, String)], owner: Option<&str>) -> Option<MenuItem> {
+  if teams.is_empty() {
+    return None;
+  }
+  let mark = |on: bool, name: &str| {
+    if on {
+      format!("✓ {name}")
+    } else {
+      name.to_string()
+    }
+  };
+  let mut items = vec![MenuItem::item(
+    &mark(owner.is_none(), "Personal"),
+    MenuAction::SetProjectOwner(None),
+  )];
+  items.extend(teams.iter().map(|(id, name)| {
+    MenuItem::item(
+      &mark(owner == Some(id.as_str()), name),
+      MenuAction::SetProjectOwner(Some(id.clone())),
+    )
+  }));
+  Some(MenuItem::Submenu {
+    text: "Move to".into(),
+    icon: Some(MenuIcon::FolderOpen),
+    items,
+  })
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn project_owner_menu_marks_the_owner_and_lists_teams() {
+    let teams = vec![("o1".to_string(), "Acme".to_string())];
+    assert_eq!(project_owner_item(&[], None), None);
+    let item = project_owner_item(&teams, Some("o1")).unwrap();
+    assert_eq!(
+      labels(std::slice::from_ref(&item)),
+      ["Move to: [Personal, ✓ Acme]"]
+    );
+    let MenuItem::Submenu { items, .. } = item else {
+      panic!()
+    };
+    assert!(
+      matches!(&items[1], MenuItem::Item { action: MenuAction::SetProjectOwner(Some(id)), .. } if id == "o1")
+    );
+  }
 
   fn entry(id: &str, name: &str) -> ProjectEntry {
     ProjectEntry {
       id: id.into(),
       name: name.into(),
+      team: None,
     }
+  }
+
+  #[test]
+  fn project_menu_puts_each_teams_projects_in_a_submenu() {
+    let mut team = entry("t", "Billing");
+    team.team = Some("Acme".into());
+    let items = project_items(&[entry("a", "Checkout"), team], Some("t"));
+    assert_eq!(
+      labels(&items)[..3],
+      ["Checkout", "Acme: [✓ Billing]", "---"]
+    );
   }
 
   #[test]
@@ -442,7 +619,7 @@ mod tests {
         let projects: Vec<ProjectEntry> = names
           .iter()
           .enumerate()
-          .map(|(i, n)| ProjectEntry { id: format!("p{i}"), name: n.clone() })
+          .map(|(i, n)| ProjectEntry { id: format!("p{i}"), name: n.clone(), team: None })
           .collect();
         let current = current.map(|i| format!("p{i}"));
         let items = project_items(&projects, current.as_deref());
@@ -552,6 +729,7 @@ mod tests {
       repo_path: "/r".into(),
       missing: true,
       supporting: true,
+      removable: true,
       on_screen: false,
     };
     let items = home_items(&menu, NO_EDITORS);
@@ -563,10 +741,32 @@ mod tests {
   }
 
   #[test]
+  fn offers_to_remove_the_main_repository_when_removable() {
+    let menu = HomeMenu {
+      repo_path: "/m".into(),
+      removable: true,
+      ..Default::default()
+    };
+    let items = home_items(&menu, NO_EDITORS);
+    assert_eq!(
+      labels(&items)[3..],
+      ["---", "Add Repository…", "Remove Repository"]
+    );
+    let fixed = HomeMenu {
+      removable: false,
+      ..menu
+    };
+    assert!(!labels(&home_items(&fixed, NO_EDITORS))
+      .iter()
+      .any(|l| l == "Remove Repository"));
+  }
+
+  #[test]
   fn offers_settings_for_a_present_supporting_repository() {
     let menu = HomeMenu {
       repo_path: "/s".into(),
       supporting: true,
+      removable: true,
       ..Default::default()
     };
     let items = home_items(&menu, NO_EDITORS);
@@ -609,6 +809,55 @@ mod tests {
       &items[5],
       MenuItem::Item { action: MenuAction::Copy(path), .. } if path == "/r/.treq/workspaces/feat-a"
     ));
+  }
+
+  #[test]
+  fn several_workspaces_menu_acts_on_every_workspace() {
+    let mut b = workspace("/r/wt/b");
+    b.id = 5;
+    b.branch_name = "feat/b".into();
+    let items = workspaces_items(&[workspace("feat-a"), b], "/r", NO_EDITORS);
+    assert_eq!(
+      labels(&items),
+      [
+        "Copy branch names",
+        "Copy relative paths",
+        "Copy full paths",
+        format!("Open in…: [{REVEAL_LABEL}]").as_str(),
+        "---",
+        "Archive 2 workspaces"
+      ]
+    );
+    let action = |i: usize| match &items[i] {
+      MenuItem::Item { action, .. } => action.clone(),
+      _ => panic!("not an item"),
+    };
+    assert_eq!(action(0), MenuAction::Copy("feat/a\nfeat/b".into()));
+    assert_eq!(
+      action(1),
+      MenuAction::Copy(".treq/workspaces/feat-a\nwt/b".into())
+    );
+    assert_eq!(
+      action(2),
+      MenuAction::Copy("/r/.treq/workspaces/feat-a\n/r/wt/b".into())
+    );
+    let MenuItem::Submenu { items: open, .. } = &items[3] else {
+      panic!("no Open in submenu");
+    };
+    assert!(matches!(
+      &open[0],
+      MenuItem::Item { action: MenuAction::Each(each), .. } if *each == [
+        MenuAction::Reveal("/r/.treq/workspaces/feat-a".into()),
+        MenuAction::Reveal("/r/wt/b".into()),
+      ]
+    ));
+    assert_eq!(
+      action(5),
+      MenuAction::ArchiveWorkspaces {
+        repo_path: "/r".into(),
+        workspace_ids: vec![4, 5],
+      }
+    );
   }
 
   #[test]

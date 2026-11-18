@@ -66,7 +66,7 @@ fn merge_preview_merges_then_hands_back(cx: &mut TestAppContext) {
       ..FakeHost::default()
     },
   );
-  assert!(h.drawn("merge-file-src/a.rs"));
+  assert!(h.shows(gpui::Role::Button, "src/a.rs"));
   h.click("merge-confirm");
   h.cx.run_until_parked();
   assert_eq!(
@@ -95,9 +95,15 @@ fn merge_preview_picks_a_strategy(cx: &mut TestAppContext) {
     },
   );
   h.click("merge-strategy");
-  assert!(h.drawn("merge-strategy-menu"));
+  assert!(!h
+    .rendered()
+    .query_all_by_role(gpui_testing_library::by::role(gpui::Role::RadioButton))
+    .is_empty());
   h.click("merge-strategy-rebase");
-  assert!(!h.drawn("merge-strategy-menu"));
+  assert!(h
+    .rendered()
+    .query_all_by_role(gpui_testing_library::by::role(gpui::Role::RadioButton))
+    .is_empty());
   assert_eq!(
     merge_view(&mut h, |v| (v.strategy, v.message())),
     (merge::Strategy::Rebase, String::new())
@@ -139,9 +145,9 @@ fn merge_preview_collapses_files_and_goes_back(cx: &mut TestAppContext) {
       ..FakeHost::default()
     },
   );
-  assert!(h.drawn("merge-hunk-0-0"));
+  assert!(h.shows(gpui::Role::Heading, "src/a.rs @@ -1 +1 @@"));
   h.click("merge-file-src/a.rs");
-  assert!(!h.drawn("merge-hunk-0-0"));
+  assert!(!h.shows(gpui::Role::Heading, "src/a.rs @@ -1 +1 @@"));
   h.click("merge-back");
   assert_eq!(
     h.sent(),
@@ -160,9 +166,15 @@ fn merge_preview_without_a_pr_merges_locally_only(cx: &mut TestAppContext) {
       ..FakeHost::default()
     },
   );
-  assert!(h.drawn("merge-landing"));
-  assert!(!h.drawn("merge-location-github"));
-  assert!(!h.drawn("merge-push"));
+  assert!(h.shows(gpui::Role::Heading, "What lands where"));
+  assert!(h
+    .rendered()
+    .query_by_role(
+      gpui_testing_library::by::role(gpui::Role::Button)
+        .name(gpui_testing_library::TextMatch::regex("^On GitHub"))
+    )
+    .is_none());
+  assert!(!h.shows(gpui::Role::Switch, "Push after merging"));
 }
 
 #[gpui::test]
@@ -198,7 +210,7 @@ fn merge_preview_pushes_the_target_by_default(cx: &mut TestAppContext) {
       ..FakeHost::default()
     },
   );
-  assert!(h.drawn("merge-push"));
+  assert!(h.shows(gpui::Role::Switch, "Push after merging"));
   h.click("merge-confirm");
   h.cx.run_until_parked();
   assert!(host.writes()[0].ends_with(" push"), "{:?}", host.writes());
@@ -255,10 +267,10 @@ fn merge_preview_merges_the_pr_on_github_with_the_repo_default(cx: &mut TestAppC
   );
   h.click("merge-location-github");
   assert_eq!(merge_view(&mut h, |v| v.strategy), merge::Strategy::Squash);
-  assert!(!h.drawn("merge-push"));
+  assert!(!h.shows(gpui::Role::Switch, "Push after merging"));
   h.click("merge-strategy");
-  assert!(h.drawn("merge-strategy-squash"));
-  assert!(!h.drawn("merge-strategy-rebase"));
+  assert!(h.shows(gpui::Role::RadioButton, "Squash and merge"));
+  assert!(!h.shows(gpui::Role::RadioButton, "Rebase and merge"));
   h.click("merge-strategy-squash");
   h.click("merge-confirm");
   h.cx.run_until_parked();
@@ -299,7 +311,10 @@ fn merge_preview_hints_the_github_message_is_optional(cx: &mut TestAppContext) {
   };
   assert_eq!(placeholder(&mut h), "Enter merge commit message…");
   h.click("merge-location-github");
-  assert!(h.drawn("merge-message"));
+  assert!(h.shows(
+    gpui::Role::MultilineTextInput,
+    "Leave empty to use GitHub's default message"
+  ));
   assert_eq!(
     placeholder(&mut h),
     "Leave empty to use GitHub's default message"
@@ -315,9 +330,15 @@ fn merge_preview_warns_what_github_reports(cx: &mut TestAppContext) {
       ..FakeHost::default()
     },
   );
-  assert!(!h.drawn("merge-warning-0"));
+  assert!(h
+    .rendered()
+    .query_all_by_role(gpui_testing_library::by::role(gpui::Role::Alert))
+    .is_empty());
   h.click("merge-location-github");
-  assert!(h.drawn("merge-warning-0"));
+  assert!(!h
+    .rendered()
+    .query_all_by_role(gpui_testing_library::by::role(gpui::Role::Alert))
+    .is_empty());
   assert_eq!(
     merge_view(&mut h, |v| v.warnings()),
     ["This pull request has merge conflicts on GitHub. Resolve them before merging."]
@@ -348,7 +369,13 @@ fn merge_preview_syncs_a_pr_already_merged(cx: &mut TestAppContext) {
       ..FakeHost::default()
     },
   );
-  assert!(!h.drawn("merge-location-github"));
+  assert!(h
+    .rendered()
+    .query_by_role(
+      gpui_testing_library::by::role(gpui::Role::Button)
+        .name(gpui_testing_library::TextMatch::regex("^On GitHub"))
+    )
+    .is_none());
   h.click("merge-sync");
   h.cx.run_until_parked();
   assert_eq!(
@@ -377,7 +404,10 @@ fn merge_preview_without_commits_cannot_merge(cx: &mut TestAppContext) {
   );
   h.click("merge-confirm");
   h.click("merge-strategy");
-  assert!(!h.drawn("merge-strategy-menu"));
+  assert!(h
+    .rendered()
+    .query_all_by_role(gpui_testing_library::by::role(gpui::Role::RadioButton))
+    .is_empty());
   assert_eq!(host.writes(), ["notify toast Failed to load merge preview"]);
 }
 

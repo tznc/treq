@@ -218,7 +218,8 @@ pub struct ChangesView {
   /// Line comments, notes and the pending review.
   pub(super) review: review::Review,
   /// The find bar.
-  pub(super) search: search::Search,
+  pub(super) search: super::find::Find,
+  pub(super) matches: search::Matches,
   /// GitHub review threads and the review agent's comments.
   pub(super) threads: threads::Threads,
   /// The pull request reviewed instead of a workspace (`PrReviewPage`).
@@ -311,7 +312,8 @@ impl ChangesView {
       scroll_to: None,
       anchors: Rc::default(),
       review: review::Review::default(),
-      search: search::Search::default(),
+      search: super::find::Find::default(),
+      matches: search::Matches::default(),
       threads: threads::Threads::default(),
       pr: None,
       focus: cx.focus_handle(),
@@ -365,7 +367,7 @@ impl ChangesView {
       self.message_input = None;
       self.discard_dialog = false;
       self.review = review::Review::default();
-      self.close_search(cx);
+      super::find::close(self, cx);
       self.watch_threads(cx);
       self.hydrate_review(cx);
       self.hydrate_viewed(cx);
@@ -392,7 +394,7 @@ impl ChangesView {
     self.hidden = !shown;
     if !shown {
       self.stop_threads();
-      self.unwatch_find_key();
+      super::find::unwatch_key(self);
       return;
     }
     self.poll_threads(cx);
@@ -1498,10 +1500,6 @@ impl ChangesView {
 
   /// `handleExpandContext`; `all` reads the whole gap ("Expand all").
   fn expand_context(&mut self, path: &str, h: usize, dir: Dir, all: bool, cx: &mut Context<Self>) {
-    // The PR's files are not checked out.
-    if self.read_only() {
-      return;
-    }
     // A committed card's lines are read from the working copy, which only
     // matches the branch head while the file has no uncommitted edits.
     if !self.hunks.contains_key(path)
@@ -1532,31 +1530,41 @@ impl ChangesView {
     };
     let key = (path.to_string(), h, dir);
     let file = path.to_string();
+    let apply = move |view: &mut Self, result: Result<Vec<String>, String>| {
+      let Ok(lines) = result else {
+        return;
+      };
+      view.layout_gen += 1;
+      if dir == Dir::After && lines.len() <= end - start {
+        view.context_ended.insert((key.0.clone(), h));
+      }
+      if lines.is_empty() {
+        return;
+      }
+      let entry = view.context.entry(key).or_default();
+      match dir {
+        Dir::Before => {
+          let mut all = lines;
+          all.append(entry);
+          *entry = all;
+        }
+        Dir::After => entry.extend(lines),
+      }
+    };
+    // The PR's files are not checked out: read them at the PR's head.
+    if self.read_only() {
+      self.run_pr(
+        move |host, pr| host.pr_file_lines(&pr.full_name, pr.number, &file, start, end),
+        move |view, result, _| apply(view, result),
+        cx,
+      );
+      return;
+    }
     self.run(
       move |host, parent| {
         host.file_lines(&parent.repo_path, parent.workspace_id(), &file, start, end)
       },
-      move |view, result, _| {
-        let Ok(lines) = result else {
-          return;
-        };
-        view.layout_gen += 1;
-        if dir == Dir::After && lines.len() <= end - start {
-          view.context_ended.insert((key.0.clone(), h));
-        }
-        if lines.is_empty() {
-          return;
-        }
-        let entry = view.context.entry(key).or_default();
-        match dir {
-          Dir::Before => {
-            let mut all = lines;
-            all.append(entry);
-            *entry = all;
-          }
-          Dir::After => entry.extend(lines),
-        }
-      },
+      move |view, result, _| apply(view, result),
       cx,
     );
   }
@@ -1568,7 +1576,7 @@ impl ChangesView {
     };
     self.starting_review = true;
     cx.notify();
-    let files = self.files().len();
+    let files = self.snapshot.as_ref().map_or(0, |s| s.review_file_count());
     self.run(
       move |host, parent| {
         let keys = ["review_prompt".to_string(), "review_agent".to_string()];
@@ -1853,8 +1861,8 @@ impl Render for ChangesView {
     self.ensure_input(window, cx);
     self.ensure_review_inputs(window, cx);
     self.ensure_reply_inputs(window, cx);
-    self.watch_find_key(window, cx);
-    self.ensure_search_input(window, cx);
+    super::find::watch_key(self, window, cx);
+    super::find::ensure_input(self, window, cx);
     // The rows first: the threads and the find index follow their revision.
     self.sync_rows(window);
     if !self.read_only() {
@@ -2364,9 +2372,13 @@ impl ChangesView {
       .when_some(error, |this, err| {
         this.child(
           div()
+            .id("commit-message-error")
             .debug_selector(|| "commit-message-error".into())
+            .role(gpui::Role::Alert)
+            .aria_label(err)
             .text_color(p.destructive)
-            .child(err),
+            .child(err)
+            .test_support(),
         )
       })
       .child(div().flex().w_full().child(main).child(menu))
@@ -2417,7 +2429,7 @@ impl ChangesView {
           )
           .when_some(dir, |this, dir| {
             this.child(
-              ui::text(div(), TextSize::Xs)
+              ui::text(div(), TextSize::Sm)
                 .truncate()
                 .text_color(p.muted_foreground.opacity(0.6))
                 .child(dir),
@@ -2695,7 +2707,7 @@ impl ChangesView {
         )
         .when_some(dir, |this, dir| {
           this.child(
-            ui::text(div(), TextSize::Xs)
+            ui::text(div(), TextSize::Sm)
               .flex_1()
               .truncate()
               .text_color(p.muted_foreground.opacity(0.6))
@@ -2874,7 +2886,7 @@ impl ChangesView {
         )
         .when_some(dir, |this, dir| {
           this.child(
-            ui::text(div(), TextSize::Xs)
+            ui::text(div(), TextSize::Sm)
               .min_w_0()
               .flex_1()
               .truncate()
@@ -2931,7 +2943,11 @@ impl ChangesView {
     if let Some(err) = self.pr.as_ref().and_then(|pr| pr.error.clone()) {
       return area.child(
         ui::text(div(), TextSize::Sm)
+          .id("pr-diff-error")
           .debug_selector(|| "pr-diff-error".into())
+          .role(gpui::Role::Alert)
+          .aria_label(format!("Failed to load the PR diff: {err}"))
+          .test_support()
           .p_6()
           .text_color(p.destructive)
           .child(format!("Failed to load the PR diff: {err}")),
@@ -3241,10 +3257,14 @@ impl ChangesView {
           .gap_1p5()
           .child(
             ui::text(div(), TextSize::Code)
+              .id(SharedString::from(format!("file-path-{path}")))
+              .role(gpui::Role::Heading)
+              .aria_label(shown_path.clone())
               .truncate()
               .font_family(theme::MONO_FONT)
               .text_color(muted)
-              .child(shown_path),
+              .child(shown_path)
+              .test_support(),
           )
           .child(self.tip(
             format!("copy-path-tip-{path}"),
@@ -3293,7 +3313,7 @@ impl ChangesView {
           div()
             .id(SharedString::from(format!("add-file-comment-{path}")))
             .role(gpui::Role::Button)
-            .aria_label("Add file comment")
+            .aria_label(format!("Add file comment on {path}"))
             .debug_selector(|| "add-file-comment-button".into())
             .p_1()
             .rounded(radius::SM)
@@ -3303,7 +3323,8 @@ impl ChangesView {
             .on_click({
               let path = path.to_string();
               cx.listener(move |view, _, _, cx| view.add_file_comment(&path, cx))
-            }),
+            })
+            .test_support(),
           cx,
         ),
       );
@@ -3473,6 +3494,8 @@ impl ChangesView {
           "Base" => Tone::Warning,
           _ => Tone::DiffAdded,
         };
+        // Short label (['badge']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .debug_selector(move || format!("conflict-label-{label}"))
           .mr_2()
@@ -3505,7 +3528,10 @@ impl ChangesView {
       );
       let deleted_notice = |side: &'static str, tone: Tone| {
         div()
+          .id("conflict-deleted-side")
           .debug_selector(|| "conflict-deleted-side".into())
+          .role(gpui::Role::Label)
+          .aria_label(format!("{side} deleted this file"))
           .my_1()
           .rounded(radius::MD)
           .border_1()
@@ -3516,6 +3542,7 @@ impl ChangesView {
           .font_family(theme::SANS_FONT)
           .text_color(tone.text(p))
           .child(format!("{side} deleted this file"))
+          .test_support()
       };
       if kind == ConflictLineKind::Marker && role == ConflictLineRole::Start && left_deleted {
         pre = pre.child(deleted_notice("Side #1", Tone::DiffRemoved));
@@ -3529,11 +3556,12 @@ impl ChangesView {
     } else {
       format!("Conflict {}", conflict.number)
     };
+    let card = format!("conflict-card-{}", conflict.id);
     div()
-      .debug_selector({
-        let id = format!("conflict-card-{}", conflict.id);
-        move || id
-      })
+      .id(SharedString::from(card.clone()))
+      .debug_selector(move || card)
+      .role(gpui::Role::Group)
+      .aria_label(number.clone())
       .bg(p.destructive.opacity(0.1))
       .border_y_1()
       .border_color(p.destructive.opacity(0.4))
@@ -3544,6 +3572,8 @@ impl ChangesView {
       .gap_2()
       .font_family(theme::SANS_FONT)
       .child(
+        // Short label (['line-range meta']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .flex()
           .items_center()
@@ -3559,6 +3589,7 @@ impl ChangesView {
       )
       .child(pre)
       .children(self.note_section(conflict, p, cx))
+      .test_support()
   }
 
   fn discard_all_dialog(

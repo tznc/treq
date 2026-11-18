@@ -1,0 +1,18 @@
+id: no-assert-on-drawn
+language: rust
+severity: error
+message: >
+  Do not assert on whether an element id was drawn. Assert on what the user
+  sees: query by text or role with gpui-testing-library
+  (`get_by_text`, `get_by_role`) and check its content.
+# Baseline: files that already asserted on drawn ids. Do not add to it;
+# migrate a file and drop it from this list instead.
+ignores:
+  - "src-tauri/src/gpui_shell/screen/tests/changes_screen.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/code_screen.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/dialogs.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/linear_view.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/terminal_screen.rs"
+rule:
+  kind: macro_invocation
+  regex: ^assert(_eq|_ne)?!\(\s*!?\s*[A-Za-z_][A-Za-z_0-9.]*\.drawn\(

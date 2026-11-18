@@ -24,7 +24,6 @@ use crate::{
     context_menu::{self, EditorApps, HomeMenu, MenuAction},
   },
   local_db::Workspace,
-  result_ext::ResultExt,
 };
 
 /// Whether GPUI may handle `action` (a window the model does not drive
@@ -35,8 +34,8 @@ pub fn handles(action: &SidebarAction) -> bool {
     SidebarAction::HomeMenu { .. }
       | SidebarAction::ProjectMenu
       | SidebarAction::WorkspaceMenu { .. }
+      | SidebarAction::WorkspacesMenu
       | SidebarAction::RepoWorkspaceMenu { .. }
-      | SidebarAction::BulkArchive
       | SidebarAction::MoveWorkspace { .. }
   )
 }
@@ -57,14 +56,27 @@ pub fn handle(
   match action {
     SidebarAction::ProjectMenu => {
       let current = super::projects::window_project(app, label).map(|p| p.id);
+      let teams = super::projects::teams(app);
       let entries: Vec<context_menu::ProjectEntry> = super::projects::list(app)
         .into_iter()
         .map(|p| context_menu::ProjectEntry {
+          team: p.org_id.as_ref().map(|o| {
+            teams
+              .iter()
+              .find(|(id, _)| id == o)
+              .map_or_else(|| "Team".to_string(), |(_, n)| n.clone())
+          }),
           id: p.id,
           name: p.name,
         })
         .collect();
-      let items = context_menu::project_items(&entries, current.as_deref());
+      let mut items = context_menu::project_items(&entries, current.as_deref());
+      if let Some(project) = super::projects::window_project(app, label) {
+        if let Some(owner) = context_menu::project_owner_item(&teams, project.org_id.as_deref()) {
+          // Before "New Window…", the last item.
+          items.insert(items.len() - 1, owner);
+        }
+      }
       show(app, label, backend, items);
       true
     }
@@ -77,6 +89,10 @@ pub fn handle(
         missing: snapshot.repos[index].missing,
         on_screen: repo_path == &active.path,
         supporting: index > 0,
+        // Any local repository can leave; the next takes over the window,
+        // or the project shows empty. A remote window's one repository stays.
+        removable: snapshot.repos.len() > 1
+          || crate::core::projects::remote_repo(repo_path).is_none(),
       };
       let items = context_menu::home_items(&menu, editors(&*backend));
       show(app, label, backend, items);
@@ -88,31 +104,26 @@ pub fn handle(
     SidebarAction::RepoWorkspaceMenu { repo_path, id } => {
       workspace_menu(app, label, backend, repo_path, *id, false, cx)
     }
-    SidebarAction::BulkArchive => {
-      let ids: Vec<i64> = active
-        .workspaces
-        .iter()
-        .filter(|row| row.selected)
-        .map(|row| row.id)
-        .collect();
+    SidebarAction::WorkspacesMenu => {
+      let ids = selected_ids(active);
       if ids.is_empty() {
         return false;
       }
-      let (app, repo_path) = (app.clone(), active.path.clone());
+      let (app, label, repo_path) = (app.clone(), label.to_string(), active.path.clone());
       std::thread::spawn(move || {
         let Some(workspaces) =
-          workspaces_or_toast(&backend, &repo_path, "Failed to archive workspaces")
+          workspaces_or_toast(&backend, &repo_path, "Failed to load the workspace menu")
         else {
           return;
         };
-        let selected: Vec<Removed> = workspaces
-          .iter()
+        let selected: Vec<Workspace> = workspaces
+          .into_iter()
           .filter(|w| ids.contains(&w.id))
-          .map(Removed::of)
           .collect();
-        for workspace in workspace_ops::archive_all(&*backend, &selected) {
-          super::close_workspace_terminals(&app, backend.label(), workspace.path);
-        }
+        super::defer_main(&app.clone(), move |app| {
+          let items = context_menu::workspaces_items(&selected, &repo_path, editors(&*backend));
+          show(app, &label, backend, items);
+        });
       });
       true
     }
@@ -155,6 +166,37 @@ pub fn handle(
     }
     _ => false,
   }
+}
+
+/// The ids of `repo`'s selected workspace rows.
+fn selected_ids(repo: &super::sidebar::RepoSection) -> Vec<i64> {
+  repo
+    .workspaces
+    .iter()
+    .filter(|row| row.selected)
+    .map(|row| row.id)
+    .collect()
+}
+
+/// Archives workspaces `ids` of `repo_path`, off the main thread, closing
+/// the terminals of each one archived.
+fn archive_all(app: &AppHandle, backend: Arc<Backend>, repo_path: String, ids: Vec<i64>) {
+  let app = app.clone();
+  std::thread::spawn(move || {
+    let Some(workspaces) =
+      workspaces_or_toast(&backend, &repo_path, "Failed to archive workspaces")
+    else {
+      return;
+    };
+    let selected: Vec<Removed> = workspaces
+      .iter()
+      .filter(|w| ids.contains(&w.id))
+      .map(Removed::of)
+      .collect();
+    for workspace in workspace_ops::archive_all(&*backend, &selected) {
+      super::close_workspace_terminals(&app, backend.label(), workspace.path);
+    }
+  });
 }
 
 /// `repo_path`'s workspaces, over SSH for the window's remote repository.
@@ -282,29 +324,22 @@ fn run(app: &AppHandle, backend: Arc<Backend>, action: MenuAction) {
     MenuAction::OpenBranchSwitcher => open(OpenRequest::BranchSwitcher),
     MenuAction::SaveProject => open(OpenRequest::SaveProject { closing: false }),
     MenuAction::ProjectContext => open(OpenRequest::ProjectContext),
+    MenuAction::SetProjectOwner(org_id) => {
+      if let Err(e) = super::projects::set_window_owner(app, backend.label(), org_id.as_deref()) {
+        log::warn!("moving project: {e}");
+      }
+    }
+    // A pick runs inside a GPUI update, where `run_on_main_thread` runs at
+    // once and the new window could not attach GPUI: open it after.
     MenuAction::SwitchProject(id) => {
-      let main = app.clone();
-      main
-        .run_on_main_thread({
-          let app = app.clone();
-          move || super::projects::open_project(&app, &id)
-        })
-        .ignore_closed();
+      super::defer_main(app, move |app| super::projects::open_project(app, &id))
     }
-    MenuAction::NewWindow => {
-      let main = app.clone();
-      main
-        .run_on_main_thread({
-          let app = app.clone();
-          move || {
-            let label = crate::open_new_window::new_repo_window_label();
-            if let Err(err) = super::open_window(&app, &label, None, "Treq") {
-              log::error!("failed to open window: {err}");
-            }
-          }
-        })
-        .ignore_closed();
-    }
+    MenuAction::NewWindow => super::defer_main(app, |app| {
+      let label = crate::open_new_window::new_repo_window_label();
+      if let Err(err) = super::open_window(app, &label, None, "Treq") {
+        log::error!("failed to open window: {err}");
+      }
+    }),
     MenuAction::AddRepository => open(OpenRequest::AddRepository),
     MenuAction::OpenRepoSettings(repo_path) => open(OpenRequest::RepoSettings { repo_path }),
     MenuAction::LocateRepo(repo_path) => open(OpenRequest::LocateRepo { repo_path }),
@@ -336,6 +371,10 @@ fn run(app: &AppHandle, backend: Arc<Backend>, action: MenuAction) {
         }
       });
     }
+    MenuAction::ArchiveWorkspaces {
+      repo_path,
+      workspace_ids,
+    } => archive_all(app, backend, repo_path, workspace_ids),
     _ => {}
   }
 }

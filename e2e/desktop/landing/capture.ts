@@ -17,7 +17,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, expect as baseExpect, type Page } from "@playwright/test";
 import { port } from "../env.ts";
-import { fixture } from "../fixture.ts";
+import { agentCalls, fixture } from "../fixture.ts";
 import {
   CACHE,
   CACHE_EDIT,
@@ -62,7 +62,6 @@ const CHANGES: Clip = { x: 280, y: 102, width: 1120, height: 759 };
  */
 async function rest(page: Page): Promise<void> {
   await page.mouse.move(140, 880, { steps: 12 });
-  await page.waitForTimeout(400);
 }
 
 async function shot(page: Page, name: string, clip?: Clip): Promise<void> {
@@ -73,6 +72,33 @@ async function shot(page: Page, name: string, clip?: Clip): Promise<void> {
   await page.screenshot({ path: join(outDir, name), clip });
   written.add(name);
   mark(name);
+}
+
+/** The shell pane under the tabs, where `treq send` shows its thumbnail. */
+const SHELL: Clip = { x: 280, y: 603, width: 1120, height: 297 };
+
+/**
+ * Retries screenshots of `clip` until it differs from `before` (when given)
+ * and two frames in a row match: for state the app draws but does not expose
+ * as an element, such as terminal output.
+ */
+async function settle(page: Page, clip?: Clip, before?: Buffer): Promise<void> {
+  let last: Buffer | undefined;
+  await expect(async () => {
+    const now = await page.screenshot({ clip });
+    const prev = last;
+    last = now;
+    if (before) expect(now.equals(before), "still unchanged").toBe(false);
+    expect(prev?.equals(now), "still changing").toBe(true);
+  }).toPass({ intervals: [50], timeout: 20_000 });
+}
+
+/** Retries until the fake `gh` has answered a call whose arguments contain `text`. */
+async function ghAnswered(text: string): Promise<void> {
+  const exits = join(fixture().root, "gh-exits.log");
+  await expect(() => {
+    expect(readFileSync(exits, "utf8")).toContain(text);
+  }).toPass({ intervals: [50], timeout: 20_000 });
 }
 
 /** The Code tab's agent prompt dialog. */
@@ -99,7 +125,6 @@ async function openWorkspace(page: Page, branch: string): Promise<void> {
 async function openTab(page: Page, name: string): Promise<void> {
   await page.getByRole("tab", { name }).click();
   await expect(page.getByRole("tab", { name, selected: true })).toBeVisible();
-  await page.waitForTimeout(1500);
   mark(`tab ${name}`);
 }
 
@@ -158,7 +183,8 @@ async function capture(page: Page): Promise<void> {
   });
   await expect(row(page, MARKETING)).toBeVisible({ timeout: 30_000 });
   // The PR status poll fills the stack's PR and CI state.
-  await page.waitForTimeout(3000);
+  await ghAnswered("statusCheckRollup");
+  await settle(page, SIDEBAR);
 
   // The sidebar's stacked workspaces, on the home view.
   await shot(page, "sidebar.png", SIDEBAR);
@@ -168,10 +194,12 @@ async function capture(page: Page): Promise<void> {
   await expect(
     page.getByRole("button", { name: "New", exact: true }),
   ).toBeVisible();
-  await page.waitForTimeout(2000);
+  await expect(
+    page.getByText("Empty event payloads drop the Discord body"),
+  ).toBeVisible();
   await shot(page, "github-issues.png", MAIN);
   await page.mouse.click(422, 62); // the "Pull requests" tab
-  await page.waitForTimeout(2000);
+  await expect(page.getByText("fix: retry Slack webhooks on 429")).toBeVisible();
   await shot(page, "github.png", MAIN);
 
   // Prompts typed into a workspace's Agent dialog.
@@ -203,7 +231,6 @@ async function capture(page: Page): Promise<void> {
   await expect(resolve).toBeVisible();
   // Home.tsx under Conflicts (it is listed again under Committed).
   await file(page, "packages/web/src/pages/Home.tsx").first().click();
-  await page.waitForTimeout(1000);
   await resolve.click();
   await expect(page.getByRole("button", { name: "Plan" })).toBeVisible();
   await shot(page, "conflict-new-commit.png", CHANGES);
@@ -212,10 +239,11 @@ async function capture(page: Page): Promise<void> {
 
   // A resolved GitHub thread and a local comment on client.ts.
   await file(page, "packages/web/src/lib/client.ts").click();
-  await page.waitForTimeout(1500);
   await commentOnLine(page, "packages/web/src/lib/client.ts", 6, "remove this");
   await page.mouse.click(571, 474); // unfold the resolved thread
-  await page.waitForTimeout(800);
+  await expect(
+    page.getByText("JSON.stringify is the right fallback when event_message is empty."),
+  ).toBeVisible();
   await shot(page, "review.png", CHANGES);
 
   // The conflicted commit, resolved in place from the Commits tab.
@@ -269,7 +297,6 @@ async function capture(page: Page): Promise<void> {
     await rest(page);
   }
   await openWorkspace(page, "feat/agent-one");
-  await page.waitForTimeout(1500);
   await shot(page, "spawn-after.png", SIDEBAR);
 
   // `treq send` from the workspace shell: the thumbnail, then the lightbox.
@@ -279,34 +306,32 @@ async function capture(page: Page): Promise<void> {
   await row(page, MARKETING)
     .getByRole("button", { name: "Open shell" })
     .click();
-  await page.waitForTimeout(2500);
+  await expect(page.getByText("Shell", { exact: true })).toBeVisible();
   await page.mouse.click(900, 760); // focus the terminal
   // A short prompt, and no "Sent <absolute path>" line, keep the fixture's
-  // temp dir out of the shot.
+  // temp dir out of the shot. The shell runs the two lines in order.
   await page.keyboard.type("PS1='event-bus $ '; clear\n");
-  await page.waitForTimeout(800);
   await page.keyboard.type("treq send ~/research-draft.svg >/dev/null\n");
-  await page.waitForTimeout(3000);
-  await shot(page, "send-thumb.png", {
-    x: 280,
-    y: 603,
-    width: 1120,
-    height: 297,
-  });
-  await page.mouse.click(364, 690); // the thumbnail
-  await page.waitForTimeout(1500);
+  const preview = page.getByRole("button", { name: "Open preview" });
+  await expect(preview).toBeVisible();
+  await shot(page, "send-thumb.png", SHELL);
+  const lightbox = page.getByRole("dialog", { name: "Preview" });
+  await preview.click();
+  await expect(lightbox).toBeVisible();
   await shot(page, "send-lightbox.png");
   await page.keyboard.press("Escape");
-  await page.waitForTimeout(800);
+  await expect(lightbox).toHaveCount(0);
 
   // The Commits tab with a commit open and an agent in the terminal pane.
   await row(page, MARKETING).hover();
+  const starts = agentCalls().length;
   await row(page, MARKETING)
     .getByRole("button", { name: "Start agent" })
     .click();
-  await page.waitForTimeout(3000);
+  await expect.poll(() => agentCalls().length, { intervals: [50] }).toBeGreaterThan(starts);
+  // The row spins while the agent streams, then shows its conflict dot again.
+  await expect(row(page, MARKETING).getByRole("img", { name: "Conflict" })).toBeVisible();
   await page.mouse.click(330, 346); // unfold "feat: handle empty event messages"
-  await page.waitForTimeout(1500);
   await shot(page, "commits.png");
 
   // Every PNG the site lists came from this run.

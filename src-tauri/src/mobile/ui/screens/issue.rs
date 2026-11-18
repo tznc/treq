@@ -2,6 +2,7 @@
 //! editing, closing, reopening and deleting it.
 
 use crate::mobile::ui::widgets::TouchButton as _;
+use gpui_kit::component::Selectable as _;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -9,13 +10,12 @@ use crate::{
   core::remote::{GithubAction, GithubQuery, TreqCommandRequest},
   github::{GhIssue, GhIssueComment, GhReactionGroup},
 };
-use gpui_kit::component::Disableable as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
     button::{Button, ButtonVariants},
     h_flex,
-    input::{Textarea, TextareaState},
+    input::TextareaState,
     v_flex, ActiveTheme, IconName, Sizable, StyledExt,
   },
   div, px, App, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement,
@@ -276,20 +276,6 @@ impl IssueScreen {
     sheet::menu(format!("Issue #{}", self.number), entries, cx);
   }
 
-  fn close_menu(&mut self, cx: &mut Context<Self>) {
-    let this = cx.weak_entity();
-    let entries = CLOSE_REASONS
-      .iter()
-      .map(|&(reason, label)| {
-        let this = this.clone();
-        sheet::MenuEntry::new(format!("close-{reason}"), label, move |_, cx| {
-          this.update(cx, |screen, cx| screen.close(reason, cx)).ok();
-        })
-      })
-      .collect();
-    sheet::menu(format!("Close issue #{}", self.number), entries, cx);
-  }
-
   fn close(&mut self, reason: &'static str, cx: &mut Context<Self>) {
     let number = self.number;
     self.write(
@@ -484,16 +470,11 @@ impl IssueScreen {
           group.content
         )))
         .small()
-        .h(px(36.))
+        .h(px(44.))
         .min_w(px(44.))
         .label(format!("{} {}", issues::emoji(&group.content), group.count))
-        .map(|b| {
-          if group.viewer_has_reacted {
-            b.primary()
-          } else {
-            b.outline()
-          }
-        })
+        .outline()
+        .selected(group.viewer_has_reacted)
         .on_click(cx.listener(move |this, _, _, cx| this.react(id.clone(), content.clone(), cx)))
         .touch()
       }))
@@ -501,7 +482,7 @@ impl IssueScreen {
         Button::new(SharedString::from(format!("reaction-add-{id}")))
           .ghost()
           .small()
-          .h(px(36.))
+          .h(px(44.))
           .min_w(px(44.))
           .icon(IconName::Plus)
           .accessibility_label("Add reaction")
@@ -553,50 +534,39 @@ impl IssueScreen {
       })
   }
 
+  /// The foot of the page: one bar that opens the composer. Closing and
+  /// reopening live in the ⋯ menu.
   fn bottom_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let theme = cx.theme();
-    let open = self.is_open();
-    let empty = self.composer.read(cx).value().trim().is_empty();
-    v_flex()
+    let text = self.composer.read(cx).value().to_string();
+    h_flex()
       .p_3()
-      .gap_2()
       .border_t_1()
       .border_color(theme.border)
       .bg(theme.background)
-      .child(Textarea::new(&self.composer))
-      .child(
-        h_flex()
-          .gap_2()
-          .child(
-            Button::new("issue-state")
-              .outline()
-              .large()
-              .h(px(widgets::CTA_H - 8.))
-              .label(if open { "Close…" } else { "Reopen" })
-              .loading(matches!(self.busy, Some("issue-close" | "issue-reopen")))
-              .disabled(self.issue.ready().is_none())
-              .on_click(cx.listener(move |this, _, _, cx| {
-                if open {
-                  this.close_menu(cx)
-                } else {
-                  this.reopen(cx)
-                }
-              }))
-              .touch(),
-          )
-          .child(
-            Button::new("issue-comment")
-              .primary()
-              .large()
-              .flex_1()
-              .h(px(widgets::CTA_H - 8.))
-              .label("Comment")
-              .loading(self.busy == Some("issue-comment"))
-              .disabled(empty || self.issue.ready().is_none())
-              .on_click(cx.listener(|this, _, window, cx| this.comment(window, cx)))
-              .touch(),
-          ),
-      )
+      .child(widgets::composer_bar(
+        "issue-composer",
+        &text,
+        cx.listener(|this, _, _, cx| this.open_composer(cx)),
+        cx,
+      ))
+  }
+
+  fn open_composer(&mut self, cx: &mut Context<Self>) {
+    if self.issue.ready().is_none() || self.busy.is_some() {
+      return;
+    }
+    let this = cx.weak_entity();
+    crate::mobile::ui::composer::open(
+      format!("Comment on #{}", self.number),
+      self.composer.clone(),
+      std::rc::Rc::new(move |window, cx| {
+        this
+          .update(cx, |screen, cx| screen.comment(window, cx))
+          .ok();
+      }),
+      cx,
+    );
   }
 }
 

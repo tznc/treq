@@ -1,0 +1,11 @@
+id: gpui-text-xs-short-label-only
+valid:
+  - |
+    fn f() { ui::text(div(), TextSize::Sm).child(path); }
+  - |
+    mod tests { fn t() { assert!(TextSize::Xs.metrics().0 > 0.); } }
+invalid:
+  - |
+    fn f() { ui::text(div(), TextSize::Xs).child(path); }
+  - |
+    fn f() { treq_ui::text(div(), treq_ui::TextSize::Xs).child(description); }

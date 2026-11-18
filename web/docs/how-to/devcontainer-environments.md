@@ -1,5 +1,6 @@
 ---
 sidebar_position: 6
+description: Run Treq agent sessions and terminals inside a repository's devcontainer. Needs Docker and the Dev Containers CLI. Feature Preview.
 ---
 
 # Devcontainer Environments

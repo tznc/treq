@@ -232,6 +232,8 @@ test.describe('Dashboard subscription tab', () => {
       '/dashboard?tab=subscription&session_id=cs_test_e2e',
     );
     await expect(card(page)).toContainText('Payment received');
+    // A Pro checkout says nothing about Team.
+    await expect(page.getByText(/Activating Team|Team will appear/)).toHaveCount(0);
     await expect(field(page, 'Current Plan')).toContainText('Pro', { timeout: 15_000 });
     await expect(card(page)).not.toContainText('Payment received');
     expect(calls.subscriptionReads).toBeGreaterThanOrEqual(3);

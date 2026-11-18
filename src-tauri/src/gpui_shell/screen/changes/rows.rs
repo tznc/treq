@@ -7,6 +7,7 @@
 //! and the character-level marks are kept between frames, per file, until
 //! its diff changes.
 
+use gpui_kit::base::TestSupportExt as _;
 use std::{
   collections::{BTreeSet, HashMap, HashSet},
   ops::Range,
@@ -587,6 +588,8 @@ impl ChangesView {
             )
             .when(expandable, |this| {
               this.child(
+                // Short label (['expander button label']): 11px is fine.
+                // ast-grep-ignore: gpui-text-xs-short-label-only
                 ui::text(div(), TextSize::Xs)
                   .ml_2()
                   .flex_none()
@@ -653,7 +656,8 @@ impl ChangesView {
               .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|view, e: &gpui::MouseDownEvent, _, cx| view.line_menu(e.position, cx)),
-              ),
+              )
+              .test_support(),
           )
           .children(self.line_extras(path, hunks, h, l, numbers, p, cx))
           .into_any_element()
@@ -678,6 +682,8 @@ impl ChangesView {
             })),
         )
         .child(
+          // Short label (['expander button label']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .flex_1()
             .flex()
@@ -718,10 +724,12 @@ impl ChangesView {
     };
     let file = path.to_string();
     let hover = p.foreground;
+    // Short label (['expander button label']): 11px is fine.
+    // ast-grep-ignore: gpui-text-xs-short-label-only
     ui::text(div(), TextSize::Xs)
       .id(SharedString::from(id.clone()))
       .role(gpui::Role::Button)
-      .aria_label("Show more lines")
+      .aria_label(format!("Expand all ({count} lines)"))
       .debug_selector(move || id)
       .ml_3()
       .flex_none()
@@ -734,6 +742,7 @@ impl ChangesView {
         view.expand_context(&file, h, dir, true, cx);
       }))
       .child(format!("Expand all ({count} lines)"))
+      .test_support()
   }
 
   /// Added and removed lines of a card, for its header.

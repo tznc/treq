@@ -4,6 +4,7 @@ import Link from '@docusaurus/Link';
 import Head from '@docusaurus/Head';
 import Layout from '@theme/Layout';
 import Heading from '@theme/Heading';
+import {trackEvent} from '@site/src/lib/analytics';
 import {DOWNLOAD_HREF} from '@site/src/lib/downloads';
 import {FAQ_ITEMS, FAQ_SCHEMA, PRICING_SCHEMA} from '@site/src/lib/pricing';
 
@@ -38,6 +39,7 @@ const TEAM_FEATURES: PlanFeature[] = [
   {key: 'pro', text: 'Everything in Pro for every member'},
   {key: 'installation', text: 'Manage team-wide integrations'},
   {key: 'sandbox-usage', text: 'Sandbox usage management'},
+  {key: 'shared-projects', text: 'Projects shared with every member'},
   {key: 'one-bill', text: 'One bill for the whole team'},
 ];
 
@@ -77,6 +79,12 @@ const COMPARISON_ROWS: ComparisonRow[] = [
     free: {included: false},
     pro: {included: true, detail: 'API key or OAuth'},
     team: {included: true, detail: 'API key or OAuth'},
+  },
+  {
+    feature: 'Projects',
+    free: {included: true, detail: 'Personal'},
+    pro: {included: true, detail: 'Personal'},
+    team: {included: true, detail: 'Shared with every member'},
   },
   {
     feature: 'Price',
@@ -121,6 +129,7 @@ function PlansSection(): ReactNode {
         <Link
           className={clsx('button', styles.planButton, styles.planButtonSecondary)}
           href={DOWNLOAD_HREF}
+          onClick={() => trackEvent('download_click', {location: 'pricing', platform: 'release-page'})}
         >
           Download Treq
         </Link>

@@ -14,6 +14,7 @@
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
+use gpui_kit::base::TestSupportExt as _;
 use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 
 use gpui_kit::component::{
@@ -1105,7 +1106,7 @@ impl RemoteView {
           ))
           .when(!form.resolve_error.is_empty(), |this| {
             this.child(
-              ui::text(div(), TextSize::Xs)
+              ui::text(div(), TextSize::Sm)
                 .text_color(p.destructive)
                 .child(form.resolve_error.clone()),
             )
@@ -1255,12 +1256,17 @@ impl RemoteView {
     let content = div()
       .child(grid(cells, two_columns))
       .when(too_long, |this| {
+        let message = format!("Hostnames are at most {MAX_HOSTNAME} characters.");
         this.child(
           ui::text(div(), TextSize::Sm)
+            .id("remote-hostname-too-long")
             .debug_selector(|| "remote-hostname-too-long".into())
+            .role(gpui::Role::Alert)
+            .aria_label(message.clone())
             .mt_2()
             .text_color(ui::Tone::Danger.text(p))
-            .child(format!("Hostnames are at most {MAX_HOSTNAME} characters.")),
+            .child(message)
+            .test_support(),
         )
       })
       .children(trust)
@@ -1302,6 +1308,8 @@ impl RemoteView {
         .flex_col()
         .gap_2()
         .child(
+          // Short label (['section heading']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .font_weight(FontWeight::MEDIUM)
             .text_color(p.muted_foreground)
@@ -1334,7 +1342,7 @@ impl RemoteView {
                     .child(title.clone().unwrap_or_else(|| label.clone())),
                 )
                 .child(
-                  ui::text(div(), TextSize::Xs)
+                  ui::text(div(), TextSize::Sm)
                     .text_color(p.muted_foreground)
                     .truncate()
                     .child(match &title {

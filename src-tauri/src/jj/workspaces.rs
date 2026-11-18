@@ -1145,6 +1145,21 @@ impl WorkspacePaths {
   }
 }
 
+/// jj names of the `_resolve-*` workspaces still registered, which
+/// [`list_registered_workspaces`] hides.
+pub fn list_resolve_workspace_names(repo_path: &str) -> Result<Vec<String>, JjError> {
+  let (_, repo, _) = load_home_repo(repo_path)?;
+  Ok(
+    repo
+      .view()
+      .wc_commit_ids()
+      .keys()
+      .map(|name| name.as_str().to_string())
+      .filter(|name| name.starts_with("_resolve-"))
+      .collect(),
+  )
+}
+
 pub(super) fn list_registered_workspaces(
   repo_path: &str,
 ) -> Result<Vec<RegisteredWorkspace>, JjError> {
@@ -1459,14 +1474,18 @@ pub fn remove_workspace_directory_only(workspace_path: &str) -> Result<(), JjErr
 /// Forget a jj workspace without deleting its directory.
 // home-head-test: delete_workspace, resolve_workspace_conflict
 pub fn forget_workspace(repo_path: &str, workspace_path: &str) -> Result<(), JjError> {
-  let workspace_dir = Path::new(workspace_path);
-
   // Extract workspace name from path (last component)
-  let workspace_name = workspace_dir
+  let workspace_name = Path::new(workspace_path)
     .file_name()
     .and_then(|n| n.to_str())
     .unwrap_or("");
+  forget_workspace_by_name(repo_path, workspace_name)
+}
 
+/// Forget a jj workspace by its jj name. Use when the name differs from the
+/// directory name (e.g. `_resolve-{slug}-{change}` under `.treq/resolve/{slug}/{change}`).
+// home-head-test: delete_workspace, resolve_workspace_conflict
+pub fn forget_workspace_by_name(repo_path: &str, workspace_name: &str) -> Result<(), JjError> {
   // Always forget the jj workspace first so jj stops tracking even if directory is gone.
   if !workspace_name.is_empty() {
     let loaded = load_workspace_repo(repo_path)?;

@@ -106,6 +106,8 @@ pub struct OnboardingView {
   live: HashMap<String, Option<Result<TerminalStatus, String>>>,
   /// Other machines' + is open, offering an SSH host or a dev container.
   other_open: bool,
+  /// Whose projects show: `None` personal, else a Team organization.
+  project_owner: Option<String>,
 }
 
 /// The one group SSH hosts and dev containers share until there is one.
@@ -158,6 +160,7 @@ impl OnboardingView {
       terminals: HashMap::new(),
       live: HashMap::new(),
       other_open: false,
+      project_owner: None,
     };
     // Signing in, or the cloud workspace changing state, changes its row.
     cx.observe_global::<super::account_data::Account>(|view, cx| {
@@ -1145,6 +1148,8 @@ impl OnboardingView {
                 ))
                 // A name the user gave: kept as typed.
                 .child(
+                  // Short label (['machine name label']): 11px is fine.
+                  // ast-grep-ignore: gpui-text-xs-short-label-only
                   ui::text(div(), TextSize::Xs)
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(p.muted_foreground)
@@ -1152,7 +1157,7 @@ impl OnboardingView {
                 )
                 .when(!machine.detail.is_empty(), |d| {
                   d.child(
-                    ui::text(div(), TextSize::Xs)
+                    ui::text(div(), TextSize::Sm)
                       .min_w_0()
                       .truncate()
                       .text_color(p.muted_foreground)
@@ -1166,18 +1171,65 @@ impl OnboardingView {
         )
       })
       .collect();
-    let projects = (!self.listing.projects.is_empty()).then(|| {
+    let owner = self
+      .project_owner
+      .clone()
+      .filter(|o| self.listing.teams.iter().any(|(id, _)| id == o));
+    let switcher = (!self.listing.teams.is_empty()).then(|| {
+      let mut tabs = ui::Tabs::segmented("projects-owner", &p)
+        .tab(ui::Tab::new("projects-owner-personal", "Personal"));
+      for (id, name) in &self.listing.teams {
+        tabs = tabs.tab(ui::Tab::new(format!("projects-owner-{id}"), name.clone()));
+      }
+      let selected = owner
+        .as_ref()
+        .and_then(|o| self.listing.teams.iter().position(|(id, _)| id == o))
+        .map_or(0, |i| i + 1);
+      let teams: Vec<String> = self
+        .listing
+        .teams
+        .iter()
+        .map(|(id, _)| id.clone())
+        .collect();
+      let view = cx.weak_entity();
+      div()
+        .px_2()
+        .pb_3()
+        .child(tabs.selected(selected).on_select(move |ix, _, cx| {
+          let owner = ix.checked_sub(1).and_then(|i| teams.get(i).cloned());
+          view
+            .update(cx, |view, cx| {
+              view.project_owner = owner;
+              // Team projects arrive by sync: read them again.
+              view.load(cx);
+              cx.notify();
+            })
+            .ok();
+        }))
+    });
+    let shown: Vec<&super::machines::ProjectSummary> = self
+      .listing
+      .projects
+      .iter()
+      .filter(|p| p.org_id == owner)
+      .collect();
+    let projects = (!shown.is_empty() || switcher.is_some()).then(|| {
       div()
         .debug_selector(|| "onboarding-projects".into())
         .pb_5()
         .child(
           ui::text(div(), TextSize::Sm)
+            .id("onboarding-projects-heading")
+            .role(tauri_plugin_gpui::gpui::Role::Heading)
+            .aria_label("Projects")
             .px_2()
             .pb_3()
             .font_weight(FontWeight::SEMIBOLD)
-            .child("Projects"),
+            .child("Projects")
+            .test_support(),
         )
-        .children(self.listing.projects.iter().map(|project| {
+        .children(switcher)
+        .children(shown.into_iter().map(|project| {
           let repos = project
             .repos
             .iter()

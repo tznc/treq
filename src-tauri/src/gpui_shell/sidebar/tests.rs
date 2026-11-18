@@ -288,10 +288,6 @@ fn serializes_actions_for_react() {
     serde_json::json!({"kind": "startAgent", "id": null})
   );
   assert_eq!(
-    json(SidebarAction::BulkArchive),
-    serde_json::json!({"kind": "bulkArchive"})
-  );
-  assert_eq!(
     json(SidebarAction::HomeMenu {
       repo_path: "/r".into()
     }),
@@ -315,12 +311,15 @@ fn names_create_buttons_by_what_they_open() {
 }
 
 #[test]
-fn indents_rows_like_the_react_sidebar() {
+fn nests_each_row_one_icon_width_under_its_parent() {
   assert_eq!(row_indent(0), 10.);
-  assert_eq!(row_indent(1), 16.);
-  assert_eq!(row_indent(3), 28.);
-  assert_eq!(guide_left(2), 8.);
-  assert_eq!(guide_left(4), 20.);
+  assert_eq!(row_indent(1), 22.);
+  assert_eq!(row_indent(3), 46.);
+  // The elbow hangs from the parent's icon centre and ends at the row's icon.
+  for depth in 1..4 {
+    assert_eq!(guide_left(depth), row_indent(depth - 1) + 5.);
+    assert_eq!(guide_left(depth) + 6., row_indent(depth) - 1.);
+  }
 }
 
 #[gpui::test]
@@ -335,6 +334,16 @@ fn header_buttons_open_the_palette_and_settings(cx: &mut TestAppContext) {
       SidebarAction::OpenSettings
     ]
   );
+}
+
+#[gpui::test]
+fn an_empty_project_offers_to_add_a_repository(cx: &mut TestAppContext) {
+  let mut s = snapshot(vec![]);
+  s.repos.clear();
+  s.project = Some("Checkout".into());
+  let mut h = Harness::new(cx, s);
+  h.click("add-repository");
+  assert_eq!(h.sent(), vec![SidebarAction::AddRepository]);
 }
 
 #[gpui::test]
@@ -567,12 +576,29 @@ fn shows_skeleton_rows_while_loading(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn bulk_archive_button_archives_the_selection(cx: &mut TestAppContext) {
+fn multi_selection_draws_no_archive_button(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, snapshot(vec![row(7, "a", 0), row(8, "b", 0)]));
-  assert!(h.bounds("bulk-archive").is_none());
   h.update(|s| s.bulk_archive = Some(2));
-  h.click("bulk-archive");
-  assert_eq!(h.sent(), vec![SidebarAction::BulkArchive]);
+  assert!(h.bounds("bulk-archive").is_none());
+}
+
+#[gpui::test]
+fn right_click_on_a_multi_selected_row_opens_the_selection_menu(cx: &mut TestAppContext) {
+  let mut selected = row(7, "a", 0);
+  selected.selected = true;
+  let mut other = row(8, "b", 0);
+  other.selected = true;
+  let mut h = Harness::new(cx, snapshot(vec![selected, other, row(9, "c", 0)]));
+  h.update(|s| s.bulk_archive = Some(2));
+  right_click(&mut h, "workspace-7");
+  right_click(&mut h, "workspace-9");
+  assert_eq!(
+    h.sent(),
+    vec![
+      SidebarAction::WorkspacesMenu,
+      SidebarAction::WorkspaceMenu { id: 9 },
+    ]
+  );
 }
 
 #[gpui::test]
@@ -700,6 +726,26 @@ fn button_tooltip_opens_below_and_closes_on_leave(cx: &mut TestAppContext) {
   ));
   h.hover("command-palette");
   h.cx.run_until_parked();
+  assert_eq!(h.popups.borrow().last(), Some(&PopupRequest::HideTooltip));
+}
+
+/// Clicking a button closes its tooltip: the dialog or menu it opens would
+/// otherwise sit under a tooltip that no pointer move takes away.
+#[gpui::test]
+fn clicking_a_row_button_closes_its_tooltip(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![]));
+  h.hover("home");
+  h.hover("home-stack");
+  h.cx.executor().advance_clock(TOOLTIP_DELAY);
+  h.cx.run_until_parked();
+  assert!(matches!(
+    h.popups.borrow().last(),
+    Some(PopupRequest::ShowTooltip { .. })
+  ));
+  h.click("home-stack");
+  h.cx.run_until_parked();
+  h.sidebar
+    .read_with(&h.cx, |s, _| assert!(!s.tooltip_shown("home-stack")));
   assert_eq!(h.popups.borrow().last(), Some(&PopupRequest::HideTooltip));
 }
 

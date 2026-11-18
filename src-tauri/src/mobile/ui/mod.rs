@@ -4,11 +4,13 @@
 //! [`Root`] owns the stack and the app-wide [`AppModel`] (sign-in and
 //! connection state). Screens push and pop pages through [`nav`].
 
+mod composer;
 mod hold;
 mod home;
 mod load;
 #[cfg(test)]
 mod perf;
+mod projects_list;
 mod review;
 mod screens;
 pub mod sheet;
@@ -34,6 +36,7 @@ use gpui_kit::{
 use std::collections::HashMap;
 
 use crate::core::auth::OAuthProvider;
+use crate::core::control_plane::{self, ManagedInstance};
 use crate::core::remote::RemoteHostCheck;
 
 use crate::mobile::{
@@ -64,6 +67,9 @@ pub struct AppModel {
   pub auth_notice: Option<String>,
   /// The machine the screens act on, if any.
   pub connection: Option<Connection>,
+  /// The account's Treq Cloud machine as the control plane last reported
+  /// it, in any state; `None` when there is none (or before it is read).
+  pub cloud_instance: Option<ManagedInstance>,
   /// Each machine's state this session, by machine id
   /// ([`MANAGED_MACHINE`] or an SSH host's record id).
   pub machines: HashMap<String, MachineState>,
@@ -89,6 +95,21 @@ impl AppModel {
 
   fn set_status(&mut self, id: &str, status: MachineStatus) {
     self.machines.entry(id.to_string()).or_default().status = status;
+  }
+
+  /// Forgets the Treq Cloud machine once it is deleted, so the card offers
+  /// a new one. Returns whether it was the machine the screens acted on.
+  fn forget_cloud_machine(&mut self) -> bool {
+    self.cloud_instance = None;
+    self.machines.remove(MANAGED_MACHINE);
+    let was_active = self
+      .connection
+      .as_ref()
+      .is_some_and(|c| c.kind == ConnectionKind::Managed);
+    if was_active {
+      self.connection = None;
+    }
+    was_active
   }
 }
 
@@ -368,7 +389,7 @@ impl Root {
     let root = Self {
       model,
       stack: vec![Page {
-        title: "Machines".into(),
+        title: "Projects".into(),
         header: nav::Header::default(),
         view: home.into(),
         location: Location::default(),
@@ -400,13 +421,22 @@ impl Root {
 
   fn handle(&mut self, event: AppEvent, _window: &mut Window, cx: &mut Context<Self>) {
     match event {
-      AppEvent::Auth(user) => self.model.update(cx, |m, cx| {
-        if user.is_some() {
-          m.auth_notice = None;
+      AppEvent::Auth(user) => {
+        let signed_in = self.model.update(cx, |m, cx| {
+          let changed = m.user != user;
+          if user.is_some() {
+            m.auth_notice = None;
+          } else {
+            m.cloud_instance = None;
+          }
+          m.user = user;
+          cx.notify();
+          changed && m.user.is_some()
+        });
+        if signed_in {
+          refresh_cloud(cx);
         }
-        m.user = user;
-        cx.notify();
-      }),
+      }
       AppEvent::AuthToken(token) => {
         self.model.update(cx, |m, cx| {
           m.auth_busy = true;
@@ -905,6 +935,66 @@ pub fn connect(machine: Machine, open: bool, cx: &mut App) {
         cx.notify();
       }),
     }
+    // A connect can create the machine, or find it failed.
+    if id == MANAGED_MACHINE {
+      cx.update(refresh_cloud);
+    }
+  })
+  .detach();
+}
+
+/// Reads the account's Treq Cloud machine, for the card's Delete.
+pub fn refresh_cloud(cx: &mut App) {
+  let model = model(cx);
+  let status =
+    backend::spawn(async { control_plane::instance_status(&backend::get().supabase).await });
+  cx.spawn(async move |cx| {
+    if let Ok(Ok(status)) = status.await {
+      model.update(cx, |m, cx| {
+        m.cloud_instance = status.instance;
+        cx.notify();
+      });
+    }
+  })
+  .detach();
+}
+
+/// Deletes the account's Treq Cloud machine; the card then offers a new one.
+pub fn delete_cloud_machine(cx: &mut App) {
+  let model = model(cx);
+  let Some(instance_id) = model
+    .read(cx)
+    .cloud_instance
+    .as_ref()
+    .map(|i| i.instance_id.clone())
+  else {
+    return;
+  };
+  model.update(cx, |m, cx| {
+    m.set_status(
+      MANAGED_MACHINE,
+      MachineStatus::Connecting("Deleting the machine"),
+    );
+    cx.notify();
+  });
+  let result = backend::spawn(managed::delete(instance_id));
+  cx.spawn(async move |cx| {
+    let Ok(result) = result.await else { return };
+    let was_active = model.update(cx, |m, cx| {
+      let was_active = match result {
+        Ok(()) => m.forget_cloud_machine(),
+        Err(error) => {
+          m.set_status(MANAGED_MACHINE, MachineStatus::Failed(error));
+          false
+        }
+      };
+      cx.notify();
+      was_active
+    });
+    if was_active {
+      cx.update(nav::home);
+    }
+    cx.update(refresh_cloud);
   })
   .detach();
 }
@@ -926,6 +1016,148 @@ fn activate(connection: Connection, model: &Entity<AppModel>, cx: &mut App) {
     m.epoch += 1;
     cx.notify();
   });
+}
+
+/// Every machine on this device, in the order added: the SSH hosts, and the
+/// Treq Cloud machine when signed in. No kind is preferred.
+pub fn machines(cx: &App) -> Vec<Machine> {
+  let signed_in = model(cx).read(cx).user.is_some();
+  store::user_managed_endpoints()
+    .into_iter()
+    .map(Machine::Host)
+    .chain(signed_in.then_some(Machine::Managed))
+    .collect()
+}
+
+/// Opens `project`'s first repository on the machine Treq picks from what
+/// is in use (`projects::pick_machine`), connecting to it first if needed.
+pub fn open_project(
+  project: &crate::mobile::projects::Project,
+  cx: &mut App,
+) -> Result<(), String> {
+  use crate::mobile::projects::{pick_machine, Candidate};
+  let repo = project
+    .repos
+    .first()
+    .cloned()
+    .ok_or("This project has no repositories.")?;
+  let all = machines(cx);
+  let model = model(cx);
+  let candidates: Vec<Candidate> = all
+    .iter()
+    .map(|m| Candidate {
+      id: m.id().to_string(),
+      ready: model.read(cx).machine(m.id()).status == MachineStatus::Ready
+        && backend::get().connection_to(m.id()).is_some(),
+    })
+    .collect();
+  let active = model
+    .read(cx)
+    .connection
+    .as_ref()
+    .map(|c| c.machine().to_string());
+  let last_used = store::session_snapshot().map(|s| match s.endpoint {
+    crate::core::remote_records::SessionEndpoint::Managed => MANAGED_MACHINE.to_string(),
+    crate::core::remote_records::SessionEndpoint::UserManaged { id } => id,
+  });
+  let id = pick_machine(&candidates, active.as_deref(), last_used.as_deref())
+    .ok_or("Add a machine in Settings to open projects.")?;
+  let machine = all
+    .into_iter()
+    .find(|m| m.id() == id)
+    .ok_or("That machine is gone.")?;
+  if let (MachineStatus::Ready, Some(connection)) = (
+    model.read(cx).machine(&id).status,
+    backend::get().connection_to(&id),
+  ) {
+    activate(connection, &model, cx);
+    open_repo_on_active(repo, cx);
+    return Ok(());
+  }
+  connect(machine, false, cx);
+  // Open once the machine is ready; a failed connect shows on its row in
+  // Settings.
+  cx.spawn(async move |cx| {
+    for _ in 0..480 {
+      cx.background_executor()
+        .timer(std::time::Duration::from_millis(250))
+        .await;
+      let status = cx.update(|cx| model.read(cx).machine(&id).status);
+      match status {
+        MachineStatus::Ready => {
+          cx.update(|cx| open_repo_on_active(repo, cx));
+          return;
+        }
+        MachineStatus::Connecting(_) => {}
+        _ => return,
+      }
+    }
+  })
+  .detach();
+  Ok(())
+}
+
+/// Opens project repo `remote` on the active machine: a saved clone of it,
+/// else a new clone under `~/.treq/repos`.
+fn open_repo_on_active(remote: String, cx: &mut App) {
+  use crate::core::remote::{RemoteRepoProbe, TreqCommandRequest};
+  use crate::mobile::projects::{locate, Target};
+  let Ok(endpoint) = backend::get().endpoint() else {
+    return;
+  };
+  let generation = store::endpoint_generation(&endpoint);
+  let saved: Vec<String> = store::saved_repositories(&endpoint.id, generation)
+    .into_iter()
+    .map(|r| r.canonical_remote_path)
+    .collect();
+  let (url, destination) = match locate(&remote, &saved) {
+    Some(Target::Existing(path)) => return screens::workspaces::open(path, cx),
+    Some(Target::Clone { url, destination }) => (url, destination),
+    None => return,
+  };
+  let result = backend::spawn(async move {
+    let key = || uuid::Uuid::new_v4().to_string();
+    let probe = remote::read::<RemoteRepoProbe>(TreqCommandRequest::ProbeRepo {
+      repo: destination.clone(),
+    })
+    .await?;
+    // The host expands `~`; its answer is the path every command uses.
+    let path = if probe.path.is_empty() {
+      destination
+    } else {
+      probe.path
+    };
+    if !probe.is_repo {
+      if let remote::Mutation::Ambiguous(reason) = remote::mutate(TreqCommandRequest::CloneRepo {
+        repo_url: url,
+        destination: path.clone(),
+        idempotency_key: format!("CloneRepo:{}", key()),
+      })
+      .await?
+      {
+        return Err(reason);
+      }
+    }
+    if let remote::Mutation::Ambiguous(reason) = remote::mutate(TreqCommandRequest::InitRepo {
+      repo: path.clone(),
+      idempotency_key: format!("InitRepo:{}", key()),
+    })
+    .await?
+    {
+      return Err(reason);
+    }
+    Ok::<String, String>(path)
+  });
+  cx.spawn(async move |cx| {
+    let Ok(Ok(path)) = result.await else {
+      return;
+    };
+    cx.update(|cx| {
+      store::upsert_saved_repository(&endpoint.id, generation, &path);
+      screens::workspaces::open(path, cx);
+    });
+  })
+  .detach();
 }
 
 /// The active machine's last repository, or its repository picker.
@@ -1149,8 +1381,27 @@ impl Root {
 
 #[cfg(test)]
 mod tests {
-  use super::{is_landing, panes, split_backs};
+  use super::{is_landing, panes, split_backs, AppModel, MachineStatus, MANAGED_MACHINE};
   use gpui_kit::px;
+
+  /// After a delete the card offers a fresh machine: no instance, no
+  /// leftover error, and an SSH host's state untouched.
+  #[test]
+  fn forgets_the_deleted_cloud_machine() {
+    let mut model = AppModel {
+      cloud_instance: serde_json::from_value(
+        serde_json::json!({"instance_id": "i1", "status": "failed"}),
+      )
+      .unwrap(),
+      ..AppModel::default()
+    };
+    model.set_status(MANAGED_MACHINE, MachineStatus::Failed("x".into()));
+    model.set_status("host-1", MachineStatus::Ready);
+    assert!(!model.forget_cloud_machine());
+    assert!(model.cloud_instance.is_none());
+    assert!(!model.machines.contains_key(MANAGED_MACHINE));
+    assert!(model.machine("host-1").status == MachineStatus::Ready);
+  }
 
   #[test]
   fn phones_show_one_page() {

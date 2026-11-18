@@ -8,6 +8,7 @@
 use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
+use gpui_kit::base::TestSupportExt as _;
 use std::{
   collections::HashSet,
   rc::Rc,
@@ -940,7 +941,10 @@ impl MergeView {
         .children(self.warnings().into_iter().enumerate().map(|(i, warning)| {
           let selector = format!("merge-warning-{i}");
           ui::text(div(), TextSize::Sm)
+            .id(SharedString::from(selector.clone()))
             .debug_selector(move || selector)
+            .role(gpui::Role::Alert)
+            .aria_label(warning.clone())
             .flex()
             .items_start()
             .gap_2()
@@ -955,6 +959,7 @@ impl MergeView {
               Tone::Warning.color(p),
             ))
             .child(warning)
+            .test_support()
         }))
         .child(
           div()
@@ -976,7 +981,7 @@ impl MergeView {
             )
             .when(rebase, |this| {
               this.child(
-                ui::text(div(), TextSize::Xs)
+                ui::text(div(), TextSize::Sm)
                   .mt_2()
                   .text_color(p.muted_foreground)
                   .child("Rebase keeps the original commit messages."),
@@ -1283,13 +1288,14 @@ impl MergeView {
                     .child(title),
                 )
                 .child(
-                  ui::text(div(), TextSize::Xs)
+                  ui::text(div(), TextSize::Sm)
                     .mt_1()
                     .pl_6()
                     .text_color(p.muted_foreground)
                     .child(detail),
                 )
                 .on_click(self.press(format!("merge.strategy:{}", strategy.value())))
+                .test_support()
             }),
         ),
     )
@@ -1378,9 +1384,13 @@ impl MergeView {
           .and_then(|f| f.hunks.get(h))
           .map(|h| h.header.clone())
           .unwrap_or_default();
+        let path = files.get(i).map(|f| f.path.clone()).unwrap_or_default();
         let id = format!("merge-hunk-{i}-{h}");
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
+          .id(SharedString::from(id.clone()))
           .debug_selector(move || id)
+          .role(gpui::Role::Heading)
+          .aria_label(format!("{path} {header}"))
           .when(h == 0, |this| this.border_t_1().border_color(p.border))
           .bg(p.muted.opacity(0.3))
           .px_2()
@@ -1389,6 +1399,7 @@ impl MergeView {
           .font_family(theme::MONO_FONT)
           .text_color(p.muted_foreground)
           .child(header)
+          .test_support()
           .into_any_element()
       }
       Row::Line(i, h, l) => {
@@ -1430,6 +1441,7 @@ impl MergeView {
       .child(
         ui::Row::new(id, p)
           .label(path.to_string())
+          .aria_expanded(expanded)
           .w_full()
           .p_3()
           .rounded_none()
@@ -1468,7 +1480,7 @@ fn hunk_line(line: &str, p: &Palette) -> impl IntoElement {
   };
   // An empty line still takes its height, as in a `<pre>`.
   let text = if line.is_empty() { " " } else { line };
-  ui::text(div(), TextSize::Xs)
+  ui::text(div(), TextSize::Sm)
     .font_family(theme::MONO_FONT)
     .whitespace_nowrap()
     .overflow_hidden()
@@ -1493,6 +1505,8 @@ fn commits(preview: &Preview, target: &str, p: &Palette) -> impl IntoElement {
           .items_start()
           .gap_3()
           .child(
+            // Short label (['short commit id']): 11px is fine.
+            // ast-grep-ignore: gpui-text-xs-short-label-only
             ui::text(div(), TextSize::Xs)
               .flex_none()
               .bg(p.muted)
@@ -1513,7 +1527,7 @@ fn commits(preview: &Preview, target: &str, p: &Palette) -> impl IntoElement {
                   .child(description),
               )
               .child(
-                ui::text(div(), TextSize::Xs)
+                ui::text(div(), TextSize::Sm)
                   .flex()
                   .flex_wrap()
                   .items_center()
