@@ -20,7 +20,7 @@ test("apply-suggestion: github thread", async ({ page }) => {
     name: "21-apply-suggestion-01-thread",
     title: "Apply buttons on the reaction row",
     expectations: [
-      "zoe's suggestion shows Apply and Apply & commit on the same line as the add-reaction button, right-aligned",
+      "zoe's suggestion shows Apply & commit, then the primary Apply rightmost, on the add-reaction line",
       "Resolve sits under the comment; the thread is unresolved",
     ],
   });

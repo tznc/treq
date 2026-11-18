@@ -313,8 +313,8 @@ impl ChangesView {
         .flex()
         .items_center()
         .gap_2()
-        .child(button("apply", "Apply", false, false))
-        .child(button("commit", "Apply & commit", true, dirty)),
+        .child(button("commit", "Apply & commit", true, dirty))
+        .child(button("apply", "Apply", false, false)),
     )
   }
 
