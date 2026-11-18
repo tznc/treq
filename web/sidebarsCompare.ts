@@ -49,6 +49,17 @@ const sidebars: SidebarsConfig = {
         'best-open-weight-coding-models',
       ],
     },
+    {
+      type: 'category',
+      label: 'Coding Agents',
+      items: [
+        'best-coding-agent-clis',
+        'claude-code-vs-codex-cli',
+        'claude-code-vs-gemini-cli',
+        'opencode-vs-claude-code',
+        'cursor-vs-claude-code',
+      ],
+    },
   ],
 };
 
