@@ -563,11 +563,15 @@ impl ChangesView {
         .rounded(radius::MD)
         .border_1()
         .border_color(p.border.opacity(0.6));
+      let lines = match (thread.start_line, thread.line) {
+        (Some(start), Some(end)) if end >= start => usize::try_from(end - start + 1).unwrap_or(1),
+        _ => 1,
+      };
       for (i, comment) in thread.comments.iter().enumerate() {
         let id = comment.id.clone();
         let mut c = div()
           .debug_selector(move || format!("github-comment-{id}"))
-          .child(self.thread_comment(comment, path, anchor.clone(), line, side, p, cx));
+          .child(self.thread_comment(comment, lines, path, anchor.clone(), line, side, p, cx));
         if i > 0 {
           c = c.border_t_1().border_color(p.border.opacity(0.6));
         }
@@ -581,7 +585,7 @@ impl ChangesView {
 
   /// A GitHub comment's text, its ```` ```suggestion ```` block drawn as a
   /// diff against the line it replaces rather than as a code block.
-  fn github_comment_body(&self, comment: &GhReviewComment, p: &Palette) -> Div {
+  fn github_comment_body(&self, comment: &GhReviewComment, lines: usize, p: &Palette) -> Div {
     let md = |key: &str, text: &str| {
       super::super::code::markdown(
         format!("github-comment-{}{key}", comment.id),
@@ -594,7 +598,7 @@ impl ChangesView {
     let Some(s) = crate::core::review::parse_suggestion(&comment.body) else {
       return body.child(md("", &comment.body));
     };
-    let original = github_suggestion_original(&comment.diff_hunk);
+    let original = github_suggestion_original(&comment.diff_hunk, lines);
     body
       .flex()
       .flex_col()
@@ -612,6 +616,7 @@ impl ChangesView {
   fn thread_comment(
     &self,
     comment: &GhReviewComment,
+    lines: usize,
     path: &str,
     anchor: Option<(String, LineRef)>,
     line: u32,
@@ -650,7 +655,7 @@ impl ChangesView {
           )
           .child(ui::icon(theme::ICON_GITHUB, 14., Tone::Primary.text(p))),
       )
-      .child(self.github_comment_body(comment, p))
+      .child(self.github_comment_body(comment, lines, p))
       .child(
         reactions::bar(
           &self.tips,

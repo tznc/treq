@@ -320,11 +320,18 @@ pub fn suggestion_diff(original: Option<&str>, suggested: &str) -> Option<Vec<Ro
   (!rows.is_empty()).then_some(rows)
 }
 
-/// The line a GitHub suggestion replaces: the last line of the comment's
-/// `diffHunk`, which GitHub ends on the commented line.
-pub fn github_suggestion_original(diff_hunk: &str) -> Option<String> {
-  let last = diff_hunk.lines().next_back()?;
-  (!last.starts_with("@@")).then(|| last.get(1..).unwrap_or("").to_string())
+/// The `lines` a GitHub suggestion replaces: the last lines of the
+/// comment's `diffHunk`, which GitHub ends on the commented line.
+pub fn github_suggestion_original(diff_hunk: &str, lines: usize) -> Option<String> {
+  let body: Vec<&str> = diff_hunk.lines().filter(|l| !l.starts_with("@@")).collect();
+  let start = body.len().checked_sub(lines.max(1))?;
+  Some(
+    body[start..]
+      .iter()
+      .map(|l| l.get(1..).unwrap_or(""))
+      .collect::<Vec<_>>()
+      .join("\n"),
+  )
 }
 
 /// `formatGithubCommentDate`: "Mar 4", with the year when not this one.
@@ -365,6 +372,7 @@ mod tests {
       is_outdated: false,
       path: path.into(),
       line,
+      start_line: None,
       diff_side: side.into(),
       comments: vec![GhReviewComment {
         id: "c".into(),
@@ -522,10 +530,17 @@ mod tests {
   fn github_suggestion_original_is_the_hunks_last_line() {
     let hunk = "@@ -1,2 +1,3 @@\n context\n+No scrape endpoint.";
     assert_eq!(
-      github_suggestion_original(hunk).as_deref(),
+      github_suggestion_original(hunk, 1).as_deref(),
       Some("No scrape endpoint.")
     );
-    assert_eq!(github_suggestion_original(""), None);
+    assert_eq!(github_suggestion_original("", 1), None);
+  }
+
+  #[test]
+  fn github_suggestion_original_spans_a_multi_line_comment() {
+    let hunk = "@@ -1,3 +1,3 @@\n a\n+b\n+c";
+    assert_eq!(github_suggestion_original(hunk, 2).as_deref(), Some("b\nc"));
+    assert_eq!(github_suggestion_original(hunk, 4), None);
   }
 
   #[test]
