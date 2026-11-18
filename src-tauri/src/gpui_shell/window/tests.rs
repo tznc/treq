@@ -984,6 +984,14 @@ fn back_and_forward_walk_the_places_shown(cx: &mut TestAppContext) {
   assert_eq!(window.route_workspace(), Some(2));
   go(cx, Shortcut::Forward);
   assert_eq!(page(cx), super::model::Page::Linear);
+  // The title bar's arrows do the same, and show where they can go.
+  let sidebar = window.last().sidebar.unwrap();
+  assert!(sidebar.can_back && !sidebar.can_forward);
+  window.sidebar(cx, SidebarAction::Back);
+  assert_eq!(window.route_workspace(), Some(2));
+  assert!(window.last().sidebar.unwrap().can_forward);
+  window.sidebar(cx, SidebarAction::Forward);
+  assert_eq!(page(cx), super::model::Page::Linear);
 }
 
 /// What a click on a workspace row would show, for reading it ahead, is
