@@ -1641,8 +1641,10 @@ impl Sidebar {
       .text_color(palette.sidebar_foreground)
       .when(row.archiving, |this| this.opacity(0.5))
       .when(peek, |this| {
+        // The row's own hover fill, as if the pointer rested on it.
+        let fill = this.hover_fill();
         this
-          .bg(palette.hover())
+          .when_some(fill, |this, fill| this.bg(fill))
           .debug_selector(move || format!("workspace-peek-{id}"))
       })
       .when(row.depth > 0, |this| {
