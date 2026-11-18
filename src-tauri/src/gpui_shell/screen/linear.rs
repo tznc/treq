@@ -957,7 +957,7 @@ impl LinearView {
           .and_then(|s| s.get("review_agent").cloned().flatten())
           .filter(|a| !a.is_empty());
         let prompt = data::review_prompt(&target.of, &target.title, comments.len(), &dir);
-        host.launch_session(&review_launch(repo, prompt, agent), true)?;
+        host.launch_session(&review_launch(repo, prompt, agent, None), true)?;
         Ok::<_, String>(())
       },
       move |view, result, _cx| {
@@ -3265,6 +3265,7 @@ pub(super) fn review_launch(
   repo: &str,
   prompt: String,
   agent: Option<String>,
+  link: Option<String>,
 ) -> super::launch_data::LaunchRequest {
   super::launch_data::LaunchRequest {
     repo_path: repo.to_string(),
@@ -3273,6 +3274,6 @@ pub(super) fn review_launch(
     mode: Some("acceptEdits".into()),
     agent: crate::core::agent_launch::agent_kind(agent.as_deref()),
     session_name: Some("AI Review".into()),
-    link: None,
+    link,
   }
 }

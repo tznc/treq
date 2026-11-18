@@ -58,6 +58,19 @@ pub fn take_pending() -> Option<PrLink> {
   PENDING.lock().unwrap_or_else(|p| p.into_inner()).take()
 }
 
+/// The shareable treq.dev link for GitHub PR URL `github_url`
+/// (`https://github.com/{owner}/{repo}/pull/{n}`), or `None` for any other URL.
+pub fn treq_web_link(github_url: &str) -> Option<String> {
+  let path = github_url.strip_prefix("https://github.com/")?;
+  let mut parts = path.split('/');
+  let (owner, repo, pull, number) = (parts.next()?, parts.next()?, parts.next()?, parts.next()?);
+  if parts.next().is_some() || pull != "pull" || !is_github_name(owner) || !is_github_name(repo) {
+    return None;
+  }
+  let number = number.parse::<u64>().ok().filter(|n| *n > 0)?;
+  Some(format!("https://treq.dev/open/pr/{owner}/{repo}/{number}"))
+}
+
 /// A GitHub owner or repository name: letters, digits, `-`, `_` and `.`,
 /// never `.` or `..` alone.
 fn is_github_name(part: &str) -> bool {
@@ -88,6 +101,22 @@ mod tests {
     assert_eq!(take_pending(), Some(link));
     assert_eq!(take_pending(), None);
     assert!(!has_pending());
+  }
+
+  #[test]
+  fn shares_a_github_pr_url_as_a_treq_dev_link() {
+    assert_eq!(
+      treq_web_link("https://github.com/tznc/treq/pull/42").as_deref(),
+      Some("https://treq.dev/open/pr/tznc/treq/42")
+    );
+    for url in [
+      "https://github.com/tznc/treq/pull/42/checks",
+      "https://github.com/tznc/treq/issues/42",
+      "https://github.com/tznc/treq",
+      "https://linear.app/t/ENG-12",
+    ] {
+      assert_eq!(treq_web_link(url), None, "{url}");
+    }
   }
 
   #[test]

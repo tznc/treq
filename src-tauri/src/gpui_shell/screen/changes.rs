@@ -1807,7 +1807,7 @@ impl ChangesView {
     cx.defer(move |cx| popups(request, cx));
   }
 
-  /// Opens the "Copy link" menu for `url` at `at`, for a right-click on
+  /// Opens the copy-link menu for `url` at `at`, for a right-click on
   /// what opens it.
   fn copy_link(&self, url: String, at: gpui::Point<gpui::Pixels>, cx: &mut App) {
     let host = self.host.clone();
@@ -3305,7 +3305,7 @@ impl ChangesView {
           ),
       );
     let mut right = div().flex().items_center().gap_2();
-    if !committed && !self.read_only() {
+    if !self.read_only() {
       right = right.child(
         self.tip(
           format!("add-file-comment-tip-{path}"),
