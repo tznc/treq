@@ -449,7 +449,7 @@ impl ChangesView {
         .py_0p5()
         .rounded(radius::SM)
         .bg(sky(p, 0.1))
-        .hover(move |s| s.bg(sky(p, 0.18)))
+        .hover(move |s| s.bg(p.hover()))
     };
     let muted = if collapsed {
       muted
