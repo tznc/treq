@@ -188,22 +188,10 @@ fn allow_codex_commands(cwd: &str) -> Result<(), String> {
     "prefix_rule(\n  pattern = [\"gh\", \"pr\", \"diff\"],\n  decision = \"allow\",\n)\n",
   )
   .map_err(|e| e.to_string())?;
-  let Ok(out) = std::process::Command::new("git")
-    .args([
-      "-C",
-      cwd,
-      "rev-parse",
-      "--path-format=absolute",
-      "--git-common-dir",
-    ])
-    .output()
-  else {
+  let Ok(repo) = gix::open(cwd) else {
     return Ok(());
   };
-  if !out.status.success() {
-    return Ok(());
-  }
-  let exclude = Path::new(String::from_utf8_lossy(&out.stdout).trim()).join("info/exclude");
+  let exclude = repo.common_dir().join("info/exclude");
   let entry = format!("/{CODEX_RULE_PATH}");
   let existing = std::fs::read_to_string(&exclude).unwrap_or_default();
   if existing.lines().any(|line| line == entry) {
