@@ -2,7 +2,7 @@
 //! picker of GitHub's eight reactions that adds or removes the user's own.
 
 use crate::gpui_shell::ui::radius;
-use tauri_plugin_gpui::gpui::{deferred, div, prelude::*, Context, Div, SharedString};
+use tauri_plugin_gpui::gpui::{deferred, div, img, prelude::*, Context, Div, SharedString};
 
 use crate::{
   github::GhReactionGroup,
@@ -15,16 +15,16 @@ use crate::{
 };
 
 /// GitHub's `ReactionContent`s, in the order GitHub lists them, with their
-/// emoji and names.
+/// color emoji asset and names.
 pub(super) const REACTIONS: [(&str, &str, &str); 8] = [
-  ("THUMBS_UP", "👍", "Thumbs up"),
-  ("THUMBS_DOWN", "👎", "Thumbs down"),
-  ("LAUGH", "😄", "Laugh"),
-  ("HOORAY", "🎉", "Hooray"),
-  ("CONFUSED", "😕", "Confused"),
-  ("HEART", "❤️", "Heart"),
-  ("ROCKET", "🚀", "Rocket"),
-  ("EYES", "👀", "Eyes"),
+  ("THUMBS_UP", theme::ICON_EMOJI_THUMBS_UP, "Thumbs up"),
+  ("THUMBS_DOWN", theme::ICON_EMOJI_THUMBS_DOWN, "Thumbs down"),
+  ("LAUGH", theme::ICON_EMOJI_LAUGH, "Laugh"),
+  ("HOORAY", theme::ICON_EMOJI_HOORAY, "Hooray"),
+  ("CONFUSED", theme::ICON_EMOJI_CONFUSED, "Confused"),
+  ("HEART", theme::ICON_EMOJI_HEART, "Heart"),
+  ("ROCKET", theme::ICON_EMOJI_ROCKET, "Rocket"),
+  ("EYES", theme::ICON_EMOJI_EYES, "Eyes"),
 ];
 
 fn known(content: &str) -> Option<(usize, &'static str, &'static str)> {
@@ -153,7 +153,7 @@ fn chip<V: Reacts>(
     group.count,
     if mine { ", you reacted" } else { "" }
   ))
-  .child(emoji)
+  .child(emoji_img(emoji, 14.))
   .child(
     // Short label (['count']): 11px is fine.
     // ast-grep-ignore: gpui-text-xs-short-label-only
@@ -210,7 +210,7 @@ fn picker<V: Reacts>(
         .size(Size::IconXs)
         .when(mine, |b| b.bg(sky.opacity(0.15)))
         .aria_label(name)
-        .child(emoji)
+        .child(emoji_img(emoji, 18.))
         .on_click(cx.listener(move |view: &mut V, _, _, cx| {
           view.set_reaction_picker(None, cx);
           view.react(&comment, content, cx);
@@ -218,6 +218,11 @@ fn picker<V: Reacts>(
       })),
   )
   .with_priority(1)
+}
+
+/// A reaction's emoji in color, as GitHub draws it.
+fn emoji_img(path: &'static str, size: f32) -> impl IntoElement {
+  img(path).size(zpx(size)).flex_none()
 }
 
 fn static_content(content: &str) -> Option<&'static str> {
@@ -236,6 +241,18 @@ mod tests {
       content: content.into(),
       count,
       viewer_has_reacted: mine,
+    }
+  }
+
+  #[test]
+  fn every_reaction_has_a_bundled_color_emoji() {
+    use tauri_plugin_gpui::gpui::AssetSource as _;
+    for (content, emoji, _) in REACTIONS {
+      let bytes = theme::Assets.load(emoji).expect("load");
+      assert!(
+        bytes.is_some_and(|b| b.starts_with(b"<svg")),
+        "{content}: {emoji}"
+      );
     }
   }
 
