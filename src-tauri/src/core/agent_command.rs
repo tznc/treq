@@ -220,25 +220,6 @@ fn allow_codex_commands(cwd: &str) -> Result<(), String> {
   std::fs::write(&exclude, format!("{existing}{sep}{entry}\n")).map_err(|e| e.to_string())
 }
 
-/// Allows `gh pr diff` in Devin's local (uncommitted) project config.
-fn allow_devin_commands(cwd: &str) -> Result<(), String> {
-  let path = Path::new(cwd).join(".devin/config.local.json");
-  let mut config = std::fs::read_to_string(&path)
-    .ok()
-    .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
-    .and_then(|value| match value {
-      Value::Object(map) => Some(map),
-      _ => None,
-    })
-    .unwrap_or_default();
-  add_allow_rules(&mut config, &["Exec(gh pr diff)"]);
-  if let Some(dir) = path.parent() {
-    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-  }
-  let json = serde_json::to_string_pretty(&Value::Object(config)).map_err(|e| e.to_string())?;
-  std::fs::write(&path, json).map_err(|e| e.to_string())
-}
-
 /// Overlay Treq filesystem restrictions onto `.claude/settings.local.json`, without sandbox.
 pub fn merge_claude_local_settings(
   existing: Option<Map<String, Value>>,
@@ -405,10 +386,8 @@ pub fn prepare_auto_command(
   if !Path::new(cwd).is_dir() {
     return Err(format!("Workspace folder no longer exists: {cwd}"));
   }
-  match options.agent {
-    "devin" => allow_devin_commands(cwd)?,
-    "codex" => allow_codex_commands(cwd)?,
-    _ => {}
+  if options.agent == "codex" {
+    allow_codex_commands(cwd)?;
   }
   let system = system_prompt(paths);
   let (prompt, settings) = match options.agent {
@@ -965,36 +944,6 @@ mod tests {
     assert_eq!(written["extra"], 1);
     assert!(written.get("sandbox").is_none());
     super::super::agent_cli::cleanup_agent_cli_files(&prepared.file_paths).unwrap();
-  }
-
-  #[test]
-  fn allows_gh_pr_diff_in_devin_local_config() {
-    let dir = tempfile::tempdir().unwrap();
-    let cwd = dir.path().to_str().unwrap();
-    std::fs::create_dir_all(dir.path().join(".devin")).unwrap();
-    let config = dir.path().join(".devin/config.local.json");
-    std::fs::write(
-      &config,
-      r#"{"extra":1,"permissions":{"allow":["Exec(ls)"]}}"#,
-    )
-    .unwrap();
-    let paths = AgentPaths {
-      workspace_path: None,
-      repo_path: cwd,
-      supporting_repo_paths: NONE,
-      project: None,
-      app_instructions: None,
-      repo_instructions: None,
-    };
-    for _ in 0..2 {
-      let prepared = prepare_auto_command(&paths, &opts("devin")).unwrap();
-      super::super::agent_cli::cleanup_agent_cli_files(&prepared.file_paths).unwrap();
-    }
-    let written: Value = serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
-    assert_eq!(
-      written,
-      json!({ "extra": 1, "permissions": { "allow": ["Exec(ls)", "Exec(gh pr diff)"] } })
-    );
   }
 
   #[test]
