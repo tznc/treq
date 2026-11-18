@@ -391,6 +391,18 @@ pub fn rebase_single_workspace(
   if !passes_guard(repo_path, &workspace, &sync) {
     return Ok(None);
   }
+  // A squash-merged stack lands upstream under new hashes; rebasing it would
+  // conflict every commit. Leave it alone when the target already has its changes.
+  if jj::jj_branch_changes_landed_on_target(&full_path, &workspace.branch_name, &target_branch)
+    .unwrap_or(false)
+  {
+    tracing::info!(
+      "Skipping rebase of workspace '{}': its changes are already on '{}'",
+      workspace.workspace_name,
+      target_branch
+    );
+    return Ok(None);
+  }
 
   // Convert target branch to jj format
   let jj_target_branch = convert_to_jj_branch_format(&target_branch, repo_path);

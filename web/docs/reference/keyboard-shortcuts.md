@@ -1,5 +1,6 @@
 ---
 sidebar_position: 3
+description: Reference for Treq keyboard shortcuts that act on the current workspace or terminal session.
 ---
 
 # Keyboard Shortcuts

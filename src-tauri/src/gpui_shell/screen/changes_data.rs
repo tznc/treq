@@ -300,11 +300,7 @@ impl ChangesHost for Backend {
     repo_path: &str,
     workspace_id: i64,
   ) -> Result<Vec<AgentReviewComment>, String> {
-    crate::core::agent_review::list_comments(
-      &self.state_scope(repo_path),
-      super::changes_threads::WORKSPACE_DIFF,
-      &workspace_id.to_string(),
-    )
+    crate::core::agent_review::workspace_comments(&self.state_scope(repo_path), workspace_id)
   }
 
   fn resolve_agent_comment(&self, repo_path: &str, id: &str) -> Result<(), String> {
