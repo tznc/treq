@@ -1146,6 +1146,8 @@ fn markdown_text_size(size: f32) -> TextSize {
     // Short label (["maps the user's font-size setting onto the scale"]): 11px is fine.
     // ast-grep-ignore: gpui-text-xs-short-label-only
     s if s <= 11. => TextSize::Xs,
+    // Maps the user's font-size setting onto the scale.
+    // ast-grep-ignore: gpui-sans-text-min-size
     s if s <= 12. => TextSize::Code,
     s if s <= 14. => TextSize::Sm,
     s if s <= 17. => TextSize::Lg,

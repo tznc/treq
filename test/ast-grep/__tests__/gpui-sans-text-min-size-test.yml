@@ -1,0 +1,23 @@
+id: gpui-sans-text-min-size
+valid:
+  - |
+    fn f() { ui::text(div(), TextSize::Sm).child(body); }
+  - |
+    fn f() { ui::text(div(), TextSize::Code).font_family(theme::MONO_FONT).child(line); }
+  - |
+    fn f() { ui::text(div(), TextSize::Code).flex_1().font_family(MONO_FONT).child(line); }
+  - |
+    mod tests { fn t() { assert!(TextSize::Code.metrics().0 > 0.); } }
+  - |
+    fn f() { ui::text(Textarea::new(i).font_family(theme::MONO_FONT), TextSize::Code); }
+  - |
+    fn f() { div().font_family(theme::MONO_FONT).child(ui::text(Textarea::new(s), TextSize::Code)); }
+invalid:
+  - |
+    fn f() { ui::text(div(), TextSize::Code).child(comment); }
+  - |
+    fn f() { ui::text(Textarea::new(&state), TextSize::Code); }
+  - |
+    fn f() { markdown(id, body, TextSize::Code.metrics().0, dark); }
+  - |
+    fn f() { ui::text(div(), TextSize::Code).font_family(theme::SANS_FONT); }

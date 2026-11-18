@@ -146,6 +146,8 @@ impl TextSize {
       TextSize::Sm => (13., 20.),
       TextSize::Lg => (15., 22.),
       TextSize::Xl => (20., 28.),
+      // The type scale's own definition.
+      // ast-grep-ignore: gpui-sans-text-min-size
       TextSize::Code => (12., 20.),
     }
   }

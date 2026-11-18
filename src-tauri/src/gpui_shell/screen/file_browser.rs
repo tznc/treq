@@ -1769,6 +1769,8 @@ impl FileBrowserView {
     let bg = line_fill(selected, has_comment, added, &p);
     let selecting = self.selecting;
     let accent = p.primary;
+    // Code line: the file view sets the mono font on its parent.
+    // ast-grep-ignore: gpui-sans-text-min-size
     let line = ui::text(div(), TextSize::Code)
       .id(SharedString::from(format!("code-line-{n}")))
       .debug_selector(move || format!("code-line-{n}"))
