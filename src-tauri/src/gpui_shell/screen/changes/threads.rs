@@ -549,8 +549,7 @@ impl ChangesView {
         .bg(p.background)
         .rounded(radius::MD)
         .border_1()
-        .border_color(p.border.opacity(0.6))
-        .overflow_hidden();
+        .border_color(p.border.opacity(0.6));
       for (i, comment) in thread.comments.iter().enumerate() {
         let id = comment.id.clone();
         let mut c = div()
