@@ -233,12 +233,14 @@ pub fn remote_agent(agent: &str) -> Option<RemoteAgentId> {
   }
 }
 
-/// `remoteLaunchFor`: the agent binary with no arguments, or a login shell.
-pub fn launch_for(agent: Option<RemoteAgentId>) -> PtyLaunchSpec {
+/// `remoteLaunchFor`: the agent binary with no arguments, on `profile`'s
+/// account, or a login shell.
+pub fn launch_for(agent: Option<RemoteAgentId>, profile: Option<String>) -> PtyLaunchSpec {
   match agent {
     Some(agent) => PtyLaunchSpec::Agent {
       agent,
       args: Vec::new(),
+      profile,
     },
     None => PtyLaunchSpec::Shell,
   }
@@ -809,13 +811,14 @@ mod tests {
   #[test]
   fn launches_the_agent_binary_as_a_typed_spec_or_a_login_shell() {
     assert_eq!(
-      launch_for(Some(RemoteAgentId::Codex)),
+      launch_for(Some(RemoteAgentId::Codex), None),
       PtyLaunchSpec::Agent {
         agent: RemoteAgentId::Codex,
-        args: Vec::new()
+        args: Vec::new(),
+        profile: None,
       }
     );
-    assert_eq!(launch_for(None), PtyLaunchSpec::Shell);
+    assert_eq!(launch_for(None, None), PtyLaunchSpec::Shell);
   }
 
   #[test]

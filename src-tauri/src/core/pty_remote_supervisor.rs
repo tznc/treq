@@ -1244,6 +1244,7 @@ mod tests {
     let launch = PtyLaunchSpec::Agent {
       agent: RemoteAgentId::Claude,
       args: vec![malicious.to_string()],
+      profile: None,
     };
     let command = daemon_attach_command(
       "/opt/treq bin/treq",
@@ -1498,6 +1499,7 @@ mod tests {
     let launch = PtyLaunchSpec::Agent {
       agent: RemoteAgentId::Claude,
       args: vec!["--prompt".to_string(), malicious_arg.to_string()],
+      profile: None,
     };
     let command = tmux_attach_command(
       &session_name("/srv/repo", "ws1", "term"),

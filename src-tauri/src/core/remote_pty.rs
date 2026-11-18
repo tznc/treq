@@ -86,6 +86,11 @@ pub enum PtyLaunchSpec {
   Agent {
     agent: RemoteAgentId,
     args: Vec<String>,
+    /// An account profile name; the host maps it to its own config
+    /// directory under `~/.treq/agent-profiles`. Hosts that predate it
+    /// ignore it and use the agent's own sign-in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    profile: Option<String>,
   },
 }
 
@@ -209,9 +214,14 @@ impl From<SshTransportError> for RemotePtyError {
 pub fn build_launch_program(spec: &PtyLaunchSpec) -> String {
   match spec {
     PtyLaunchSpec::Shell => "\"${SHELL:-/bin/bash}\" -l".to_string(),
-    PtyLaunchSpec::Agent { agent, args } => {
+    PtyLaunchSpec::Agent {
+      agent,
+      args,
+      profile,
+    } => {
+      let export = profile_export(*agent, profile.as_deref()).unwrap_or_default();
       let mut parts = vec![
-        "exec".to_string(),
+        format!("{export}exec"),
         crate::core::remote::shell_quote(agent.binary_name()),
       ];
       parts.extend(args.iter().map(|arg| crate::core::remote::shell_quote(arg)));
@@ -221,6 +231,28 @@ pub fn build_launch_program(spec: &PtyLaunchSpec) -> String {
       )
     }
   }
+}
+
+/// `export <VAR>="$HOME"/'.treq/agent-profiles/<agent>/<name>'; ` for a
+/// valid profile of an agent that takes profiles: each host keeps its own
+/// sign-in for the profile, under its own home.
+fn profile_export(agent: RemoteAgentId, profile: Option<&str>) -> Option<String> {
+  use crate::core::agent_profiles::{self, AgentProfile};
+  let id = match agent {
+    RemoteAgentId::Claude => "claude",
+    RemoteAgentId::Codex => "codex",
+    _ => return None,
+  };
+  let profile = AgentProfile {
+    agent: id.to_string(),
+    name: agent_profiles::validate_name(profile?).ok()?,
+  };
+  let var = agent_profiles::config_dir_var(id)?;
+  let dir = agent_profiles::config_dir(std::path::Path::new(".treq"), &profile);
+  Some(format!(
+    "export {var}=\"$HOME\"/{}; ",
+    crate::core::remote::shell_quote(&dir.to_string_lossy())
+  ))
 }
 
 /// Builds the remote command line for a [`PtyLaunchSpec`], starting in
@@ -759,6 +791,7 @@ mod tests {
     let spec = PtyLaunchSpec::Agent {
       agent: RemoteAgentId::Claude,
       args: vec!["--prompt".to_string(), "$(rm -rf /)".to_string()],
+      profile: None,
     };
     let command = build_launch_command("/srv/project", &spec);
     assert!(command.contains("-lc "));
@@ -795,6 +828,7 @@ mod tests {
         hostile.to_string(),
         "$(id)".to_string(),
       ],
+      profile: None,
     };
     let output = std::process::Command::new("/bin/sh")
       .arg("-c")
@@ -812,6 +846,75 @@ mod tests {
       "{stdout}"
     );
     assert!(!home.path().join("pwned").exists());
+  }
+
+  /// A profile's config directory is exported under the host's own home,
+  /// so each machine keeps its own sign-in for the same profile name.
+  #[cfg(unix)]
+  #[test]
+  fn agent_launch_exports_the_profile_dir_under_the_host_home() {
+    let home = tempfile::tempdir().unwrap();
+    let bin = home.path().join(".local/bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let agent = bin.join("claude");
+    std::fs::write(&agent, "#!/bin/sh\nprintf '%s\\n' \"$CLAUDE_CONFIG_DIR\"\n").unwrap();
+    std::fs::set_permissions(
+      &agent,
+      <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o755),
+    )
+    .unwrap();
+    std::fs::write(
+      home.path().join(".bash_profile"),
+      "PATH=\"$HOME/.local/bin:$PATH\"\n",
+    )
+    .unwrap();
+    let run = |profile: Option<&str>| {
+      let spec = PtyLaunchSpec::Agent {
+        agent: RemoteAgentId::Claude,
+        args: Vec::new(),
+        profile: profile.map(str::to_string),
+      };
+      let output = std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg(build_launch_command(home.path().to_str().unwrap(), &spec))
+        .env("HOME", home.path())
+        .env("SHELL", "/bin/bash")
+        .env("PATH", "/usr/bin:/bin")
+        .env_remove("CLAUDE_CONFIG_DIR")
+        .output()
+        .unwrap();
+      assert!(output.status.success(), "{output:?}");
+      String::from_utf8(output.stdout).unwrap()
+    };
+    assert_eq!(
+      run(Some("work")),
+      format!(
+        "{}/.treq/agent-profiles/claude/work\n",
+        home.path().display()
+      )
+    );
+    assert_eq!(run(None), "\n");
+    // A name that isn't a valid profile never reaches the command line.
+    assert_eq!(run(Some("$(touch pwned)")), "\n");
+    assert!(!home.path().join("pwned").exists());
+  }
+
+  #[test]
+  fn launch_specs_without_a_profile_keep_their_wire_shape() {
+    let spec: PtyLaunchSpec =
+      serde_json::from_str(r#"{"type":"agent","agent":"claude","args":[]}"#).unwrap();
+    assert_eq!(
+      spec,
+      PtyLaunchSpec::Agent {
+        agent: RemoteAgentId::Claude,
+        args: Vec::new(),
+        profile: None,
+      }
+    );
+    assert_eq!(
+      serde_json::to_string(&spec).unwrap(),
+      r#"{"type":"agent","agent":"claude","args":[]}"#
+    );
   }
 
   // -- Failing-before-manager-exists coverage is structural: RemotePtyManager
