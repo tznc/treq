@@ -249,7 +249,10 @@ mod tests {
     use tauri_plugin_gpui::gpui::AssetSource as _;
     for (content, emoji, _) in REACTIONS {
       let bytes = theme::Assets.load(emoji).expect("load");
-      assert!(bytes.is_some_and(|b| b.starts_with(b"<svg")), "{content}: {emoji}");
+      assert!(
+        bytes.is_some_and(|b| b.starts_with(b"<svg")),
+        "{content}: {emoji}"
+      );
     }
   }
 
