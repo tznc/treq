@@ -1363,6 +1363,26 @@ fn changes_tab_sends_an_agent_comment_to_the_idle_agent(cx: &mut TestAppContext)
     .contains(&"notify toast Comment sent to agent".to_string()));
 }
 
+/// An agent TUI submits at each newline it reads as typed, keeping only the
+/// last paragraph, so multi-line text goes in as one bracketed paste.
+#[gpui::test]
+fn changes_tab_pastes_multi_line_text_into_a_bracketed_idle_agent(cx: &mut TestAppContext) {
+  let (mut h, host) = changes_with_terminal(cx);
+  host.output(&agent_pty(), "\x1b[?2004h");
+  h.cx.run_until_parked();
+  h.click("agent-send-ag");
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_millis(500));
+  h.cx.run_until_parked();
+  let prompt = "Please address this review comment.\n\na.rs:2\n> Use one line\n\nSuggested change:\n```\none()\n```\n";
+  let pasted = format!("write {} {:?}", agent_pty(), format!("\x1b[200~{prompt}\x1b[201~"));
+  let enter = format!("write {} {:?}", agent_pty(), "\r");
+  let writes = pty_writes(&host);
+  let at = writes.iter().position(|w| *w == pasted).expect("pasted");
+  assert_eq!(writes.get(at + 1), Some(&enter), "{writes:?}");
+}
+
 #[gpui::test]
 fn changes_tab_starts_an_agent_for_a_comment_without_an_idle_one(cx: &mut TestAppContext) {
   // The open agent runs in another workspace, so it is not this one's.

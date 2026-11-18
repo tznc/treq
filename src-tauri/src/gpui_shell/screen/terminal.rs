@@ -2714,7 +2714,13 @@ impl TerminalPane {
       return false;
     };
     if let Some(view) = self.view(&column) {
-      view.update(cx, |view, cx| view.write(text, cx));
+      // Pasted: a TUI reading typed text submits at each newline, so a
+      // multi-line review would arrive as only its last paragraph.
+      view.update(cx, |view, cx| {
+        let bracketed = view.with_emulator(|e| e.bracketed_paste()).unwrap_or(false);
+        let bytes = paste_bytes(text, bracketed);
+        view.write(&String::from_utf8_lossy(&bytes), cx)
+      });
       // Enter as its own later write: a TUI reads a burst ending in it
       // as a paste and leaves the text unsent.
       let view = view.downgrade();
