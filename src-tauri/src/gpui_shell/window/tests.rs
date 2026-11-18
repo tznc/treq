@@ -977,12 +977,22 @@ fn back_and_forward_walk_the_places_shown(cx: &mut TestAppContext) {
       .read_with(cx, |c, _| c.model().page.clone())
   };
   let go = |cx: &mut TestAppContext, shortcut| {
-    window.controller.update(cx, |c, cx| c.shortcut(shortcut, cx));
+    window
+      .controller
+      .update(cx, |c, cx| c.shortcut(shortcut, cx));
     cx.run_until_parked();
   };
   go(cx, Shortcut::Back);
   assert_eq!(window.route_workspace(), Some(2));
   go(cx, Shortcut::Forward);
+  assert_eq!(page(cx), super::model::Page::Linear);
+  // The title bar's arrows do the same, and show where they can go.
+  let sidebar = window.last().sidebar.unwrap();
+  assert!(sidebar.can_back && !sidebar.can_forward);
+  window.sidebar(cx, SidebarAction::Back);
+  assert_eq!(window.route_workspace(), Some(2));
+  assert!(window.last().sidebar.unwrap().can_forward);
+  window.sidebar(cx, SidebarAction::Forward);
   assert_eq!(page(cx), super::model::Page::Linear);
 }
 
