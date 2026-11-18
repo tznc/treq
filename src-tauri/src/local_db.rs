@@ -1855,7 +1855,10 @@ pub fn create_agent_review_comment(
     )
     .map_err(|e| format!("Failed to insert agent review comment: {}", e))?;
 
-  if is_code_review_target(&comment.target_type) {
+  // A sent review is already in the history as one `user_review` row.
+  if is_code_review_target(&comment.target_type)
+    && comment.source != crate::core::agent_review::SENT_REVIEW_SOURCE
+  {
     conn
       .execute(
         "INSERT INTO review_history (kind, comment_id, source, target_type, target_id, file_path, start_line, end_line, body, suggestion, quoted_text, outcome, created_at)

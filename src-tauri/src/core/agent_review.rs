@@ -345,7 +345,10 @@ mod tests {
     assert_eq!(kept.len(), 1);
     let c = &kept[0];
     assert_eq!(c.source, SENT_REVIEW_SOURCE);
-    assert_eq!((c.file_path.as_str(), c.start_line, c.end_line), ("a.rs", 2, 3));
+    assert_eq!(
+      (c.file_path.as_str(), c.start_line, c.end_line),
+      ("a.rs", 2, 3)
+    );
     assert_eq!(c.side.as_deref(), Some("old"));
     assert_eq!(c.comment_text, "Rename this");
     assert_eq!(c.quoted_text.as_deref(), Some("a\nb"));
