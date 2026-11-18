@@ -601,8 +601,22 @@ impl TerminalHost for Backend {
       .ok()
       .flatten();
     let bin_dir = crate::commands::binary::get_treq_bin_dir().ok();
-    let env = match (&start.profile, crate::core::app_data_dir()) {
-      (Some(profile), Some(dir)) => crate::core::agent_profiles::env(&dir, profile),
+    // In a devcontainer the agent runs inside the container, where profiles
+    // live in their volume rather than the host's app data directory.
+    let in_container = {
+      use tauri::Manager;
+      let state = self.app().state::<crate::AppState>();
+      crate::commands::pty_commands::devcontainer_repo(
+        &state,
+        Some(&start.repo_path),
+        start.workspace_path.as_deref(),
+      )
+      .is_some()
+    };
+    let base =
+      crate::core::devcontainer::agent_profiles_base(in_container, crate::core::app_data_dir());
+    let env = match (&start.profile, base) {
+      (Some(profile), Some(base)) => crate::core::agent_profiles::env(&base, profile),
       _ => Vec::new(),
     };
     let supporting = self.supporting_repos(&start.repo_path);
