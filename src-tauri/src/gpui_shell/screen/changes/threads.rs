@@ -19,8 +19,8 @@ use crate::{
   gpui_shell::screen::{
     changes_review::{count_label, number_and_side, Pending, Quote, Side},
     changes_threads::{
-      agent_by_line, comment_date, github_suggestion_original, original_text, place_threads,
-      preview, suggestion_diff, suggestion_span, Placed, RowKind,
+      agent_by_line, comment_date, github_suggestion, github_suggestion_original, original_text,
+      place_threads, preview, suggestion_diff, suggestion_span, Placed, RowKind,
     },
     commits_data::LineRef,
     reactions::{self, Reacts},
@@ -258,6 +258,128 @@ impl ChangesView {
               .description(err)
               .into(),
           );
+        }
+        cx.notify();
+      },
+      cx,
+    );
+  }
+
+  /// Apply and Apply & commit, beside a suggestion's reactions. Committing
+  /// is off while the file has other uncommitted edits, so the commit holds
+  /// only the suggestion.
+  fn suggestion_actions(
+    &self,
+    thread: &GhReviewThread,
+    comment: &GhReviewComment,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> Option<Div> {
+    if thread.is_resolved {
+      return None;
+    }
+    github_suggestion(thread, comment)?;
+    let busy = self.threads.busy.contains(&thread.id);
+    let dirty = self.hunks.contains_key(&thread.path);
+    let button = |action: &str, label: &'static str, commit: bool, disabled: bool| {
+      let (t, c) = (thread.id.clone(), comment.id.clone());
+      Button::new(SharedString::from(format!("gh-{action}-{}", comment.id)), p)
+        .variant(if commit {
+          Variant::Outline
+        } else {
+          Variant::Default
+        })
+        .size(Size::Xs)
+        .gap_1p5()
+        .disabled(busy || disabled)
+        .icon(
+          if commit {
+            theme::ICON_CHECK
+          } else {
+            theme::ICON_WAND
+          },
+          12.,
+        )
+        .label(label)
+        .on_click(cx.listener(move |view, _, _, cx| view.apply_github(&t, &c, commit, cx)))
+    };
+    Some(
+      div()
+        .ml_auto()
+        .flex()
+        .items_center()
+        .gap_2()
+        .child(button("apply", "Apply", false, false))
+        .child(button("commit", "Apply & commit", true, dirty)),
+    )
+  }
+
+  /// Writes a GitHub suggestion into the checkout, commits that file alone
+  /// when asked (crediting the reviewer), then resolves the thread.
+  fn apply_github(
+    &mut self,
+    thread_id: &str,
+    comment_id: &str,
+    commit: bool,
+    cx: &mut Context<Self>,
+  ) {
+    let Some(thread) = self
+      .threads
+      .github
+      .iter()
+      .find(|t| t.id == thread_id)
+      .cloned()
+    else {
+      return;
+    };
+    let Some(comment) = thread.comments.iter().find(|c| c.id == comment_id).cloned() else {
+      return;
+    };
+    let Some(s) = github_suggestion(&thread, &comment) else {
+      return;
+    };
+    if commit && self.hunks.contains_key(&thread.path) {
+      return;
+    }
+    if !self.threads.busy.insert(thread.id.clone()) {
+      return;
+    }
+    cx.notify();
+    let workspace = self.parent.working_directory();
+    let id = thread.id.clone();
+    self.run(
+      move |host, _| {
+        host.apply_suggestion(&workspace, &thread.path, s.lines, &s.original, &s.suggested)?;
+        if commit {
+          let message =
+            crate::github::suggestion_commit_message(&comment.author.login, comment.author_id);
+          host.split(&workspace, &message, vec![thread.path.clone()])?;
+        }
+        host.resolve_thread(&thread.id)
+      },
+      move |view, result, cx| {
+        view.threads.busy.remove(&id);
+        match result {
+          Ok(()) => {
+            view.set_thread_resolved(&id, true);
+            view.threads.collapsed.insert(id.clone());
+            super::tell(
+              view.host.as_ref(),
+              Toast::success(if commit {
+                "Suggestion committed"
+              } else {
+                "Suggestion applied"
+              })
+              .into(),
+            );
+            view.load(cx);
+          }
+          Err(err) => super::tell(
+            view.host.as_ref(),
+            Toast::error("Could not apply suggestion")
+              .description(err)
+              .into(),
+          ),
         }
         cx.notify();
       },
@@ -612,7 +734,17 @@ impl ChangesView {
         let id = comment.id.clone();
         let mut c = div()
           .debug_selector(move || format!("github-comment-{id}"))
-          .child(self.thread_comment(comment, lines, path, anchor.clone(), line, side, p, cx));
+          .child(self.thread_comment(
+            thread,
+            comment,
+            lines,
+            path,
+            anchor.clone(),
+            line,
+            side,
+            p,
+            cx,
+          ));
         if i > 0 {
           c = c.border_t_1().border_color(p.border.opacity(0.6));
         }
@@ -671,6 +803,7 @@ impl ChangesView {
   )]
   fn thread_comment(
     &self,
+    thread: &GhReviewThread,
     comment: &GhReviewComment,
     lines: usize,
     path: &str,
@@ -739,7 +872,8 @@ impl ChangesView {
                 cx,
               ),
             ),
-        ),
+        )
+        .children(self.suggestion_actions(thread, comment, p, cx)),
       )
       .test_support()
   }

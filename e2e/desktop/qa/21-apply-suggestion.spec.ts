@@ -4,6 +4,8 @@ import { expect, test } from "@playwright/test";
 import { capture } from "./capture.ts";
 import { openTab, openWorkspace, settle } from "./helpers.ts";
 
+test.describe.configure({ mode: "serial" });
+
 test("apply-suggestion: github thread", async ({ page }) => {
   await openWorkspace(page, "feat/empty-event-message");
   await openTab(page, "Changes");
@@ -11,13 +13,37 @@ test("apply-suggestion: github thread", async ({ page }) => {
   await page.getByRole("button", { name: "packages/web/src/lib/client.ts", exact: true }).click();
   await settle(page, 1500);
   await expect(page.getByText("Trim before checking length:")).toBeVisible();
+  const commit = page.getByRole("button", { name: "Apply & commit", exact: true });
+  await expect(page.getByRole("button", { name: "Apply", exact: true })).toBeEnabled();
+  await expect(commit).toBeEnabled();
   await capture(page, {
     name: "21-apply-suggestion-01-thread",
-    title: "A GitHub suggestion thread",
+    title: "Apply buttons on the reaction row",
     expectations: [
-      "zoe's comment on line 5 shows the suggestion",
-      "The thread is unresolved",
-      "Baseline: no Apply or Apply & commit button",
+      "zoe's suggestion shows Apply and Apply & commit on the same line as the add-reaction button, right-aligned",
+      "Resolve sits under the comment; the thread is unresolved",
     ],
+  });
+
+  await commit.click();
+  await settle(page, 2000);
+  await expect(page.getByRole("button", { name: "Apply & commit", exact: true })).toHaveCount(0);
+  await capture(page, {
+    name: "21-apply-suggestion-02-committed",
+    title: "Committed and resolved",
+    screen: true,
+    expectations: [
+      "zoe's thread is folded with a Resolved pill",
+      "A 'Suggestion committed' toast shows",
+    ],
+  });
+
+  await openTab(page, "Commits");
+  await settle(page, 1500);
+  await expect(page.getByText("Apply suggestion from @zoe").first()).toBeVisible();
+  await capture(page, {
+    name: "21-apply-suggestion-03-commit",
+    title: "The new commit",
+    expectations: ["The newest commit reads 'Apply suggestion from @zoe'"],
   });
 });
