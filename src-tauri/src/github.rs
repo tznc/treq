@@ -4129,7 +4129,10 @@ esac
 
     let stdin: serde_json::Value =
       serde_json::from_str(&fs::read_to_string(bin_dir.path().join("stdin")).unwrap()).unwrap();
-    assert!(stdin["query"].as_str().unwrap().contains("resolveReviewThread"));
+    assert!(stdin["query"]
+      .as_str()
+      .unwrap()
+      .contains("resolveReviewThread"));
     assert_eq!(stdin["variables"]["id"], "PRRT_1");
   }
 

@@ -1145,6 +1145,11 @@ impl changes_data::ChangesHost for FakeHost {
     Ok(())
   }
 
+  fn resolve_thread(&self, thread_id: &str) -> Result<(), String> {
+    self.record(format!("resolve thread {thread_id}"));
+    Ok(())
+  }
+
   fn agent_comments(
     &self,
     _: &str,

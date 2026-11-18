@@ -234,6 +234,50 @@ impl ChangesView {
     );
   }
 
+  /// Marks a GitHub thread resolved and folds it; undone if GitHub refuses.
+  fn resolve_thread(&mut self, id: &str, cx: &mut Context<Self>) {
+    if !self.set_thread_resolved(id, true) || !self.threads.busy.insert(id.to_string()) {
+      return;
+    }
+    self.threads.collapsed.insert(id.to_string());
+    cx.notify();
+    let id = id.to_string();
+    self.run(
+      {
+        let id = id.clone();
+        move |host, _| host.resolve_thread(&id)
+      },
+      move |view, result, cx| {
+        view.threads.busy.remove(&id);
+        if let Err(err) = result {
+          view.set_thread_resolved(&id, false);
+          view.threads.collapsed.remove(&id);
+          super::tell(
+            view.host.as_ref(),
+            Toast::error("Failed to resolve thread")
+              .description(err)
+              .into(),
+          );
+        }
+        cx.notify();
+      },
+      cx,
+    );
+  }
+
+  /// Sets a thread's resolved flag; false when it is unknown or already so.
+  fn set_thread_resolved(&mut self, id: &str, resolved: bool) -> bool {
+    let Some(t) = self.threads.github.iter_mut().find(|t| t.id == id) else {
+      return false;
+    };
+    if t.is_resolved == resolved {
+      return false;
+    }
+    t.is_resolved = resolved;
+    self.threads.revision += 1;
+    true
+  }
+
   fn toggle_thread(&mut self, id: &str, cx: &mut Context<Self>) {
     if !self.threads.collapsed.remove(id) {
       self.threads.collapsed.insert(id.to_string());
@@ -574,7 +618,22 @@ impl ChangesView {
         }
         comments = comments.child(c);
       }
-      let body = div().w_full().flex().flex_col().gap_2().child(comments);
+      let mut body = div().w_full().flex().flex_col().gap_2().child(comments);
+      if !thread.is_resolved {
+        let id = thread.id.clone();
+        body = body.child(
+          div().flex().child(
+            Button::new(SharedString::from(format!("gh-resolve-{id}")), p)
+              .variant(Variant::Outline)
+              .size(Size::Sm)
+              .gap_1p5()
+              .disabled(self.threads.busy.contains(&id))
+              .icon(theme::ICON_CHECK, 12.)
+              .label("Resolve")
+              .on_click(cx.listener(move |view, _, _, cx| view.resolve_thread(&id, cx))),
+          ),
+        );
+      }
       card = card.child(body.children(self.thread_reply(thread, p, cx)));
     }
     card.into_any_element()
