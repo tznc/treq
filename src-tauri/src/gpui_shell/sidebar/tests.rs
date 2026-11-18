@@ -311,12 +311,15 @@ fn names_create_buttons_by_what_they_open() {
 }
 
 #[test]
-fn indents_rows_like_the_react_sidebar() {
+fn nests_each_row_one_icon_width_under_its_parent() {
   assert_eq!(row_indent(0), 10.);
-  assert_eq!(row_indent(1), 16.);
-  assert_eq!(row_indent(3), 28.);
-  assert_eq!(guide_left(2), 8.);
-  assert_eq!(guide_left(4), 20.);
+  assert_eq!(row_indent(1), 22.);
+  assert_eq!(row_indent(3), 46.);
+  // The elbow hangs from the parent's icon centre and ends at the row's icon.
+  for depth in 1..4 {
+    assert_eq!(guide_left(depth), row_indent(depth - 1) + 5.);
+    assert_eq!(guide_left(depth) + 6., row_indent(depth) - 1.);
+  }
 }
 
 #[gpui::test]

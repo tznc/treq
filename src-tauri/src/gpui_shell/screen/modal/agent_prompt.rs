@@ -1034,7 +1034,14 @@ impl AgentPromptView {
               let index = view.mention.as_ref().map_or(0, |m| m.index);
               view.select_mention(index, window, cx);
               cx.stop_propagation();
-            } else if action.secondary && !action.shift {
+            }
+          }))
+          // ⌘/Ctrl+Enter is unbound in inputs (treq-ui `init`), so it
+          // arrives as a key, not an `Enter` action.
+          .capture_key_down(cx.listener(|view, e: &gpui::KeyDownEvent, _, cx| {
+            let k = &e.keystroke;
+            let held = crate::gpui_shell::keys::held(k.modifiers);
+            if k.key == "enter" && (held.platform || held.control) && !held.shift {
               view.submit(cx);
               cx.stop_propagation();
             }

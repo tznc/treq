@@ -292,6 +292,15 @@ fn agent_prompt_starts_the_session_in_the_backend(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn agent_prompt_starts_the_session_on_secondary_enter(cx: &mut TestAppContext) {
+  let (mut h, host) = modal_harness(cx, FakeHost::default(), agent_modal());
+  h.cx.simulate_keystrokes("secondary-enter");
+  h.cx.run_until_parked();
+  assert_eq!(tasks(&mut h, &host).len(), 1);
+  assert!(agent_view(&h, |v| v.submitting()));
+}
+
+#[gpui::test]
 fn agent_prompt_toasts_a_failed_start_and_allows_another(cx: &mut TestAppContext) {
   let host = FakeHost {
     task_error: Some("jj failed".into()),

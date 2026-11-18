@@ -770,7 +770,14 @@ pub struct Key<'a> {
 /// The bytes xterm sends for a key press; `None` leaves the key to the app.
 pub fn encode_key(key: Key<'_>, app_cursor: bool) -> Option<Vec<u8>> {
   if key.platform {
-    return None;
+    // Cmd+Backspace: macOS "delete to line start", sent as readline's Ctrl+U.
+    // Cmd+←/→: line start/end, sent as readline's Ctrl+A / Ctrl+E.
+    return match key.key {
+      "backspace" => Some(b"\x15".to_vec()),
+      "left" => Some(b"\x01".to_vec()),
+      "right" => Some(b"\x05".to_vec()),
+      _ => None,
+    };
   }
   let modifier = 1 + u8::from(key.shift) + 2 * u8::from(key.alt) + 4 * u8::from(key.ctrl);
   let cursor = |code: char| -> Vec<u8> {
@@ -1254,6 +1261,33 @@ mod tests {
         .as_deref(),
       Some("\x1bOA")
     );
+  }
+
+  #[test]
+  fn cmd_backspace_deletes_to_line_start() {
+    let bytes = encode_key(
+      Key {
+        platform: true,
+        ..key("backspace")
+      },
+      false,
+    );
+    assert_eq!(bytes.as_deref(), Some(&b"\x15"[..]));
+  }
+
+  #[test]
+  fn cmd_arrows_jump_to_line_start_and_end() {
+    let cmd = |name| {
+      encode_key(
+        Key {
+          platform: true,
+          ..key(name)
+        },
+        false,
+      )
+    };
+    assert_eq!(cmd("left").as_deref(), Some(&b"\x01"[..]));
+    assert_eq!(cmd("right").as_deref(), Some(&b"\x05"[..]));
   }
 
   #[test]

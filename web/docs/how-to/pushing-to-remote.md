@@ -1,5 +1,6 @@
 ---
 sidebar_position: 2
+description: "Push commits from Treq to a remote repository: set upstream tracking, push from the dashboard, handle rejections, and force push."
 ---
 
 # Pushing to Remote

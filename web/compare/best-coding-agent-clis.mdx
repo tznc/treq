@@ -1,0 +1,115 @@
+---
+sidebar_position: 34
+title: Best Coding Agent CLIs Compared (2026)
+description: Best coding agent CLIs in 2026, with Claude Code, Codex CLI, Antigravity CLI, OpenCode, Aider, Amp, Cursor CLI and Copilot CLI compared.
+---
+
+# Best Coding Agent CLIs
+
+_Vendor agents run their own vendor's models, and open source agents run almost any model. After that, they differ most in price and safety defaults._
+
+A coding agent CLI is a terminal program that drives a language model to read your repository, edit files and run commands until a task is done. This page compares the ones that are current in November 2026. Facts were checked against each tool's own docs, pricing page or repository in November 2026. For what a [coding agent](/learn/concepts/ai-engineering/coding-agents) is and how its loop works, start there.
+
+## What Changed in 2026
+
+Three changes affect which tools belong on this list.
+
+Gemini CLI moved to Antigravity CLI for individuals. On June 18, 2026, Google stopped serving free and Google AI Pro and Ultra users in Gemini CLI. Those users now use Antigravity CLI, `agy`. Gemini CLI remains open source and still serves Gemini Code Assist Standard and Enterprise customers and paid API keys.
+
+Kiro CLI is the successor to Amazon Q Developer CLI. The old Q Developer CLI repository stays available as open source.
+
+Cursor joined SpaceX in August 2026. Its cheapest paid plan now uses only Cursor's own Grok and Composer models.
+
+## Price and Models
+
+| Tool | License | Pricing model | Models |
+| --- | --- | --- | --- |
+| Claude Code | Proprietary | Claude Pro, Max, Ultra, Team or Enterprise plan, or pay per token | Claude, through Anthropic, Bedrock, Google Cloud or Microsoft Foundry |
+| Codex CLI | Apache 2.0 | Any ChatGPT plan including Free, or an API key at API prices | OpenAI models, local models through Ollama or LM Studio, custom providers |
+| Antigravity CLI | No source published | Google account on Free, Pro or Ultra, Gemini Enterprise, or a Gemini API key | Gemini, plus some partner models by plan |
+| Gemini CLI | Apache 2.0 | Gemini Code Assist Standard or Enterprise, paid Gemini API key, or Vertex AI | Gemini |
+| OpenCode | MIT | Free with your own provider. Optional OpenCode Go from $10 per month | Any models.dev provider, ChatGPT and Copilot sign-in, local models |
+| Aider | Apache 2.0 | Free with your own provider | Almost any model, including local models |
+| Amp | Proprietary | Free Hobby tier with your own keys or subscriptions. $20 per month tier adds hosted cloud machine minutes | Amp routes work across several vendors' models. You can also choose per thread |
+| Cursor CLI | Proprietary | Cursor plan, from Free to Ultra at $200 per month | Cursor's Grok and Composer models. Third-party models at API price on Premium and above |
+| GitHub Copilot CLI | Proprietary | Included in every Copilot plan, including Free. Pro is $10 per month | Several vendors' models, or your own OpenAI-compatible, Azure OpenAI or Anthropic provider |
+| Kiro CLI | No source published | Kiro plans, from Free to Power at $200 per month | Claude models, or an Auto agent that picks models |
+| Goose | Apache 2.0 | Free with your own provider | 15+ providers, local models through Ollama |
+
+## Safety, Extensions and Automation
+
+| Tool | Default permissions | OS sandbox | MCP | Skills and extensions | Headless | Platforms |
+| --- | --- | --- | --- | --- | --- | --- |
+| Claude Code | Asks before edits and shell commands | Optional, macOS, Linux, WSL2 | Yes | Skills, plugins, hooks, subagents | `claude -p`, GitHub Actions | macOS, Windows, Linux |
+| Codex CLI | Writes in the workspace, asks for more | On by default, macOS, Linux, Windows | Yes | Skills, plugins, hooks, subagents | `codex exec`, GitHub Action | macOS, Windows, Linux |
+| Antigravity CLI | Asks before edits and commands | Optional, needed for `auto` mode | Yes | Skills, plugins, hooks, subagents | `agy -p` | macOS, Windows, Linux |
+| Gemini CLI | Asks before tools | Optional, Seatbelt or containers and more | Yes | Skills, extensions, hooks | `gemini -p`, GitHub Action | macOS, Windows, Linux |
+| OpenCode | Allows everything except `.env` reads | None | Yes | Skills, plugins, custom agents | `opencode run` | macOS, Windows, Linux |
+| Aider | Asks for confirmation, commits each change to git | Not documented | Not documented | Not documented | `aider --message` | macOS, Windows, Linux |
+| Amp | Runs tools without asking | None locally. Threads can run in cloud sandboxes called orbs | Yes | Skills, plugins | `amp -x` | macOS, Linux, Windows through WSL |
+| Cursor CLI | Set by Run Mode | macOS and Linux | Yes | Skills, rules | `agent -p` | macOS, Windows, Linux |
+| GitHub Copilot CLI | Asks before tools that are not allowed | Optional local or cloud sandbox | Yes, GitHub's server built in | Skills, custom agents, hooks | `copilot -p` | macOS, Windows, Linux |
+| Kiro CLI | Allow, ask and deny rules with prompts | Optional, macOS, Linux, Windows | Yes | Skills, steering files, custom agents | Headless mode | macOS, Windows, Linux |
+| Goose | Autonomous by default | Not documented | Yes | Skills, recipes | `goose run` | macOS, Windows, Linux |
+
+"Not documented" means we did not find the feature in the tool's own docs. It does not prove the feature is missing.
+
+## How to Choose
+
+Start from the models you want, then check the safety defaults.
+
+- **You want one vendor's models.** Claude Code for Claude, Codex CLI for OpenAI, Antigravity CLI for Gemini.
+- **You want to switch models.** OpenCode, Aider and Goose run nearly any provider, including local models.
+- **You already pay for a tool.** A ChatGPT plan includes Codex. Every Copilot plan includes Copilot CLI. A Cursor plan includes Cursor CLI.
+- **You run agents unattended.** Prefer a tool with an OS sandbox, or run the agent in a container or a [cloud sandbox](./sandbox-providers-for-coding-agents.mdx). OpenCode, Amp and Goose run actions without asking by default.
+
+## Claude Code
+
+Anthropic's agent runs in the terminal, VS Code, JetBrains, a desktop app and the browser. Its permission system has six modes and allow and deny rules your team can commit. The OS sandbox is optional. It suits teams that standardize on Claude. See [Claude Code vs Codex CLI](./claude-code-vs-codex-cli.mdx) and [Setting Up Claude Code](/learn/tutorials/setting-up-claude-code).
+
+## Codex CLI
+
+OpenAI's Apache 2.0 agent sandboxes commands by default on macOS, Linux and Windows, with network off. Every ChatGPT plan includes it, Free included. It suits people who want open source code and safe defaults.
+
+## Antigravity CLI and Gemini CLI
+
+Antigravity CLI is Google's agent for individuals, built on the same core as the Antigravity desktop app. Gemini CLI remains for enterprise Code Assist and API customers. See [Claude Code vs Gemini CLI and Antigravity CLI](./claude-code-vs-gemini-cli.mdx) for the details of the move.
+
+## OpenCode
+
+OpenCode is an MIT-licensed agent with a terminal UI, a desktop app and a web app. It connects to almost any provider and loads skills from `.claude/skills`. It allows every action by default and has no OS sandbox, so set deny rules or isolate it. See [OpenCode vs Claude Code](./opencode-vs-claude-code.mdx).
+
+## Aider
+
+Aider is an Apache 2.0 terminal agent that works with almost any model. It commits each change to git with a generated message, which makes every edit easy to undo. Its most recent release, 0.86.2, came out in February 2026.
+
+## Amp
+
+Amp runs threads on your machine, in cloud machines it calls orbs, or on runners you connect. It picks models for you across vendors. Its free tier charges no token fees when you bring your own keys or subscriptions. It runs tools without asking unless a plugin adds checks.
+
+## Cursor CLI
+
+Cursor's terminal agent is called `agent`. It shares rules, skills and MCP configuration with the Cursor editor, and reads `AGENTS.md` and `CLAUDE.md`. Prepending `&` to a message hands the task to a cloud agent. See [Cursor vs Claude Code](./cursor-vs-claude-code.mdx).
+
+## GitHub Copilot CLI
+
+Copilot CLI comes with every Copilot plan. It ships with GitHub's MCP server, so it can work with GitHub issues and pull requests. You can also connect your own model provider, including local models through Ollama.
+
+## Kiro CLI
+
+Kiro CLI replaced the Amazon Q Developer CLI. It uses Claude models, reads MCP configuration from the project's `.kiro/` folder, and supports custom agents with fixed tool permissions. Its optional command sandbox is off by default.
+
+## Goose
+
+Goose is an Apache 2.0 agent with a desktop app, a CLI and an API. It is part of the Agentic AI Foundation at the Linux Foundation. It runs in Autonomous mode by default, so switch to Manual or Smart Approval with `/mode` if you want prompts.
+
+## Running Several Agents at Once
+
+Running several of these agents at once needs one checkout per agent, so their edits do not collide. [Git Worktrees for AI](/learn/git-worktrees-for-ai) covers the manual setup, and [How to Run Multiple Claude Code Sessions](/learn/how-to/how-to-run-multiple-claude-code-sessions) applies it to Claude Code. Treq runs several of these agents in isolated workspaces and stacks dependent tasks for review.
+
+## Next Steps
+
+- [Best Tools for Running AI Coding Agents in Parallel](./best-parallel-agent-tools.mdx): apps that manage several agents at once
+- [Sandbox Providers for Coding Agents](./sandbox-providers-for-coding-agents.mdx): cloud machines for unattended agents
+- [Quality Gates for Agent Output](/learn/concepts/ai-engineering/quality-gates-for-agent-output): checks before agent code merges
+- [Parallel Coding Agents](/learn/parallel-coding-agents): why agents need isolation

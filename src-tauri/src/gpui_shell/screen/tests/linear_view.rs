@@ -460,7 +460,7 @@ fn linear_team_selector_reads_that_teams_issues(cx: &mut TestAppContext) {
   );
   assert!(matches!(
     &entries[2],
-    MenuEntry::Item { text, radio: Some(true), .. } if text == "All teams"
+    MenuEntry::Item { text, radio: Some(true), .. } if text == "All"
   ));
   h.pick("Backend");
   assert!(host
