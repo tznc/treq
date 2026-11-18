@@ -1,0 +1,78 @@
+---
+sidebar_position: 32
+title: OpenCode vs Claude Code (2026)
+description: OpenCode vs Claude Code compared on license, model providers, pricing, permissions, sandboxing, MCP, skills and headless use.
+---
+
+# OpenCode vs Claude Code
+
+_OpenCode is an MIT-licensed agent that runs almost any model you connect. Claude Code runs Claude models and ships stricter defaults for what the agent may do._
+
+OpenCode and Claude Code are terminal [coding agents](/learn/concepts/ai-engineering/coding-agents). Both read your code, edit files and run commands until a task is done. OpenCode is open source and model-agnostic. Claude Code is Anthropic's agent for Claude. This page covers OpenCode V2, the current release. Facts were checked against each tool's own docs, pricing page and repository in November 2026.
+
+## At a Glance
+
+| | OpenCode | Claude Code |
+| --- | --- | --- |
+| License | MIT | Proprietary |
+| Pricing | Free. You pay your model provider. Optional OpenCode Go subscription from $10 per month | Claude Pro, Max, Ultra, Team or Enterprise plan, or pay per token through the Claude Console |
+| Models | Providers from the models.dev catalog, including Anthropic, OpenAI, Google, Amazon Bedrock, Azure, OpenRouter and xAI. ChatGPT Plus or Pro and GitHub Copilot sign-in. Local models through Ollama, LM Studio or vLLM. Any OpenAI-compatible endpoint. | Claude models, through Anthropic, Amazon Bedrock, Google Cloud's Agent Platform or Microsoft Foundry |
+| Default permissions | Allows every action except reading `.env` files, which asks | Asks before file edits and non-read-only shell commands |
+| Permission rules | Ordered `allow`, `ask` and `deny` rules per action and path, per agent | Allow, ask and deny rules, plus modes such as `plan`, `acceptEdits` and `auto` |
+| OS sandbox | None. Shell commands run with your user's full access | Optional. Seatbelt on macOS, bubblewrap on Linux and WSL2 |
+| MCP | Local stdio and remote HTTP servers, with OAuth | Yes |
+| Project instructions | `AGENTS.md` only | `CLAUDE.md`, or `AGENTS.md` |
+| Skills and extensions | Agent Skills, plugins, custom agents, custom commands | Agent Skills, plugins, hooks, subagents |
+| Headless and CI | `opencode run` | `claude -p`, GitHub Actions, GitLab CI/CD |
+| Surfaces | Terminal UI, desktop app in beta, web app | Terminal, VS Code, JetBrains, desktop app, web |
+| Platforms | macOS, Windows, Linux | macOS, Windows, Linux |
+
+## Models and Cost
+
+Model choice is the biggest difference. OpenCode reads its provider and model list from models.dev and connects to almost any provider with `/connect`. You can sign in with a ChatGPT Plus or Pro plan, use a GitHub Copilot account, or point it at a model running on your own machine. OpenCode itself is free.
+
+OpenCode Go is an optional subscription for open coding models that the OpenCode team tests. It costs $10 per month, with Go Plus at $40 per month and Go Teams at $20 per member per month.
+
+Claude Code runs only Claude models. Anthropic lists Pro at $20 per month billed monthly, Max at $100 and Ultra at $200. You can also pay per token with an API key, or bill usage through Amazon Bedrock, Google Cloud or Microsoft Foundry.
+
+If you want to switch models per task or use local models, OpenCode fits. If you only use Claude, Claude Code comes from Anthropic, which also trains the models.
+
+## Permissions and Sandboxing
+
+The defaults point in opposite directions. OpenCode starts every agent with a policy that allows everything, then asks only before reading `.env` files. You tighten it with ordered `allow`, `ask` and `deny` rules. The last matching rule wins, and a configured `deny` beats a saved approval.
+
+OpenCode has no OS sandbox. Its docs warn that shell commands run with your user's filesystem, process and network access. Rules match command text, which the docs call best effort, so they recommend a narrow shell allowlist.
+
+Claude Code asks before it edits a file or runs a shell command that is not read-only. It also has an optional OS sandbox. When it is on, shell commands can write only inside the working directory and reach only the network domains you allow.
+
+If you let OpenCode run unattended, run it in a container or a [cloud sandbox](./sandbox-providers-for-coding-agents.mdx), or write deny rules first.
+
+## Agents, Skills and MCP
+
+OpenCode ships a `build` agent with full access and a `plan` agent that cannot edit your code. Press Tab to switch between them. You can define your own agents with their own prompts, models, tools and permissions.
+
+Claude Code covers the same split with permission modes, including a read-only `plan` mode. You can also define custom subagents for specific tasks.
+
+Both load skills from `SKILL.md` folders. OpenCode also reads skills from `.claude/skills` and `~/.claude/skills`, so skills you wrote for Claude Code work there. Both support local and remote MCP servers.
+
+Project instructions do not carry over the same way. OpenCode V2 reads `AGENTS.md` only and no longer falls back to `CLAUDE.md`. Claude Code reads `CLAUDE.md`, or `AGENTS.md` when that is what a repository has. A single `AGENTS.md` works for both.
+
+## Headless Use
+
+`opencode run "prompt"` submits a prompt without the interface, for scripts and CI jobs. OpenCode runs a shared background server that every local client connects to, and `--server` points a client at another one. `claude -p "prompt"` is Claude Code's equivalent, and Anthropic ships GitHub Actions and GitLab CI/CD integrations for it.
+
+## Which One Suits You
+
+- **Choose OpenCode** if you want open source code, many model providers, local models, or one agent across several subscriptions.
+- **Choose Claude Code** if you work mostly with Claude models and want prompts and an optional sandbox by default, plus IDE, desktop and browser surfaces.
+
+## Running Several Agents at Once
+
+Because OpenCode runs any model, you can give the same task to one agent per model and keep the best result. That only works when each agent has its own checkout. [Git Worktrees for AI](/learn/git-worktrees-for-ai) covers the manual setup, and [Review AI-Generated PRs](/learn/how-to/review-ai-generated-prs) covers checking the results. Treq gives each agent an isolated workspace and stacks dependent ones.
+
+## Next Steps
+
+- [Best Coding Agent CLIs](./best-coding-agent-clis.mdx): every current terminal agent in one table
+- [Claude Code vs Codex CLI](./claude-code-vs-codex-cli.mdx): two vendor agents side by side
+- [Sandbox Providers for Coding Agents](./sandbox-providers-for-coding-agents.mdx): run agents on machines they can break
+- [How to Run Multiple Claude Code Sessions](/learn/how-to/how-to-run-multiple-claude-code-sessions): parallel sessions without collisions

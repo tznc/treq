@@ -1442,7 +1442,7 @@ impl LinearView {
             let mut items = vec![
               NativeMenuItem::Label("Teams".into()),
               NativeMenuItem::Separator,
-              NativeMenuItem::item("All teams", pick(None)).radio(current.is_none()),
+              NativeMenuItem::item("All", pick(None)).radio(current.is_none()),
             ];
             items.extend(teams.iter().map(|t| {
               NativeMenuItem::item(t.name.clone(), pick(Some(t.key.clone())))

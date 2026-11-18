@@ -1,0 +1,94 @@
+---
+sidebar_position: 25
+title: Claude vs GPT for Coding (2026)
+description: Claude vs GPT for coding in 2026. Claude Fable 5.2 and Opus 5.5 compared with GPT-6 Astra and GPT-6.1 Sol on price, context and limits.
+---
+
+# Claude vs GPT for Coding
+
+_Claude Fable 5.2 costs less per token than GPT-6 Astra. One tier down, GPT-6.1 Sol costs half as much as Claude Opus 5.5 and the same as Claude Sonnet 5.5._
+
+Anthropic and OpenAI each sell a top model for the hardest agent work and a cheaper model they recommend for most coding. This page compares both pairs on the properties that drive an agent's cost and behavior: price, caching, context limits and effort settings. Figures were checked against each provider's official model and pricing pages in November 2026 and will change. Benchmark scores are left out because each vendor reports them with its own agent setup and settings.
+
+## Flagships: Claude Fable 5.2 vs GPT-6 Astra
+
+| | Claude Fable 5.2 | GPT-6 Astra |
+| --- | --- | --- |
+| Released | Nov 9, 2026 | Sep 3, 2026 |
+| API model ID | `claude-fable-5-2` | `gpt-6-astra` |
+| Input per 1M tokens | $8 | $10 |
+| Output per 1M tokens | $40 | $50 |
+| Cached input per 1M tokens | $0.20 | $1 |
+| Price for prompts over 272K tokens | Same as above | 2x input, 1.5x output |
+| Context window | 1M tokens | 1,050,000 tokens |
+| Max input | Full window | 922,000 tokens |
+| Max output | 128K tokens | 128K tokens |
+| Effort levels | `low` to `max`, default `high` | `low` to `max`, no `none` |
+| Fast mode | $16 / $80 per 1M tokens | 2x standard rates |
+| Batch discount | 50% | 50% |
+
+Both flagships run safety checks that can stop a request. Claude Fable 5.2 returns a `refusal` stop reason and supports a server-side fallback to another model. GPT-6 Astra runs misalignment monitoring on supported Responses API requests, which can stop a conversation for review. Claude Fable 5.2 also requires 30-day data retention, so it is not available under zero data retention without Anthropic's authorization.
+
+## Recommended Defaults: Claude Opus 5.5 vs GPT-6.1 Sol
+
+Anthropic's docs tell you to start most work on Claude Opus 5.5. OpenAI positions GPT-6.1 Sol as near-Astra performance at a lower cost.
+
+| | Claude Opus 5.5 | GPT-6.1 Sol |
+| --- | --- | --- |
+| Released | Sep 22, 2026 | Sep 29, 2026 |
+| API model ID | `claude-opus-5-5` | `gpt-6.1-sol` |
+| Input per 1M tokens | $4 | $2 |
+| Output per 1M tokens | $20 | $10 |
+| Cached input per 1M tokens | $0.20 | $0.10 |
+| Price for prompts over 272K tokens | Same as above | 2x input, 1.5x output |
+| Context window | 1M tokens | 1,050,000 tokens |
+| Max output | 128K tokens | 128K tokens |
+| Default effort | `medium` | `medium` |
+| Fast mode | $8 / $40 per 1M tokens | 2x standard, or 6x for Ultrafast |
+
+Claude Sonnet 5.5 matches GPT-6.1 Sol at $2 input and $10 output, with cached input at $0.10. If price is your constraint, compare Sonnet 5.5 against GPT-6.1 Sol on your own tasks before you compare Opus 5.5.
+
+## What One Agent Request Costs
+
+The arithmetic below uses list prices for one request with 200,000 input tokens, of which 180,000 are cache hits, and 4,000 output tokens. It ignores cache-write charges.
+
+| Model | Cost of one request |
+| --- | --- |
+| Claude Fable 5.2 | about $0.36 |
+| GPT-6 Astra | about $0.58 |
+| Claude Opus 5.5 | about $0.20 |
+| GPT-6.1 Sol | about $0.10 |
+| Claude Sonnet 5.5 | about $0.10 |
+
+This is the cost of one request, not one task. Models differ in how many steps they take, how many reasoning tokens they spend, and how their tokenizers count the same text. Measure cost per finished task on your own repository before you draw a conclusion.
+
+## Long Context
+
+Anthropic bills the full 1M-token window at standard rates on these models. OpenAI raises the price of the whole request once input passes 272K tokens. An agent that keeps a large repository map or long tool output in context pays that surcharge on every turn above the threshold. GPT-6.1 Sol uses a 500K default context window in Codex, and OpenAI states that usage drawn from a Codex subscription has no long-context surcharge.
+
+## API Shape
+
+Claude models use the Messages API, and thinking is always on for Fable 5.2 and Opus 5.5. You control depth with the effort setting. GPT-6 Astra and GPT-6.1 Sol require the Responses API for tool calling. OpenAI's GPT-6 guide tells you to remove `temperature` and `top_p` whenever reasoning effort is above `none`, so tune behavior with prompts and effort.
+
+## Where You Can Run Them
+
+Claude Code runs Claude models, and Codex runs GPT-6 models. GitHub Copilot lists Claude Fable 5.2, Opus 5.5, GPT-6 Astra and GPT-6.1 Sol as generally available, so a Copilot team can test both vendors in one tool.
+
+On cloud platforms, Claude models run on Amazon Bedrock, Google Cloud and Microsoft Foundry. GPT-6 Astra and GPT-6.1 Sol run on Amazon Bedrock, and on Google Cloud in private preview.
+
+## How to Choose
+
+The choice depends on your task mix and your coding tool. Use the flagship only for work the cheaper tier fails, since both flagships cost two to five times more per token. If your team already works in Claude Code or Codex, the tool often decides the vendor. Test each model in the tool you will use, because the tool shapes prompts, tool definitions and context handling.
+
+Run both vendors' mid-tier models on 20 to 50 closed issues from your own repository, with a failing test for each. Set effort explicitly, record cost and pass rate, and step up a tier only where the pass rate falls short.
+
+## Related Concepts
+
+A [coding agent](/learn/concepts/ai-engineering/coding-agents) is a loop of model calls and tool runs, so per-request prices compound across a task. [Quality gates](/learn/concepts/ai-engineering/quality-gates-for-agent-output) give you the pass or fail signal you need to compare models fairly.
+
+## Next Steps
+
+- [Best LLMs for Coding Agents](./best-llms-for-coding-agents.mdx): every current frontier and open-weight model in one table
+- [Claude vs Gemini for Coding](./claude-vs-gemini-for-coding.mdx): the same comparison against Google's models
+- [Best Open-Weight Coding Models](./best-open-weight-coding-models.mdx): models you can host yourself
+- [Parallel Coding Agents](/learn/parallel-coding-agents): why running several agents raises the stakes on model cost

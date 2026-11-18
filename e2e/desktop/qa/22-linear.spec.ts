@@ -160,7 +160,7 @@ test("linear: issues", async ({ page }) => {
     name: "22-linear-07-team-menu",
     title: "Linear view: team menu",
     screen: true,
-    expectations: ["A menu under the selector: Teams heading, All Teams, Engineering, Operations"],
+    expectations: ["A menu under the selector: Teams heading, All, Engineering, Operations"],
   });
   await page.keyboard.press("Escape");
   await settle(page, 600);

@@ -737,6 +737,11 @@ pub fn skill_install_link(app: &AppHandle, label: &str, skill_id: String) {
   window::skill_install_link(app, label, skill_id);
 }
 
+/// A `treq://pr/open` link for window `label`: it shows PR `number`. Any thread.
+pub fn pr_open_link(app: &AppHandle, label: &str, number: u64) {
+  window::pr_open_link(app, label, number);
+}
+
 /// Types `keystroke` (GPUI's notation, e.g. "cmd-v") into the focused GPUI
 /// window, as if pressed there. On macOS a menu item's key equivalent takes
 /// the key press before the window sees it, so the Edit menu hands its keys
