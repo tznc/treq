@@ -1139,6 +1139,23 @@ impl changes_data::ChangesHost for FakeHost {
     Ok(self.agent.lock().unwrap().clone())
   }
 
+  fn keep_sent_comments(
+    &self,
+    _: &str,
+    workspace_id: i64,
+    comments: &[crate::core::review::LineComment],
+  ) -> Result<(), String> {
+    let kept: Vec<String> = comments
+      .iter()
+      .map(|c| format!("{}:{}", c.file_path, c.text))
+      .collect();
+    self.record(format!(
+      "keep sent comments {workspace_id} {}",
+      kept.join(",")
+    ));
+    Ok(())
+  }
+
   fn resolve_agent_comment(&self, _: &str, id: &str) -> Result<(), String> {
     self.record(format!("resolve agent comment {id}"));
     for c in self.agent.lock().unwrap().iter_mut().filter(|c| c.id == id) {

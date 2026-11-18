@@ -1064,6 +1064,9 @@ fn changes_tab_sends_the_review_to_an_agent(cx: &mut TestAppContext) {
   assert!(!h.drawn("review-action-bar"));
   assert!(!h.drawn("finish-review-popover"));
   assert!(host.writes().contains(&"clear review 7".to_string()));
+  assert!(host
+    .writes()
+    .contains(&"keep sent comments 7 a.rs:Nit".to_string()));
 }
 
 #[gpui::test]

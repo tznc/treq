@@ -768,10 +768,27 @@ impl ChangesView {
       }),
       cx,
     );
+    self.keep_sent(cx);
     if self.review.parked.is_some() {
       self.reload_stale(cx);
     }
     self.reset_review(cx);
+  }
+
+  /// The sent comments stay on the diff, marked sent, until resolved.
+  fn keep_sent(&mut self, cx: &mut Context<Self>) {
+    let Some(id) = self.parent.workspace_id() else {
+      return;
+    };
+    let comments = self.review.comments.clone();
+    self.run(
+      move |host, parent| host.keep_sent_comments(&parent.repo_path, id, &comments),
+      |view, result, cx| match result {
+        Ok(()) => view.read_agent(cx),
+        Err(err) => log::warn!("Failed to keep sent review comments: {err}"),
+      },
+      cx,
+    );
   }
 
   /// Clears everything and the kept review.
