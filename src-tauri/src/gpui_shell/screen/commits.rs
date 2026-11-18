@@ -1719,11 +1719,15 @@ impl Render for CommitsView {
     self.scroll_to_commit(cx);
     let p = theme::palette(self.dark);
     let root = ui::text(div(), TextSize::Sm)
+      .id("workspace-commits")
       .debug_selector(|| "workspace-commits".into())
+      .role(gpui::Role::Group)
+      .aria_label("Commits")
       .relative()
       .size_full()
       .bg(p.background)
       .text_color(p.foreground)
+      .test_support()
       .track_focus(&self.focus)
       .on_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
         let held = crate::gpui_shell::keys::held(e.keystroke.modifiers);
