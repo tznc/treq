@@ -30,6 +30,34 @@ pub fn parse_pr_open_link(url: &str) -> Option<PrLink> {
   Some(PrLink { repo, number })
 }
 
+static PENDING: std::sync::Mutex<Option<PrLink>> = std::sync::Mutex::new(None);
+
+/// Keeps a `treq://pr/open` link that launched Treq, before any window has
+/// a repository open.
+pub fn queue_pending(link: PrLink) {
+  *PENDING.lock().unwrap_or_else(|p| p.into_inner()) = Some(link);
+}
+
+/// The queued link, once, if it names GitHub repository `repo`.
+pub fn take_pending_for(repo: &str) -> Option<PrLink> {
+  let mut pending = PENDING.lock().unwrap_or_else(|p| p.into_inner());
+  if pending.as_ref()?.repo.eq_ignore_ascii_case(repo) {
+    pending.take()
+  } else {
+    None
+  }
+}
+
+/// Whether a link is queued.
+pub fn has_pending() -> bool {
+  PENDING.lock().unwrap_or_else(|p| p.into_inner()).is_some()
+}
+
+/// The queued link, once, whatever its repository.
+pub fn take_pending() -> Option<PrLink> {
+  PENDING.lock().unwrap_or_else(|p| p.into_inner()).take()
+}
+
 /// A GitHub owner or repository name: letters, digits, `-`, `_` and `.`,
 /// never `.` or `..` alone.
 fn is_github_name(part: &str) -> bool {
@@ -44,6 +72,23 @@ fn is_github_name(part: &str) -> bool {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn a_queued_link_is_taken_once_by_its_repo() {
+    let link = PrLink {
+      repo: "tznc/treq".into(),
+      number: 42,
+    };
+    queue_pending(link.clone());
+    assert!(has_pending());
+    assert_eq!(take_pending_for("tznc/other"), None);
+    assert_eq!(take_pending_for("TZNC/treq"), Some(link.clone()));
+    assert_eq!(take_pending_for("tznc/treq"), None);
+    queue_pending(link.clone());
+    assert_eq!(take_pending(), Some(link));
+    assert_eq!(take_pending(), None);
+    assert!(!has_pending());
+  }
 
   #[test]
   fn reads_the_repo_and_number() {
