@@ -1776,6 +1776,12 @@ fn terminal_agent_header_has_no_link_without_one(cx: &mut TestAppContext) {
 
 #[test]
 fn terminal_link_labels_name_the_pull_request() {
-  assert_eq!(super::super::terminal::link_label("https://github.com/o/r/pull/4305"), "#4305");
-  assert_eq!(super::super::terminal::link_label("https://linear.app/x/issue/ENG-1"), "linear.app");
+  assert_eq!(
+    super::super::terminal::link_label("https://github.com/o/r/pull/4305"),
+    "#4305"
+  );
+  assert_eq!(
+    super::super::terminal::link_label("https://linear.app/x/issue/ENG-1"),
+    "linear.app"
+  );
 }

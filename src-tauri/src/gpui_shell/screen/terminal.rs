@@ -3826,7 +3826,10 @@ impl TerminalPane {
           // Short label (['link label']): 11px is fine.
           // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
-            .id(SharedString::from(format!("terminal-link-label-{}", column.id)))
+            .id(SharedString::from(format!(
+              "terminal-link-label-{}",
+              column.id
+            )))
             .role(gpui::Role::Link)
             .aria_label(url.clone())
             .debug_selector(|| "terminal-link-label".into())
@@ -3853,6 +3856,7 @@ impl TerminalPane {
             })
             .child(ui::icon(theme::ICON_GITHUB, 12., d.foreground))
             .child(link_label(&url))
+            .test_support()
         });
         let waiting = self
           .host
