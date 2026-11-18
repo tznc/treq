@@ -1023,7 +1023,7 @@ impl WorkspaceView {
     self.pr.pr.as_ref()?.as_ref().map(|pr| pr.url.clone())
   }
 
-  /// A right-click on a button that opens `url`: its "Copy link" menu.
+  /// A right-click on a button that opens `url`: its copy-link menu.
   fn copy_link(
     &self,
     url: Option<String>,
