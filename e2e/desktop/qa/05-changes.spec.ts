@@ -313,7 +313,9 @@ test("changes: filter menu picks what the lists show", async ({ page }) => {
     expectations: ["The menu lists only Generated files, checked"],
   });
   await page.keyboard.press("Escape");
-  await settle(page, 500);  await page.getByRole("checkbox", { name: "Hide" }).click();
+  await settle(page, 500);
+  // The Hide toggle is not observable: click its fixed point (1400x900 window).
+  await page.mouse.click(463, 423);
   await settle(page, 500);
   await capture(page, {
     name: "05-changes-committed-hidden",
@@ -323,6 +325,6 @@ test("changes: filter menu picks what the lists show", async ({ page }) => {
       "No committed file rows are listed under it",
     ],
   });
-  await page.getByRole("checkbox", { name: "Hide" }).click();
+  await page.mouse.click(463, 423);
   await settle(page, 500);
 });
