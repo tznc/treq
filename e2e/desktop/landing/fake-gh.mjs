@@ -230,6 +230,48 @@ function rollupEntry(c) {
 for (const pr of prs) pr.statusCheckRollup = (checks[pr.headRefName] ?? []).map(rollupEntry);
 
 const reviewThreads = {
+  401: [
+    {
+      id: "PRRT_cache_rename",
+      isResolved: false,
+      isOutdated: false,
+      path: "packages/api/src/cache.ts",
+      line: 1,
+      diffSide: "RIGHT",
+      comments: {
+        nodes: [
+          {
+            id: "PRRC_cache_rename",
+            body: "Name it for what it holds.\n\n```suggestion\nconst values = new Map<string, string>();\n```",
+            createdAt: "2026-08-14T09:10:00Z",
+            url: `${REPO}/pull/401#discussion_r3`,
+            diffHunk: "@@ -0,0 +1 @@\n+const store = new Map<string, string>();",
+            author: author("octocat"),
+          },
+        ],
+      },
+    },
+    {
+      id: "PRRT_cache_delete",
+      isResolved: false,
+      isOutdated: false,
+      path: "packages/api/src/cache.ts",
+      line: 4,
+      diffSide: "RIGHT",
+      comments: {
+        nodes: [
+          {
+            id: "PRRC_cache_delete",
+            body: "```suggestion\n```",
+            createdAt: "2026-08-14T09:12:00Z",
+            url: `${REPO}/pull/401#discussion_r4`,
+            diffHunk: "@@ -0,0 +1,4 @@\n+const store = new Map<string, string>();\n+\n+export function setKey(key: string, value: string): void {\n+  store.set(key, value);",
+            author: author("hubot"),
+          },
+        ],
+      },
+    },
+  ],
   418: [
     {
       id: "PRRT_client_stringify",
