@@ -1515,7 +1515,7 @@ impl WorkspaceView {
   fn create_pr(&self, create: &CreatePr, p: &Palette, cx: &mut Context<Self>) -> Div {
     let white = p.primary_foreground;
     let styled = |b: Button| {
-      b.size(Size::Sm)
+      b.size(Size::Md)
         .disabled(create.disabled)
         .variant(Variant::Github)
     };
