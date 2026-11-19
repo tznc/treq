@@ -3308,12 +3308,12 @@ impl TerminalPane {
                     let id = id.clone();
                     move || format!("terminal-send-title-{id}")
                   })
-                  .w_full()
+                  .max_w_full()
                   .truncate()
                   .child(asset.title.clone()),
                 cx,
               )
-              .w_full()
+              .max_w_full()
               .min_w_0(),
           )
       };
@@ -3332,9 +3332,8 @@ impl TerminalPane {
         .test_support()
         .relative()
         .flex_none()
-        .h_20()
-        .w(zpx(144.))
-        .min_w(zpx(144.))
+        .size_20()
+        .min_w_20()
         .rounded(radius::MD)
         .border_1()
         .border_color(dark.foreground.opacity(if shown { 0.4 } else { 0.15 }))
