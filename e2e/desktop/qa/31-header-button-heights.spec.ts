@@ -19,7 +19,7 @@ test("header-button-heights: Create PR matches Merge…", async ({ page }) => {
   await settle(page, 25_000);
   await openWorkspace(page, "feat/keyvalues-cache");
   await settle(page, 2500);
-  const create = page.getByRole("button", { name: "Create PR" });
+  const create = page.getByRole("button", { name: "Create PR", exact: true });
   const merge = page.getByRole("button", { name: "Merge…" });
   await expect(create).toBeVisible();
   await expect(merge).toBeVisible();
