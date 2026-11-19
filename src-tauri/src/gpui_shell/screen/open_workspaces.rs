@@ -615,6 +615,7 @@ impl OpenWorkspacesDialog {
     });
     let from_issues = data::issue_targets(
       &self.route.repo_path,
+      &self.pattern,
       &self.chosen_issues,
       &self.open_branches,
       &self.linear_branches,
@@ -1183,6 +1184,7 @@ impl OpenWorkspacesDialog {
       .chain(
         data::issue_targets(
           repo_path,
+          &self.pattern,
           &self.chosen_issues,
           &self.open_branches,
           &self.linear_branches,
