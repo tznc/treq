@@ -1320,3 +1320,23 @@ fn project_button_draws_for_saved_and_unsaved_projects(cx: &mut TestAppContext) 
   h.click("project-button");
   assert_eq!(h.sent(), vec![SidebarAction::ProjectMenu]);
 }
+
+#[test]
+fn pr_pills_name_the_state_as_github_does() {
+  assert_eq!(
+    PrState::Open.pill(),
+    ("Open", theme::ICON_PR, Tone::GitOpen)
+  );
+  assert_eq!(
+    PrState::Merged.pill(),
+    ("Merged", theme::ICON_MERGE, Tone::GitMerged)
+  );
+  assert_eq!(
+    PrState::Closed.pill(),
+    ("Closed", theme::ICON_PR_CLOSED, Tone::GitClosed)
+  );
+  assert_eq!(
+    PrState::Draft.pill(),
+    ("Draft", theme::ICON_PR_DRAFT, Tone::Neutral)
+  );
+}
