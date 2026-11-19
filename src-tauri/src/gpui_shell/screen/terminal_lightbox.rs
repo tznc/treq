@@ -868,6 +868,9 @@ impl Lightbox {
 
 /// A click on the lightbox's content (`data-lightbox-content`), which
 /// leaves it open.
+/// Below this window width the previous/next buttons move into the actions row.
+const NAV_INLINE_BELOW: f32 = 768.;
+
 fn content<E: InteractiveElement>(el: E) -> E {
   el.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
 }
@@ -900,7 +903,7 @@ fn tool_with(id: &'static str, icon: gpui::AnyElement, disabled: bool) -> Statef
 }
 
 impl Lightbox {
-  fn controls(&self, cx: &mut Context<Self>) -> Div {
+  fn controls(&self, compact: bool, cx: &mut Context<Self>) -> Div {
     let image = self.current().is_some_and(SendAsset::is_image);
     let mut pill = div()
       .flex()
@@ -992,8 +995,10 @@ impl Lightbox {
       .items_center()
       .justify_center()
       .gap_2()
+      .when(compact, |d| d.child(self.nav(false, true, cx)))
       .child(pill)
       .children(input)
+      .when(compact, |d| d.child(self.nav(true, true, cx)))
   }
 
   fn image_slide(&self, asset: &SendAsset, window: &Window, cx: &mut Context<Self>) -> Div {
@@ -1485,7 +1490,7 @@ impl Lightbox {
     div().w_full().flex().justify_center().child(content(panel))
   }
 
-  fn nav(&self, next: bool, cx: &mut Context<Self>) -> Stateful<Div> {
+  fn nav(&self, next: bool, compact: bool, cx: &mut Context<Self>) -> Stateful<Div> {
     let disabled = if next {
       self.index + 1 >= self.assets.len()
     } else {
@@ -1507,12 +1512,16 @@ impl Lightbox {
         .role(gpui::Role::Button)
         .aria_label(if next { "Next" } else { "Previous" })
         .debug_selector(move || id.into())
-        .absolute()
-        .top(gpui::relative(0.5))
-        .mt_neg_8()
-        .when(next, |d| d.right_3())
-        .when(!next, |d| d.left_3())
-        .size_16()
+        // Narrow windows keep it in the actions row, clear of the slide.
+        .when(compact, |d| d.flex_none().size_8())
+        .when(!compact, |d| {
+          d.absolute()
+            .top(gpui::relative(0.5))
+            .mt_neg_8()
+            .when(next, |d| d.right_3())
+            .when(!next, |d| d.left_3())
+            .size_16()
+        })
         .flex()
         .items_center()
         .justify_center()
@@ -1530,7 +1539,7 @@ impl Lightbox {
               }),
             )
         })
-        .child(ui::icon(icon, 32., chrome(1.))),
+        .child(ui::icon(icon, if compact { 16. } else { 32. }, chrome(1.))),
     )
   }
 
@@ -1587,6 +1596,7 @@ impl Render for Lightbox {
     let p = theme::palette(true);
     let viewport = window.viewport_size();
     let current = self.current().cloned();
+    let compact = f32::from(viewport.width) < NAV_INLINE_BELOW;
     let header = div()
       .mb_3()
       .flex()
@@ -1603,7 +1613,7 @@ impl Render for Lightbox {
           .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
           .child(asset.title.clone())
       }))
-      .child(self.controls(cx));
+      .child(self.controls(compact, cx));
     let slide = current.as_ref().map(|asset| {
       if asset.is_image() {
         self.image_slide(asset, window, cx)
@@ -1664,8 +1674,10 @@ impl Render for Lightbox {
           .child(header)
           .children(slide),
       )
-      .child(self.nav(false, cx))
-      .child(self.nav(true, cx))
+      .when(!compact, |d| {
+        d.child(self.nav(false, false, cx))
+          .child(self.nav(true, false, cx))
+      })
       .children(self.discard_dialog(&p, cx))
   }
 }
