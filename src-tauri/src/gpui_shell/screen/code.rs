@@ -2153,7 +2153,7 @@ impl CodeView {
       p,
     );
     div()
-      .flex_shrink()
+      .flex_shrink(1.)
       .min_w(zpx(160.))
       .w(zpx(280.))
       .child(button.w_full())
