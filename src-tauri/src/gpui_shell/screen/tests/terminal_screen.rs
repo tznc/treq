@@ -1795,7 +1795,10 @@ fn send_file_thumbnail_is_square_with_centered_name(cx: &mut TestAppContext) {
   let chip = h.cx.debug_bounds("terminal-send-preview-t1").expect("chip");
   assert_eq!(chip.size.width, chip.size.height, "square chip");
   let title = h.cx.debug_bounds("terminal-send-title-t1").expect("title");
-  assert!(title.size.width < chip.size.width - gpui::px(8.), "title hugs its text");
+  assert!(
+    title.size.width < chip.size.width - gpui::px(8.),
+    "title hugs its text"
+  );
   let offset = (title.center().x - chip.center().x).abs();
   assert!(offset < gpui::px(1.), "title centered, off by {offset:?}");
 }
