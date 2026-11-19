@@ -300,8 +300,6 @@ pub enum SidebarAction {
 struct DraggedWorkspace {
   id: i64,
   title: SharedString,
-  /// The title is a branch, drawn in mono as its row draws it.
-  mono: bool,
   palette: Palette,
 }
 
@@ -315,7 +313,6 @@ impl Render for DraggedWorkspace {
       .border_color(self.palette.border)
       .bg(self.palette.sidebar)
       .text_color(self.palette.sidebar_foreground)
-      .when(self.mono, |this| this.font_family(theme::MONO_FONT))
       .shadow_md()
       .child(self.title.clone())
   }
@@ -1621,10 +1618,6 @@ impl Sidebar {
           .flex_1()
           .min_w_0()
           .truncate()
-          // A branch is code; a title is prose.
-          .when(row.name.is_none(), |this| {
-            this.font_family(theme::MONO_FONT)
-          })
           .text_color(palette.sidebar_foreground)
           .child(label.clone()),
       )
@@ -1683,7 +1676,6 @@ impl Sidebar {
             DraggedWorkspace {
               id,
               title: label.clone().into(),
-              mono: row.name.is_none(),
               palette: *palette,
             },
             |dragged, _, _, cx| cx.new(|_| dragged.clone()),
