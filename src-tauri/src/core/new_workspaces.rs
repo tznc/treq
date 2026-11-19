@@ -336,6 +336,12 @@ fn branch_pattern(repo_path: &str) -> String {
     .unwrap_or_else(|| DEFAULT_BRANCH_PATTERN.to_string())
 }
 
+/// The branch for a tracker issue: the provider's name for it (Linear's
+/// branch name, `github-<n>-<slug>`) put into the repository's pattern.
+pub fn issue_branch(repo_path: &str, provider_name: &str) -> String {
+  apply_branch_name_pattern(&branch_pattern(repo_path), provider_name)
+}
+
 /// What each line of `text` would do in `repo_path`. New workspaces stack
 /// on `stack_on`, or the default branch.
 pub fn plan(

@@ -46,7 +46,7 @@ pub async fn open_or_create_workspace_from_linear_issue(
 
     let (ws, ws_created) = crate::core::open_or_create_workspace_from_issue(
       &repo_path_owned,
-      &branch_name,
+      &crate::core::new_workspaces::issue_branch(&repo_path_owned, &branch_name),
       &base_branch,
       &title,
       description.as_deref(),
