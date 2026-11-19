@@ -354,6 +354,53 @@ fn pr_open_deep_link(app: &AppHandle, url: &str) {
   gpui_shell::pr_open_link(app, &label, link.number);
 }
 
+/// How long a link that launched Treq waits for a window to open its
+/// repository before it opens on GitHub instead.
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+const PR_LAUNCH_LINK_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// A `treq://pr/open` link that launched Treq: no window has a repository
+/// yet, so the first window to open the link's repository shows the PR
+/// (`pr_launch_link_window`). With none in time, it opens on GitHub.
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+fn pr_open_launch_link(app: &AppHandle, url: &str) {
+  let Some(link) = crate::core::pr_link::parse_pr_open_link(url) else {
+    log::info!("pr deep link ignored (malformed)");
+    return;
+  };
+  crate::core::pr_link::queue_pending(link);
+  let app = app.clone();
+  let url = url.to_string();
+  std::thread::spawn(move || {
+    std::thread::sleep(PR_LAUNCH_LINK_WAIT);
+    if crate::core::pr_link::take_pending().is_some() {
+      pr_open_deep_link(&app, &url);
+    }
+  });
+}
+
+/// Window `label` opened the repository at `path`: it shows the PR a link
+/// that launched Treq asked for, when the link names that repository.
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+pub(crate) fn pr_launch_link_window(app: &AppHandle, label: &str, path: &str) {
+  if !crate::core::pr_link::has_pending() {
+    return;
+  }
+  let Some(info) = github::get_git_remote_url_impl(path).ok().flatten() else {
+    return;
+  };
+  let Some(link) = crate::core::pr_link::take_pending_for(&info.full_name) else {
+    return;
+  };
+  #[cfg(feature = "gpui-shell")]
+  gpui_shell::pr_open_link(app, label, link.number);
+  #[cfg(not(feature = "gpui-shell"))]
+  let _ = (app, label, link);
+}
+
 /// The window open on GitHub repository `repo` (`owner/repo`), the focused
 /// one first.
 #[cfg(feature = "gui")]
@@ -895,8 +942,10 @@ pub fn run() {
         // The link that launched Treq, if any; later links reach on_open_url.
         if let Ok(Some(urls)) = app.deep_link().get_current() {
           for url in urls {
-            if classify_deep_link(url.as_str()) == DeepLinkKind::SkillInstall {
-              skill_install_deep_link(app.handle(), url.as_str());
+            match classify_deep_link(url.as_str()) {
+              DeepLinkKind::SkillInstall => skill_install_deep_link(app.handle(), url.as_str()),
+              DeepLinkKind::PrOpen => pr_open_launch_link(app.handle(), url.as_str()),
+              _ => {}
             }
           }
         }

@@ -1898,10 +1898,14 @@ impl Render for TerminalView {
       .on_key_down(cx.listener(Self::on_key))
       .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
       // A click anywhere else blurs the terminal, as it does xterm's
-      // textarea; its cursor turns to an outline.
+      // textarea; its cursor turns to an outline. It also drops the
+      // selection, so no stale highlight is left behind.
       .on_mouse_down_out(cx.listener(|view, _, window, cx| {
         if view.focus.is_focused(window) {
           window.blur(cx);
+        }
+        if view.with_emulator(|e| e.clear_selection()).is_some() {
+          cx.notify();
         }
       }))
       .on_mouse_down(MouseButton::Middle, cx.listener(Self::on_mouse_down))
@@ -1977,6 +1981,8 @@ enum Kind {
     workspace_path: Option<String>,
     workspace_name: Option<String>,
     agent: String,
+    /// What the session works on (a reviewed PR), opened from its header.
+    link: Option<String>,
   },
   Shell {
     dir: String,
@@ -3815,9 +3821,48 @@ impl TerminalPane {
         workspace_name,
         repo_path,
         agent,
+        link,
         ..
       } => {
         let key = workspace_path.clone().unwrap_or_else(|| repo_path.clone());
+        let link = link.clone().map(|url| {
+          let host = self.host.clone();
+          let open = url.clone();
+          // Short label (['link label']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
+          ui::text(div(), TextSize::Xs)
+            .id(SharedString::from(format!(
+              "terminal-link-label-{}",
+              column.id
+            )))
+            .role(gpui::Role::Link)
+            .aria_label(url.clone())
+            .debug_selector(|| "terminal-link-label".into())
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap_1()
+            .rounded_sm()
+            .bg(d.foreground.opacity(0.08))
+            .px_1()
+            .py_0p5()
+            .font_family(theme::MONO_FONT)
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .text_color(d.foreground)
+            .cursor_pointer()
+            .hover(|s| s.bg(p.hover()))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(move |_, _, cx| {
+              // `open_url` blocks, so it runs off the main thread.
+              let (host, open) = (host.clone(), open.clone());
+              cx.background_executor()
+                .spawn(async move { host.open_url(&open) })
+                .detach();
+            })
+            .child(ui::icon(theme::ICON_GITHUB, 12., d.foreground))
+            .child(link_label(&url))
+            .test_support()
+        });
         let waiting = self
           .host
           .agent_msg_waiting(&column.view.read(cx).pty)
@@ -3892,7 +3937,8 @@ impl TerminalPane {
                   self.react.clone(),
                 ),
                 cx,
-              )),
+              ))
+              .children(link),
           )
           .child(
             div()
@@ -4412,6 +4458,20 @@ fn paint_run(
     .best_effort();
 }
 
+/// A session link's chip text: `#N` for a GitHub pull request, else the
+/// URL's host.
+pub(super) fn link_label(url: &str) -> String {
+  match url.split_once("/pull/") {
+    Some((_, rest)) => format!("#{}", rest.split(['/', '?', '#']).next().unwrap_or(rest)),
+    None => url
+      .split("://")
+      .nth(1)
+      .and_then(|rest| rest.split('/').next())
+      .unwrap_or(url)
+      .to_string(),
+  }
+}
+
 /// The session's column and what its terminal starts, read from the
 /// session tables of the repository `main` and its supporting ones.
 fn agent_session(
@@ -4469,6 +4529,7 @@ fn agent_session(
       workspace_path,
       workspace_name: workspace_name.clone(),
       agent,
+      link: session.link_url.clone(),
     };
     return Some((
       kind,

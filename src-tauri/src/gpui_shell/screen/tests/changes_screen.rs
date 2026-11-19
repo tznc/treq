@@ -144,11 +144,12 @@ fn changes_host_with_committed() -> FakeHost {
 }
 
 #[gpui::test]
-fn changes_tab_filters_the_committed_group(cx: &mut TestAppContext) {
+fn changes_tab_hides_the_committed_group_from_its_checkbox(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host_with_committed(), committed_route(true));
   assert!(h.drawn("committed-section-toggle"));
   assert!(h.drawn("file-card-c.rs"));
-  filter(&mut h, "Committed");
+  assert!(!h.drawn("changes-filter"), "no filter button for committed");
+  h.click("committed-hide");
   assert_eq!(
     fields(&h, "changes.showCommitted"),
     vec![serde_json::json!(false)]
@@ -159,8 +160,9 @@ fn changes_tab_filters_the_committed_group(cx: &mut TestAppContext) {
 fn changes_tab_hides_the_committed_group_when_filtered_out(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host_with_committed(), committed_route(false));
   assert!(h.drawn("file-row-a.rs"));
-  assert!(h.drawn("changes-filter"));
-  assert!(!h.drawn("committed-section-toggle"));
+  assert!(!h.drawn("changes-filter"));
+  assert!(h.drawn("committed-hide"), "the header stays to unhide");
+  assert!(!h.drawn("committed-row-c.rs"));
   assert!(!h.drawn("file-card-c.rs"));
 }
 
@@ -1565,4 +1567,22 @@ fn the_changes_section_header_is_a_heading(cx: &mut TestAppContext) {
   let screen = a11y_screen(&mut h);
   expect(screen.get_by_role(by::role(gpui::Role::Heading).name("Changes"))).to_be_visible();
   expect(screen.get_by_role(by::role(gpui::Role::Button).name("Collapse Changes"))).to_be_visible();
+}
+
+#[gpui::test]
+fn a_committed_file_takes_a_file_comment(cx: &mut TestAppContext) {
+  use gpui::Role;
+  use gpui_testing_library::prelude::*;
+  let (mut h, _) = workspace_harness(cx, changes_host_committed_only(), committed_route(true));
+  let screen = h.rendered();
+  let user = screen.user();
+  user.click(&screen.get_by_role(by::role(Role::Button).name("Add file comment on c.rs")));
+  user.keyboard("Split this");
+  user.click(&screen.get_by_role(by::role(Role::Button).name("Add comment")));
+  h.cx.run_until_parked();
+  expect(
+    h.rendered()
+      .get_by_role(by::role(Role::Button).name("Edit comment")),
+  )
+  .to_be_visible();
 }

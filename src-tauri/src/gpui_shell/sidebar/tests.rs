@@ -1340,3 +1340,23 @@ fn hovering_a_terminal_peeks_its_workspace_row(cx: &mut TestAppContext) {
   });
   assert!(h.bounds("workspace-peek-8").is_some());
 }
+
+#[test]
+fn pr_pills_name_the_state_as_github_does() {
+  assert_eq!(
+    PrState::Open.pill(),
+    ("Open", theme::ICON_PR, Tone::GitOpen)
+  );
+  assert_eq!(
+    PrState::Merged.pill(),
+    ("Merged", theme::ICON_MERGE, Tone::GitMerged)
+  );
+  assert_eq!(
+    PrState::Closed.pill(),
+    ("Closed", theme::ICON_PR_CLOSED, Tone::GitClosed)
+  );
+  assert_eq!(
+    PrState::Draft.pill(),
+    ("Draft", theme::ICON_PR_DRAFT, Tone::Neutral)
+  );
+}

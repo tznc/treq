@@ -184,7 +184,12 @@ fn hint(text: impl Into<SharedString>, p: &Palette) -> Div {
 
 /// A plain `<input>`: `rounded-md border border-border/60 bg-background
 /// px-2 py-1.5`.
-fn text_field(id: &'static str, state: &Entity<InputState>, p: &Palette) -> impl IntoElement {
+fn text_field(
+  id: &'static str,
+  name: &'static str,
+  state: &Entity<InputState>,
+  p: &Palette,
+) -> impl IntoElement {
   div()
     .id(id)
     .debug_selector(|| id.into())
@@ -197,7 +202,13 @@ fn text_field(id: &'static str, state: &Entity<InputState>, p: &Palette) -> impl
     .border_1()
     .border_color(p.border.opacity(0.6))
     .bg(p.background)
-    .child(ui::input(state).appearance(false).bordered(false).flex_1())
+    .child(
+      ui::input(state)
+        .aria_label(name)
+        .appearance(false)
+        .bordered(false)
+        .flex_1(),
+    )
 }
 
 /// A `<label className="flex flex-col gap-1">`: a caption over a control.
@@ -826,6 +837,7 @@ impl RemoteView {
             .child(description),
         )
         .on_click(cx.listener(move |view, _, window, cx| view.set_mode(mode, window, cx)))
+        .test_support()
     };
     let wide = window.viewport_size().width >= crate::gpui_shell::ui::zoomed(640., window);
     div().child(
@@ -888,9 +900,12 @@ impl RemoteView {
     account: &super::settings::AccountRoute,
     press: &impl Fn(&str) -> ClickFn,
     p: &Palette,
-  ) -> Div {
+  ) -> impl IntoElement {
     let busy = account.loading || account.signing_in;
     div()
+      .id("remote-setup-signed-out")
+      .role(gpui::Role::Group)
+      .aria_label("Sign in to Treq")
       .debug_selector(|| "remote-setup-signed-out".into())
       .flex()
       .flex_col()
@@ -916,6 +931,7 @@ impl RemoteView {
           .text_color(p.destructive)
           .child(format!("Sign-in failed: {error}"))
       }))
+      .test_support()
   }
 
   /// A text field whose `<datalist>` suggests the `~/.ssh/config` aliases
@@ -923,7 +939,7 @@ impl RemoteView {
   /// the field.
   fn suggest_field(
     &self,
-    id: &'static str,
+    (id, name): (&'static str, &'static str),
     state: &Entity<InputState>,
     aliases: &[String],
     window: &Window,
@@ -965,6 +981,7 @@ impl RemoteView {
               cx.stop_propagation();
             }),
           )
+          .test_support()
       });
       deferred(
         anchored()
@@ -988,7 +1005,7 @@ impl RemoteView {
     div()
       .relative()
       .w_full()
-      .child(text_field(id, state, p))
+      .child(text_field(id, name, state, p))
       .child(
         canvas(
           move |at, _, _| {
@@ -1080,7 +1097,7 @@ impl RemoteView {
               .flex()
               .gap_2()
               .child(div().flex_1().child(self.suggest_field(
-                "remote-alias",
+                ("remote-alias", "Alias"),
                 &form.alias,
                 &form.aliases,
                 window,
@@ -1118,7 +1135,7 @@ impl RemoteView {
       (
         labelled(
           "Display name",
-          text_field("remote-display-name", &form.display_name, p),
+          text_field("remote-display-name", "Display name", &form.display_name, p),
         )
         .into_any_element(),
         false,
@@ -1127,7 +1144,7 @@ impl RemoteView {
         labelled(
           "Hostname or IP address",
           self.suggest_field(
-            "remote-hostname",
+            ("remote-hostname", "Hostname or IP address"),
             &form.hostname,
             &form.aliases,
             window,
@@ -1139,11 +1156,19 @@ impl RemoteView {
         false,
       ),
       (
-        labelled("SSH port", text_field("remote-port", &form.port, p)).into_any_element(),
+        labelled(
+          "SSH port",
+          text_field("remote-port", "SSH port", &form.port, p),
+        )
+        .into_any_element(),
         false,
       ),
       (
-        labelled("Username", text_field("remote-username", &form.username, p)).into_any_element(),
+        labelled(
+          "Username",
+          text_field("remote-username", "Username", &form.username, p),
+        )
+        .into_any_element(),
         false,
       ),
       (key_cell.into_any_element(), true),
@@ -1157,6 +1182,8 @@ impl RemoteView {
       let endpoint = format!("{username}@{hostname}:{port}");
       div()
         .id("remote-trust-confirmation")
+        .role(gpui::Role::Group)
+        .aria_label("Confirm host trust")
         .debug_selector(|| "remote-trust-confirmation".into())
         .mt_4()
         .rounded(radius::MD)
@@ -1203,6 +1230,7 @@ impl RemoteView {
                 })),
             ),
         )
+        .test_support()
     });
 
     let show_continue = form.trust.is_none();
@@ -1357,6 +1385,7 @@ impl RemoteView {
                 .size(Size::Sm)
                 .disabled(!session.running)
                 .label("Reattach")
+                .aria_label(format!("Reattach {}", title.as_ref().unwrap_or(&label)))
                 .on_click(cx.listener(move |view, _, _, cx| {
                   view.open_session(Some(label.clone()), title.clone(), true, cx)
                 })),
@@ -1404,9 +1433,13 @@ impl RemoteView {
         .when_some(self.sessions.error.clone(), |this, error| {
           this.child(
             div()
+              .id("remote-terminal-error")
+              .role(gpui::Role::Alert)
+              .aria_label(error.clone())
               .debug_selector(|| "remote-terminal-error".into())
               .text_color(red)
-              .child(error),
+              .child(error)
+              .test_support(),
           )
         })
         .children(rows)
@@ -1486,8 +1519,12 @@ impl RemoteView {
       }))
       .child(
         div()
+          .id("remote-ambiguous-reason")
+          .role(gpui::Role::Paragraph)
+          .aria_label(reason.clone())
           .debug_selector(|| "remote-ambiguous-reason".into())
-          .child(reason),
+          .child(reason)
+          .test_support(),
       )
       .footer([
         Button::new("remote-ambiguous-dismiss", p)

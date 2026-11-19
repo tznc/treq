@@ -173,12 +173,14 @@ pub enum PrState {
 }
 
 impl PrState {
-  pub(super) fn label(self) -> &'static str {
+  /// The state's pill, as GitHub and the workspace header draw it: its
+  /// label, icon and tone.
+  pub(super) fn pill(self) -> (&'static str, &'static str, Tone) {
     match self {
-      PrState::Draft => "Draft PR",
-      PrState::Open => "Open PR",
-      PrState::Merged => "PR merged",
-      PrState::Closed => "PR closed",
+      PrState::Draft => ("Draft", theme::ICON_PR_DRAFT, Tone::Neutral),
+      PrState::Open => ("Open", theme::ICON_PR, Tone::GitOpen),
+      PrState::Merged => ("Merged", theme::ICON_MERGE, Tone::GitMerged),
+      PrState::Closed => ("Closed", theme::ICON_PR_CLOSED, Tone::GitClosed),
     }
   }
 }

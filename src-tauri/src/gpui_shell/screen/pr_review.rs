@@ -275,8 +275,12 @@ impl PrReviewView {
         let prompt = review_prompt_for(custom.as_deref(), TARGET, &number.to_string(), &summary);
         // A PR is usually not checked out, so its review runs in the home
         // repository and reads the diff through gh.
+        let link = format!("https://github.com/{full_name}/pull/{number}");
         host
-          .launch_session(&super::linear::review_launch(&repo, prompt, agent), false)
+          .launch_session(
+            &super::linear::review_launch(&repo, prompt, agent, Some(link)),
+            false,
+          )
           .map(|_| ())
       },
       |view, result, _cx| {
