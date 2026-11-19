@@ -1853,3 +1853,27 @@ fn send_file_thumbnail_is_square_with_centered_name(cx: &mut TestAppContext) {
   let offset = (title.center().x - chip.center().x).abs();
   assert!(offset < gpui::px(1.), "title centered, off by {offset:?}");
 }
+
+/// A long workspace title truncates in a narrow header instead of running
+/// under the search and close buttons.
+#[gpui::test]
+fn terminal_workspace_label_truncates_before_actions(cx: &mut TestAppContext) {
+  let mut host = terminal_host();
+  for w in &mut host.workspaces {
+    w.title = "Exclude products without images from rankings and more".into();
+  }
+  let (mut h, _) = workspace_harness(cx, host, terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  h.cx
+    .simulate_resize(gpui::size(gpui::px(520.), gpui::px(800.)));
+  h.cx.run_until_parked();
+  let label = h
+    .cx
+    .debug_bounds("terminal-workspace-label")
+    .expect("label");
+  let search = h.cx.debug_bounds("terminal-search-button").expect("search");
+  assert!(
+    label.right() <= search.left(),
+    "label {label:?} overlaps search {search:?}"
+  );
+}
