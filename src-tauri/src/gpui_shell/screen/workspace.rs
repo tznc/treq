@@ -1651,7 +1651,8 @@ impl WorkspaceView {
 
   /// The workspace's tab bar: the view tabs, then its busy and loc status.
   fn tab_bar(&self, row: &TabRow, p: &Palette) -> Div {
-    // Counts are neutral; a conflict shows once, as a danger dot.
+    // Counts are neutral, uncommitted changes yellow; a conflict shows once,
+    // as a danger dot.
     let commits = ui::Tab::new("workspace-tab-commits", "Commits").icon(theme::ICON_COMMIT);
     let commits = match &row.commits {
       Some(CommitsLabel::Count { count, tone }) => {
@@ -1670,6 +1671,9 @@ impl WorkspaceView {
       Some(c) if c.tone == Tone::Conflict => changes
         .count(c.count as usize)
         .dot(ui::Tone::Danger, "Conflict"),
+      Some(c) if c.tone == Tone::Uncommitted => changes
+        .count(c.count as usize)
+        .count_tone(ui::Tone::Warning, "uncommitted changes"),
       Some(c) => changes.count(c.count as usize),
       None => changes,
     };

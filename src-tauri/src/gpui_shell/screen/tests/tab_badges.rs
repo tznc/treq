@@ -182,3 +182,18 @@ fn a_failed_status_read_draws_no_placeholder(cx: &mut TestAppContext) {
     ))
     .is_none());
 }
+
+/// Uncommitted changes tint the Changes count yellow, and its label says
+/// so, since a colour alone says nothing.
+#[gpui::test]
+fn uncommitted_changes_tint_the_changes_count(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, feature_host(), workspace_route());
+  let screen = h.rendered();
+  let changes = screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Tab).name("Changes"));
+  gpui_testing_library::expect(
+    screen.within(&changes).get_by_role(
+      gpui_testing_library::by::role(gpui::Role::Image).name("5, uncommitted changes"),
+    ),
+  )
+  .to_be_visible();
+}

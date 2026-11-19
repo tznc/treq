@@ -1,5 +1,5 @@
-//! Badges, counts and status dots. Color means state: a count is always
-//! neutral, and a problem shows once, as a dot.
+//! Badges, counts and status dots. Color means state: a count is neutral
+//! unless its things share one, and a problem shows once, as a dot.
 
 use gpui::{div, prelude::*, App, Hsla, SharedString, Window};
 use gpui_kit::base::TestSupportExt as _;
@@ -129,10 +129,12 @@ impl RenderOnce for Badge {
 }
 
 /// A number of things, such as changed files on a tab: a neutral pill
-/// with tabular digits. It never takes a state's color.
+/// with tabular digits, or its tone's tint where the things share a state,
+/// such as uncommitted changes.
 #[derive(IntoElement)]
 pub struct Count {
   count: usize,
+  tone: Tone,
   palette: Palette,
   /// On a selected fill: no pill, the number in this (the label's) colour.
   on_selected: Option<Hsla>,
@@ -142,8 +144,24 @@ impl Count {
   pub fn new(count: usize, palette: &Palette) -> Self {
     Self {
       count,
+      tone: Tone::Neutral,
       palette: *palette,
       on_selected: None,
+    }
+  }
+
+  pub fn tone(mut self, tone: Tone) -> Self {
+    self.tone = tone;
+    self
+  }
+
+  /// The pill's fill and text colours.
+  fn colors(&self) -> (Hsla, Hsla) {
+    let p = &self.palette;
+    match (self.on_selected, self.tone) {
+      (Some(label), Tone::Neutral) => (gpui::transparent_black(), label.opacity(0.75)),
+      (_, Tone::Neutral) => (p.muted, p.muted_foreground),
+      (_, tone) => (tone.tint(p), tone.text(p)),
     }
   }
 
@@ -166,11 +184,7 @@ impl Count {
 
 impl RenderOnce for Count {
   fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-    let p = &self.palette;
-    let (bg, fg) = match self.on_selected {
-      Some(label) => (gpui::transparent_black(), label.opacity(0.75)),
-      None => (p.muted, p.muted_foreground),
-    };
+    let (bg, fg) = self.colors();
     pill(cx)
       .min_w(zpx(20.))
       .px(zpx(6.))
@@ -288,6 +302,20 @@ mod tests {
   }
   use super::*;
   use crate::theme;
+
+  /// A toned count, such as uncommitted changes, paints its tone over the
+  /// tone's tint; the default stays neutral.
+  #[test]
+  fn a_toned_count_takes_the_tone() {
+    for dark in [false, true] {
+      let p = theme::palette(dark);
+      assert_eq!(Count::new(3, &p).colors(), (p.muted, p.muted_foreground));
+      assert_eq!(
+        Count::new(3, &p).tone(Tone::Warning).colors(),
+        (Tone::Warning.tint(&p), Tone::Warning.text(&p))
+      );
+    }
+  }
 
   #[test]
   fn test_badge_builder() {
