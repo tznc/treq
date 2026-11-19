@@ -151,6 +151,21 @@ struct SideData {
   last_changed: Option<usize>,
 }
 
+/// The file list's default width, and how far its edge drags.
+const SIDE_WIDTH: f32 = 240.;
+const MIN_SIDE_WIDTH: f32 = 160.;
+const MAX_SIDE_WIDTH: f32 = 600.;
+
+/// The file list's edge being dragged.
+#[derive(Clone, Copy)]
+struct SideResize;
+
+impl Render for SideResize {
+  fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    gpui::Empty
+  }
+}
+
 pub struct ChangesView {
   host: Host,
   react: ActionSink,
@@ -212,6 +227,9 @@ pub struct ChangesView {
   /// The sidebar's rows and the list drawing them.
   side: ListRows<SideRow>,
   side_data: SideData,
+  /// The file list's width, while dragged and after.
+  side_width: f32,
+  side_resizing: bool,
   pub(super) scroll_to: Option<String>,
   /// The button a dropdown opens below, by key.
   anchors: Rc<RefCell<HashMap<String, Bounds<Pixels>>>>,
@@ -309,6 +327,8 @@ impl ChangesView {
       diff: rows::DiffRows::default(),
       side: ListRows::default(),
       side_data: SideData::default(),
+      side_width: SIDE_WIDTH,
+      side_resizing: false,
       scroll_to: None,
       anchors: Rc::default(),
       review: review::Review::default(),
@@ -2105,8 +2125,32 @@ impl ChangesView {
         .size_full(),
       )
     };
+    let resizing = self.side_resizing;
+    let primary = p.primary;
+    let hover = p.handle_hover();
+    let handle = div()
+      .id("changes-file-list-resize")
+      .debug_selector(|| "changes-file-list-resize".into())
+      .absolute()
+      .top_0()
+      .bottom_0()
+      .right_0()
+      .w(zpx(4.))
+      .cursor_ew_resize()
+      .when(resizing, |this| this.bg(primary))
+      .hover(move |style| style.bg(hover))
+      .on_drag(SideResize, |drag, _, _, cx| cx.new(|_| *drag))
+      .on_click(cx.listener(|this, event: &gpui::ClickEvent, _, cx| {
+        cx.stop_propagation();
+        if event.click_count() >= 2 {
+          this.side_width = SIDE_WIDTH;
+          cx.notify();
+        }
+      }));
     div()
-      .w(zpx(240.))
+      .debug_selector(|| "changes-file-list".into())
+      .relative()
+      .w(zpx(self.side_width))
       .flex_none()
       .h_full()
       .flex()
@@ -2115,6 +2159,35 @@ impl ChangesView {
       .border_color(p.border)
       .bg(p.sidebar)
       .child(list)
+      .child(handle)
+      .on_drag_move(cx.listener(
+        |this, event: &gpui::DragMoveEvent<SideResize>, _, cx| {
+          let width = f32::from(event.event.position.x - event.bounds.left())
+            .round()
+            .clamp(MIN_SIDE_WIDTH, MAX_SIDE_WIDTH);
+          if this.side_width != width || !this.side_resizing {
+            this.side_width = width;
+            this.side_resizing = true;
+            cx.notify();
+          }
+        },
+      ))
+      .on_mouse_up_out(
+        MouseButton::Left,
+        cx.listener(|this, _, _, cx| {
+          if std::mem::take(&mut this.side_resizing) {
+            cx.notify();
+          }
+        }),
+      )
+      .on_mouse_up(
+        MouseButton::Left,
+        cx.listener(|this, _, _, cx| {
+          if std::mem::take(&mut this.side_resizing) {
+            cx.notify();
+          }
+        }),
+      )
   }
 
   /// One row of the sidebar.

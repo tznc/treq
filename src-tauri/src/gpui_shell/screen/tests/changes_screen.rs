@@ -1586,3 +1586,67 @@ fn a_committed_file_takes_a_file_comment(cx: &mut TestAppContext) {
   )
   .to_be_visible();
 }
+
+fn drag_mouse(h: &mut Harness, from: gpui::Point<gpui::Pixels>, to: gpui::Point<gpui::Pixels>) {
+  h.cx.simulate_event(gpui::MouseDownEvent {
+    position: from,
+    button: MouseButton::Left,
+    modifiers: Modifiers::none(),
+    click_count: 1,
+    first_mouse: false,
+  });
+  for step in 1..=4 {
+    let position = from + (to - from) * (step as f32 / 4.);
+    h.cx
+      .simulate_mouse_move(position, Some(MouseButton::Left), Modifiers::none());
+  }
+  h.cx.simulate_event(gpui::MouseUpEvent {
+    position: to,
+    button: MouseButton::Left,
+    modifiers: Modifiers::none(),
+    click_count: 1,
+  });
+  h.cx.run_until_parked();
+}
+
+fn file_list_width(h: &mut Harness) -> f32 {
+  h.cx.run_until_parked();
+  f32::from(
+    h.cx
+      .debug_bounds("changes-file-list")
+      .expect("file list drawn")
+      .size
+      .width,
+  )
+}
+
+#[gpui::test]
+fn dragging_the_file_list_edge_resizes_it_within_bounds(cx: &mut TestAppContext) {
+  let (mut h, _host) = workspace_harness(cx, changes_host(), changes_route());
+  assert_eq!(file_list_width(&mut h), 240.);
+  let list = h.cx.debug_bounds("changes-file-list").expect("drawn");
+  let handle = h.cx.debug_bounds("changes-file-list-resize").expect("drawn").center();
+  drag_mouse(&mut h, handle, gpui::point(list.left() + gpui::px(320.), handle.y));
+  assert_eq!(file_list_width(&mut h), 320.);
+
+  let handle = h.cx.debug_bounds("changes-file-list-resize").expect("drawn").center();
+  drag_mouse(&mut h, handle, gpui::point(list.left() + gpui::px(5.), handle.y));
+  assert_eq!(file_list_width(&mut h), 160.);
+
+  let handle = h.cx.debug_bounds("changes-file-list-resize").expect("drawn").center();
+  h.cx.simulate_click(handle, Modifiers::none());
+  h.cx.simulate_event(gpui::MouseDownEvent {
+    position: handle,
+    button: MouseButton::Left,
+    modifiers: Modifiers::none(),
+    click_count: 2,
+    first_mouse: false,
+  });
+  h.cx.simulate_event(gpui::MouseUpEvent {
+    position: handle,
+    button: MouseButton::Left,
+    modifiers: Modifiers::none(),
+    click_count: 2,
+  });
+  assert_eq!(file_list_width(&mut h), 240.);
+}
