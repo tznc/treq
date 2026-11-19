@@ -1950,7 +1950,8 @@ impl CodeView {
             .child(
               div()
                 .absolute()
-                .left(zpx(7.))
+                // Centre the 2px rail on the 14px dots/arrow (centre x = 7px).
+                .left(zpx(6.))
                 .top_2()
                 .bottom_2()
                 .w(zpx(2.))
