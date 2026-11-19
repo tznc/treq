@@ -907,6 +907,8 @@ const PALETTE_TOOLTIP: &str = "Command palette (Ctrl+K)";
 
 /// The WORKSPACES heading's create button.
 pub(super) const OPEN_WORKSPACES_LABEL: &str = "New workspace…";
+/// Its visible text; the heading already says what it creates.
+pub(super) const OPEN_WORKSPACES_TEXT: &str = "New…";
 const ADD_REPOSITORY_LABEL: &str = "Add repository…";
 
 /// A row's stack button: a new workspace on the home row, one stacked on the
@@ -959,7 +961,7 @@ impl Sidebar {
         12.,
         palette.sidebar_foreground.opacity(0.7),
       ))
-      .child(OPEN_WORKSPACES_LABEL)
+      .child(OPEN_WORKSPACES_TEXT)
       .on_click(self.on_action(SidebarAction::OpenWorkspaces))
   }
 

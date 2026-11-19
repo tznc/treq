@@ -308,6 +308,7 @@ fn names_create_buttons_by_what_they_open() {
   assert_eq!(stack_label(None), "New workspace…");
   assert_eq!(stack_label(Some(7)), "Stack on this…");
   assert_eq!(OPEN_WORKSPACES_LABEL, "New workspace…");
+  assert_eq!(OPEN_WORKSPACES_TEXT, "New…");
 }
 
 #[test]
