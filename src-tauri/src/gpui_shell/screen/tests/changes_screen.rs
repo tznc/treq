@@ -1309,8 +1309,17 @@ fn review_thread_quote_button_sits_in_the_card_bottom_row(cx: &mut TestAppContex
     "{quote:?} outside {card:?}"
   );
   assert!(quote.top() >= body.bottom(), "{quote:?} not below {body:?}");
-  // A labelled "Quote" button, not a bare 24px icon.
-  assert!(quote.size.width > gpui::px(40.), "{quote:?} has no label");
+  // A "Quote" button inside the comment, reading "Quote".
+  use gpui_testing_library::prelude::*;
+  let screen = a11y_screen(&mut h);
+  let comment = screen.get_by_role(by::role(gpui::Role::Group).name("Comment by octo"));
+  let button = within(&comment).get_by_role(by::role(gpui::Role::Button).name("Quote"));
+  expect(&button).to_be_visible();
+  expect(&button).to_have_text_content("Quote");
+  // The library reads a button's text from its accessible name, so an
+  // icon-only button with aria_label "Quote" would pass the above; its
+  // width shows the label is drawn.
+  assert!(quote.size.width > gpui::px(40.), "{quote:?} draws no label");
 }
 
 #[gpui::test]
