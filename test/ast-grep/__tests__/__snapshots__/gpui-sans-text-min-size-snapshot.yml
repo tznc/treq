@@ -1,0 +1,30 @@
+id: gpui-sans-text-min-size
+snapshots:
+  ? |
+    fn f() { markdown(id, body, TextSize::Code.metrics().0, dark); }
+  : labels:
+    - source: TextSize::Code
+      style: primary
+      start: 28
+      end: 42
+  ? |
+    fn f() { ui::text(Textarea::new(&state), TextSize::Code); }
+  : labels:
+    - source: TextSize::Code
+      style: primary
+      start: 41
+      end: 55
+  ? |
+    fn f() { ui::text(div(), TextSize::Code).child(comment); }
+  : labels:
+    - source: TextSize::Code
+      style: primary
+      start: 25
+      end: 39
+  ? |
+    fn f() { ui::text(div(), TextSize::Code).font_family(theme::SANS_FONT); }
+  : labels:
+    - source: TextSize::Code
+      style: primary
+      start: 25
+      end: 39

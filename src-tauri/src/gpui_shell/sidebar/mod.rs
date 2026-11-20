@@ -305,8 +305,6 @@ pub enum SidebarAction {
 struct DraggedWorkspace {
   id: i64,
   title: SharedString,
-  /// The title is a branch, drawn in mono as its row draws it.
-  mono: bool,
   palette: Palette,
 }
 
@@ -320,7 +318,6 @@ impl Render for DraggedWorkspace {
       .border_color(self.palette.border)
       .bg(self.palette.sidebar)
       .text_color(self.palette.sidebar_foreground)
-      .when(self.mono, |this| this.font_family(theme::MONO_FONT))
       .shadow_md()
       .child(self.title.clone())
   }
@@ -884,7 +881,7 @@ impl Render for Sidebar {
               .child("WORKSPACES"),
           )
           .when(snapshot.repos.iter().any(|r| r.active), |this| {
-            this.child(self.open_workspaces_button(&palette))
+            this.child(self.open_workspaces_button(&palette, cx))
           }),
       )
       .when(snapshot.repos.is_empty(), |this| {
@@ -976,32 +973,17 @@ impl Sidebar {
     )
   }
 
-  fn open_workspaces_button(&self, palette: &Palette) -> impl IntoElement {
-    // Short label (['button label']): 11px is fine.
-    // ast-grep-ignore: gpui-text-xs-short-label-only
-    ui::text(div(), TextSize::Xs)
-      .id("open-workspaces")
-      .debug_selector(|| "open-workspaces".into())
-      .role(Role::Button)
-      .aria_label(OPEN_WORKSPACES_LABEL)
-      .test_support()
-      .flex()
-      .flex_none()
-      .items_center()
-      .gap_1()
-      .px_1p5()
-      .h(zpx(22.))
-      .rounded_md()
-      .text_color(palette.sidebar_foreground.opacity(0.7))
-      .cursor_pointer()
-      .hover(|style| style.bg(palette.hover()))
-      .child(icon(
-        theme::ICON_PR_CREATE,
-        12.,
-        palette.sidebar_foreground.opacity(0.7),
-      ))
-      .child(OPEN_WORKSPACES_LABEL)
-      .on_click(self.on_action(SidebarAction::OpenWorkspaces))
+  fn open_workspaces_button(&self, palette: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    self.row_button(
+      "open-workspaces".into(),
+      theme::ICON_PR_CREATE,
+      OPEN_WORKSPACES_LABEL,
+      None,
+      SidebarAction::OpenWorkspaces,
+      Side::Top,
+      palette,
+      cx,
+    )
   }
 
   /// A square header button with a tooltip below it.
@@ -1058,6 +1040,7 @@ impl Sidebar {
     tooltip: &'static str,
     disabled_reason: Option<&str>,
     action: SidebarAction,
+    side: Side,
     palette: &Palette,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
@@ -1102,12 +1085,7 @@ impl Sidebar {
         }),
       )
       .when(self.tooltip_shown(&id), |this| {
-        this.child(self.tooltip_anchor(
-          id.clone(),
-          Side::Bottom,
-          TooltipContent::Text(tip.into()),
-          0.,
-        ))
+        this.child(self.tooltip_anchor(id.clone(), side, TooltipContent::Text(tip.into()), 0.))
       })
       // Swallow clicks on a disabled button too, so the row is not selected.
       .on_click(if disabled {
@@ -1139,6 +1117,7 @@ impl Sidebar {
         "Start agent",
         snapshot.agent_unavailable.as_deref(),
         SidebarAction::StartAgent { id },
+        Side::Bottom,
         palette,
         cx,
       ))
@@ -1148,6 +1127,7 @@ impl Sidebar {
         "Open shell",
         snapshot.shell_unavailable.as_deref(),
         SidebarAction::OpenShell { id },
+        Side::Bottom,
         palette,
         cx,
       ))
@@ -1161,6 +1141,7 @@ impl Sidebar {
         stack_label(id),
         None,
         SidebarAction::Stack { id },
+        Side::Bottom,
         palette,
         cx,
       ))
@@ -1674,10 +1655,6 @@ impl Sidebar {
           .flex_1()
           .min_w_0()
           .truncate()
-          // A branch is code; a title is prose.
-          .when(row.name.is_none(), |this| {
-            this.font_family(theme::MONO_FONT)
-          })
           .text_color(palette.sidebar_foreground)
           .child(label.clone()),
       )
@@ -1736,7 +1713,6 @@ impl Sidebar {
             DraggedWorkspace {
               id,
               title: label.clone().into(),
-              mono: row.name.is_none(),
               palette: *palette,
             },
             |dragged, _, _, cx| cx.new(|_| dragged.clone()),
