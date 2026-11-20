@@ -1411,3 +1411,23 @@ fn a_truncated_group_chevron_lines_up_with_its_rows_status_dots(cx: &mut TestApp
     dot.right()
   );
 }
+
+#[gpui::test]
+fn a_stacked_rows_elbow_reaches_up_to_its_parents_icon(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![row(7, "parent", 0), row(8, "child", 1)]));
+  let parent = h.bounds("workspace-7").expect("parent row");
+  let child = h.bounds("workspace-8").expect("child row");
+  let parent_icon = h.bounds("workspace-7-icon").expect("parent icon");
+  let child_icon = h.bounds("workspace-8-icon").expect("child icon");
+  let elbow = h.bounds("workspace-8-elbow").expect("elbow");
+  // Rows sit 2px apart.
+  assert_eq!(child.top() - parent.bottom(), gpui::px(2.));
+  // The elbow leaves the parent's icon about as close as it meets the
+  // child's, so the two ends of the elbow look alike.
+  let above = elbow.top() - parent_icon.bottom();
+  let beside = child_icon.left() - elbow.right();
+  assert!(
+    above >= gpui::px(0.) && above <= beside + gpui::px(2.),
+    "above {above:?}, beside {beside:?}"
+  );
+}

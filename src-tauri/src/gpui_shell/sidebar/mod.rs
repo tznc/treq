@@ -709,6 +709,13 @@ const GROUP_INDENT: f32 = 4.;
 
 /// Indentation of a row's content: one 12px icon per level, so a child's
 /// icon starts past its parent's.
+/// The space between two workspace rows.
+const ROW_GAP: f32 = 2.;
+
+/// How far a nested row's elbow reaches above the row: across the gap and
+/// the parent row's space under its 12px icon, stopping 1px short of it.
+const ELBOW_REACH: f32 = ROW_GAP + (32. - 12.) / 2. - 1.;
+
 fn row_indent(depth: u32) -> f32 {
   10. + depth as f32 * 12.
 }
@@ -1463,7 +1470,7 @@ impl Sidebar {
     let gap = match item {
       _ if ix == 0 => 0.,
       _ if first_of_repo => 2.,
-      _ => 4.,
+      _ => ROW_GAP,
     };
     let content = match item {
       Item::Label(_) => {
@@ -1533,8 +1540,16 @@ impl Sidebar {
       ui::spinner(("archiving", id as u64), 12., palette.muted_foreground).into_any_element()
     } else {
       // The React sidebar flips the branch icon vertically.
-      icon(theme::ICON_PR, 12., branch_color)
-        .with_transformation(Transformation::scale(gpui::size(1., -1.)))
+      div()
+        .debug_selector({
+          let selector = format!("{prefix}workspace-{id}-icon");
+          move || selector
+        })
+        .flex_none()
+        .child(
+          icon(theme::ICON_PR, 12., branch_color)
+            .with_transformation(Transformation::scale(gpui::size(1., -1.))),
+        )
         .into_any_element()
     };
 
@@ -1617,10 +1632,14 @@ impl Sidebar {
         // An elbow into the row, not a bar that reads as a selection marker.
         this.overlay(
           div()
+            .debug_selector({
+              let selector = format!("{prefix}workspace-{id}-elbow");
+              move || selector
+            })
             .absolute()
-            .top_0()
+            .top(zpx(-ELBOW_REACH))
             .left(zpx(guide_left(row.depth) + group_indent))
-            .h(zpx(16.))
+            .h(zpx(16. + ELBOW_REACH))
             .w(zpx(6.))
             .border_l_1()
             .border_b_1()
