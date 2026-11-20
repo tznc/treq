@@ -283,6 +283,11 @@ pub fn agent_column_id(pane_id: i64) -> String {
   format!("agent-{pane_id}")
 }
 
+/// `base` scaled by the UI zoom, read off the window's rem size.
+fn zoomed_font_size(base: f32, rem: Pixels) -> f32 {
+  (base * f32::from(rem) / crate::gpui_shell::ui::BASE_REM).round()
+}
+
 /// xterm's cell: the font's advance and height, each rounded down to whole
 /// device pixels.
 pub fn cell_size(advance: f32, height: f32, scale: f32) -> (f32, f32) {
@@ -443,7 +448,10 @@ pub struct TerminalView {
   /// The size last given to the PTY, which follows the grid once it runs.
   pty_size: Option<(usize, usize)>,
   focus: FocusHandle,
+  /// The unzoomed font size; the window's rem size scales it.
   font_size: f32,
+  /// The zoomed font size `cell` was measured at.
+  measured_font_size: f32,
   /// The cell size, once measured.
   cell: Option<(f32, f32)>,
   /// The font's own advance, which the cell width rounds down.
@@ -562,6 +570,7 @@ impl TerminalView {
       pty_size: None,
       focus: cx.focus_handle(),
       font_size,
+      measured_font_size: font_size,
       cell: None,
       advance: 0.,
       dark,
@@ -786,16 +795,18 @@ impl TerminalView {
   }
 
   fn measure(&mut self, window: &Window, cx: &App) {
-    if self.cell.is_some() {
+    let font_size = zoomed_font_size(self.font_size, window.rem_size());
+    if self.cell.is_some() && self.measured_font_size == font_size {
       return;
     }
+    self.measured_font_size = font_size;
     let system = cx.text_system();
     let font = system.resolve_font(&gpui::font(theme::MONO_FONT));
-    let size = px(self.font_size);
+    let size = px(font_size);
     let advance = system
       .advance(font, size, 'm')
       .map(|a| f32::from(a.width))
-      .unwrap_or(self.font_size * 0.6);
+      .unwrap_or(font_size * 0.6);
     let height = f32::from(system.ascent(font, size)) + f32::from(system.descent(font, size)).abs();
     self.advance = advance;
     self.cell = Some(cell_size(advance, height, window.scale_factor()));
@@ -1621,7 +1632,7 @@ impl TerminalView {
     let Some(((w, h), frame)) = self.cell.zip(self.with_emulator(|e| e.frame(scheme))) else {
       return div();
     };
-    let (font_size, advance) = (px(self.font_size), self.advance);
+    let (font_size, advance) = (px(self.measured_font_size), self.advance);
     let cursor = frame.cursor.map(|(row, col)| {
       cursor_div(
         (row, col),
@@ -2172,18 +2183,16 @@ impl TerminalPane {
     place: Place,
     _: &mut Context<Self>,
   ) -> Self {
-    let settings = host
-      .settings(&["terminal_font_size".to_string(), "ui_zoom".to_string()])
-      .unwrap_or_default();
-    let get = |key: &str| {
-      settings
-        .get(key)
-        .cloned()
-        .flatten()
-        .and_then(|v| v.parse::<f32>().ok())
-    };
-    let font_size =
-      (get("terminal_font_size").unwrap_or(14.) * get("ui_zoom").unwrap_or(100.) / 100.).round();
+    // Unzoomed: each view scales it by the window's rem size, so zoom
+    // changes reach open terminals.
+    let font_size = host
+      .settings(&["terminal_font_size".to_string()])
+      .unwrap_or_default()
+      .get("terminal_font_size")
+      .cloned()
+      .flatten()
+      .and_then(|v| v.parse::<f32>().ok())
+      .unwrap_or(14.);
     Self {
       serial: NEXT_PANE.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
       adopt_due: true,
@@ -4911,6 +4920,14 @@ mod tests {
       assert_eq!(bounds.origin, cell_origin(40, 2, cell), "zoom {zoom}");
       assert_eq!(bounds.size.height, px(cell.1), "zoom {zoom}");
     }
+  }
+
+  #[test]
+  fn scales_the_font_with_the_ui_zoom() {
+    let rem = crate::gpui_shell::ui::BASE_REM;
+    assert_eq!(zoomed_font_size(14., px(rem)), 14.);
+    assert_eq!(zoomed_font_size(14., px(rem * 1.5)), 21.);
+    assert_eq!(zoomed_font_size(14., px(rem * 0.8)), 11.);
   }
 
   #[test]
