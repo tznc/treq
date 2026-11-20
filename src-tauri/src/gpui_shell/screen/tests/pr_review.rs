@@ -582,7 +582,7 @@ fn pr_review_expands_all_lines_above_a_hunk(cx: &mut TestAppContext) {
     ..pr_host()
   };
   let (mut h, host) = workspace_harness(cx, host, pr_route());
-  assert!(h.shows(gpui::Role::Button, "Expand all (9 lines)"));
+  assert!(h.shows(gpui::Role::Button, "Expand all 9 lines of a.rs from line 1"));
   h.click("expand-all-above-a.rs-0");
   h.cx.run_until_parked();
   assert!(
@@ -592,7 +592,7 @@ fn pr_review_expands_all_lines_above_a_hunk(cx: &mut TestAppContext) {
     "{:?}",
     host.calls()
   );
-  assert!(!h.shows(gpui::Role::Button, "Expand all (9 lines)"));
+  assert!(!h.shows(gpui::Role::Button, "Expand all 9 lines of a.rs from line 1"));
 }
 
 /// Like the Changes tab, each file row shows its name, then its folder as subtext.

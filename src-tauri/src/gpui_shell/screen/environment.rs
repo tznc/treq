@@ -118,6 +118,8 @@ pub(crate) fn menu<V: 'static>(
   };
   let devcontainer = env.devcontainer;
   let mut panel = menu_panel(id, p)
+    .role(tauri_plugin_gpui::gpui::Role::Menu)
+    .aria_label("Environment")
     .w(zpx(256.))
     .child(ui::MenuLabel::new("New terminals and agents run in", p))
     .child(

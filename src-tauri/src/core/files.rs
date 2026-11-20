@@ -205,6 +205,48 @@ pub fn list_directory(path: &str) -> Result<Vec<WorkspaceEntry>, String> {
   Ok(files)
 }
 
+/// `WorkspaceEntry::status` of an entry a gitignore rule excludes.
+pub const IGNORED: &str = "ignored";
+
+/// Every child of `path` but VCS metadata (`.git`, `.jj`), sorted as
+/// [`list_directory`]; the ones it would leave out carry [`IGNORED`].
+pub fn list_directory_with_ignored(path: &str) -> Result<Vec<WorkspaceEntry>, String> {
+  let kept: std::collections::HashSet<String> =
+    list_directory(path)?.into_iter().map(|e| e.name).collect();
+  let mut files = Vec::new();
+  for entry in std::fs::read_dir(path)
+    .map_err(|e| e.to_string())?
+    .flatten()
+  {
+    let Ok(name) = entry.file_name().into_string() else {
+      continue;
+    };
+    if name == ".git" || name == ".jj" {
+      continue;
+    }
+    let entry_path = entry.path();
+    let is_directory = match entry.file_type() {
+      Ok(t) if !t.is_symlink() => t.is_dir(),
+      _ => entry_path.is_dir(),
+    };
+    files.push(WorkspaceEntry {
+      status: (!kept.contains(&name)).then(|| IGNORED.to_string()),
+      name,
+      modified_at: None,
+      path: entry_path.to_string_lossy().to_string(),
+      is_directory,
+      submodule_pin: None,
+      submodule_synced: None,
+    });
+  }
+  files.sort_by(|a, b| {
+    b.is_directory
+      .cmp(&a.is_directory)
+      .then_with(|| a.name.cmp(&b.name))
+  });
+  Ok(files)
+}
+
 #[cfg(test)]
 mod list_directory_tests {
   use super::*;
@@ -239,6 +281,34 @@ mod list_directory_tests {
     };
     assert!(dir("real") && dir("link"));
     assert!(!dir("file") && !dir("file-link"));
+  }
+
+  #[test]
+  fn listing_with_ignored_keeps_dot_and_ignored_entries_marked() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    std::fs::create_dir(root.join(".git")).unwrap();
+    std::fs::create_dir(root.join(".jj")).unwrap();
+    std::fs::create_dir(root.join(".github")).unwrap();
+    std::fs::create_dir(root.join(".claude")).unwrap();
+    std::fs::write(root.join(".gitignore"), ".claude/\n.env\n").unwrap();
+    std::fs::write(root.join(".env"), "x").unwrap();
+    std::fs::write(root.join("a.txt"), "a").unwrap();
+    let entries = list_directory_with_ignored(&root.to_string_lossy()).unwrap();
+    let rows: Vec<_> = entries
+      .iter()
+      .map(|e| (e.name.as_str(), e.status.as_deref()))
+      .collect();
+    assert_eq!(
+      rows,
+      [
+        (".claude", Some(IGNORED)),
+        (".github", None),
+        (".env", Some(IGNORED)),
+        (".gitignore", None),
+        ("a.txt", None),
+      ]
+    );
   }
 
   #[test]

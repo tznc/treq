@@ -32,7 +32,7 @@ pub mod theme;
 pub mod touch;
 
 pub use alert::{Alert, Severity};
-pub use badge::{Badge, Count, Dot, Tone};
+pub use badge::{Badge, Count, Dot, Tone, BADGE_ICON_GAP, BADGE_ICON_SIZE};
 pub use card::{Card, CardFooter, CardHeader, CardVariant};
 pub use checkbox::{CheckKind, CheckState, Checkbox};
 pub use dialog::{handler, tab_key, trap_tab, ConfirmDialog, Dialog};
@@ -146,6 +146,8 @@ impl TextSize {
       TextSize::Sm => (13., 20.),
       TextSize::Lg => (15., 22.),
       TextSize::Xl => (20., 28.),
+      // The type scale's own definition.
+      // ast-grep-ignore: gpui-sans-text-min-size
       TextSize::Code => (12., 20.),
     }
   }

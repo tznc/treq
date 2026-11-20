@@ -230,6 +230,11 @@ impl Render for Popover {
       self.focused = true;
       self.focus.focus(window, cx);
     }
+    let name = match self.content {
+      Content::Details(_) => "Workspace details",
+      Content::Target(_) => "Workspace target",
+      Content::Checks(_) => "Checks",
+    };
     let (width, body) = match self.content {
       Content::Details(_) => (
         details::WIDTH,
@@ -292,6 +297,7 @@ impl Render for Popover {
         div()
           .id("header-popover")
           .role(gpui::Role::Dialog)
+          .aria_label(name)
           .test_support()
           .absolute()
           .left(origin.x)
