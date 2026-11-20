@@ -41,6 +41,18 @@ test("code: workspace Code tab, action row, alerts and Agent", async ({ page, co
     ],
   });
 
+  const stack = await page.getByTestId("workspace-stack-panel").boundingBox();
+  expect(stack).not.toBeNull();
+  await capture(page, {
+    name: "03-code-stack-rail",
+    title: "Stack panel: rail alignment",
+    clip: stack!,
+    expectations: [
+      "The vertical rail runs through the horizontal centre of every stack dot",
+      "The rail ends centred on the base-branch down arrow's shaft",
+    ],
+  });
+
   const alerts = page.getByRole("button", { name: /^Alerts/ });
   await alerts.click();
   const conflicts = page.getByRole("alert", { name: "1 file has conflicts" });
