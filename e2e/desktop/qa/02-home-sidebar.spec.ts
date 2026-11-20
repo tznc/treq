@@ -159,6 +159,6 @@ test("home-sidebar: workspaces create button is icon-only", async ({ page }) => 
     title: "WORKSPACES create button: hover tooltip",
     screen: true,
     rest: false,
-    expectations: ["A tooltip reading 'New workspace…' shows below the WORKSPACES icon button"],
+    expectations: ["A tooltip reading 'New workspace…' shows above the WORKSPACES icon button, clear of the first row"],
   });
 });

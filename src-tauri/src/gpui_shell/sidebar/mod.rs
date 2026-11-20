@@ -942,6 +942,7 @@ impl Sidebar {
       OPEN_WORKSPACES_LABEL,
       None,
       SidebarAction::OpenWorkspaces,
+      Side::Top,
       palette,
       cx,
     )
@@ -1001,6 +1002,7 @@ impl Sidebar {
     tooltip: &'static str,
     disabled_reason: Option<&str>,
     action: SidebarAction,
+    side: Side,
     palette: &Palette,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
@@ -1045,12 +1047,7 @@ impl Sidebar {
         }),
       )
       .when(self.tooltip_shown(&id), |this| {
-        this.child(self.tooltip_anchor(
-          id.clone(),
-          Side::Bottom,
-          TooltipContent::Text(tip.into()),
-          0.,
-        ))
+        this.child(self.tooltip_anchor(id.clone(), side, TooltipContent::Text(tip.into()), 0.))
       })
       // Swallow clicks on a disabled button too, so the row is not selected.
       .on_click(if disabled {
@@ -1082,6 +1079,7 @@ impl Sidebar {
         "Start agent",
         snapshot.agent_unavailable.as_deref(),
         SidebarAction::StartAgent { id },
+        Side::Bottom,
         palette,
         cx,
       ))
@@ -1091,6 +1089,7 @@ impl Sidebar {
         "Open shell",
         snapshot.shell_unavailable.as_deref(),
         SidebarAction::OpenShell { id },
+        Side::Bottom,
         palette,
         cx,
       ))
@@ -1104,6 +1103,7 @@ impl Sidebar {
         stack_label(id),
         None,
         SidebarAction::Stack { id },
+        Side::Bottom,
         palette,
         cx,
       ))
