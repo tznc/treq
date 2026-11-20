@@ -993,8 +993,10 @@ fn rows_of_another_repository_have_no_actions(cx: &mut TestAppContext) {
 #[gpui::test]
 fn group_labels_fold_their_repository(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, two_repos());
-  assert!(h.bounds("group-lib").is_some());
-  assert!(h.bounds("home-lib").is_some());
+  let fold = h.bounds("group-lib").expect("fold chevron");
+  let home = h.bounds("home-lib").expect("home row");
+  // The chevron trails the name, inside the header row.
+  assert!(fold.left() > home.left() && fold.right() <= home.right());
   h.click("group-lib");
   assert_eq!(
     h.sent(),
