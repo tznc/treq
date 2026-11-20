@@ -541,3 +541,66 @@ fn settings_closes_on_escape(cx: &mut TestAppContext) {
   h.cx.run_until_parked();
   assert_eq!(h.sent(), vec![press("settings.close")]);
 }
+
+fn project_host() -> Arc<FakeHost> {
+  Arc::new(FakeHost {
+    project_rows: vec![
+      settings_data::ProjectRow {
+        id: "p1".into(),
+        name: "Checkout".into(),
+        clone_directory: "~/work".into(),
+      },
+      settings_data::ProjectRow {
+        id: "p2".into(),
+        name: "Billing".into(),
+        clone_directory: String::new(),
+      },
+    ],
+    ..FakeHost::default()
+  })
+}
+
+#[gpui::test]
+fn settings_projects_tab_lists_each_project_clone_location(cx: &mut TestAppContext) {
+  let mut h = Harness::with_host(cx, settings_route("projects"), project_host());
+  let drawn = drawn_settings(&mut h);
+  assert!(drawn.tabs.contains(&settings::Tab::Projects));
+  let tab = drawn.projects.expect("projects tab");
+  let rows: Vec<_> = tab
+    .rows
+    .iter()
+    .map(|r| (r.name.as_str(), r.clone_directory.as_str()))
+    .collect();
+  assert_eq!(rows, [("Checkout", "~/work"), ("Billing", "")]);
+}
+
+#[gpui::test]
+fn settings_saves_a_project_clone_location_after_a_pause(cx: &mut TestAppContext) {
+  let host = project_host();
+  let mut h = Harness::with_host(cx, settings_route("projects"), host.clone());
+  h.click("settings-project-clone-p2");
+  h.cx.simulate_input("/b");
+  h.cx.run_until_parked();
+  assert!(host.writes().is_empty(), "{:?}", host.writes());
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_millis(600));
+  h.cx.run_until_parked();
+  assert_eq!(host.writes(), ["set project p2 clone_directory=/b"]);
+}
+
+#[gpui::test]
+fn settings_browses_for_a_project_clone_directory(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    picked: Some("/picked/billing".into()),
+    ..Arc::try_unwrap(project_host()).ok().unwrap()
+  });
+  let mut h = Harness::with_host(cx, settings_route("projects"), host.clone());
+  h.click("settings-project-clone-p2-browse");
+  assert_eq!(
+    host.writes(),
+    ["set project p2 clone_directory=/picked/billing"]
+  );
+  let tab = drawn_settings(&mut h).projects.expect("projects tab");
+  assert_eq!(tab.rows[1].clone_directory, "/picked/billing");
+}

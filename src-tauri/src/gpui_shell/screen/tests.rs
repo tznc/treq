@@ -32,6 +32,8 @@ type ExitSink = Arc<dyn Fn(Option<u32>) + Send + Sync>;
 /// The backend, as the screens see it, recording what they asked of it.
 #[derive(Default)]
 struct FakeHost {
+  /// Saved projects the Settings Projects tab lists.
+  project_rows: Vec<settings_data::ProjectRow>,
   /// How many times a screen listed machines and projects.
   listings: std::sync::atomic::AtomicUsize,
   /// Team organizations the save-project dialog offers, as (id, name).
@@ -404,6 +406,15 @@ impl onboarding::OnboardingHost for FakeHost {}
 impl settings_data::SettingsHost for FakeHost {
   fn pick_clone_folder(&self) -> Option<String> {
     self.picked.clone()
+  }
+
+  fn projects(&self) -> Result<Vec<settings_data::ProjectRow>, String> {
+    Ok(self.project_rows.clone())
+  }
+
+  fn set_project_clone_dir(&self, id: &str, dir: &str) -> Result<(), String> {
+    self.record(format!("set project {id} clone_directory={dir}"));
+    Ok(())
   }
 
   fn settings(&self, keys: &[String]) -> Result<settings_data::Values, String> {

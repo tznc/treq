@@ -11,7 +11,7 @@ use crate::{
     agent_command::AGENT_INSTRUCTIONS_SETTING,
     app_setup_script::{self, AppSetupScriptStatus},
     feature_preview::{self, PreviewFeature},
-    projects::CLONE_DIRECTORY_SETTING,
+    projects::{self, CLONE_DIRECTORY_SETTING},
     skills::{
       self, CustomSkill, CustomizedSkill, InstalledSkill, SkillCatalogEntry, SkillCatalogSkillView,
       SkillInstallScope,
@@ -24,6 +24,15 @@ use crate::{
 
 pub type Values = HashMap<String, Option<String>>;
 
+/// A saved project as the Projects tab lists it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProjectRow {
+  pub id: String,
+  pub name: String,
+  /// Its own clone folder; `""` follows the Application setting.
+  pub clone_directory: String,
+}
+
 /// What the settings screen asks of the backend; faked in tests. Everything
 /// but `notify` and `open_url` blocks, so it is called off the main thread.
 pub trait SettingsHost: ToolsHost + AccountHost {
@@ -31,6 +40,9 @@ pub trait SettingsHost: ToolsHost + AccountHost {
   fn set_settings(&self, values: &[(String, String)]) -> Result<(), String>;
   /// The folder picker, for where Treq clones repositories.
   fn pick_clone_folder(&self) -> Option<String>;
+  /// Saved projects, with their clone folders.
+  fn projects(&self) -> Result<Vec<ProjectRow>, String>;
+  fn set_project_clone_dir(&self, id: &str, dir: &str) -> Result<(), String>;
   fn setup_script(&self) -> Result<AppSetupScriptStatus, String>;
   fn save_setup_script(&self, script: &str, always_run: bool) -> Result<(), String>;
   /// Starts a run; the status reports it as running once this returns.
@@ -120,6 +132,25 @@ impl SettingsHost for Backend {
       .blocking_pick_folder()
       .and_then(|folder| folder.into_path().ok())
       .map(|path| path.to_string_lossy().into_owned())
+  }
+
+  fn projects(&self) -> Result<Vec<ProjectRow>, String> {
+    self.with_db(|db| {
+      projects::list(db.conn())?
+        .into_iter()
+        .map(|p| {
+          Ok(ProjectRow {
+            clone_directory: projects::project_clone_dir(db.conn(), &p.id)?,
+            id: p.id,
+            name: p.name,
+          })
+        })
+        .collect()
+    })
+  }
+
+  fn set_project_clone_dir(&self, id: &str, dir: &str) -> Result<(), String> {
+    self.with_db(|db| projects::set_project_clone_dir(db.conn(), id, dir))
   }
 
   fn setup_script(&self) -> Result<AppSetupScriptStatus, String> {
@@ -718,6 +749,7 @@ pub const SAVED_TICK: std::time::Duration = std::time::Duration::from_millis(150
 /// (theme, zoom, previews) or isn't a setting at all.
 pub fn save_timing(field: &str) -> Option<SaveTiming> {
   match field {
+    f if f.starts_with("project.") => Some(SaveTiming::Debounced),
     "repo.branchNamePattern"
     | "repo.includedFiles"
     | "repo.reviewPrompt"

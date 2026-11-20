@@ -68,6 +68,7 @@ const PROMPT_EDITS_POLL: Duration = Duration::from_secs(10);
 pub enum Tab {
   Repository,
   Application,
+  Projects,
   Account,
   Machines,
   Integrations,
@@ -80,6 +81,7 @@ impl Tab {
     match self {
       Tab::Repository => "Repository",
       Tab::Application => "Application",
+      Tab::Projects => "Projects",
       Tab::Account => "Account",
       Tab::Machines => "Machines",
       Tab::Integrations => "Integrations",
@@ -92,6 +94,7 @@ impl Tab {
     match self {
       Tab::Repository => theme::ICON_FOLDER_GIT,
       Tab::Application => theme::ICON_SETTINGS,
+      Tab::Projects => theme::ICON_LAYERS,
       Tab::Account => theme::ICON_USER,
       Tab::Machines => theme::ICON_SERVER,
       Tab::Integrations => theme::ICON_PLUG,
@@ -104,6 +107,7 @@ impl Tab {
     match self {
       Tab::Repository => "repository",
       Tab::Application => "application",
+      Tab::Projects => "projects",
       Tab::Account => "account",
       Tab::Machines => "machines",
       Tab::Integrations => "integrations",
@@ -132,6 +136,7 @@ pub struct Settings {
   pub tab: Tab,
   pub tabs: Vec<Tab>,
   pub application: Option<Application>,
+  pub projects: Option<ProjectsTab>,
   pub repository: Option<Repository>,
   pub preview: Option<Preview>,
   pub skills: Option<SkillsTab>,
@@ -288,6 +293,15 @@ pub struct DefaultProfile {
   pub label: String,
   pub value: String,
   pub options: Vec<SelectOption>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProjectsTab {
+  pub rows: Vec<data::ProjectRow>,
+  pub loading: bool,
+  pub error: Option<String>,
+  /// The Application clone directory, each empty field's placeholder.
+  pub app_dir: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -545,6 +559,8 @@ pub struct SettingsView {
   profile_error: Option<String>,
   /// Fields edited while a Repository save ran.
   repo_again: Vec<String>,
+  /// Saved projects, loaded when the Projects tab shows; `Err` if that failed.
+  projects: Option<Result<Vec<data::ProjectRow>, String>>,
 }
 
 /// What a field shows next to its label after auto-saving.
@@ -607,6 +623,7 @@ impl SettingsView {
       new_profile: ("claude".into(), String::new()),
       profile_error: None,
       repo_again: Vec::new(),
+      projects: None,
     };
     this.load_app(cx);
     this.load_setup(cx);
@@ -615,6 +632,9 @@ impl SettingsView {
     this.show_skills(cx);
     if this.route.tab == Tab::Integrations {
       this.load_linear(cx);
+    }
+    if this.route.tab == Tab::Projects {
+      this.load_projects(cx);
     }
     this.sync_account(cx);
     // The tuning agent records its proposed edits while Settings is open.
@@ -657,6 +677,9 @@ impl SettingsView {
       if self.route.tab == Tab::Integrations && (repo_moved || tab_moved) {
         self.load_linear(cx);
       }
+      if self.route.tab == Tab::Projects && tab_moved {
+        self.load_projects(cx);
+      }
       self.sync_account(cx);
       cx.notify();
     }
@@ -693,6 +716,59 @@ impl SettingsView {
         };
         app.clone_directory = path;
         let field = "app.cloneDirectory".to_string();
+        view.pending.remove(&field);
+        view.save_fields(vec![field], cx);
+      },
+    );
+  }
+
+  fn load_projects(&mut self, cx: &mut Context<Self>) {
+    self.spawn(
+      cx,
+      |host| host.projects(),
+      |view, rows, _| view.projects = Some(rows),
+    );
+  }
+
+  /// Saves each `project.<id>` field's clone directory.
+  fn save_projects(&mut self, fields: Vec<String>, cx: &mut Context<Self>) {
+    let rows = match &self.projects {
+      Some(Ok(rows)) => rows.clone(),
+      _ => return,
+    };
+    for field in fields {
+      let Some(row) = field
+        .strip_prefix("project.")
+        .and_then(|id| rows.iter().find(|r| r.id == id))
+        .cloned()
+      else {
+        continue;
+      };
+      self.spawn(
+        cx,
+        move |host| host.set_project_clone_dir(&row.id, &row.clone_directory),
+        move |view, result, cx| view.mark(vec![field], result, cx),
+      );
+    }
+  }
+
+  /// Picks project `id`'s clone directory in the system dialog and saves it.
+  fn browse_project_dir(&mut self, id: String, cx: &mut Context<Self>) {
+    self.spawn(
+      cx,
+      |host| host.pick_clone_folder(),
+      move |view, picked, cx| {
+        let Some(path) = picked else {
+          return;
+        };
+        let Some(Ok(rows)) = &mut view.projects else {
+          return;
+        };
+        let Some(row) = rows.iter_mut().find(|r| r.id == id) else {
+          return;
+        };
+        row.clone_directory = path;
+        let field = format!("project.{id}");
         view.pending.remove(&field);
         view.save_fields(vec![field], cx);
       },
@@ -1371,6 +1447,11 @@ impl SettingsView {
 
   /// Saves `fields`, split by the tab that owns them.
   fn save_fields(&mut self, fields: Vec<String>, cx: &mut Context<Self>) {
+    let (project, fields): (Vec<String>, Vec<String>) =
+      fields.into_iter().partition(|f| f.starts_with("project."));
+    if !project.is_empty() {
+      self.save_projects(project, cx);
+    }
     let (repo, app): (Vec<String>, Vec<String>) =
       fields.into_iter().partition(|f| f.starts_with("repo."));
     if !repo.is_empty() {
@@ -1559,6 +1640,10 @@ impl SettingsView {
           "app.setupScript.run" => self.run_setup(cx),
           "app.addProfile" => self.add_profile(cx),
           "app.cloneDirectory.browse" => self.browse_clone_dir(cx),
+          browse if browse.starts_with("project.") && browse.ends_with(".browse") => {
+            let id = browse["project.".len()..browse.len() - ".browse".len()].to_string();
+            self.browse_project_dir(id, cx);
+          }
           "repo.reviewPrompt.tune" => self.tune_review_prompt(cx),
           "repo.promptEdits.dismissAll" => self.dismiss_all_prompt_edits(cx),
           "repo.yaml.reload" => self.load_repo(cx),
@@ -1600,6 +1685,16 @@ impl SettingsView {
       return;
     }
     let text = value.as_str().unwrap_or_default().to_string();
+    if let Some(id) = field.strip_prefix("project.") {
+      if let Some(Ok(rows)) = &mut self.projects {
+        if let Some(row) = rows.iter_mut().find(|r| r.id == id) {
+          row.clone_directory = text;
+          self.marks.remove(&field);
+          self.schedule_save(&field, cx);
+        }
+      }
+      return;
+    }
     if let Some(name) = field.strip_prefix("repo.") {
       if let Some(repo) = &mut self.repo {
         let mut fields = repo.fields();
@@ -1735,6 +1830,7 @@ impl SettingsView {
     let mut tabs = vec![
       Tab::Repository,
       Tab::Application,
+      Tab::Projects,
       Tab::Account,
       Tab::Machines,
       Tab::Integrations,
@@ -2041,6 +2137,23 @@ impl SettingsView {
       skills,
       account: (tab == Tab::Account).then(|| self.account_tab()),
       machines: (tab == Tab::Machines).then(|| self.machines_tab()),
+      projects: (tab == Tab::Projects).then(|| ProjectsTab {
+        rows: match &self.projects {
+          Some(Ok(rows)) => rows.clone(),
+          _ => Vec::new(),
+        },
+        loading: self.projects.is_none(),
+        error: match &self.projects {
+          Some(Err(err)) => Some(err.clone()),
+          _ => None,
+        },
+        app_dir: self
+          .app
+          .as_ref()
+          .map(|app| app.clone_directory.clone())
+          .filter(|d| !d.trim().is_empty())
+          .unwrap_or_else(crate::core::projects::default_clone_dir),
+      }),
       integrations: (tab == Tab::Integrations).then(|| self.integrations_tab()),
     }
   }
@@ -2269,6 +2382,10 @@ impl Render for SettingsView {
     let content: AnyElement = match s.tab {
       Tab::Application => match &s.application {
         Some(app) => self.application(app, &p, window, cx).into_any_element(),
+        None => div().into_any_element(),
+      },
+      Tab::Projects => match &s.projects {
+        Some(projects) => self.projects_tab(projects, &p, window, cx),
         None => div().into_any_element(),
       },
       Tab::Repository => match &s.repository {
@@ -2765,6 +2882,66 @@ impl SettingsView {
         self.mark_of("app.cloneDirectory"),
         p,
       ))
+  }
+
+  fn projects_tab(
+    &mut self,
+    tab: &ProjectsTab,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> AnyElement {
+    let note = |text: String| {
+      div()
+        .text_center()
+        .py_8()
+        .text_color(p.muted_foreground)
+        .child(text)
+        .into_any_element()
+    };
+    if tab.loading {
+      return note("Loading projects…".into());
+    }
+    if let Some(err) = &tab.error {
+      return note(format!("Couldn't load projects: {err}"));
+    }
+    if tab.rows.is_empty() {
+      return note("No saved projects yet.".into());
+    }
+    let mut list = div().flex().flex_col().gap_6();
+    for row in &tab.rows {
+      let key = format!("project.{}", row.id);
+      let input = self
+        .controls
+        .input(&key, &row.clone_directory, &tab.app_dir, window, cx);
+      let id = format!("settings-project-clone-{}", row.id);
+      list = list.child(saved_field_block(
+        &row.name,
+        div()
+          .flex()
+          .items_center()
+          .gap_2()
+          .child(div().flex_1().min_w_0().child(form::input_field(
+            SharedString::from(id.clone()),
+            &input,
+            true,
+            false,
+          )))
+          .child(
+            ui::IconButton::new(
+              SharedString::from(format!("{id}-browse")),
+              theme::ICON_FOLDER_OPEN,
+              format!("Browse for {} clone directory", row.name),
+              p,
+            )
+            .on_click(self.press(&format!("{key}.browse"))),
+          ),
+        Some("Clone directory for repositories added to this project. Leave empty to use the Application setting."),
+        self.mark_of(&key),
+        p,
+      ));
+    }
+    list.into_any_element()
   }
 
   fn repository(
