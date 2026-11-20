@@ -37,6 +37,7 @@ pub mod managed;
 pub mod merge_preview;
 pub mod new_workspaces;
 pub mod palette_commands;
+pub mod pr_link;
 pub mod pr_stacks;
 pub mod pr_sync;
 pub mod pr_view;

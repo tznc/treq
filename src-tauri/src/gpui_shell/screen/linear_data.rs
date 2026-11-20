@@ -65,6 +65,8 @@ impl Commented {
 /// What the Linear view asks of the backend; faked in tests. Everything
 /// blocks, so it is called off the main thread.
 pub trait LinearHost: ChangesHost {
+  /// Linear's OAuth page for connecting the signed-in treq account.
+  fn linear_connect_url(&self) -> Result<String, String>;
   fn linear_teams(&self, repo_path: &str) -> Result<Vec<LinearTeam>, String>;
   fn linear_issues(&self, repo_path: &str, team: Option<&str>) -> Result<Vec<LinearIssue>, String>;
   fn linear_viewer(&self, repo_path: &str) -> Result<LinearUser, String>;
@@ -121,6 +123,10 @@ impl Backend {
 }
 
 impl LinearHost for Backend {
+  fn linear_connect_url(&self) -> Result<String, String> {
+    super::account_data::AccountHost::linear_oauth_url(self).map_err(|e| e.message)
+  }
+
   fn linear_teams(&self, repo_path: &str) -> Result<Vec<LinearTeam>, String> {
     let client = self.linear_client(repo_path)?;
     crate::gpui_shell::block_on(crate::linear::linear_list_teams_impl(&client))

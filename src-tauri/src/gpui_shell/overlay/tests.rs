@@ -644,14 +644,29 @@ fn branch_switcher_groups_main_tree_workspaces_local_and_remote(cx: &mut TestApp
 }
 
 #[gpui::test]
-fn branch_switcher_opens_the_workspace_that_holds_a_branch(cx: &mut TestAppContext) {
+fn branch_switcher_switches_home_to_a_workspace_branch(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, branch_json(), held_branch_host());
   h.keys("down enter");
+  assert!(h
+    .host
+    .calls()
+    .contains(&"switch /repo feat/alpha".to_string()));
   assert_eq!(
     h.sent(),
-    vec![field("branchSwitcher.openWorkspace", 3.into())]
+    vec![field("branchSwitcher.changed", "feat/alpha".into())]
   );
-  assert!(!h.host.calls().iter().any(|c| c.starts_with("switch")));
+}
+
+#[gpui::test]
+fn branch_switcher_keeps_the_current_branch_in_the_main_tree(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    current: Some("feat/alpha".into()),
+    ..held_branch_host()
+  };
+  let mut h = Harness::new(cx, branch_json(), host);
+  assert_eq!(h.shown().first().map(String::as_str), Some("feat/alpha"));
+  h.keys("enter");
+  assert_eq!(h.sent(), vec![press("overlay.close")]);
 }
 
 #[gpui::test]

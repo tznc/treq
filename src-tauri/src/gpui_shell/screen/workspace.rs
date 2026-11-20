@@ -1023,7 +1023,7 @@ impl WorkspaceView {
     self.pr.pr.as_ref()?.as_ref().map(|pr| pr.url.clone())
   }
 
-  /// A right-click on a button that opens `url`: its "Copy link" menu.
+  /// A right-click on a button that opens `url`: its copy-link menu.
   fn copy_link(
     &self,
     url: Option<String>,
@@ -1515,7 +1515,7 @@ impl WorkspaceView {
   fn create_pr(&self, create: &CreatePr, p: &Palette, cx: &mut Context<Self>) -> Div {
     let white = p.primary_foreground;
     let styled = |b: Button| {
-      b.size(Size::Sm)
+      b.size(Size::Md)
         .disabled(create.disabled)
         .variant(Variant::Github)
     };
@@ -1870,6 +1870,7 @@ impl WorkspaceView {
         mode: Some(mode.into()),
         agent,
         session_name: Some(name.into()),
+        link: None,
       }
     };
     let text = |key: &str| value[key].as_str().unwrap_or_default().to_string();

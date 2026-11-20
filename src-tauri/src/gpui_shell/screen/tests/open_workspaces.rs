@@ -266,6 +266,20 @@ fn the_pull_request_list_shows_the_users_own_first(cx: &mut TestAppContext) {
     .contains(&"read open prs acme/treq all \"6\"".to_string()));
 }
 
+#[gpui::test]
+fn the_pull_request_list_hides_those_with_an_open_workspace(cx: &mut TestAppContext) {
+  let mut host = FakeHost::default();
+  host.github.remote = acme();
+  host.github.workspaces = vec![workspace(7, "feat/open", Some("main"))];
+  host.open_workspaces.mine = vec![pr(5, "feat/open", "main"), pr(6, "feat/new", "main")];
+  let (mut h, _) = dialog(host, cx);
+  let screen = screen(&mut h);
+  expect(screen.get_by_role(by::role(Role::CheckBox).name("#6 Change 6"))).to_be_visible();
+  assert!(screen
+    .query_by_role(by::role(Role::CheckBox).name("#5 Change 5"))
+    .is_none());
+}
+
 /// The input's spinner while a search waits or runs.
 fn searching(screen: &gpui_testing_library::Screen) -> bool {
   screen

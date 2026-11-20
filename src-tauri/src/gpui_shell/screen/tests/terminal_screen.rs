@@ -507,6 +507,43 @@ fn terminal_pane_activates_the_selected_workspaces_terminal(cx: &mut TestAppCont
   assert!(!host.calls().contains(&format!("close {}", agent_pty())));
 }
 
+/// Clicking a terminal in another workspace switches to that workspace: the
+/// clicked terminal stays active, rather than the row jumping to the
+/// workspace's first one.
+#[gpui::test]
+fn switching_to_the_active_terminals_workspace_keeps_it_active(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(
+    &mut h,
+    serde_json::json!({
+      "activeSessionId": 3,
+      "commands": [
+        { "nonce": 1, "kind": "newShell", "dir": "/repo" },
+        { "nonce": 2, "kind": "newShell", "dir": "/repo" },
+      ],
+    }),
+  );
+  let shells: Vec<String> = host
+    .calls()
+    .iter()
+    .filter_map(|c| c.strip_prefix("spawn ").and_then(|c| c.split(' ').next()))
+    .filter(|id| id.starts_with("shell-"))
+    .map(str::to_string)
+    .collect();
+  assert_eq!(shells.len(), 2, "{:?}", host.calls());
+  // The newest shell is active, as a click on it would leave it.
+  h.update(|s| {
+    if let View::Workspace(route) = &mut s.view {
+      route.workspace_id = None;
+    }
+  });
+  h.cx.run_until_parked();
+  h.cx.simulate_keystrokes("cmd-w");
+  h.cx.run_until_parked();
+  let closed = format!("close {}", shells[1]);
+  assert!(host.calls().contains(&closed), "{:?}", host.calls());
+}
+
 /// The pane shows every workspace's terminals: the shown workspace's are
 /// highlighted, the others dimmed, and switching workspace swaps them.
 #[gpui::test]
@@ -994,6 +1031,80 @@ fn double_clicking_a_remote_session_scrolls_it_fully_into_view(cx: &mut TestAppC
     header.right() <= container.right() + gpui::px(1.),
     "{header:?} {container:?}"
   );
+}
+
+#[gpui::test]
+fn double_clicking_a_session_clipped_on_the_left_scrolls_it_into_view(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  let mut commands = Vec::new();
+  for (nonce, label) in [(1, "shell-a"), (2, "shell-b"), (3, "shell-c")] {
+    let mut command = open_remote_command(nonce);
+    command["commands"][0]["remote"]["label"] = label.into();
+    commands.extend(command["commands"].as_array().cloned().unwrap());
+  }
+  set_terminal(&mut h, serde_json::json!({ "commands": commands }));
+  let container = h
+    .cx
+    .debug_bounds("terminal-scroll-container")
+    .expect("container");
+  // Drag the row's scrollbar to the end so the first session is clipped
+  // by the left edge.
+  let thumb = h
+    .cx
+    .debug_bounds("terminal-row-scrollbar")
+    .expect("scrollbar");
+  let grab = thumb.center();
+  let to = gpui::point(container.right(), grab.y);
+  h.cx.simulate_event(gpui::MouseDownEvent {
+    position: grab,
+    modifiers: Modifiers::none(),
+    button: MouseButton::Left,
+    click_count: 1,
+    first_mouse: false,
+  });
+  h.cx.simulate_event(gpui::MouseMoveEvent {
+    position: to,
+    modifiers: Modifiers::none(),
+    pressed_button: Some(MouseButton::Left),
+  });
+  h.cx.simulate_event(gpui::MouseUpEvent {
+    position: to,
+    modifiers: Modifiers::none(),
+    button: MouseButton::Left,
+    click_count: 1,
+  });
+  h.cx.run_until_parked();
+  let before = h
+    .cx
+    .debug_bounds("terminal-row-scrollbar")
+    .expect("scrollbar");
+  assert!(
+    before.left() > container.left() + gpui::px(1.),
+    "{before:?}"
+  );
+  let header = h.cx.debug_bounds("remote-terminal-header").expect("header");
+  let at = gpui::point(container.left() + gpui::px(8.), header.center().y);
+  for click_count in [1, 2] {
+    h.cx.simulate_event(gpui::MouseDownEvent {
+      position: at,
+      modifiers: Modifiers::none(),
+      button: MouseButton::Left,
+      click_count,
+      first_mouse: false,
+    });
+    h.cx.simulate_event(gpui::MouseUpEvent {
+      position: at,
+      modifiers: Modifiers::none(),
+      button: MouseButton::Left,
+      click_count,
+    });
+  }
+  h.cx.run_until_parked();
+  let after = h
+    .cx
+    .debug_bounds("terminal-row-scrollbar")
+    .expect("scrollbar");
+  assert!(after.left() < before.left(), "{before:?} {after:?}");
 }
 
 #[gpui::test]
@@ -1596,4 +1707,83 @@ fn terminal_pane_shows_on_the_github_view(cx: &mut TestAppContext) {
     .expect("github route");
   });
   assert!(h.drawn("terminal-scroll-container"));
+}
+
+/// Clicking an agent header's workspace label navigates to that workspace.
+#[gpui::test]
+fn terminal_workspace_label_click_navigates(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  h.click("terminal-workspace-label");
+  let navigated = h
+    .sent()
+    .into_iter()
+    .any(|a| matches!(a, ScreenAction::Field { field, .. } if field == "terminal.navigate"));
+  assert!(navigated, "{:?}", h.sent());
+}
+
+/// A session whose workspace is known only by its path (the launch kept
+/// it, the workspace row isn't loaded) still navigates to that workspace,
+/// not to the main repository.
+#[gpui::test]
+fn terminal_workspace_label_click_navigates_by_path(cx: &mut TestAppContext) {
+  let mut host = terminal_host();
+  host.sessions[0].workspace_id = None;
+  host.pending.lock().unwrap().insert(
+    3,
+    launch_data::PendingSession {
+      pending_prompt: None,
+      permission_mode: None,
+      agent: None,
+      workspace_path: Some("/repo/.treq/workspaces/b".into()),
+    },
+  );
+  let (mut h, _) = workspace_harness(cx, host, terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  h.click("terminal-workspace-label");
+  let value = h.sent().into_iter().find_map(|a| match a {
+    ScreenAction::Field { field, value } if field == "terminal.navigate" => Some(value),
+    _ => None,
+  });
+  assert_eq!(
+    value,
+    Some(serde_json::json!({ "key": "/repo/.treq/workspaces/b", "isMainRepo": false }))
+  );
+}
+
+#[gpui::test]
+fn terminal_agent_header_links_to_what_it_reviews(cx: &mut TestAppContext) {
+  let mut host = terminal_host();
+  host.sessions[0].link_url = Some("https://github.com/o/r/pull/4305".into());
+  let (mut h, host) = workspace_harness(cx, host, terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  assert!(h.drawn("terminal-workspace-label"));
+  h.click("terminal-link-label");
+  assert!(
+    host
+      .calls()
+      .contains(&"open https://github.com/o/r/pull/4305".to_string()),
+    "{:?}",
+    host.calls()
+  );
+}
+
+#[gpui::test]
+fn terminal_agent_header_has_no_link_without_one(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  assert!(h.drawn("terminal-workspace-label"));
+  assert!(!h.drawn("terminal-link-label"));
+}
+
+#[test]
+fn terminal_link_labels_name_the_pull_request() {
+  assert_eq!(
+    super::super::terminal::link_label("https://github.com/o/r/pull/4305"),
+    "#4305"
+  );
+  assert_eq!(
+    super::super::terminal::link_label("https://linear.app/x/issue/ENG-1"),
+    "linear.app"
+  );
 }

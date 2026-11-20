@@ -2597,6 +2597,7 @@ fn terminal_host() -> FakeHost {
     created_at: String::new(),
     last_accessed: String::new(),
     model: None,
+    link_url: None,
   }];
   host.workspaces = host.loaded.workspace.clone().into_iter().collect();
   host

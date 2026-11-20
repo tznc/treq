@@ -345,6 +345,10 @@ fn http_status_error(status: reqwest::StatusCode, text: &str, via_proxy: bool) -
       .ok()
       .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
     {
+      // No linked account means the user still has to connect Linear.
+      if message == PROXY_NOT_LINKED {
+        return NOT_CONNECTED.to_string();
+      }
       return format!("Linear: {message}");
     }
   }
@@ -364,6 +368,8 @@ pub fn needs_connection(error: &str) -> bool {
   error == NOT_CONNECTED || error.starts_with(REJECTED_KEY) || error.starts_with(REJECTED_PROXY)
 }
 
+/// The integration proxy's error when the user has no Linear OAuth link.
+const PROXY_NOT_LINKED: &str = "Linear account not linked";
 const REJECTED_KEY: &str = "Linear rejected the API key";
 const REJECTED_PROXY: &str = "treq could not authenticate with the Linear proxy";
 
@@ -1428,7 +1434,8 @@ mod tests {
       true,
     )
     .unwrap_err();
-    assert_eq!(err, "Linear: Linear account not linked");
+    assert_eq!(err, NOT_CONNECTED);
+    assert!(needs_connection(&err));
 
     let err = parse_graphql_response::<ViewerOnly>(
       reqwest::StatusCode::UNAUTHORIZED,
@@ -1812,7 +1819,7 @@ mod tests {
     });
 
     let err = linear_get_viewer_impl(&client).await.unwrap_err();
-    assert_eq!(err, "Linear: Linear account not linked");
+    assert_eq!(err, NOT_CONNECTED);
   }
 
   fn issue_node_json(title: &str, description: &str) -> serde_json::Value {

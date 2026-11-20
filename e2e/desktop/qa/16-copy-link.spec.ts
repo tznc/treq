@@ -1,4 +1,4 @@
-// Right-clicking a button that opens GitHub offers "Copy link", which copies
+// Right-clicking a button that opens GitHub offers "Copy GitHub link" (and "Copy Treq link" for a PR), which copies
 // its URL and toasts. feat/keyvalues-cache has open PR #401.
 import { execFileSync } from "node:child_process";
 import { expect, test } from "@playwright/test";
@@ -27,14 +27,14 @@ for (const [name, what, suffix] of [
       screen: true,
       rest: false,
       expectations: [
-        "A context menu opens at the pointer with one row, 'Copy link', and a link icon",
+        "A context menu opens at the pointer with 'Copy GitHub link' first (plus 'Copy Treq link' for a PR), each with a link icon",
       ],
     });
-    await xPointer(page, menu.x + menu.w / 2, menu.y + menu.h / 2, 1);
+    await xPointer(page, menu.x + menu.w / 2, menu.y + menu.h / 4, 1);
     await settle(page, 600);
     await capture(page, {
       name: `16-copy-link-${what}-toast`,
-      title: `After Copy link on the ${what} button`,
+      title: `After Copy GitHub link on the ${what} button`,
       screen: true,
       rest: false,
       expectations: ["The menu is gone and a one-line 'Link copied' toast shows"],

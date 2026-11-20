@@ -175,6 +175,8 @@ pub enum NativeMenuItem {
     /// A `DropdownMenuCheckboxItem`, checked or not: picking it toggles
     /// the check and keeps the menu open.
     check: Option<bool>,
+    /// The key that runs the item without the menu, in a `Kbd` at the end.
+    shortcut: Option<String>,
     on_select: Pick,
   },
   Separator,
@@ -197,6 +199,7 @@ impl NativeMenuItem {
       destructive: false,
       radio: None,
       check: None,
+      shortcut: None,
       on_select: Rc::new(on_select),
     }
   }
@@ -242,6 +245,14 @@ impl NativeMenuItem {
     self
   }
 
+  /// Shows `key` (as GPUI binds it, such as `backspace`) at the row's end.
+  pub fn shortcut(mut self, key: impl Into<String>) -> Self {
+    if let NativeMenuItem::Item { shortcut, .. } = &mut self {
+      *shortcut = Some(key.into());
+    }
+    self
+  }
+
   pub fn destructive(mut self) -> Self {
     if let NativeMenuItem::Item { destructive, .. } = &mut self {
       *destructive = true;
@@ -265,6 +276,7 @@ pub fn native_entries(items: Vec<NativeMenuItem>) -> Vec<MenuEntry> {
           destructive,
           radio,
           check,
+          shortcut,
           on_select,
         } => {
           let id = *next;
@@ -277,6 +289,7 @@ pub fn native_entries(items: Vec<NativeMenuItem>) -> Vec<MenuEntry> {
             destructive,
             radio,
             check,
+            shortcut,
           }
         }
         NativeMenuItem::Separator => MenuEntry::Separator,
@@ -298,23 +311,32 @@ pub fn native_entries(items: Vec<NativeMenuItem>) -> Vec<MenuEntry> {
   build(items, &mut next)
 }
 
-/// The menu a right-click on a GitHub link opens at `at`: "Copy link",
-/// which copies `url` and toasts through `notify`.
+/// The menu a right-click on a GitHub link opens at `at`: "Copy GitHub
+/// link", which copies `url`, and for a PR "Copy Treq link", which copies its
+/// treq.dev link. Each toasts through `notify`.
 pub fn copy_link_menu(
   url: String,
   at: Point<Pixels>,
   dark: bool,
   notify: impl Fn(NativeEvent) + 'static,
 ) -> PopupRequest {
-  let item = NativeMenuItem::item("Copy link", move |cx| {
-    cx.write_to_clipboard(ClipboardItem::new_string(url.clone()));
-    notify(NativeEvent::from(
-      crate::gpui_shell::native::Toast::success("Link copied"),
-    ));
-  })
-  .icon(MenuIcon::Link);
+  let notify = std::rc::Rc::new(notify);
+  let copy = |label: &str, link: String| {
+    let notify = notify.clone();
+    NativeMenuItem::item(label, move |cx| {
+      cx.write_to_clipboard(ClipboardItem::new_string(link.clone()));
+      notify(NativeEvent::from(
+        crate::gpui_shell::native::Toast::success("Link copied"),
+      ));
+    })
+    .icon(MenuIcon::Link)
+  };
+  let mut items = vec![copy("Copy GitHub link", url.clone())];
+  if let Some(treq) = crate::core::pr_link::treq_web_link(&url) {
+    items.push(copy("Copy Treq link", treq));
+  }
   PopupRequest::ShowMenu {
-    entries: native_entries(vec![item]),
+    entries: native_entries(items),
     at,
     dark,
   }
@@ -415,6 +437,9 @@ pub enum MenuEntry {
     /// A checkbox item (`pl-8`, its check drawn when `true`).
     #[serde(default)]
     check: Option<bool>,
+    /// A key that runs the item, in a `Kbd` at the row's end (`ml-auto`).
+    #[serde(default)]
+    shortcut: Option<String>,
   },
   Separator,
   Submenu {
@@ -498,6 +523,20 @@ struct PopupView {
 }
 
 /// The width of `text` in `family` at `text-sm`, without kerning.
+/// A PR state pill's width: its padding, icon, gap and caption label.
+fn pr_pill_width(cx: &App, pr: PrState) -> f32 {
+  let label = pr.pill().0;
+  let size = cx
+    .try_global::<theme::Density>()
+    .copied()
+    .unwrap_or_default()
+    .caption();
+  2. * 6.
+    + ui::BADGE_ICON_SIZE
+    + ui::BADGE_ICON_GAP
+    + text_width_at(cx, label, theme::SANS_FONT, size) * 1.03
+}
+
 fn text_width(cx: &App, text: &str, family: &'static str) -> f32 {
   text_width_at(cx, text, family, TEXT_SIZE)
 }
@@ -586,7 +625,7 @@ fn tooltip_size(cx: &App, content: &TooltipContent) -> (f32, f32) {
         lines += 1;
       }
       if let Some(pr) = pr {
-        width = width.max(text_width(cx, pr.label(), theme::SANS_FONT));
+        width = width.max(pr_pill_width(cx, *pr));
         lines += 1;
       }
       (width, lines)
@@ -626,6 +665,14 @@ fn entry_width(cx: &App, entry: &MenuEntry) -> f32 {
     if radio.is_some() || check.is_some() {
       width += RADIO_INSET - ITEM_PADDING_X;
     }
+  }
+  if let MenuEntry::Item {
+    shortcut: Some(key),
+    ..
+  } = entry
+  {
+    let label = ui::Kbd::label(key);
+    width += DETAIL_GAP + kbd_width(text_width_at(cx, &label, theme::SANS_FONT, 12.));
   }
   if let MenuEntry::Submenu {
     detail: Some(detail),
@@ -835,10 +882,11 @@ impl PopupView {
           )
         })
         .when_some(*pr, |this, pr| {
+          let (label, icon, tone) = pr.pill();
           this.child(
             div()
-              .text_color(super::sidebar::pr_color(pr, palette))
-              .child(pr.label()),
+              .flex()
+              .child(ui::Badge::new(label, palette).tone(tone).icon(icon)),
           )
         })
         .into_any_element(),
@@ -897,6 +945,7 @@ impl PopupView {
           destructive,
           radio,
           check,
+          shortcut,
         } => {
           let id = *id;
           let checkable = check.is_some();
@@ -907,42 +956,29 @@ impl PopupView {
           };
           menu_row(format!("item-{index}"), text, *icon, color, &palette, false)
             .debug_selector(move || format!("menu-item-{id}"))
-            .when_some(*radio, |row, checked| {
-              row.relative().pl(zpx(RADIO_INSET)).child(
+            .when_some(shortcut.as_deref(), |row, key| {
+              row.child(
                 div()
-                  .absolute()
-                  .left(zpx(ITEM_PADDING_X))
-                  .size_4()
-                  .flex()
-                  .items_center()
-                  .justify_center()
-                  .when(checked, |this| {
-                    this.child(div().size_2().rounded_full().bg(color))
-                  }),
+                  .ml_auto()
+                  .pl(zpx(DETAIL_GAP))
+                  .child(ui::Kbd::new(key, &palette)),
               )
             })
+            .when_some(*radio, |row, checked| {
+              menu_indicator(row, checked.then(|| radio_dot(color)))
+            })
             .when_some(*check, |row, checked| {
-              row
-                .relative()
-                .pl(zpx(RADIO_INSET))
+              let row = row
                 .role(gpui::Role::MenuItemCheckBox)
                 .aria_toggled(if checked {
                   gpui::accesskit::Toggled::True
                 } else {
                   gpui::accesskit::Toggled::False
-                })
-                .child(
-                  div()
-                    .absolute()
-                    .left(zpx(ITEM_PADDING_X))
-                    .size_4()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .when(checked, |this| {
-                      this.child(super::ui::icon(theme::ICON_CHECK, 16., color))
-                    }),
-                )
+                });
+              menu_indicator(
+                row,
+                checked.then(|| super::ui::icon(theme::ICON_CHECK, 16., color).into_any_element()),
+              )
             })
             .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
               if *hovered {
@@ -1096,6 +1132,30 @@ fn menu_row(
         .whitespace_nowrap()
         .child(SharedString::from(text.to_string())),
     )
+}
+
+/// Insets `row` to `pl-8` and draws `mark` (a radio dot, a check) in the
+/// `left-2 h-4 w-4` box before its text. An overlay, so the box is placed
+/// against the row rather than its text.
+fn menu_indicator(row: ui::Row, mark: Option<gpui::AnyElement>) -> ui::Row {
+  row.pl(zpx(RADIO_INSET)).overlay(
+    div()
+      .debug_selector(|| "menu-indicator".into())
+      .absolute()
+      .top_0()
+      .bottom_0()
+      .left(zpx(ITEM_PADDING_X))
+      .w_4()
+      .flex()
+      .items_center()
+      .justify_center()
+      .children(mark),
+  )
+}
+
+/// A picked radio item's `h-2 w-2` dot.
+fn radio_dot(color: Hsla) -> gpui::AnyElement {
+  div().size_2().rounded_full().bg(color).into_any_element()
 }
 
 impl Render for PopupView {
@@ -1699,6 +1759,32 @@ mod tests {
     });
   }
 
+  #[gpui::test]
+  fn sizes_a_branch_tooltip_with_its_pr_pill(cx: &mut gpui::TestAppContext) {
+    cx.update(|cx| {
+      theme::init(cx);
+      let branch = |pr| TooltipContent::Branch {
+        name: None,
+        title: "a".into(),
+        target: None,
+        conflicted: false,
+        pr,
+      };
+      let (_, bare) = tooltip_size(cx, &branch(None));
+      for pr in [
+        PrState::Draft,
+        PrState::Open,
+        PrState::Merged,
+        PrState::Closed,
+      ] {
+        let (width, height) = tooltip_size(cx, &branch(Some(pr)));
+        // The pill sits on its own row, as wide as its icon and label.
+        assert_eq!(height, bare + LINE_HEIGHT + 4.);
+        assert!(width >= pr_pill_width(cx, pr) + 16.);
+      }
+    });
+  }
+
   #[test]
   fn reads_every_menu_icon() {
     // Every icon a menu item can name.
@@ -1746,10 +1832,43 @@ mod tests {
           destructive: false,
           radio: None,
           check: None,
+          shortcut: None,
         }],
       }
     );
     assert_eq!(entry_top(&entries, 2), 1. + 4. + 32. + 9.);
+  }
+
+  struct IndicatorRow;
+
+  impl Render for IndicatorRow {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+      let palette = theme::palette(true);
+      let row = menu_row(
+        "row",
+        "All teams",
+        None,
+        palette.popover_foreground,
+        &palette,
+        false,
+      )
+      .debug_selector(|| "row".into());
+      div().w(px(240.)).child(menu_indicator(
+        row,
+        Some(radio_dot(palette.popover_foreground)),
+      ))
+    }
+  }
+
+  #[gpui::test]
+  fn places_a_radio_dot_in_the_row_inset_not_over_its_text(cx: &mut gpui::TestAppContext) {
+    cx.update(theme::init);
+    let (_, cx) = cx.add_window_view(|_, _| IndicatorRow);
+    cx.run_until_parked();
+    let row = cx.debug_bounds("row").expect("row");
+    let dot = cx.debug_bounds("menu-indicator").expect("indicator");
+    assert_eq!(dot.origin.x, row.origin.x + px(ITEM_PADDING_X));
+    assert_eq!(dot.center().y, row.center().y);
   }
 
   #[test]
