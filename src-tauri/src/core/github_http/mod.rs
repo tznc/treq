@@ -1154,7 +1154,7 @@ mod tests {
     let thread = |id: &str, author: Value| {
       json!({
         "id": id, "is_resolved": false, "is_outdated": true, "path": "src/a.rs",
-        "line": 12, "diff_side": "RIGHT",
+        "line": 12, "start_line": null, "diff_side": "RIGHT",
         "comments": [{
           "id": format!("{id}-c"), "body": "nit", "author": author,
           "created_at": "2026-01-01T00:00:00Z", "diff_hunk": "@@ -1 +1 @@",
