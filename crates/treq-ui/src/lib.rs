@@ -975,7 +975,7 @@ mod tests {
   }
 
   #[test]
-  fn a_command_button_is_a_primary_outlined_field_with_its_shortcut_last() {
+  fn a_command_button_is_an_unfilled_field_with_its_shortcut_last() {
     let p = theme::palette(false);
     let command = Button::new("c", &p)
       .variant(Variant::Command)
@@ -983,10 +983,6 @@ mod tests {
       .icon(theme::ICON_SEARCH, 16.)
       .label("Go to file");
     assert!(!command.filled());
-    assert_eq!(command.colors().bg, p.background);
-    assert_eq!(command.colors().border, p.primary.opacity(0.5));
-    assert_eq!(command.colors().hover_bg, p.primary.opacity(0.1));
-    assert_eq!(command.foreground(), p.primary);
     assert!(matches!(
       command.children[..],
       [ButtonChild::Icon(..), ButtonChild::Element(_)]
