@@ -31,7 +31,7 @@ pub const COMMENT_HUNK: &str = "browser";
 /// What the file browser asks of the backend; faked in tests. Everything
 /// blocks, so it is called off the main thread.
 pub trait FileBrowserHost: ChangesHost {
-  /// `list_directory`: a directory's children, minus ignored files.
+  /// A directory's children, gitignored ones marked [`is_ignored`].
   fn list_directory(&self, path: &str) -> Result<Vec<WorkspaceEntry>, String>;
   fn read_file(&self, path: &str) -> Result<String, String>;
   /// `get_file_modified_at`.
@@ -55,7 +55,7 @@ pub trait FileBrowserHost: ChangesHost {
 
 impl FileBrowserHost for Backend {
   fn list_directory(&self, path: &str) -> Result<Vec<WorkspaceEntry>, String> {
-    core::list_directory(path)
+    core::list_directory_with_ignored(path)
   }
 
   fn read_file(&self, path: &str) -> Result<String, String> {
@@ -89,12 +89,23 @@ impl FileBrowserHost for Backend {
   }
 }
 
-/// `filterHiddenEntries`: hidden files stay, hidden directories go.
-pub fn filter_hidden(entries: Vec<WorkspaceEntry>) -> Vec<WorkspaceEntry> {
+/// Whether a gitignore rule excludes `entry`; the tree dims it.
+pub fn is_ignored(entry: &WorkspaceEntry) -> bool {
+  entry.status.as_deref() == Some(core::files::IGNORED)
+}
+
+/// Everything under an ignored directory is ignored too, though its own
+/// listing only sees rules that name the children.
+pub fn inherit_ignored(
+  mut entries: Vec<WorkspaceEntry>,
+  parent_ignored: bool,
+) -> Vec<WorkspaceEntry> {
+  if parent_ignored {
+    for e in &mut entries {
+      e.status = Some(core::files::IGNORED.to_string());
+    }
+  }
   entries
-    .into_iter()
-    .filter(|e| !e.is_directory || !e.name.starts_with('.'))
-    .collect()
 }
 
 /// Directories first, then by name as `localeCompare` orders them: case
@@ -351,14 +362,10 @@ mod tests {
   }
 
   #[test]
-  fn hidden_directories_are_left_out_but_hidden_files_stay() {
-    let kept = filter_hidden(vec![
-      entry(".git", true),
-      entry(".env", false),
-      entry("src", true),
-    ]);
-    let names: Vec<_> = kept.iter().map(|e| e.name.as_str()).collect();
-    assert_eq!(names, [".env", "src"]);
+  fn an_ignored_directory_s_children_are_ignored() {
+    let listed = || vec![entry(".env", false), entry("src", true)];
+    assert!(inherit_ignored(listed(), true).iter().all(is_ignored));
+    assert!(!inherit_ignored(listed(), false).iter().any(is_ignored));
   }
 
   #[test]

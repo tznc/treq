@@ -39,9 +39,10 @@ use super::{
   changes_review::{count_label, review_markdown, LineComment},
   code::Parent,
   file_browser_data::{
-    comment_counts, comment_target, dir_status, file_name, filter_hidden, flatten, is_binary,
-    is_markdown, line_marks, line_number_width, parse_review, readme, relative, review_to_save,
-    sorted, status_title, too_large, FileBrowserHost, LineMarks, TreeRow, COMMENT_HUNK,
+    comment_counts, comment_target, dir_status, file_name, flatten, inherit_ignored, is_binary,
+    is_ignored, is_markdown, line_marks, line_number_width, parse_review, readme, relative,
+    review_to_save, sorted, status_title, too_large, FileBrowserHost, LineMarks, TreeRow,
+    COMMENT_HUNK,
   },
   find::{self, match_ranges, Find, Findable},
   highlight, prefetch, ActionSink, ScreenAction,
@@ -422,7 +423,7 @@ impl FileBrowserView {
   fn load_root(&mut self, cx: &mut Context<Self>) {
     let base = self.base();
     self.run(
-      move |host| host.list_directory(&base).map(|e| sorted(filter_hidden(e))),
+      move |host| host.list_directory(&base).map(sorted),
       |view, result, cx| match result {
         Ok(entries) => {
           let first = view.root.is_none();
@@ -479,8 +480,17 @@ impl FileBrowserView {
       return;
     }
     let path = dir.clone();
+    let parent_ignored = self
+      .cache
+      .values()
+      .flatten()
+      .any(|e| e.path == dir && is_ignored(e));
     self.run(
-      move |host| host.list_directory(&path).map(|e| sorted(filter_hidden(e))),
+      move |host| {
+        host
+          .list_directory(&path)
+          .map(|e| sorted(inherit_ignored(e, parent_ignored)))
+      },
       move |view, result, _| {
         let entries = match result {
           Ok(entries) => entries,
@@ -1442,7 +1452,11 @@ impl FileBrowserView {
       let open = self.expanded.contains(&entry.path);
       let rel = self.rel(&entry.path);
       let status = dir_status(&self.changed, &rel);
-      let color = p.foreground;
+      let color = if is_ignored(entry) {
+        p.muted_foreground
+      } else {
+        p.foreground
+      };
       return row
         .leading(ui::icon(
           if open {
@@ -1451,7 +1465,7 @@ impl FileBrowserView {
             theme::ICON_FOLDER
           },
           16.,
-          p.foreground,
+          color,
         ))
         .child(mono(&entry.name, color).font_weight(FontWeight::MEDIUM))
         .when(status.is_some(), |this| {
@@ -1472,7 +1486,11 @@ impl FileBrowserView {
       .get(&rel)
       .copied()
       .unwrap_or(0);
-    let color = p.foreground;
+    let color = if is_ignored(entry) {
+      p.muted_foreground
+    } else {
+      p.foreground
+    };
     let selected = self.selected.as_deref() == Some(entry.path.as_str());
     let primary = p.primary;
     row
