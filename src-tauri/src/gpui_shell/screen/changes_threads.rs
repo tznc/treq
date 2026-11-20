@@ -87,14 +87,17 @@ fn place<'a>(
   None
 }
 
-/// Open agent comments by the last line of their range and side, as
+/// Open agent comments, and resolved sent ones, by the last line of their range and side, as
 /// indices into `comments`.
 pub fn agent_by_line(comments: &[AgentReviewComment]) -> HashMap<(String, u32, Side), Vec<usize>> {
   let mut out: HashMap<_, Vec<_>> = HashMap::new();
   for (i, c) in comments
     .iter()
     .enumerate()
-    .filter(|(_, c)| c.status != "resolved")
+    // A resolved comment the user sent stays, folded.
+    .filter(|(_, c)| {
+      c.status != "resolved" || c.source == crate::core::agent_review::SENT_REVIEW_SOURCE
+    })
   {
     let side = if c.side.as_deref() == Some("old") {
       Side::Old
@@ -447,6 +450,14 @@ mod tests {
     assert!(by_line.contains_key(&("a.rs".into(), 3, Side::New)));
     assert!(by_line.contains_key(&("a.rs".into(), 2, Side::Old)));
     assert_eq!(by_line.len(), 2);
+  }
+
+  #[test]
+  fn resolved_sent_review_comments_stay_on_their_line() {
+    let mut sent = agent("a.rs", 4, 4, None, "resolved");
+    sent.source = crate::core::agent_review::SENT_REVIEW_SOURCE.into();
+    let by_line = agent_by_line(&[sent]);
+    assert!(by_line.contains_key(&("a.rs".into(), 4, Side::New)));
   }
 
   #[test]
