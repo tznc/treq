@@ -1,7 +1,15 @@
 //! A small chevron button that sits after a group's name and folds the
-//! group: pointing down while open, right while shut. It is for the
-//! sidebar's repository groups; a section in a screen folds through
-//! [`crate::SectionHeader::collapsible`], whose chevron leads its title.
+//! group: pointing down while open, right while shut.
+//!
+//! Use it where the header's text must line up with the rows above it and
+//! its children must show their indent from it, as in the sidebar's
+//! repository groups. A leading chevron would push the text right of
+//! everything else; [`crate::SectionHeader::collapsible`] does that and
+//! suits headers that need no such alignment.
+//!
+//! Put the name in a `min_w_0().truncate()` element before the toggle:
+//! a long name then gives way with an ellipsis and the chevron keeps its
+//! size, never clipped or pushed out of the row. The toggle is `flex_none`.
 
 use std::rc::Rc;
 

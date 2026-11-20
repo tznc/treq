@@ -1362,3 +1362,26 @@ fn pr_pills_name_the_state_as_github_does() {
     ("Draft", theme::ICON_PR_DRAFT, Tone::Neutral)
   );
 }
+
+#[gpui::test]
+fn a_long_group_name_truncates_before_its_fold_chevron(cx: &mut TestAppContext) {
+  const NAME: &str = "an-organisation-with-a-long-name/a-repository-with-an-even-longer-name";
+  let mut snapshot = two_repos();
+  snapshot.repos[1].label = Some(NAME.into());
+  let mut h = Harness::new(cx, snapshot);
+  let fold = h
+    .bounds(concat!(
+      "group-",
+      "an-organisation-with-a-long-name/a-repository-with-an-even-longer-name"
+    ))
+    .expect("fold chevron");
+  let home = h
+    .bounds(concat!(
+      "home-",
+      "an-organisation-with-a-long-name/a-repository-with-an-even-longer-name"
+    ))
+    .expect("home row");
+  // The name gives way; the chevron keeps its full size inside the row.
+  assert!(fold.right() <= home.right());
+  assert!(fold.size.width > gpui::px(0.));
+}
