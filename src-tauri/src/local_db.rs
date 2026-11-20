@@ -56,6 +56,8 @@ pub struct Session {
   pub created_at: String,
   pub last_accessed: String,
   pub model: Option<String>,
+  /// What the session works on, opened from its header (a PR review's PR).
+  pub link_url: Option<String>,
 }
 
 static INITIALIZED_DBS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
@@ -1397,7 +1399,7 @@ pub fn set_workspace_metadata(repo_path: &str, id: i64, metadata: &str) -> Resul
 pub fn get_sessions(repo_path: &str) -> Result<Vec<Session>, String> {
   let conn = get_connection(repo_path)?;
   let mut stmt = conn
-        .prepare("SELECT id, workspace_id, name, created_at, last_accessed, model FROM sessions ORDER BY created_at ASC")
+        .prepare("SELECT id, workspace_id, name, created_at, last_accessed, model, link_url FROM sessions ORDER BY created_at ASC")
         .map_err(|e| format!("Failed to prepare sessions query: {}", e))?;
 
   let sessions = stmt
@@ -1409,6 +1411,7 @@ pub fn get_sessions(repo_path: &str) -> Result<Vec<Session>, String> {
         created_at: row.get(3)?,
         last_accessed: row.get(4)?,
         model: row.get(5)?,
+        link_url: row.get(6)?,
       })
     })
     .map_err(|e| format!("Failed to query sessions: {}", e))?;
@@ -1460,6 +1463,17 @@ pub fn update_session_name(repo_path: &str, id: i64, name: String) -> Result<(),
     )
     .map_err(|e| format!("Failed to update session name: {}", e))?;
 
+  Ok(())
+}
+
+pub fn set_session_link(repo_path: &str, id: i64, url: &str) -> Result<(), String> {
+  let conn = get_connection(repo_path)?;
+  conn
+    .execute(
+      "UPDATE sessions SET link_url = ?1 WHERE id = ?2",
+      params![url, id],
+    )
+    .map_err(|e| format!("Failed to set session link: {}", e))?;
   Ok(())
 }
 
@@ -2883,6 +2897,19 @@ mod tests {
     assert!(
       workspaces.iter().any(|w| w.id == id),
       "{label}: workspace not read back"
+    );
+  }
+
+  #[test]
+  fn keeps_a_session_link() {
+    let temp_dir = TempDir::new().expect("temp dir");
+    let repo_path = temp_dir.path().to_str().unwrap();
+    let id = add_session(repo_path, None, "AI Review".into()).expect("add_session");
+    assert_eq!(get_sessions(repo_path).unwrap()[0].link_url, None);
+    set_session_link(repo_path, id, "https://github.com/o/r/pull/4").expect("set link");
+    assert_eq!(
+      get_sessions(repo_path).unwrap()[0].link_url.as_deref(),
+      Some("https://github.com/o/r/pull/4")
     );
   }
 

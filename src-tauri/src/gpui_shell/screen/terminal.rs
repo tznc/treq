@@ -12,6 +12,7 @@
 
 use crate::core::pty_remote_supervisor::clean_title;
 use crate::gpui_shell::native::Toast;
+use crate::gpui_shell::sidebar;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use crate::lock_ext::LockExt as _;
@@ -34,7 +35,7 @@ use tauri_plugin_gpui::gpui::{
   self, anchored, deferred, div, img, linear_color_stop, linear_gradient, point, prelude::*, px,
   relative, AnyElement, App, Bounds, ClipboardItem, Context, Div, Entity, ExternalPaths,
   FocusHandle, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, ObjectFit, Pixels,
-  ScrollHandle, ScrollWheelEvent, SharedString, Stateful, Subscription, Task, Window,
+  ScrollHandle, ScrollWheelEvent, SharedString, Subscription, Task, Window,
 };
 
 use super::{
@@ -282,6 +283,11 @@ pub fn agent_column_id(pane_id: i64) -> String {
   format!("agent-{pane_id}")
 }
 
+/// `base` scaled by the UI zoom, read off the window's rem size.
+fn zoomed_font_size(base: f32, rem: Pixels) -> f32 {
+  (base * f32::from(rem) / crate::gpui_shell::ui::BASE_REM).round()
+}
+
 /// xterm's cell: the font's advance and height, each rounded down to whole
 /// device pixels.
 pub fn cell_size(advance: f32, height: f32, scale: f32) -> (f32, f32) {
@@ -442,7 +448,10 @@ pub struct TerminalView {
   /// The size last given to the PTY, which follows the grid once it runs.
   pty_size: Option<(usize, usize)>,
   focus: FocusHandle,
+  /// The unzoomed font size; the window's rem size scales it.
   font_size: f32,
+  /// The zoomed font size `cell` was measured at.
+  measured_font_size: f32,
   /// The cell size, once measured.
   cell: Option<(f32, f32)>,
   /// The font's own advance, which the cell width rounds down.
@@ -561,6 +570,7 @@ impl TerminalView {
       pty_size: None,
       focus: cx.focus_handle(),
       font_size,
+      measured_font_size: font_size,
       cell: None,
       advance: 0.,
       dark,
@@ -785,16 +795,18 @@ impl TerminalView {
   }
 
   fn measure(&mut self, window: &Window, cx: &App) {
-    if self.cell.is_some() {
+    let font_size = zoomed_font_size(self.font_size, window.rem_size());
+    if self.cell.is_some() && self.measured_font_size == font_size {
       return;
     }
+    self.measured_font_size = font_size;
     let system = cx.text_system();
     let font = system.resolve_font(&gpui::font(theme::MONO_FONT));
-    let size = px(self.font_size);
+    let size = px(font_size);
     let advance = system
       .advance(font, size, 'm')
       .map(|a| f32::from(a.width))
-      .unwrap_or(self.font_size * 0.6);
+      .unwrap_or(font_size * 0.6);
     let height = f32::from(system.ascent(font, size)) + f32::from(system.descent(font, size)).abs();
     self.advance = advance;
     self.cell = Some(cell_size(advance, height, window.scale_factor()));
@@ -1578,6 +1590,10 @@ impl TerminalView {
     );
     Some(
       div()
+        .id("terminal-search")
+        .role(gpui::Role::Search)
+        .aria_label("Find in terminal")
+        .test_support()
         .debug_selector(|| "terminal-search".into())
         .absolute()
         .top_2()
@@ -1620,7 +1636,7 @@ impl TerminalView {
     let Some(((w, h), frame)) = self.cell.zip(self.with_emulator(|e| e.frame(scheme))) else {
       return div();
     };
-    let (font_size, advance) = (px(self.font_size), self.advance);
+    let (font_size, advance) = (px(self.measured_font_size), self.advance);
     let cursor = frame.cursor.map(|(row, col)| {
       cursor_div(
         (row, col),
@@ -1687,7 +1703,7 @@ impl TerminalView {
     target: &RemoteTarget,
     p: &Palette,
     cx: &mut Context<Self>,
-  ) -> Option<Div> {
+  ) -> Option<AnyElement> {
     let error = match &self.status {
       Status::Failed(error) | Status::AgentFailed(error) => Some(error.clone()),
       _ => None,
@@ -1699,6 +1715,10 @@ impl TerminalView {
       });
       return Some(
         ui::text(div(), TextSize::Sm)
+          .id("remote-terminal-lost")
+          .role(gpui::Role::Alert)
+          .aria_label(message.clone())
+          .test_support()
           .debug_selector(|| "remote-terminal-lost".into())
           .absolute()
           .inset_0()
@@ -1737,15 +1757,25 @@ impl TerminalView {
                   .label("Close")
                   .on_click(cx.listener(|view, _, _, cx| (view.on_event)(TermEvent::Close, cx))),
               ),
-          ),
+          )
+          .into_any_element(),
       );
     }
     if self.status != Status::Preparing || self.remote.ended.is_some() {
       return None;
     }
     let reattaching = target.reattach || self.remote.attaches > 0;
+    let label = if reattaching {
+      "Reattaching…"
+    } else {
+      "Starting remote session…"
+    };
     Some(
       ui::text(div(), TextSize::Sm)
+        .id("remote-terminal-attaching")
+        .role(gpui::Role::Status)
+        .aria_label(label)
+        .test_support()
         .debug_selector(|| "remote-terminal-attaching".into())
         .absolute()
         .inset_0()
@@ -1760,18 +1790,19 @@ impl TerminalView {
           20.,
           p.muted_foreground,
         )))
-        .child(if reattaching {
-          "Reattaching…"
-        } else {
-          "Starting remote session…"
-        }),
+        .child(label)
+        .into_any_element(),
     )
   }
 
-  fn overlay(&self, p: &Palette, cx: &mut Context<Self>) -> Option<Div> {
+  fn overlay(&self, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
     if let Some(target) = self.remote_target() {
       return self.remote_overlay(&target.clone(), p, cx);
     }
+    self.local_overlay(p, cx).map(IntoElement::into_any_element)
+  }
+
+  fn local_overlay(&self, p: &Palette, cx: &mut Context<Self>) -> Option<Div> {
     match &self.status {
       Status::Ready => None,
       Status::Preparing => Some(
@@ -1897,10 +1928,14 @@ impl Render for TerminalView {
       .on_key_down(cx.listener(Self::on_key))
       .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
       // A click anywhere else blurs the terminal, as it does xterm's
-      // textarea; its cursor turns to an outline.
+      // textarea; its cursor turns to an outline. It also drops the
+      // selection, so no stale highlight is left behind.
       .on_mouse_down_out(cx.listener(|view, _, window, cx| {
         if view.focus.is_focused(window) {
           window.blur(cx);
+        }
+        if view.with_emulator(|e| e.clear_selection()).is_some() {
+          cx.notify();
         }
       }))
       .on_mouse_down(MouseButton::Middle, cx.listener(Self::on_mouse_down))
@@ -1976,6 +2011,8 @@ enum Kind {
     workspace_path: Option<String>,
     workspace_name: Option<String>,
     agent: String,
+    /// What the session works on (a reviewed PR), opened from its header.
+    link: Option<String>,
   },
   Shell {
     dir: String,
@@ -2165,18 +2202,16 @@ impl TerminalPane {
     place: Place,
     _: &mut Context<Self>,
   ) -> Self {
-    let settings = host
-      .settings(&["terminal_font_size".to_string(), "ui_zoom".to_string()])
-      .unwrap_or_default();
-    let get = |key: &str| {
-      settings
-        .get(key)
-        .cloned()
-        .flatten()
-        .and_then(|v| v.parse::<f32>().ok())
-    };
-    let font_size =
-      (get("terminal_font_size").unwrap_or(14.) * get("ui_zoom").unwrap_or(100.) / 100.).round();
+    // Unzoomed: each view scales it by the window's rem size, so zoom
+    // changes reach open terminals.
+    let font_size = host
+      .settings(&["terminal_font_size".to_string()])
+      .unwrap_or_default()
+      .get("terminal_font_size")
+      .cloned()
+      .flatten()
+      .and_then(|v| v.parse::<f32>().ok())
+      .unwrap_or(14.);
     Self {
       serial: NEXT_PANE.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
       adopt_due: true,
@@ -2492,6 +2527,10 @@ impl TerminalPane {
   fn title(&self, id: &str, text: String, color: gpui::Hsla, cx: &mut Context<Self>) -> AnyElement {
     if let Some(renaming) = self.renaming.as_ref().filter(|r| r.id == id) {
       return div()
+        .id("terminal-rename-input")
+        .role(gpui::Role::Group)
+        .aria_label("Rename terminal")
+        .test_support()
         .debug_selector(|| "terminal-rename-input".into())
         .w(zpx(200.))
         .min_w_0()
@@ -2554,9 +2593,15 @@ impl TerminalPane {
     let moved = self.place.working_directory != place.working_directory;
     self.adopt_due |= self.place.repo_path != place.repo_path;
     self.place = place;
-    // A newly selected workspace's first terminal becomes the active one.
-    if moved && !self.collapsed {
-      let dir = &self.place.working_directory;
+    // A newly selected workspace's first terminal becomes the active one,
+    // unless the active one is already there (a click on it switched
+    // workspace): the row then stays where the click left it.
+    let dir = &self.place.working_directory;
+    let active_here = self
+      .columns
+      .iter()
+      .any(|c| self.active.as_deref() == Some(c.id.as_str()) && self.column_key(c) == *dir);
+    if moved && !self.collapsed && !active_here {
       let id = self
         .columns
         .iter()
@@ -3295,12 +3340,12 @@ impl TerminalPane {
                     let id = id.clone();
                     move || format!("terminal-send-title-{id}")
                   })
-                  .w_full()
+                  .max_w_full()
                   .truncate()
                   .child(asset.title.clone()),
                 cx,
               )
-              .w_full()
+              .max_w_full()
               .min_w_0(),
           )
       };
@@ -3319,9 +3364,8 @@ impl TerminalPane {
         .test_support()
         .relative()
         .flex_none()
-        .h_20()
-        .w(zpx(144.))
-        .min_w(zpx(144.))
+        .size_20()
+        .min_w_20()
         .rounded(radius::MD)
         .border_1()
         .border_color(dark.foreground.opacity(if shown { 0.4 } else { 0.15 }))
@@ -3534,7 +3578,7 @@ impl TerminalPane {
     cx.notify();
   }
 
-  fn controls(&mut self, p: &Palette, cx: &mut Context<Self>) -> Stateful<Div> {
+  fn controls(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     let fg = p.foreground;
     let button = |id: &'static str, icon: &'static str, name: &'static str| {
       div()
@@ -3606,7 +3650,8 @@ impl TerminalPane {
             let open = std::mem::take(&mut pane.environment_menu);
             cx.notify();
             open
-          });
+          })
+          .test_support();
           deferred(panel).with_priority(1)
         });
         buttons.push(
@@ -3670,6 +3715,9 @@ impl TerminalPane {
     }
     div()
       .id("terminal-pane-controls")
+      .role(gpui::Role::Toolbar)
+      .aria_label("Terminal pane controls")
+      .test_support()
       .debug_selector(|| "terminal-pane-controls".into())
       .flex()
       .items_center()
@@ -3705,11 +3753,30 @@ impl TerminalPane {
     let place = self.place.clone();
     let label = |name: String, main: bool, key: String, react: ActionSink| {
       let tones = if on_dark { &d } else { p };
+      let changes = (key.clone(), react.clone());
       let loc = place.workspace_loc(&key).map(|loc| {
+        let (key, react) = changes;
         div()
+          .id(SharedString::from(format!("terminal-workspace-loc-{id}")))
+          .role(gpui::Role::Button)
+          .aria_label("Open changes")
           .flex()
           .flex_none()
           .gap_1()
+          .rounded_sm()
+          .cursor_pointer()
+          .hover(|s| s.underline())
+          .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+          .on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            react(
+              ScreenAction::Field {
+                field: "terminal.navigate".into(),
+                value: serde_json::json!({ "key": key, "isMainRepo": main, "tab": "changes" }),
+              },
+              cx,
+            )
+          })
           .debug_selector(|| "terminal-workspace-loc".into())
           .child(super::workspace::loc_count(
             format!("+{}", loc.insertions),
@@ -3725,9 +3792,10 @@ impl TerminalPane {
       ui::text(div(), TextSize::Xs)
         .id(SharedString::from(format!("terminal-workspace-label-{id}")))
         .role(gpui::Role::Button)
-        .aria_label(name.clone())
+        .aria_label(format!("Go to {name}"))
+        .test_support()
         .debug_selector(|| "terminal-workspace-label".into())
-        .max_w(zpx(200.))
+        .max_w(zpx(360.))
         .flex()
         .items_center()
         .gap_2()
@@ -3755,7 +3823,8 @@ impl TerminalPane {
           )
         })
         .child(div().min_w_0().truncate().child(name))
-        .children(loc)
+        .children(loc.map(|loc| loc.test_support()))
+        .test_support()
     };
     let close_id = column.id.clone();
     let close = div()
@@ -3788,9 +3857,48 @@ impl TerminalPane {
         workspace_name,
         repo_path,
         agent,
+        link,
         ..
       } => {
         let key = workspace_path.clone().unwrap_or_else(|| repo_path.clone());
+        let link = link.clone().map(|url| {
+          let host = self.host.clone();
+          let open = url.clone();
+          // Short label (['link label']): 11px is fine.
+          // ast-grep-ignore: gpui-text-xs-short-label-only
+          ui::text(div(), TextSize::Xs)
+            .id(SharedString::from(format!(
+              "terminal-link-label-{}",
+              column.id
+            )))
+            .role(gpui::Role::Link)
+            .aria_label(url.clone())
+            .debug_selector(|| "terminal-link-label".into())
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap_1()
+            .rounded_sm()
+            .bg(d.foreground.opacity(0.08))
+            .px_1()
+            .py_0p5()
+            .font_family(theme::MONO_FONT)
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .text_color(d.foreground)
+            .cursor_pointer()
+            .hover(|s| s.bg(p.hover()))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(move |_, _, cx| {
+              // `open_url` blocks, so it runs off the main thread.
+              let (host, open) = (host.clone(), open.clone());
+              cx.background_executor()
+                .spawn(async move { host.open_url(&open) })
+                .detach();
+            })
+            .child(ui::icon(theme::ICON_GITHUB, 12., d.foreground))
+            .child(link_label(&url))
+            .test_support()
+        });
         let waiting = self
           .host
           .agent_msg_waiting(&column.view.read(cx).pty)
@@ -3860,12 +3968,13 @@ impl TerminalPane {
                 Some(TooltipContent::Text(label_name.clone().into())),
                 label(
                   label_name,
-                  workspace_name.is_none(),
+                  workspace_path.is_none(),
                   key,
                   self.react.clone(),
                 ),
                 cx,
-              )),
+              ))
+              .children(link),
           )
           .child(
             div()
@@ -3906,6 +4015,7 @@ impl TerminalPane {
         });
         let detach_id = column.id.clone();
         let detach = ui::Button::new("remote-terminal-detach", p)
+          .aria_label("Detach")
           .variant(ui::Variant::Ghost)
           .size(ui::Size::IconXs)
           .icon(theme::ICON_X, 14.)
@@ -3924,6 +4034,10 @@ impl TerminalPane {
         // Wrapped so the active column's selector does not replace this one.
         div().flex_shrink_0().child(
           ui::text(div(), TextSize::Sm)
+            .id("remote-terminal-header")
+            .role(gpui::Role::Group)
+            .aria_label(format!("{} session", target.endpoint.hostname))
+            .test_support()
             .debug_selector(|| "remote-terminal-header".into())
             .h(zpx(REMOTE_HEADER_HEIGHT))
             .min_h(zpx(REMOTE_HEADER_HEIGHT))
@@ -3952,15 +4066,20 @@ impl TerminalPane {
                 )
                 .child(self.title(&column.id, column_title(&column.kind), muted, cx))
                 .children(ended.map(|status| {
+                  let text = match status {
+                    Some(code) => format!("(session ended, exit {code})"),
+                    None => "(session ended)".into(),
+                  };
                   // Short label (['status label']): 11px is fine.
                   // ast-grep-ignore: gpui-text-xs-short-label-only
                   ui::text(div(), TextSize::Xs)
+                    .id("remote-terminal-ended")
+                    .role(gpui::Role::Status)
+                    .aria_label(text.clone())
+                    .test_support()
                     .debug_selector(|| "remote-terminal-ended".into())
                     .text_color(ui::Tone::Warning.text(p))
-                    .child(match status {
-                      Some(code) => format!("(session ended, exit {code})"),
-                      None => "(session ended)".into(),
-                    })
+                    .child(text)
                 })),
             )
             .child(
@@ -4056,6 +4175,7 @@ impl TerminalPane {
       }
     );
     let hover_id = id.clone();
+    let hover_dir = self.column_key(column);
     let focus_id = id.clone();
     let double_id = id.clone();
     let name = match &column.kind {
@@ -4066,6 +4186,14 @@ impl TerminalPane {
       .id(SharedString::from(format!("terminal-column-{id}")))
       .role(gpui::Role::Group)
       .aria_label(name)
+      .aria_selected(active)
+      .aria_value(if current {
+        "This workspace's terminal"
+      } else if dimmed {
+        "Another workspace's terminal, dimmed"
+      } else {
+        "Another workspace's terminal"
+      })
       .test_support()
       .debug_selector(move || {
         format!(
@@ -4104,8 +4232,10 @@ impl TerminalPane {
         let id = Some(hover_id.clone());
         if *hovered {
           pane.hovered_column = id;
+          sidebar::set_hovered_terminal(Some(hover_dir.clone()), cx);
         } else if pane.hovered_column == id {
           pane.hovered_column = None;
+          sidebar::set_hovered_terminal(None, cx);
         }
         cx.notify();
       }))
@@ -4382,6 +4512,20 @@ fn paint_run(
     .best_effort();
 }
 
+/// A session link's chip text: `#N` for a GitHub pull request, else the
+/// URL's host.
+pub(super) fn link_label(url: &str) -> String {
+  match url.split_once("/pull/") {
+    Some((_, rest)) => format!("#{}", rest.split(['/', '?', '#']).next().unwrap_or(rest)),
+    None => url
+      .split("://")
+      .nth(1)
+      .and_then(|rest| rest.split('/').next())
+      .unwrap_or(url)
+      .to_string(),
+  }
+}
+
 /// The session's column and what its terminal starts, read from the
 /// session tables of the repository `main` and its supporting ones.
 fn agent_session(
@@ -4439,6 +4583,7 @@ fn agent_session(
       workspace_path,
       workspace_name: workspace_name.clone(),
       agent,
+      link: session.link_url.clone(),
     };
     return Some((
       kind,
@@ -4525,6 +4670,10 @@ impl Render for TerminalPane {
     }
     if self.collapsed {
       return div()
+        .id("workspace-terminal-pane")
+        .role(gpui::Role::Region)
+        .aria_label("Terminal pane")
+        .test_support()
         .debug_selector(|| "workspace-terminal-pane".into())
         .flex()
         .justify_end()
@@ -4584,6 +4733,7 @@ impl Render for TerminalPane {
     }
     let row_bounds = self.row.clone();
     let row_scroll = self.row_scroll.clone();
+    let measured_scroll = self.row_scroll.clone();
     let scrollbar = self.row_scrollbar(&p, cx);
     let controls = self.controls(&p, cx);
     let maximized = self.maximized;
@@ -4678,6 +4828,10 @@ impl Render for TerminalPane {
       })
       .child(
         div()
+          .id("workspace-terminal-pane")
+          .role(gpui::Role::Region)
+          .aria_label("Terminal pane")
+          .test_support()
           .debug_selector(|| "workspace-terminal-pane".into())
           .relative()
           .flex_1()
@@ -4690,6 +4844,9 @@ impl Render for TerminalPane {
           .child(
             div()
               .id("terminal-scroll-container")
+              .role(gpui::Role::Group)
+              .aria_label("Terminals")
+              .test_support()
               .debug_selector(|| "terminal-scroll-container".into())
               .flex_1()
               .min_h_0()
@@ -4704,7 +4861,14 @@ impl Render for TerminalPane {
               // what `scroll_to_item` counts.
               .child(
                 gpui::canvas(
-                  move |b, _, _| row_bounds.set(Some(b)),
+                  // Inside the scrolled row: undo the scroll so the bounds stay the
+                  // row's own, not its scrolled content's.
+                  move |b, _, _| {
+                    row_bounds.set(Some(Bounds::new(
+                      b.origin - measured_scroll.offset(),
+                      b.size,
+                    )))
+                  },
                   move |b, _, window, _| {
                     // Painted inside the scrolled row: undo the scroll to get
                     // the row's own bounds.
@@ -4812,6 +4976,14 @@ mod tests {
       assert_eq!(bounds.origin, cell_origin(40, 2, cell), "zoom {zoom}");
       assert_eq!(bounds.size.height, px(cell.1), "zoom {zoom}");
     }
+  }
+
+  #[test]
+  fn scales_the_font_with_the_ui_zoom() {
+    let rem = crate::gpui_shell::ui::BASE_REM;
+    assert_eq!(zoomed_font_size(14., px(rem)), 14.);
+    assert_eq!(zoomed_font_size(14., px(rem * 1.5)), 21.);
+    assert_eq!(zoomed_font_size(14., px(rem * 0.8)), 11.);
   }
 
   #[test]

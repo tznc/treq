@@ -781,6 +781,9 @@ impl Model {
           });
           if let Some(workspace) = workspace {
             self.select_workspace(Some(&workspace), data);
+            if value["tab"] == "changes" {
+              self.view.tab = Tab::Changes;
+            }
           }
         }
       }
@@ -1069,7 +1072,10 @@ impl Model {
   /// `openGpuiRequest`: what a GPUI menu or button asks to open.
   fn open_request(&mut self, what: &OpenRequest, data: &Data) -> Vec<Effect> {
     match what {
-      OpenRequest::BranchSwitcher => self.dialogs.branch_switcher = true,
+      OpenRequest::BranchSwitcher { repo_path } => {
+        self.activate_repo(repo_path, data);
+        self.dialogs.branch_switcher = true;
+      }
       OpenRequest::AddRepository if self.has_repo() || self.empty_project.is_some() => {
         return vec![Effect::PickFolder(FolderPurpose::AddSupporting)]
       }
@@ -1637,6 +1643,7 @@ mod tests {
           created_at: String::new(),
           last_accessed: String::new(),
           model: None,
+          link_url: None,
         }]),
         ..RepoRead::default()
       },
@@ -1657,6 +1664,21 @@ mod tests {
     assert!(model.dialogs.palette);
   }
 
+  /// A terminal label's diff counts open that workspace's Changes tab.
+  #[test]
+  fn a_terminal_label_diff_click_opens_the_changes_tab() {
+    let (mut model, data) = (model(), data());
+    model.view.tab = Tab::Overview;
+    model.screen_action(
+      &field(
+        "terminal.navigate",
+        json!({"key": ".treq/workspaces/a", "isMainRepo": false, "tab": "changes"}),
+      ),
+      &data,
+    );
+    assert_eq!((model.selected, model.view.tab), (Some(1), Tab::Changes));
+  }
+
   /// Clicking another workspace's terminal keeps the tab the user was on,
   /// at its base page: no file or commit carried over from the last one.
   #[test]
@@ -1672,6 +1694,7 @@ mod tests {
           created_at: String::new(),
           last_accessed: String::new(),
           model: None,
+          link_url: None,
         }]),
         ..RepoRead::default()
       },
@@ -1902,6 +1925,21 @@ mod tests {
     );
     assert_eq!(model.menu(Menu::ViewLogs, &data), [Effect::OpenLogDir]);
   }
+  #[test]
+  fn switching_branch_of_an_unselected_repo_activates_it_first() {
+    let (mut model, mut data) = (model(), data());
+    data.set_supporting(vec![crate::core::supporting_repos::SupportingRepo {
+      path: "/other".into(),
+      exists: true,
+    }]);
+    let what = OpenRequest::BranchSwitcher {
+      repo_path: "/other".into(),
+    };
+    model.open_request(&what, &data);
+    assert_eq!(model.repo(), "/other");
+    assert!(model.dialogs.branch_switcher);
+  }
+
   fn removing(model: &mut Model, data: &Data, terminals: Value) -> Confirm {
     model.screen_action(&field("terminal.summaries", terminals), data);
     let what = OpenRequest::RemoveRepo {

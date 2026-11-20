@@ -11,6 +11,9 @@ use std::time::Duration;
 use gpui::{AnyElement, StrikethroughStyle, StyledText, Task};
 
 use super::*;
+
+/// Comment cards cap their width so lines stay readable on wide screens.
+pub(super) const CARD_MAX_W: f32 = 820.;
 use crate::{
   github::{GhReviewComment, GhReviewThread},
   gpui_shell::screen::{
@@ -289,7 +292,7 @@ impl ChangesView {
 
   /// What a diff line carries from others: agent comments, then threads.
   /// `ReviewActionBar`'s count of the open local agent comments.
-  pub(super) fn agent_count(&self, p: &Palette) -> Option<Div> {
+  pub(super) fn agent_count(&self, p: &Palette) -> Option<impl IntoElement> {
     let open = self
       .threads
       .agent
@@ -300,9 +303,13 @@ impl ChangesView {
       // Short label (['count']): 11px is fine.
       // ast-grep-ignore: gpui-text-xs-short-label-only
       ui::text(div(), TextSize::Xs)
+        .id("agent-review-comment-count")
         .debug_selector(|| "agent-review-comment-count".into())
+        .role(gpui::Role::Label)
+        .aria_label(count_label(open, "local review comment"))
         .text_color(Tone::GitMerged.color(p))
         .child(count_label(open, "local review comment"))
+        .test_support()
     })
   }
 
@@ -372,7 +379,12 @@ impl ChangesView {
   ) -> Option<impl IntoElement> {
     let threads = self.threads.placed.unplaced.get(path)?;
     let mut section = div()
+      .id(SharedString::from(format!(
+        "github-outdated-threads-{path}"
+      )))
       .debug_selector(|| "github-outdated-threads".into())
+      .role(gpui::Role::Group)
+      .aria_label(format!("Outdated threads on {path}"))
       .border_b_1()
       .border_color(sky(p, 0.4))
       .bg(sky(p, 0.05))
@@ -393,7 +405,7 @@ impl ChangesView {
     if drafting {
       section = section.child(self.comment_input(p, cx));
     }
-    Some(section)
+    Some(section.test_support())
   }
 
   /// `GithubCommentCard`.
@@ -425,15 +437,35 @@ impl ChangesView {
         "Hide review thread"
       })
       .aria_expanded(!collapsed)
-      .w_full()
       .min_w_0()
       .flex()
       .items_center()
       .gap_2()
-      .px_3()
-      .py_1p5()
-      .cursor_pointer()
-      .hover(move |s| s.bg(p.hover()))
+      .cursor_pointer();
+    // Expanded: a compact pill above the comments. Collapsed: a full-width row
+    // holding the preview.
+    toggle = if collapsed {
+      toggle
+        .w_full()
+        .px_3()
+        .py_1p5()
+        .hover(move |s| s.bg(p.hover()))
+    } else {
+      toggle
+        .flex_none()
+        .gap_1()
+        .px_2()
+        .py_0p5()
+        .rounded(radius::SM)
+        .bg(sky(p, 0.1))
+        .hover(move |s| s.bg(p.hover()))
+    };
+    let muted = if collapsed {
+      muted
+    } else {
+      Tone::Primary.text(p)
+    };
+    toggle = toggle
       .on_click(cx.listener(move |view, _, _, cx| view.toggle_thread(&id, cx)))
       .child(ui::icon(
         if collapsed {
@@ -449,33 +481,43 @@ impl ChangesView {
         .child(avatar(&first.author.login, 20., p))
         .child(profile_link(&first.author.login, p, cx));
     }
-    if thread.is_resolved {
-      toggle = toggle.child(
-        // Short label (['status pill']): 11px is fine.
-        // ast-grep-ignore: gpui-text-xs-short-label-only
-        ui::text(div(), TextSize::Xs)
-          .flex_none()
-          .flex()
-          .items_center()
-          .gap_1()
-          .px_1p5()
-          .py_0p5()
-          .rounded(radius::SM)
-          .bg(p.muted)
-          .text_color(muted)
-          .font_weight(FontWeight::MEDIUM)
-          .child(ui::icon(theme::ICON_CIRCLE_CHECK, 12., muted))
-          .child("Resolved"),
-      );
-    }
+    // Expanded threads show the badge beside the pill rather than inside it.
+    let resolved = thread.is_resolved.then(|| {
+      let grey = p.muted_foreground;
+      // Short label (['status pill']): 11px is fine.
+      // ast-grep-ignore: gpui-text-xs-short-label-only
+      ui::text(div(), TextSize::Xs)
+        .flex_none()
+        .flex()
+        .items_center()
+        .gap_1()
+        .px_1p5()
+        .py_0p5()
+        .rounded(radius::SM)
+        .bg(p.muted)
+        .text_color(grey)
+        .font_weight(FontWeight::MEDIUM)
+        .child(ui::icon(theme::ICON_CIRCLE_CHECK, 12., grey))
+        .child("Resolved")
+    });
+    let resolved = if collapsed {
+      toggle = toggle.children(resolved);
+      None
+    } else {
+      resolved
+    };
     if let (true, Some(first)) = (collapsed, first) {
       toggle = toggle.child(
         ui::text(div(), TextSize::Sm)
+          .id("github-thread-collapsed-preview")
           .debug_selector(|| "github-thread-collapsed-preview".into())
+          .role(gpui::Role::Paragraph)
+          .aria_label(preview(&first.body))
           .min_w_0()
           .truncate()
           .text_color(muted.opacity(0.7))
-          .child(preview(&first.body)),
+          .child(preview(&first.body))
+          .test_support(),
       );
     }
     if !collapsed {
@@ -490,15 +532,28 @@ impl ChangesView {
     }
     let mut card = div()
       .min_w_0()
-      .rounded(radius::MD)
-      .border_1()
-      .border_color(sky(p, 0.3))
-      .bg(sky(p, 0.05))
-      .overflow_hidden()
-      .font_family(theme::SANS_FONT)
-      .child(toggle.test_support());
+      .max_w(zpx(CARD_MAX_W))
+      .font_family(theme::SANS_FONT);
+    if collapsed {
+      card = card
+        .rounded(radius::MD)
+        .border_1()
+        .border_color(sky(p, 0.3))
+        .bg(sky(p, 0.05))
+        .overflow_hidden();
+    } else {
+      card = card.flex().flex_col().items_start().gap_1p5();
+    }
+    card = card.child(
+      div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .child(toggle.test_support())
+        .children(resolved),
+    );
     if !collapsed {
-      let mut body = div().px_3().pb_3().flex().flex_col().gap_2();
+      let mut body = div().w_full().flex().flex_col().gap_2();
       for comment in &thread.comments {
         body = body.child(self.thread_comment(comment, path, anchor.clone(), line, side, p, cx));
       }
@@ -528,7 +583,13 @@ impl ChangesView {
     let quoted = comment.clone();
     let file = path.to_string();
     div()
+      .id(SharedString::from(format!(
+        "github-comment-card-{}",
+        comment.id
+      )))
       .debug_selector(|| "github-comment-card".into())
+      .role(gpui::Role::Group)
+      .aria_label(format!("Comment by {}", comment.author.login))
       .group("github-comment")
       .relative()
       .min_w_0()
@@ -559,7 +620,7 @@ impl ChangesView {
         super::super::code::markdown(
           format!("github-comment-{}", comment.id),
           &comment.body,
-          TextSize::Code.metrics().0,
+          TextSize::Sm.metrics().0,
           self.dark,
         ),
       ))
@@ -596,6 +657,7 @@ impl ChangesView {
           cx,
         ),
       )
+      .test_support()
   }
 
   /// `AgentReviewCommentCard`.
@@ -614,7 +676,17 @@ impl ChangesView {
       comment.start_line.to_string()
     };
     let mut card = div()
+      .id(SharedString::from(format!(
+        "agent-review-comment-card-{}",
+        comment.id
+      )))
       .debug_selector(|| "agent-review-comment-card".into())
+      .max_w(zpx(CARD_MAX_W))
+      .role(gpui::Role::Group)
+      .aria_label(format!(
+        "Agent comment on {} line {range}",
+        comment.file_path
+      ))
       .font_family(theme::MONO_FONT)
       .rounded(radius::MD)
       .border_1()
@@ -706,7 +778,7 @@ impl ChangesView {
             cx.listener(move |view, _, _, cx| view.agent_action(&id, AgentAction::Delete, cx)),
           ),
       );
-    card.child(actions)
+    card.child(actions).test_support()
   }
 }
 
@@ -799,7 +871,10 @@ pub(in crate::gpui_shell::screen) fn suggestion_box(
   let body = match suggestion_diff(original, suggested) {
     Some(rows) => {
       let mut el = ui::text(div(), TextSize::Sm)
+        .id("agent-review-suggestion")
         .debug_selector(|| "agent-review-suggestion".into())
+        .role(gpui::Role::Group)
+        .aria_label("Suggestion")
         .font_family(theme::MONO_FONT);
       for row in rows {
         let (marker, bg, mark) = match row.kind {
@@ -848,15 +923,19 @@ pub(in crate::gpui_shell::screen) fn suggestion_box(
             ),
         );
       }
-      el.into_any_element()
+      el.test_support().into_any_element()
     }
     None => ui::text(div(), TextSize::Sm)
+      .id("agent-review-suggestion")
       .debug_selector(|| "agent-review-suggestion".into())
+      .role(gpui::Role::Group)
+      .aria_label("Suggestion")
       .font_family(theme::MONO_FONT)
       .px_2()
       .py_1p5()
       .bg(Tone::DiffAdded.tint(p))
       .child(suggested.to_string())
+      .test_support()
       .into_any_element(),
   };
   div()

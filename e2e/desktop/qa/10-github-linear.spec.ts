@@ -37,7 +37,8 @@ test("github-linear: issues", async ({ page }) => {
     title: "GitHub view: open issues",
     expectations: [
       "Repo name, Issues / Pull Requests tabs, Open/Closed/All filter, refresh and New",
-      "Rows: title, number, Open badge and date aligned; chevrons on the right",
+      "Rows: title, number, Open badge, author login and date aligned; chevrons on the right",
+      "Each row names its author (alice, bob, carol, ...) between the badge and the date",
     ],
   });
   await page.mouse.click(382, 103); // Closed

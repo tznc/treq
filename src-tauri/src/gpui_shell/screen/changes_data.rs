@@ -123,6 +123,9 @@ pub trait ChangesHost: CommitsHost {
     notes: Option<&str>,
   ) -> Result<(), String>;
   fn clear_review(&self, repo_path: &str, workspace_id: i64) -> Result<(), String>;
+  /// The file list's saved width, in the app settings.
+  fn file_list_width(&self) -> Option<f32>;
+  fn save_file_list_width(&self, width: f32) -> Result<(), String>;
   /// The review threads of `branch`'s pull request (`gh_list_pr_review_threads`);
   /// none without a GitHub remote or a pull request.
   fn review_threads(&self, repo_path: &str, branch: &str) -> Result<Vec<GhReviewThread>, String>;
@@ -152,7 +155,27 @@ pub trait ChangesHost: CommitsHost {
 
 pub type Host = std::sync::Arc<dyn ChangesHost>;
 
+pub const FILE_LIST_WIDTH_KEY: &str = "changes_file_list_width";
+
 impl ChangesHost for Backend {
+  fn file_list_width(&self) -> Option<f32> {
+    self
+      .with_db(|db| {
+        db.get_setting(FILE_LIST_WIDTH_KEY)
+          .map_err(|e| e.to_string())
+      })
+      .ok()
+      .flatten()
+      .and_then(|w| w.parse().ok())
+  }
+
+  fn save_file_list_width(&self, width: f32) -> Result<(), String> {
+    self.with_db(|db| {
+      db.set_setting(FILE_LIST_WIDTH_KEY, &(width as i64).to_string())
+        .map_err(|e| e.to_string())
+    })
+  }
+
   fn changed_files(
     &self,
     repo_path: &str,
@@ -300,11 +323,7 @@ impl ChangesHost for Backend {
     repo_path: &str,
     workspace_id: i64,
   ) -> Result<Vec<AgentReviewComment>, String> {
-    crate::core::agent_review::list_comments(
-      &self.state_scope(repo_path),
-      super::changes_threads::WORKSPACE_DIFF,
-      &workspace_id.to_string(),
-    )
+    crate::core::agent_review::workspace_comments(&self.state_scope(repo_path), workspace_id)
   }
 
   fn resolve_agent_comment(&self, repo_path: &str, id: &str) -> Result<(), String> {

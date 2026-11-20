@@ -15,6 +15,7 @@ const config: Config = {
     require.resolve('./plugins/releasesJsonPlugin'),
     require.resolve('./plugins/jsonLdPlugin'),
     require.resolve('./plugins/skillsPlugin'),
+    require.resolve('./plugins/openLinksPlugin'),
     require.resolve('./plugins/landingScreenshotsPlugin'),
     ...(shouldLoadGoogleTag
       ? [[require.resolve('./plugins/googleTagPlugin'), {trackingID: 'G-V9MPP2ZWZF'}] as [string, object]]
@@ -155,9 +156,10 @@ const config: Config = {
         },
         sitemap: {
           ignorePatterns: [
-            '/dashboard',
-            '/login',
-            '/sign-in',
+            // trailingSlash: true makes these routes /login/, so match the folder.
+            '/dashboard/**',
+            '/login/**',
+            '/sign-in/**',
             '/auth/**',
             '/integrations/**',
           ],

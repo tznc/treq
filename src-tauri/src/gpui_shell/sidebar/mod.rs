@@ -128,6 +128,9 @@ pub struct SidebarRow {
   /// Archived and collapsing out of the list.
   #[serde(default)]
   pub exiting: bool,
+  /// The workspace's directory, which its terminals run in.
+  #[serde(default)]
+  pub path: String,
 }
 
 /// Moves stacks whose root has an open or draft PR above the rest, keeping
@@ -170,12 +173,14 @@ pub enum PrState {
 }
 
 impl PrState {
-  pub(super) fn label(self) -> &'static str {
+  /// The state's pill, as GitHub and the workspace header draw it: its
+  /// label, icon and tone.
+  pub(super) fn pill(self) -> (&'static str, &'static str, Tone) {
     match self {
-      PrState::Draft => "Draft PR",
-      PrState::Open => "Open PR",
-      PrState::Merged => "PR merged",
-      PrState::Closed => "PR closed",
+      PrState::Draft => ("Draft", theme::ICON_PR_DRAFT, Tone::Neutral),
+      PrState::Open => ("Open", theme::ICON_PR, Tone::GitOpen),
+      PrState::Merged => ("Merged", theme::ICON_MERGE, Tone::GitMerged),
+      PrState::Closed => ("Closed", theme::ICON_PR_CLOSED, Tone::GitClosed),
     }
   }
 }
@@ -255,6 +260,8 @@ pub enum SidebarAction {
   /// Right-click on one of several selected workspace rows: the menu acts
   /// on every selected workspace.
   WorkspacesMenu,
+  /// Backspace with several workspace rows selected: archives them all.
+  ArchiveSelected,
   /// A click on the modal backdrop drawn over the sidebar.
   DismissModal,
   /// A workspace row dropped onto another row, to stack it there, or onto
@@ -298,8 +305,6 @@ pub enum SidebarAction {
 struct DraggedWorkspace {
   id: i64,
   title: SharedString,
-  /// The title is a branch, drawn in mono as its row draws it.
-  mono: bool,
   palette: Palette,
 }
 
@@ -313,7 +318,6 @@ impl Render for DraggedWorkspace {
       .border_color(self.palette.border)
       .bg(self.palette.sidebar)
       .text_color(self.palette.sidebar_foreground)
-      .when(self.mono, |this| this.font_family(theme::MONO_FONT))
       .shadow_md()
       .child(self.title.clone())
   }
@@ -358,6 +362,28 @@ pub struct Sidebar {
   /// not every workspace.
   items: Vec<Item>,
   list: ListState,
+  /// The directory of the terminal the pointer rests on, whose workspace
+  /// row shows a faint highlight.
+  peek: Option<String>,
+}
+
+/// The directory of the terminal under the pointer, app-wide.
+#[derive(Default)]
+struct HoveredTerminal(Option<String>);
+
+impl gpui::Global for HoveredTerminal {}
+
+/// Whether a terminal in `dir` runs in the workspace at `path`, which the
+/// database may keep absolute or relative to the repository.
+fn runs_in(dir: &str, path: &str) -> bool {
+  !path.is_empty() && (dir == path || dir.ends_with(&format!("/{}", path.trim_start_matches("./"))))
+}
+
+/// Marks the workspace whose terminal, in `dir`, the pointer rests on.
+pub fn set_hovered_terminal(dir: Option<String>, cx: &mut App) {
+  if cx.try_global::<HoveredTerminal>().map(|h| &h.0) != Some(&dir) {
+    cx.set_global(HoveredTerminal(dir));
+  }
 }
 
 /// One entry of the workspace list, in display order, by repository index.
@@ -413,7 +439,21 @@ impl Sidebar {
       hovered_row: None,
       drag_width: None,
       prefetch: prefetch::Intent::default(),
+      peek: None,
     }
+  }
+
+  /// Follows [`set_hovered_terminal`].
+  pub fn watch_terminals(self, cx: &mut Context<Self>) -> Self {
+    cx.observe_global::<HoveredTerminal>(|this, cx| {
+      let peek = cx.global::<HoveredTerminal>().0.clone();
+      if this.peek != peek {
+        this.peek = peek;
+        cx.notify();
+      }
+    })
+    .detach();
+    self
   }
 
   /// The width drawn: the dragged width while resizing, else React's.
@@ -662,20 +702,21 @@ impl Sidebar {
   }
 }
 
-/// Indentation of a row's content, matching the React sidebar's
-/// `16 + (depth - 1) * 6` px.
 /// How far a grouped repository's workspace rows sit right of a lone
 /// repository's, so their branch text (not their icon) starts under the
 /// group header's repository name.
 const GROUP_INDENT: f32 = 4.;
 
+/// Indentation of a row's content: one 12px icon per level, so a child's
+/// icon starts past its parent's.
 fn row_indent(depth: u32) -> f32 {
-  16. + (depth as f32 - 1.) * 6.
+  10. + depth as f32 * 12.
 }
 
-/// Where a nested row's stack guide line sits, matching the React sidebar.
+/// Where a nested row's elbow starts: under its parent's icon centre, so it
+/// runs from the parent into the row's own icon.
 fn guide_left(depth: u32) -> f32 {
-  8. + depth.saturating_sub(2) as f32 * 6.
+  row_indent(depth.saturating_sub(1)) + 5.
 }
 
 fn status_color(color: StatusColor, palette: &Palette) -> Hsla {
@@ -840,7 +881,7 @@ impl Render for Sidebar {
               .child("WORKSPACES"),
           )
           .when(snapshot.repos.iter().any(|r| r.active), |this| {
-            this.child(self.open_workspaces_button(&palette))
+            this.child(self.open_workspaces_button(&palette, cx))
           }),
       )
       .when(snapshot.repos.is_empty(), |this| {
@@ -932,32 +973,17 @@ impl Sidebar {
     )
   }
 
-  fn open_workspaces_button(&self, palette: &Palette) -> impl IntoElement {
-    // Short label (['button label']): 11px is fine.
-    // ast-grep-ignore: gpui-text-xs-short-label-only
-    ui::text(div(), TextSize::Xs)
-      .id("open-workspaces")
-      .debug_selector(|| "open-workspaces".into())
-      .role(Role::Button)
-      .aria_label(OPEN_WORKSPACES_LABEL)
-      .test_support()
-      .flex()
-      .flex_none()
-      .items_center()
-      .gap_1()
-      .px_1p5()
-      .h(zpx(22.))
-      .rounded_md()
-      .text_color(palette.sidebar_foreground.opacity(0.7))
-      .cursor_pointer()
-      .hover(|style| style.bg(palette.hover()))
-      .child(icon(
-        theme::ICON_PR_CREATE,
-        12.,
-        palette.sidebar_foreground.opacity(0.7),
-      ))
-      .child(OPEN_WORKSPACES_LABEL)
-      .on_click(self.on_action(SidebarAction::OpenWorkspaces))
+  fn open_workspaces_button(&self, palette: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    self.row_button(
+      "open-workspaces".into(),
+      theme::ICON_PR_CREATE,
+      OPEN_WORKSPACES_LABEL,
+      None,
+      SidebarAction::OpenWorkspaces,
+      Side::Top,
+      palette,
+      cx,
+    )
   }
 
   /// A square header button with a tooltip below it.
@@ -1014,6 +1040,7 @@ impl Sidebar {
     tooltip: &'static str,
     disabled_reason: Option<&str>,
     action: SidebarAction,
+    side: Side,
     palette: &Palette,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
@@ -1058,12 +1085,7 @@ impl Sidebar {
         }),
       )
       .when(self.tooltip_shown(&id), |this| {
-        this.child(self.tooltip_anchor(
-          id.clone(),
-          Side::Bottom,
-          TooltipContent::Text(tip.into()),
-          0.,
-        ))
+        this.child(self.tooltip_anchor(id.clone(), side, TooltipContent::Text(tip.into()), 0.))
       })
       // Swallow clicks on a disabled button too, so the row is not selected.
       .on_click(if disabled {
@@ -1095,6 +1117,7 @@ impl Sidebar {
         "Start agent",
         snapshot.agent_unavailable.as_deref(),
         SidebarAction::StartAgent { id },
+        Side::Bottom,
         palette,
         cx,
       ))
@@ -1104,6 +1127,7 @@ impl Sidebar {
         "Open shell",
         snapshot.shell_unavailable.as_deref(),
         SidebarAction::OpenShell { id },
+        Side::Bottom,
         palette,
         cx,
       ))
@@ -1117,6 +1141,7 @@ impl Sidebar {
         stack_label(id),
         None,
         SidebarAction::Stack { id },
+        Side::Bottom,
         palette,
         cx,
       ))
@@ -1579,6 +1604,11 @@ impl Sidebar {
       });
 
     let interactive = repo_active && !row.archiving;
+    let peek = !row.selected
+      && self
+        .peek
+        .as_deref()
+        .is_some_and(|dir| runs_in(dir, &row.path));
     let row_el = ui::Row::new(selector, palette)
       .role(Role::Button)
       .label(label.clone())
@@ -1593,6 +1623,13 @@ impl Sidebar {
       .rounded_md()
       .text_color(palette.sidebar_foreground)
       .when(row.archiving, |this| this.opacity(0.5))
+      .when(peek, |this| {
+        // The row's own hover fill, as if the pointer rested on it.
+        let fill = this.hover_fill();
+        this
+          .when_some(fill, |this, fill| this.bg(fill))
+          .debug_selector(move || format!("workspace-peek-{id}"))
+      })
       .when(row.depth > 0, |this| {
         // An elbow into the row, not a bar that reads as a selection marker.
         this.overlay(
@@ -1618,10 +1655,6 @@ impl Sidebar {
           .flex_1()
           .min_w_0()
           .truncate()
-          // A branch is code; a title is prose.
-          .when(row.name.is_none(), |this| {
-            this.font_family(theme::MONO_FONT)
-          })
           .text_color(palette.sidebar_foreground)
           .child(label.clone()),
       )
@@ -1680,7 +1713,6 @@ impl Sidebar {
             DraggedWorkspace {
               id,
               title: label.clone().into(),
-              mono: row.name.is_none(),
               palette: *palette,
             },
             |dragged, _, _, cx| cx.new(|_| dragged.clone()),

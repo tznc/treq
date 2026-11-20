@@ -28,6 +28,16 @@ icons! {
   ICON_AGENT_DEVIN => "agent-devin",
   ICON_AGENT_GEMINI => "agent-gemini",
   ICON_ARCHIVE => "archive",
+  // GitHub's reaction emoji, from Twemoji (CC-BY 4.0), drawn with `img()`
+  // in color: the bundled fonts have no color emoji.
+  ICON_EMOJI_CONFUSED => "emoji-confused",
+  ICON_EMOJI_EYES => "emoji-eyes",
+  ICON_EMOJI_HEART => "emoji-heart",
+  ICON_EMOJI_HOORAY => "emoji-hooray",
+  ICON_EMOJI_LAUGH => "emoji-laugh",
+  ICON_EMOJI_ROCKET => "emoji-rocket",
+  ICON_EMOJI_THUMBS_DOWN => "emoji-thumbs-down",
+  ICON_EMOJI_THUMBS_UP => "emoji-thumbs-up",
   ICON_ARROW_DOWN => "arrow-down",
   ICON_ARROW_LEFT => "arrow-left",
   ICON_ARROW_RIGHT => "arrow-right",

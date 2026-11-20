@@ -490,24 +490,31 @@ impl ChangesView {
         .child(self.body_line(row, &p, cx))
         .into_any_element(),
     };
+    let frame = div()
+      .when(bottom, |this| this.border_b_1().rounded_b(radius::LG))
+      .border_x_1()
+      .border_color(p.border)
+      .overflow_hidden()
+      .bg(p.background)
+      .child(content);
+    let frame = if top {
+      // The card's head names the card for assistive tech.
+      let id = format!("file-card-{path}");
+      frame
+        .id(SharedString::from(id.clone()))
+        .debug_selector(move || id)
+        .role(gpui::Role::Group)
+        .aria_label(path)
+        .border_t_1()
+        .rounded_t(radius::LG)
+        .test_support()
+        .into_any_element()
+    } else {
+      frame.into_any_element()
+    };
     div()
       .when(top, |this| this.pt_4())
-      .child(
-        div()
-          .when(top, |this| {
-            let id = format!("file-card-{path}");
-            this
-              .debug_selector(move || id)
-              .border_t_1()
-              .rounded_t(radius::LG)
-          })
-          .when(bottom, |this| this.border_b_1().rounded_b(radius::LG))
-          .border_x_1()
-          .border_color(p.border)
-          .overflow_hidden()
-          .bg(p.background)
-          .child(content),
-      )
+      .child(frame)
       .into_any_element()
   }
 
@@ -601,9 +608,8 @@ impl ChangesView {
             .when_some(
               (h == 0)
                 .then(|| self.expand_all_range(path, hunks, h, Dir::Before))
-                .flatten()
-                .map(|(start, end)| end + 1 - start),
-              |this, count| this.child(self.expand_all_button(path, h, Dir::Before, count, cx)),
+                .flatten(),
+              |this, range| this.child(self.expand_all_button(path, h, Dir::Before, range, cx)),
             ),
         )
         .into_any_element()
@@ -668,7 +674,10 @@ impl ChangesView {
           div()
             .id(SharedString::from(format!("expand-after-{path}-{h}")))
             .role(gpui::Role::Button)
-            .aria_label("Show more lines")
+            .aria_label(match self.context_ranges(path, hunks, h).1 {
+              Some((start, _)) => format!("Show more lines of {path} from line {start}"),
+              None => "Show more lines".to_string(),
+            })
             .debug_selector({
               let id = format!("expand-after-{path}-{h}");
               move || id
@@ -696,12 +705,11 @@ impl ChangesView {
             .child(ui::icon(theme::ICON_CHEVRON_DOWN, 12., muted))
             .child("Show more lines below")
             .when_some(
-              self
-                .expand_all_range(path, hunks, h, Dir::After)
-                .map(|(start, end)| end + 1 - start),
-              |this, count| this.child(self.expand_all_button(path, h, Dir::After, count, cx)),
+              self.expand_all_range(path, hunks, h, Dir::After),
+              |this, range| this.child(self.expand_all_button(path, h, Dir::After, range, cx)),
             ),
         )
+        .test_support()
         .into_any_element()
       }
       Row::Head(..) | Row::Conflict(..) | Row::End => div().into_any_element(),
@@ -714,9 +722,10 @@ impl ChangesView {
     path: &str,
     h: usize,
     dir: Dir,
-    count: usize,
+    (start, end): (usize, usize),
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
+    let count = end + 1 - start;
     let p = theme::palette(self.dark);
     let id = match dir {
       Dir::Before => format!("expand-all-above-{path}-{h}"),
@@ -729,7 +738,9 @@ impl ChangesView {
     ui::text(div(), TextSize::Xs)
       .id(SharedString::from(id.clone()))
       .role(gpui::Role::Button)
-      .aria_label(format!("Expand all ({count} lines)"))
+      .aria_label(format!(
+        "Expand all {count} lines of {path} from line {start}"
+      ))
       .debug_selector(move || id)
       .ml_3()
       .flex_none()

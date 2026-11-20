@@ -161,6 +161,8 @@ pub trait LaunchStore {
     workspace_id: Option<i64>,
     name: &str,
   ) -> Result<i64, String>;
+  /// Records what the session works on, opened from its header.
+  fn set_session_link(&self, repo_path: &str, session_id: i64, url: &str) -> Result<(), String>;
   /// The names of every session in the repository, across its workspaces.
   fn session_names(&self, repo_path: &str) -> Vec<String>;
   fn repo_setting(&self, repo_path: &str, key: &str) -> Option<String>;
@@ -330,6 +332,8 @@ pub struct LaunchRequest {
   pub agent: Option<String>,
   /// Default: `<Agent> <n>`, numbered across the repository's workspaces.
   pub session_name: Option<String>,
+  /// What the session works on (a reviewed PR's URL), linked from its header.
+  pub link: Option<String>,
 }
 
 /// Creates the session `request` asks for.
@@ -351,6 +355,9 @@ pub fn launch_session(
     format!("{label} {index}")
   });
   let session_id = store.create_session(repo, request.workspace_id, &name)?;
+  if let Some(link) = &request.link {
+    store.set_session_link(repo, session_id, link)?;
+  }
   Ok(SessionStart {
     session_id,
     session_name: name,
@@ -791,6 +798,13 @@ mod tests {
         .push(format!("session {repo} {ws:?} {name}"));
       Ok(7)
     }
+    fn set_session_link(&self, repo: &str, id: i64, url: &str) -> Result<(), String> {
+      self
+        .calls
+        .borrow_mut()
+        .push(format!("link {repo} {id} {url}"));
+      Ok(())
+    }
     fn session_names(&self, _: &str) -> Vec<String> {
       self.sessions.clone()
     }
@@ -966,6 +980,9 @@ mod tests {
       fn create_session(&self, _: &str, _: Option<i64>, _: &str) -> Result<i64, String> {
         Ok(1)
       }
+      fn set_session_link(&self, _: &str, _: i64, _: &str) -> Result<(), String> {
+        Ok(())
+      }
       fn session_names(&self, _: &str) -> Vec<String> {
         Vec::new()
       }
@@ -1099,6 +1116,28 @@ mod tests {
     record_prompt(&store, &start).unwrap();
     // No prompt: nothing recorded.
     assert_eq!(store.calls.borrow().len(), 1);
+  }
+
+  #[test]
+  fn records_the_session_link() {
+    let store = FakeStore::default();
+    launch_session(
+      &store,
+      &LaunchRequest {
+        repo_path: "/repo".into(),
+        session_name: Some("AI Review".into()),
+        link: Some("https://github.com/o/r/pull/4".into()),
+        ..Default::default()
+      },
+    )
+    .unwrap();
+    assert_eq!(
+      *store.calls.borrow(),
+      [
+        "session /repo None AI Review",
+        "link /repo 7 https://github.com/o/r/pull/4"
+      ]
+    );
   }
 
   #[test]

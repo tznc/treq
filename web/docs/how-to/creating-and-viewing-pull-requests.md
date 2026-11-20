@@ -1,5 +1,6 @@
 ---
 sidebar_position: 6
+description: Create, open, and inspect GitHub pull requests from a Treq workspace once the repository has a GitHub origin and GitHub access.
 ---
 
 # Creating and Viewing Pull Requests

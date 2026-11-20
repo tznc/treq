@@ -6,9 +6,10 @@
 use std::ops::Range;
 use std::time::Duration;
 
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::input::{Escape, InputEvent, InputState};
 use tauri_plugin_gpui::gpui::{
-  div, prelude::*, Context, Div, Entity, Hsla, SharedString, Stateful, Subscription, Task, Window,
+  div, prelude::*, Context, Entity, Hsla, SharedString, Subscription, Task, Window,
 };
 
 use crate::gpui_shell::{
@@ -157,7 +158,7 @@ impl Find {
   }
 }
 
-/// Listens for Cmd+F in the view's window, focused or not.
+/// Listens for Cmd+F (open) and Esc (close) in the view's window, focused or not.
 pub(in crate::gpui_shell::screen) fn watch_key<V: Findable>(
   view: &mut V,
   window: &mut Window,
@@ -178,6 +179,12 @@ pub(in crate::gpui_shell::screen) fn watch_key<V: Findable>(
         && !held.alt
       {
         open(view, cx);
+      } else if window.window_handle().window_id() == id
+        && crate::gpui_shell::ui::is_escape(k)
+        && view.find().open
+      {
+        // Esc closes the bar wherever focus is, not only inside it.
+        close(view, cx);
       }
     }),
   );
@@ -300,7 +307,7 @@ pub(in crate::gpui_shell::screen) fn bar<V: Findable>(
   id: &'static str,
   p: &Palette,
   cx: &mut Context<V>,
-) -> Option<Stateful<Div>> {
+) -> Option<impl IntoElement> {
   let find = view.find();
   if !find.open {
     return None;
@@ -346,6 +353,8 @@ pub(in crate::gpui_shell::screen) fn bar<V: Findable>(
     div()
       .id(id)
       .debug_selector(move || id.into())
+      .role(tauri_plugin_gpui::gpui::Role::Search)
+      .aria_label("Find")
       .absolute()
       .top_2()
       .right_2()
@@ -388,7 +397,8 @@ pub(in crate::gpui_shell::screen) fn bar<V: Findable>(
       )
       .child(prev)
       .child(next)
-      .child(close_button),
+      .child(close_button)
+      .test_support(),
   )
 }
 
