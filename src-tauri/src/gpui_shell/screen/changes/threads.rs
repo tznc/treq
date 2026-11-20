@@ -553,10 +553,27 @@ impl ChangesView {
         .children(resolved),
     );
     if !collapsed {
-      let mut body = div().w_full().flex().flex_col().gap_2();
-      for comment in &thread.comments {
-        body = body.child(self.thread_comment(comment, path, anchor.clone(), line, side, p, cx));
+      // One card per thread; replies follow flush, split by a rule.
+      let mut comments = div()
+        .debug_selector(|| "github-thread-comments".into())
+        .min_w_0()
+        .flex()
+        .flex_col()
+        .bg(p.background)
+        .rounded(radius::MD)
+        .border_1()
+        .border_color(p.border.opacity(0.6));
+      for (i, comment) in thread.comments.iter().enumerate() {
+        let id = comment.id.clone();
+        let mut c = div()
+          .debug_selector(move || format!("github-comment-{id}"))
+          .child(self.thread_comment(comment, path, anchor.clone(), line, side, p, cx));
+        if i > 0 {
+          c = c.border_t_1().border_color(p.border.opacity(0.6));
+        }
+        comments = comments.child(c);
       }
+      let body = div().w_full().flex().flex_col().gap_2().child(comments);
       card = card.child(body.children(self.thread_reply(thread, p, cx)));
     }
     card.into_any_element()
@@ -593,12 +610,8 @@ impl ChangesView {
       .group("github-comment")
       .relative()
       .min_w_0()
-      .bg(p.background)
-      .rounded(radius::MD)
       .p_2p5()
       .pr_9()
-      .border_1()
-      .border_color(p.border.opacity(0.6))
       .child(
         div()
           .flex()

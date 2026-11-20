@@ -1280,6 +1280,22 @@ fn changes_tab_shows_review_threads_on_their_line(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_review_thread_draws_its_replies_as_one_card(cx: &mut TestAppContext) {
+  let mut host = changes_host();
+  let mut thread = gh_thread("t1", 2, false);
+  let mut reply = thread.comments[0].clone();
+  reply.id = "t1-r".into();
+  reply.body = "Non blocking.".into();
+  thread.comments.push(reply);
+  host.threads = vec![thread];
+  let (mut h, _) = workspace_harness(cx, host, changes_route());
+  let first = h.cx.debug_bounds("github-comment-t1-c").expect("first");
+  let second = h.cx.debug_bounds("github-comment-t1-r").expect("reply");
+  // Replies stack flush inside one card, split by a rule, not a gap.
+  assert_eq!(first.bottom(), second.top());
+}
+
+#[gpui::test]
 fn changes_tab_quotes_a_review_thread(cx: &mut TestAppContext) {
   let mut host = changes_host();
   host.threads = vec![gh_thread("t1", 2, false)];
