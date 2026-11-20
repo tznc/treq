@@ -436,30 +436,55 @@ pub fn managed_clone_path(root: &Path, url: &str) -> Option<std::path::PathBuf> 
   Some(path)
 }
 
-/// Where Treq clones repositories: `$TREQ_CLONES_DIR`, else
-/// `~/.treq/repos`.
-pub fn clones_root() -> std::path::PathBuf {
-  if let Some(dir) = std::env::var_os("TREQ_CLONES_DIR").filter(|d| !d.is_empty()) {
-    return dir.into();
-  }
-  let home = std::env::var_os("HOME")
-    .or_else(|| std::env::var_os("USERPROFILE"))
-    .unwrap_or_else(|| ".".into());
-  std::path::PathBuf::from(home).join(".treq").join("repos")
+/// The app setting holding the folder Treq clones repositories into.
+pub const CLONE_DIRECTORY_SETTING: &str = "clone_directory";
+
+/// `$TREQ_CLONES_DIR`, else `~/.treq/repos`.
+pub fn default_clone_dir() -> String {
+  std::env::var("TREQ_CLONES_DIR")
+    .ok()
+    .filter(|d| !d.is_empty())
+    .unwrap_or_else(|| "~/.treq/repos".to_string())
+}
+
+/// The clone folder the app settings hold, else the default.
+pub fn clone_dir(db: &crate::db::Database) -> String {
+  db.get_setting(CLONE_DIRECTORY_SETTING)
+    .ok()
+    .flatten()
+    .filter(|d| !d.trim().is_empty())
+    .unwrap_or_else(default_clone_dir)
+}
+
+/// Where Treq clones `url` inside folder `dir`: `<dir>/<owner>/<repo>`, the
+/// owner holding every group between host and name. `None` for anything
+/// that is not a repository URL.
+pub fn clone_path(dir: &str, url: &str) -> Option<std::path::PathBuf> {
+  let id = managed_clone_path(Path::new(""), url)?;
+  let rest: std::path::PathBuf = id.iter().skip(1).collect();
+  let dir = dir.trim();
+  let root = match dir.strip_prefix('~') {
+    Some(after) if after.is_empty() || after.starts_with('/') => {
+      let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
+      Path::new(&home).join(after.trim_start_matches('/'))
+    }
+    _ => dir.into(),
+  };
+  Some(root.join(rest))
 }
 
 /// A repository on this machine for `spec`: an existing folder as it is, or
-/// a URL (or `owner/name`) cloned once under `root` and reused after. A
+/// a URL (or `owner/name`) cloned once into folder `dir` and reused after. A
 /// `known` repo whose `origin` names the same repository is reused instead.
 /// Returns the folder and whether this call cloned it.
-pub fn ensure_repo(spec: &str, root: &Path, known: &[String]) -> Result<(String, bool), String> {
+pub fn ensure_repo(spec: &str, dir: &str, known: &[String]) -> Result<(String, bool), String> {
   let as_path = Path::new(spec.trim());
   if as_path.is_dir() {
     let path = std::fs::canonicalize(as_path).map_err(|e| e.to_string())?;
     return Ok((path.to_string_lossy().to_string(), false));
   }
-  let dest = managed_clone_path(root, spec)
-    .ok_or_else(|| format!("'{spec}' is not a folder or a repository URL"))?;
+  let dest =
+    clone_path(dir, spec).ok_or_else(|| format!("'{spec}' is not a folder or a repository URL"))?;
   if let Some(found) = known_clone(spec, known) {
     return Ok((found, false));
   }
@@ -1134,10 +1159,66 @@ mod tests {
     assert!(projects_with_repo(&conn, "/r/none").unwrap().is_empty());
   }
 
+  /// `root` as a clone folder setting.
+  fn tpl(root: &Path) -> String {
+    root.display().to_string()
+  }
+
+  #[test]
+  fn clone_path_nests_owner_and_repo_under_the_folder() {
+    let got = clone_path("/code", "git@github.com:tznc/treq.git");
+    assert_eq!(got, Some("/code/tznc/treq".into()));
+    assert_eq!(
+      clone_path(" /code/ ", "tznc/treq"),
+      Some("/code/tznc/treq".into())
+    );
+  }
+
+  #[test]
+  fn clone_path_keeps_nested_groups_in_owner() {
+    let got = clone_path("/c", "https://gitlab.com/a/b/c.git");
+    assert_eq!(got, Some("/c/a/b/c".into()));
+  }
+
+  #[test]
+  fn clone_path_expands_a_leading_tilde() {
+    let home = std::env::var("HOME").unwrap();
+    let got = clone_path("~/src", "tznc/treq").unwrap();
+    assert_eq!(got, Path::new(&home).join("src/tznc/treq"));
+  }
+
+  #[test]
+  fn clone_path_rejects_what_is_not_a_repo_url() {
+    assert_eq!(clone_path("/c", "no such thing"), None);
+  }
+
+  #[test]
+  fn clone_dir_reads_the_app_setting_else_the_default() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let db = crate::db::Database::new(dir.path().join("app.db")).unwrap();
+    db.init().unwrap();
+    assert_eq!(clone_dir(&db), default_clone_dir());
+    db.set_setting(CLONE_DIRECTORY_SETTING, "/x").unwrap();
+    assert_eq!(clone_dir(&db), "/x");
+    db.set_setting(CLONE_DIRECTORY_SETTING, "  ").unwrap();
+    assert_eq!(clone_dir(&db), default_clone_dir());
+  }
+
+  #[test]
+  fn ensure_repo_clones_into_the_folder_by_owner_and_repo() {
+    let (_src, url) = local_origin();
+    let root = tempfile::TempDir::new().unwrap();
+    let (path, cloned) = ensure_repo(&url, &tpl(root.path()), &[]).unwrap();
+    assert!(cloned);
+    assert!(Path::new(&path).join("README.md").exists());
+    assert!(path.starts_with(&tpl(root.path())), "{path}");
+    assert!(path.ends_with("/owner/name"), "{path}");
+  }
+
   #[test]
   fn ensure_repo_takes_an_existing_folder_as_is() {
     let dir = tempfile::TempDir::new().unwrap();
-    let (path, cloned) = ensure_repo(dir.path().to_str().unwrap(), Path::new("/unused"), &[]).unwrap();
+    let (path, cloned) = ensure_repo(dir.path().to_str().unwrap(), "/unused/{repo}", &[]).unwrap();
     assert!(!cloned);
     assert_eq!(Path::new(&path), std::fs::canonicalize(dir.path()).unwrap());
   }
@@ -1145,9 +1226,9 @@ mod tests {
   #[test]
   fn ensure_repo_reuses_an_earlier_clone() {
     let root = tempfile::TempDir::new().unwrap();
-    let dest = root.path().join("github.com/tznc/app");
+    let dest = root.path().join("tznc/app");
     std::fs::create_dir_all(dest.join(".git")).unwrap();
-    let (path, cloned) = ensure_repo("tznc/app", root.path(), &[]).unwrap();
+    let (path, cloned) = ensure_repo("tznc/app", &tpl(root.path()), &[]).unwrap();
     assert!(!cloned, "no second clone");
     assert_eq!(Path::new(&path), dest);
   }
@@ -1216,13 +1297,13 @@ mod tests {
   fn ensure_repo_clones_a_url_under_root_then_reuses_it() {
     let (_src, url) = local_origin();
     let root = tempfile::TempDir::new().unwrap();
-    let expected = managed_clone_path(root.path(), &url).unwrap();
-    let (path, cloned) = ensure_repo(&url, root.path(), &[]).unwrap();
+    let expected = clone_path(&tpl(root.path()), &url).unwrap();
+    let (path, cloned) = ensure_repo(&url, &tpl(root.path()), &[]).unwrap();
     assert!(cloned);
     assert_eq!(Path::new(&path), expected);
     assert!(expected.join("README.md").exists());
     assert!(expected.starts_with(root.path()));
-    let (again, cloned) = ensure_repo(&url, root.path(), &[]).unwrap();
+    let (again, cloned) = ensure_repo(&url, &tpl(root.path()), &[]).unwrap();
     assert!(!cloned, "the second call reuses the clone");
     assert_eq!(again, path);
   }
@@ -1232,14 +1313,19 @@ mod tests {
     let known = tempfile::TempDir::new().unwrap();
     let path = known.path().to_string_lossy().to_string();
     let git = |args: &[&str]| {
-      assert!(std::process::Command::new("git").args(args).current_dir(&path).status().unwrap().success());
+      assert!(std::process::Command::new("git")
+        .args(args)
+        .current_dir(&path)
+        .status()
+        .unwrap()
+        .success());
     };
     git(&["init", "-q"]);
     git(&["remote", "add", "origin", "git@github.com:tznc/treq.git"]);
     let root = tempfile::TempDir::new().unwrap();
     let other = "/no/such/repo".to_string();
     let (got, cloned) =
-      ensure_repo("tznc/treq", root.path(), &[other, path.clone()]).unwrap();
+      ensure_repo("tznc/treq", &tpl(root.path()), &[other, path.clone()]).unwrap();
     assert!(!cloned, "no clone for a repo treq already has");
     assert_eq!(got, path);
     assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
@@ -1258,7 +1344,7 @@ mod tests {
   #[test]
   fn ensure_repo_rejects_what_is_neither_folder_nor_url() {
     let root = tempfile::TempDir::new().unwrap();
-    let err = ensure_repo("no such thing", root.path(), &[]).unwrap_err();
+    let err = ensure_repo("no such thing", &tpl(root.path()), &[]).unwrap_err();
     assert!(err.contains("not a folder or a repository URL"), "{err}");
     assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
   }
@@ -1267,7 +1353,7 @@ mod tests {
   fn ensure_repo_trims_a_folder_spec() {
     let dir = tempfile::TempDir::new().unwrap();
     let spec = format!("  {}  ", dir.path().display());
-    let (path, cloned) = ensure_repo(&spec, Path::new("/unused"), &[]).unwrap();
+    let (path, cloned) = ensure_repo(&spec, "/unused/{repo}", &[]).unwrap();
     assert!(!cloned);
     assert_eq!(Path::new(&path), std::fs::canonicalize(dir.path()).unwrap());
   }
@@ -1278,8 +1364,8 @@ mod tests {
     let missing = tempfile::TempDir::new().unwrap();
     let url = format!("file://{}/host/owner/gone", missing.path().display());
     let (result, dest) = (
-      ensure_repo(&url, root.path(), &[]),
-      managed_clone_path(root.path(), &url).unwrap(),
+      ensure_repo(&url, &tpl(root.path()), &[]),
+      clone_path(&tpl(root.path()), &url).unwrap(),
     );
     assert!(result.is_err());
     assert!(!dest.join(".git").exists());
