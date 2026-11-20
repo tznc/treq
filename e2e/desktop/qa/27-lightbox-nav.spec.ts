@@ -22,7 +22,7 @@ test("lightbox nav: edges when wide, actions row when narrow", async ({ page }) 
   await page.mouse.click(364, 693);
   await settle(page, 1000);
   const next = page.getByRole("button", { name: "Next" });
-  const close = page.getByRole("button", { name: "Close" }).last();
+  const input = page.getByRole("textbox", { name: "Add a review comment…" });
   await expect(next).toBeVisible();
   await capture(page, {
     name: "27-lightbox-nav-01-wide",
@@ -32,9 +32,9 @@ test("lightbox nav: edges when wide, actions row when narrow", async ({ page }) 
       "The actions row (copy, reveal, close, review input) holds no arrows",
     ],
   });
-  await page.setViewportSize({ width: 700, height: 900 });
+  await page.setViewportSize({ width: 1000, height: 900 });
   await settle(page, 800);
-  const [n, c] = [await next.boundingBox(), await close.boundingBox()];
+  const [n, c] = [await next.boundingBox(), await input.boundingBox()];
   expect(n!.width).toBeLessThanOrEqual(40);
   expect(Math.abs(n!.y + n!.height / 2 - (c!.y + c!.height / 2))).toBeLessThan(12);
   await capture(page, {

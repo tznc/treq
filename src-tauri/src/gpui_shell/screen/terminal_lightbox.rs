@@ -869,7 +869,7 @@ impl Lightbox {
 /// A click on the lightbox's content (`data-lightbox-content`), which
 /// leaves it open.
 /// Below this window width the previous/next buttons move into the actions row.
-const NAV_INLINE_BELOW: f32 = 768.;
+const NAV_INLINE_BELOW: f32 = 1200.;
 
 fn content<E: InteractiveElement>(el: E) -> E {
   el.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -1490,7 +1490,7 @@ impl Lightbox {
     div().w_full().flex().justify_center().child(content(panel))
   }
 
-  fn nav(&self, next: bool, compact: bool, cx: &mut Context<Self>) -> Stateful<Div> {
+  fn nav(&self, next: bool, compact: bool, cx: &mut Context<Self>) -> impl IntoElement {
     let disabled = if next {
       self.index + 1 >= self.assets.len()
     } else {
@@ -1541,6 +1541,7 @@ impl Lightbox {
         })
         .child(ui::icon(icon, if compact { 16. } else { 32. }, chrome(1.))),
     )
+    .test_support()
   }
 
   fn discard_dialog(&self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {

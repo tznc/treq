@@ -1353,7 +1353,7 @@ fn lightbox_moves_between_attachments(cx: &mut TestAppContext) {
 fn lightbox_nav_sits_in_the_actions_row_when_narrow(cx: &mut TestAppContext) {
   let (mut h, _) = send_harness(cx);
   h.cx
-    .simulate_resize(gpui::size(gpui::px(600.), gpui::px(800.)));
+    .simulate_resize(gpui::size(gpui::px(1000.), gpui::px(800.)));
   h.click("terminal-send-preview-t1");
   h.cx.run_until_parked();
   let close = h.cx.debug_bounds("treq-send-close").expect("close");
