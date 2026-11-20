@@ -1881,12 +1881,16 @@ impl Render for ChangesView {
     }
     let p = theme::palette(self.dark);
     let root = ui::text(div(), TextSize::Sm)
+      .id("changes-diff-viewer")
       .debug_selector(|| "changes-diff-viewer".into())
+      .role(gpui::Role::Group)
+      .aria_label("Changes")
       .size_full()
       .flex()
       .overflow_hidden()
       .bg(p.background)
       .text_color(p.foreground)
+      .test_support()
       .track_focus(&self.focus)
       .on_key_down(cx.listener(|view, e: &KeyDownEvent, window, cx| {
         let k = &e.keystroke;
@@ -2174,7 +2178,11 @@ impl ChangesView {
         .justify_between()
         .child(
           ui::text(div(), TextSize::Sm)
+            .id("changes-nothing-to-commit")
             .debug_selector(|| "changes-nothing-to-commit".into())
+            .role(gpui::Role::Status)
+            .aria_label("Nothing to commit")
+            .test_support()
             .py_2()
             .text_color(p.muted_foreground)
             .child("Nothing to commit"),
@@ -2787,8 +2795,9 @@ impl ChangesView {
     let path = file.path.clone();
     let name_color = p.foreground;
     let dir_color = p.muted_foreground.opacity(0.6);
-    let small =
-      |id: String, icon: &'static str, fg: Hsla, hidden: bool| file_action(id, icon, fg, hidden, p);
+    let small = |id: String, name: String, icon: &'static str, fg: Hsla, hidden: bool| {
+      file_action(id, name, icon, fg, hidden, p)
+    };
     let red = Tone::Danger.text(p);
     let status_color = p.muted_foreground;
     let mut actions = div()
@@ -2809,6 +2818,7 @@ impl ChangesView {
       let tip_key = format!("discard-tip-{}", file.path);
       let el = small(
         format!("discard-{}", file.path),
+        format!("Discard changes to {}", file.path),
         theme::ICON_UNDO,
         red,
         hidden,
@@ -2816,12 +2826,14 @@ impl ChangesView {
       .on_click(cx.listener(move |view, _, _, cx| {
         cx.stop_propagation();
         view.discard_files(&target, cx);
-      }));
+      }))
+      .test_support();
       actions = actions.child(self.tip(tip_key, "Discard selected files", el, cx));
       let target = path.clone();
       let tip_key = format!("stage-tip-{}", file.path);
       let el = small(
         format!("stage-{}", file.path),
+        format!("Stage {}", file.path),
         theme::ICON_PLUS,
         name_color,
         hidden,
@@ -2829,7 +2841,8 @@ impl ChangesView {
       .on_click(cx.listener(move |view, _, _, cx| {
         cx.stop_propagation();
         view.stage(&target, cx);
-      }));
+      }))
+      .test_support();
       actions = actions.child(self.tip(tip_key, "Stage file(s) for commit", el, cx));
     }
     if staged {
@@ -2837,6 +2850,7 @@ impl ChangesView {
       let tip_key = format!("unstage-tip-{}", file.path);
       let el = small(
         format!("unstage-{}", file.path),
+        format!("Unstage {}", file.path),
         theme::ICON_MINUS,
         name_color,
         !selected,
@@ -2844,7 +2858,8 @@ impl ChangesView {
       .on_click(cx.listener(move |view, _, _, cx| {
         cx.stop_propagation();
         view.unstage(&target, cx);
-      }));
+      }))
+      .test_support();
       actions = actions.child(self.tip(tip_key, "Unstage file", el, cx));
     }
     let (click, menu) = (path.clone(), path);
@@ -3648,6 +3663,7 @@ fn skeleton(p: &Palette) -> Div {
 /// hover when `hidden`.
 fn file_action(
   id: String,
+  name: String,
   icon: &'static str,
   fg: Hsla,
   hidden: bool,
@@ -3657,6 +3673,8 @@ fn file_action(
   div()
     .id(SharedString::from(id))
     .debug_selector(move || selector)
+    .role(gpui::Role::Button)
+    .aria_label(name)
     .p_0p5()
     .rounded(radius::SM)
     .cursor_pointer()
