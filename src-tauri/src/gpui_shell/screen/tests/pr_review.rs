@@ -431,14 +431,16 @@ fn pr_review_author_can_only_comment(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn pr_review_starts_an_ai_review_in_the_home_repository(cx: &mut TestAppContext) {
+fn pr_review_starts_an_ai_review_in_the_home_repository_without_leaving_the_pr(
+  cx: &mut TestAppContext,
+) {
   let (mut h, host) = workspace_harness(cx, pr_host(), pr_route());
   h.click("pr-review-ai-review");
   h.cx.run_until_parked();
   assert!(fields(&h, "prReview.startAgentReview").is_empty());
   let launches = host.launches.lock().unwrap().clone();
-  let [(request, true)] = &launches[..] else {
-    panic!("one selected launch: {launches:?}");
+  let [(request, false)] = &launches[..] else {
+    panic!("one unselected launch, so the PR stays on screen: {launches:?}");
   };
   assert_eq!(request.workspace_id, None);
   assert_eq!(request.session_name.as_deref(), Some("AI Review"));
@@ -529,7 +531,7 @@ fn pr_review_file_list_counts_each_files_comments(cx: &mut TestAppContext) {
   let screen = h.rendered();
   let count = |file: &str| {
     within(&screen.get_by_role(by::role(Role::Button).name(file)))
-      .query_by_role(by::role(Role::Label))
+      .query_by_role(by::role(Role::Label).name(TextMatch::regex("review comment")))
       .and_then(|label| label.name())
   };
   assert_eq!(count("a.rs").as_deref(), Some("2 review comments"));
@@ -591,4 +593,27 @@ fn pr_review_expands_all_lines_above_a_hunk(cx: &mut TestAppContext) {
     host.calls()
   );
   assert!(!h.shows(gpui::Role::Button, "Expand all (9 lines)"));
+}
+
+/// Like the Changes tab, each file row shows its name, then its folder as subtext.
+#[gpui::test]
+fn pr_review_file_rows_show_the_name_then_the_folder(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  let host = FakeHost {
+    pr_diff: Some(Ok(
+      "diff --git a/src/lib/c.rs b/src/lib/c.rs\n--- a/src/lib/c.rs\n+++ b/src/lib/c.rs\n@@ -1 +1,2 @@\n a\n+b\n"
+        .into(),
+    )),
+    ..pr_host()
+  };
+  let (mut h, _) = workspace_harness(cx, host, pr_route());
+  assert!(
+    h.shows(gpui::Role::Button, "src/lib/c.rs"),
+    "the file's row"
+  );
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  expect(screen.get_by_text("c.rs")).to_be_visible();
+  expect(screen.get_by_text("src/lib")).to_be_visible();
 }

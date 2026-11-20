@@ -11,6 +11,9 @@ use std::time::Duration;
 use gpui::{AnyElement, StrikethroughStyle, StyledText, Task};
 
 use super::*;
+
+/// Comment cards cap their width so lines stay readable on wide screens.
+pub(super) const CARD_MAX_W: f32 = 820.;
 use crate::{
   github::{GhReviewComment, GhReviewThread},
   gpui_shell::screen::{
@@ -490,6 +493,7 @@ impl ChangesView {
     }
     let mut card = div()
       .min_w_0()
+      .max_w(zpx(CARD_MAX_W))
       .rounded(radius::MD)
       .border_1()
       .border_color(sky(p, 0.3))
@@ -559,7 +563,7 @@ impl ChangesView {
         super::super::code::markdown(
           format!("github-comment-{}", comment.id),
           &comment.body,
-          TextSize::Code.metrics().0,
+          TextSize::Sm.metrics().0,
           self.dark,
         ),
       ))
@@ -615,6 +619,7 @@ impl ChangesView {
     };
     let mut card = div()
       .debug_selector(|| "agent-review-comment-card".into())
+      .max_w(zpx(CARD_MAX_W))
       .font_family(theme::MONO_FONT)
       .rounded(radius::MD)
       .border_1()

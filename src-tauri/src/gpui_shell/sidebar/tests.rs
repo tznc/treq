@@ -17,6 +17,7 @@ fn row(id: i64, title: &str, depth: u32) -> SidebarRow {
     target: None,
     archiving: false,
     exiting: false,
+    path: format!("/wt/{title}"),
   }
 }
 
@@ -138,7 +139,8 @@ impl Harness {
       let popups = popups.clone();
       Rc::new(move |request, _| popups.borrow_mut().push(request))
     };
-    let (sidebar, cx) = cx.add_window_view(|_, _| Sidebar::new(snapshot, sink, popup_sink));
+    let (sidebar, cx) =
+      cx.add_window_view(|_, cx| Sidebar::new(snapshot, sink, popup_sink).watch_terminals(cx));
     let cx = cx.clone();
     Self {
       cx,
@@ -311,12 +313,15 @@ fn names_create_buttons_by_what_they_open() {
 }
 
 #[test]
-fn indents_rows_like_the_react_sidebar() {
+fn nests_each_row_one_icon_width_under_its_parent() {
   assert_eq!(row_indent(0), 10.);
-  assert_eq!(row_indent(1), 16.);
-  assert_eq!(row_indent(3), 28.);
-  assert_eq!(guide_left(2), 8.);
-  assert_eq!(guide_left(4), 20.);
+  assert_eq!(row_indent(1), 22.);
+  assert_eq!(row_indent(3), 46.);
+  // The elbow hangs from the parent's icon centre and ends at the row's icon.
+  for depth in 1..4 {
+    assert_eq!(guide_left(depth), row_indent(depth - 1) + 5.);
+    assert_eq!(guide_left(depth) + 6., row_indent(depth) - 1.);
+  }
 }
 
 #[gpui::test]
@@ -1316,4 +1321,42 @@ fn project_button_draws_for_saved_and_unsaved_projects(cx: &mut TestAppContext) 
   h.update(|s| s.project = Some("Checkout".into()));
   h.click("project-button");
   assert_eq!(h.sent(), vec![SidebarAction::ProjectMenu]);
+}
+
+#[gpui::test]
+fn hovering_a_terminal_peeks_its_workspace_row(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![row(7, "feat-a", 0), row(8, "feat-b", 0)]));
+  assert!(h.bounds("workspace-peek-7").is_none());
+  h.cx
+    .update(|_, cx| super::set_hovered_terminal(Some("/wt/feat-a".into()), cx));
+  assert!(h.bounds("workspace-peek-7").is_some());
+  assert!(h.bounds("workspace-peek-8").is_none());
+  h.cx.update(|_, cx| super::set_hovered_terminal(None, cx));
+  assert!(h.bounds("workspace-peek-7").is_none());
+  // The database keeps the path relative to the repository's workspaces.
+  h.update(|s| s.repos[0].workspaces[1].path = "2-feat-b".into());
+  h.cx.update(|_, cx| {
+    super::set_hovered_terminal(Some("/src/treq/.treq/workspaces/2-feat-b".into()), cx)
+  });
+  assert!(h.bounds("workspace-peek-8").is_some());
+}
+
+#[test]
+fn pr_pills_name_the_state_as_github_does() {
+  assert_eq!(
+    PrState::Open.pill(),
+    ("Open", theme::ICON_PR, Tone::GitOpen)
+  );
+  assert_eq!(
+    PrState::Merged.pill(),
+    ("Merged", theme::ICON_MERGE, Tone::GitMerged)
+  );
+  assert_eq!(
+    PrState::Closed.pill(),
+    ("Closed", theme::ICON_PR_CLOSED, Tone::GitClosed)
+  );
+  assert_eq!(
+    PrState::Draft.pill(),
+    ("Draft", theme::ICON_PR_DRAFT, Tone::Neutral)
+  );
 }

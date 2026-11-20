@@ -92,6 +92,7 @@ pub struct Tabs {
   focus: Option<FocusHandle>,
   on_select: Option<OnSelect>,
   on_double_click: Option<OnSelect>,
+  label: Option<SharedString>,
 }
 
 impl Tabs {
@@ -105,6 +106,7 @@ impl Tabs {
       focus: None,
       on_select: None,
       on_double_click: None,
+      label: None,
     }
   }
 
@@ -123,6 +125,12 @@ impl Tabs {
   /// A segment's fill under the pointer.
   pub fn segment_hover(&self) -> gpui::Hsla {
     self.palette.segment_hover()
+  }
+
+  /// Names the strip for assistive technology.
+  pub fn aria_label(mut self, label: impl Into<SharedString>) -> Self {
+    self.label = Some(label.into());
+    self
   }
 
   pub fn style(mut self, style: TabsStyle) -> Self {
@@ -206,6 +214,7 @@ impl RenderOnce for Tabs {
       .id(self.id)
       .debug_selector(move || selector)
       .role(gpui::Role::TabList)
+      .when_some(self.label, |el, label| el.aria_label(label))
       .test_support()
       .flex()
       .items_center()

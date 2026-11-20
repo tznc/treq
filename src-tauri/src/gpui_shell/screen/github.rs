@@ -951,7 +951,7 @@ impl GithubView {
     self.host.open_url(url);
   }
 
-  /// A right-click on what opens `url`: its "Copy link" menu.
+  /// A right-click on what opens `url`: its copy-link menu.
   pub(super) fn copy_link(
     &self,
     url: String,

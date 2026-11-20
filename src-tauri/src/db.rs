@@ -336,6 +336,7 @@ impl Database {
         created_at: row.get(3)?,
         last_accessed: row.get(4)?,
         model: row.get(5)?,
+        link_url: None,
       })
     })?;
 

@@ -45,6 +45,15 @@ test("linear: connect with an API key in Settings", async ({ page }) => {
   linearKey(null);
   await linear(page);
   await expect(page.getByText(/Linear is not connected/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Connect Linear" })).toBeVisible();
+  await capture(page, {
+    name: "22-linear-00-not-connected",
+    title: "Linear view: not connected",
+    expectations: [
+      "Centered 'Connect Linear' empty state with the not-connected message, not an error",
+      "A primary 'Connect Linear' button beside an outline 'Open settings' button",
+    ],
+  });
   await page.getByRole("button", { name: "Open settings" }).click();
   await expect(page.getByRole("tab", { name: "Integrations", selected: true })).toBeVisible();
   await page.getByRole("button", { name: "Linear integration" }).click();
@@ -160,7 +169,7 @@ test("linear: issues", async ({ page }) => {
     name: "22-linear-07-team-menu",
     title: "Linear view: team menu",
     screen: true,
-    expectations: ["A menu under the selector: Teams heading, All Teams, Engineering, Operations"],
+    expectations: ["A menu under the selector: Teams heading, All, Engineering, Operations"],
   });
   await page.keyboard.press("Escape");
   await settle(page, 600);

@@ -41,16 +41,16 @@ fn prompt_history_names_workspaces_as_react_does() {
 #[gpui::test]
 fn prompt_history_shows_the_newest_prompt_first(cx: &mut TestAppContext) {
   let (mut h, host) = modal_harness(cx, history_host(), history_modal());
-  for selector in [
-    "prompt-history-modal",
-    "prompt-history-list",
-    "prompt-history-item-0",
-    "prompt-history-item-2",
-    "prompt-history-detail-text",
-    "prompt-history-copy-all",
-    "prompt-history-run",
+  for (role, name) in [
+    (gpui::Role::Dialog, "Prompt history"),
+    (gpui::Role::List, "Prompts"),
+    (gpui::Role::Button, "login fixes"),
+    (gpui::Role::Button, "Deleted workspace"),
+    (gpui::Role::Paragraph, "Fix the login button"),
+    (gpui::Role::Button, "Copy all"),
+    (gpui::Role::Button, "Run prompt…"),
   ] {
-    assert!(h.drawn(selector), "{selector}");
+    assert!(h.shows(role, name), "{name}");
   }
   assert!(host.calls().contains(&"read prompt history".to_string()));
   let selected = h.screen.read_with(&h.cx, |s, cx| {
@@ -116,24 +116,24 @@ fn prompt_history_closes_through_react(cx: &mut TestAppContext) {
 #[gpui::test]
 fn prompt_history_says_when_there_is_nothing(cx: &mut TestAppContext) {
   let (mut h, _) = modal_harness(cx, FakeHost::default(), history_modal());
-  assert!(h.drawn("prompt-history-empty"));
-  assert!(!h.drawn("prompt-history-copy-all"));
+  assert!(h.shows(gpui::Role::Status, "No prompts sent yet"));
+  assert!(!h.shows(gpui::Role::Button, "Copy all"));
 }
 
 #[gpui::test]
 fn stash_modal_lists_stashes_with_the_first_diff(cx: &mut TestAppContext) {
   let (mut h, host) = modal_harness(cx, stash_host(), stash_modal());
-  for selector in [
-    "stash-modal",
-    "stash-list-item-0",
-    "stash-list-item-1",
-    "stash-detail",
-    "stash-diff-pane",
-    "stash-diff-file-0",
-    "stash-apply-button",
-    "stash-more-menu",
+  for (role, name) in [
+    (gpui::Role::Dialog, "Stashed changes"),
+    (gpui::Role::Button, "login"),
+    (gpui::Role::Button, "docs"),
+    (gpui::Role::Group, "Stash details"),
+    (gpui::Role::Group, "Stash diff"),
+    (gpui::Role::Heading, "src/login.rs"),
+    (gpui::Role::Button, "Apply…"),
+    (gpui::Role::Button, "More stash actions"),
   ] {
-    assert!(h.drawn(selector), "{selector}");
+    assert!(h.shows(role, name), "{name}");
   }
   assert!(host.calls().contains(&"read stashes".to_string()));
   assert!(host.calls().contains(&"read stash diff 1".to_string()));
@@ -145,19 +145,19 @@ fn stash_modal_lists_stashes_with_the_first_diff(cx: &mut TestAppContext) {
 fn stash_modal_applies_a_stash_to_a_workspace(cx: &mut TestAppContext) {
   let (mut h, host) = modal_harness(cx, stash_host(), stash_modal());
   h.click("stash-apply-button");
-  for selector in [
-    "stash-apply-popover",
-    "stash-apply-workspace-select",
-    "stash-apply-option-.",
-    "stash-apply-option-treq/login",
-    "stash-apply-option-treq/docs",
-    "stash-apply-new-workspace",
+  for (role, name) in [
+    (gpui::Role::Dialog, "Apply stash"),
+    (gpui::Role::TextInput, "Search workspaces…"),
+    (gpui::Role::ListBoxOption, "Home repo"),
+    (gpui::Role::ListBoxOption, "Login fixes"),
+    (gpui::Role::ListBoxOption, "treq/docs"),
+    (gpui::Role::ListBoxOption, "New workspace…"),
   ] {
-    assert!(h.drawn(selector), "{selector}");
+    assert!(h.shows(role, name), "{name}");
   }
   h.click("stash-apply-option-treq/login");
   h.cx.run_until_parked();
-  assert!(!h.drawn("stash-apply-popover"));
+  assert!(!h.shows(gpui::Role::Dialog, "Apply stash"));
   assert_eq!(
     host.writes(),
     [
@@ -206,7 +206,7 @@ fn stash_modal_applies_to_a_new_workspace_in_react(cx: &mut TestAppContext) {
   assert_eq!(sent.len(), 1);
   assert_eq!(sent[0]["id"], 1);
   assert_eq!(sent[0]["short_commit_id"], "abc1");
-  assert!(!h.drawn("stash-apply-popover"));
+  assert!(!h.shows(gpui::Role::Dialog, "Apply stash"));
 }
 
 #[gpui::test]
@@ -224,8 +224,8 @@ fn stash_modal_copies_a_patch_and_deletes_a_stash(cx: &mut TestAppContext) {
     .writes()
     .contains(&"notify toast Stash deleted".to_string()));
   // The list reloads and the next stash is selected.
-  assert!(h.drawn("stash-list-item-0"));
-  assert!(!h.drawn("stash-list-item-1"));
+  assert!(h.shows(gpui::Role::Button, "docs"));
+  assert!(!h.shows(gpui::Role::Button, "login"));
   let selected = h
     .screen
     .read_with(&h.cx, |s, cx| s.stash.as_ref().map(|v| v.read(cx).selected));
@@ -235,8 +235,8 @@ fn stash_modal_copies_a_patch_and_deletes_a_stash(cx: &mut TestAppContext) {
 #[gpui::test]
 fn stash_modal_explains_an_empty_list(cx: &mut TestAppContext) {
   let (mut h, _) = modal_harness(cx, FakeHost::default(), stash_modal());
-  assert!(h.drawn("stash-empty"));
-  assert!(!h.drawn("stash-list"));
+  assert!(h.shows(gpui::Role::Status, "No stashed changes yet"));
+  assert!(!h.shows(gpui::Role::List, "Stashes"));
 }
 
 fn agent_view<T>(h: &Harness, f: impl FnOnce(&modal::agent_prompt::AgentPromptView) -> T) -> T {
@@ -248,18 +248,20 @@ fn agent_view<T>(h: &Harness, f: impl FnOnce(&modal::agent_prompt::AgentPromptVi
 #[gpui::test]
 fn agent_prompt_starts_with_what_react_sent(cx: &mut TestAppContext) {
   let (mut h, _) = modal_harness(cx, FakeHost::default(), agent_modal());
-  for selector in [
-    "agent-prompt-dialog",
-    "agent-prompt-workspace",
-    "agent-task-input",
-    "task-input",
-    "task-add",
-    "task-agent",
-    "task-submit",
+  for (role, name) in [
+    (gpui::Role::Dialog, "Start a new agent session"),
+    (gpui::Role::Button, "Workspace: treq/login"),
+    (gpui::Role::MultilineTextInput, "Describe a task…"),
+    (gpui::Role::Button, "Add"),
+    (gpui::Role::ComboBox, "Agent"),
+    (gpui::Role::Button, "Send"),
   ] {
-    assert!(h.drawn(selector), "{selector}");
+    assert!(h.shows(role, name), "{name}");
   }
-  assert!(!h.drawn("task-submit-menu"), "no Edit/Plan split menu");
+  assert!(
+    !h.shows(gpui::Role::Button, "More Send options"),
+    "no Edit/Plan split menu"
+  );
   assert_eq!(agent_view(&h, |v| v.selected), Some(7));
   assert_eq!(agent_view(&h, |v| v.task_text.clone()), "fix it");
   assert_eq!(
@@ -292,6 +294,15 @@ fn agent_prompt_starts_the_session_in_the_backend(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn agent_prompt_starts_the_session_on_secondary_enter(cx: &mut TestAppContext) {
+  let (mut h, host) = modal_harness(cx, FakeHost::default(), agent_modal());
+  h.cx.simulate_keystrokes("secondary-enter");
+  h.cx.run_until_parked();
+  assert_eq!(tasks(&mut h, &host).len(), 1);
+  assert!(agent_view(&h, |v| v.submitting()));
+}
+
+#[gpui::test]
 fn agent_prompt_toasts_a_failed_start_and_allows_another(cx: &mut TestAppContext) {
   let host = FakeHost {
     task_error: Some("jj failed".into()),
@@ -313,16 +324,16 @@ fn agent_prompt_runs_the_default_agent_unless_changed(cx: &mut TestAppContext) {
   let (mut h, host) = modal_harness(cx, host, agent_modal());
   assert_eq!(agent_view(&h, |v| v.agents()), (Agent::Codex, Agent::Codex));
   // Codex has no plan mode.
-  assert!(!h.drawn("task-submit-menu"));
+  assert!(!h.shows(gpui::Role::Button, "More Send options"));
   h.click("task-agent");
-  assert!(h.drawn("task-agent-menu"));
+  assert!(h.shows(gpui::Role::MenuItem, "Cursor"));
   h.click("task-agent-cursor");
   assert_eq!(
     agent_view(&h, |v| v.agents()),
     (Agent::Codex, Agent::Cursor)
   );
-  assert!(h.drawn("task-save-default-box"));
-  assert!(!h.drawn("task-submit-menu"));
+  assert!(h.shows(gpui::Role::CheckBox, "Set as default for this repo"));
+  assert!(!h.shows(gpui::Role::Button, "More Send options"));
   h.click("task-save-default-box");
   h.click("task-submit");
   let start = &tasks(&mut h, &host)[0];
@@ -334,12 +345,12 @@ fn agent_prompt_runs_the_default_agent_unless_changed(cx: &mut TestAppContext) {
 fn agent_prompt_picks_a_workspace(cx: &mut TestAppContext) {
   let (mut h, host) = modal_harness(cx, FakeHost::default(), agent_modal());
   h.click("agent-prompt-workspace");
-  assert!(h.drawn("agent-prompt-workspace-popover"));
-  assert!(h.drawn("agent-prompt-workspace-main"));
-  assert!(h.drawn("agent-prompt-workspace-treq/login"));
+  assert!(h.shows(gpui::Role::Dialog, "Choose a workspace"));
+  assert!(h.shows(gpui::Role::MenuItemCheckBox, "main"));
+  assert!(h.shows(gpui::Role::MenuItemCheckBox, "treq/login"));
   h.click("agent-prompt-workspace-main");
   assert_eq!(agent_view(&h, |v| v.selected), None);
-  assert!(!h.drawn("agent-prompt-workspace-popover"));
+  assert!(!h.shows(gpui::Role::Dialog, "Choose a workspace"));
   h.click("task-submit");
   assert_eq!(tasks(&mut h, &host)[0].workspace_id, None);
 }
@@ -359,9 +370,12 @@ fn agent_prompt_runs_an_attached_issue_in_its_own_workspace(cx: &mut TestAppCont
     "subItemIds": ["child-1"],
   });
   let (mut h, host) = modal_harness(cx, FakeHost::default(), modal);
-  assert!(h.drawn("agent-prompt-issue-note"));
-  assert!(h.drawn("issue-chip"));
-  assert!(!h.drawn("agent-prompt-workspace"));
+  assert!(h.shows(
+    gpui::Role::Paragraph,
+    "Opens a workspace for ENG-101 and its sub-issues"
+  ));
+  assert!(h.shows(gpui::Role::Group, "Linear ENG-101"));
+  assert!(!h.shows(gpui::Role::Button, "Workspace: treq/login"));
   // An issue alone is enough to start.
   h.click("task-submit");
   let start = &tasks(&mut h, &host)[0];
@@ -391,8 +405,8 @@ fn agent_prompt_detaches_an_issue(cx: &mut TestAppContext) {
   });
   let (mut h, host) = modal_harness(cx, FakeHost::default(), modal);
   h.click("issue-chip-remove");
-  assert!(!h.drawn("issue-chip"));
-  assert!(h.drawn("agent-prompt-workspace"));
+  assert!(!h.shows(gpui::Role::Group, "GitHub #42"));
+  assert!(h.shows(gpui::Role::Button, "Workspace: treq/login"));
   h.click("task-submit");
   assert_eq!(tasks(&mut h, &host)[0].issue, None);
 }
@@ -411,7 +425,7 @@ fn agent_prompt_suggests_files_for_mentions(cx: &mut TestAppContext) {
   h.cx
     .executor()
     .advance_clock(std::time::Duration::from_millis(500));
-  assert!(h.drawn("task-mention-0"));
+  assert!(h.shows(gpui::Role::ListBoxOption, "src/login.rs"));
   h.click("task-mention-1");
   assert_eq!(
     agent_view(&h, |v| v.task_text.clone()),
@@ -452,13 +466,13 @@ fn agent_prompt_closes_through_react(cx: &mut TestAppContext) {
 #[gpui::test]
 fn dialogs_cover_the_screen_until_closed(cx: &mut TestAppContext) {
   let (mut h, _) = modal_harness(cx, FakeHost::default(), history_modal());
-  assert!(h.drawn("prompt-history-modal"));
-  assert!(h.drawn("onboarding-open-repo"));
+  assert!(h.shows(gpui::Role::Dialog, "Prompt history"));
+  assert!(h.shows(gpui::Role::Button, "Open repository…"));
   h.set_modal(None);
-  assert!(!h.drawn("prompt-history-modal"));
+  assert!(!h.shows(gpui::Role::Dialog, "Prompt history"));
   // Another kind replaces the first.
   h.set_modal(Some(stash_modal()));
-  assert!(h.drawn("stash-modal"));
+  assert!(h.shows(gpui::Role::Dialog, "Stashed changes"));
 }
 
 // -- The remote dialogs ------------------------------------------------------
@@ -470,10 +484,10 @@ fn setup_dialog_opens_on_your_own_vm_from_the_ssh_hosts_plus(cx: &mut TestAppCon
     FakeHost::default(),
     serde_json::json!({ "setup": { "allowUserManaged": true, "screen": "ownVm" } }),
   );
-  assert!(h.drawn("remote-username"));
-  assert!(!h.drawn("remote-setup-own-vm"));
+  assert!(h.shows(gpui::Role::TextInput, "Username"));
+  assert!(!h.shows(gpui::Role::RadioButton, "Your own VM"));
   // No choice to go back to: the X closes it.
-  assert!(!h.drawn("remote-setup-back"));
+  assert!(!h.shows(gpui::Role::Button, "Back"));
   h.click("remote-setup-dialog-close");
   assert_eq!(h.sent(), vec![press("remote.setup.close")]);
 }
@@ -486,18 +500,18 @@ fn setup_dialog_asks_to_sign_in_before_the_cloud_workspace(cx: &mut TestAppConte
     serde_json::json!({ "setup": { "allowUserManaged": true, "screen": "managed" } }),
   );
   // The machines page's cloud row opens straight on the cloud workspace.
-  assert!(h.drawn("cloud-create"));
-  assert!(!h.drawn("remote-setup-own-vm"));
+  assert!(h.shows(gpui::Role::Button, "Create cloud workspace"));
+  assert!(!h.shows(gpui::Role::RadioButton, "Your own VM"));
   h.set_account(account_state(serde_json::json!({})));
-  assert!(h.drawn("remote-setup-signed-out"));
-  assert!(!h.drawn("cloud-create"));
+  assert!(h.shows(gpui::Role::Group, "Sign in to Treq"));
+  assert!(!h.shows(gpui::Role::Button, "Create cloud workspace"));
   h.click("remote-setup-sign-in");
   h.cx.run_until_parked();
   assert!(host
     .writes()
     .contains(&"open http://localhost:3001/sign-in?source=desktop".to_string()));
   h.set_account(account_state(serde_json::json!({ "user": ada() })));
-  assert!(h.drawn("cloud-create"));
+  assert!(h.shows(gpui::Role::Button, "Create cloud workspace"));
 }
 
 pub(super) fn ssh_key(label: &str) -> crate::core::remote_local_keys::LocalSshIdentity {
@@ -579,16 +593,16 @@ fn setup_dialog_offers_both_paths_and_goes_back(cx: &mut TestAppContext) {
     FakeHost::default(),
     setup_route(true, serde_json::json!({})),
   );
-  assert!(h.drawn("remote-setup-dialog"));
-  assert!(h.drawn("remote-setup-managed"));
-  assert!(h.drawn("remote-setup-own-vm"));
-  assert!(!h.drawn("remote-setup-back"));
+  assert!(h.shows(gpui::Role::Dialog, "Connect a remote repository"));
+  assert!(h.shows(gpui::Role::RadioButton, "Treq-managed cloud workspace"));
+  assert!(h.shows(gpui::Role::RadioButton, "Your own VM"));
+  assert!(!h.shows(gpui::Role::Button, "Back"));
   h.click("remote-setup-managed");
-  assert!(h.drawn("cloud-create"));
-  assert!(!h.drawn("remote-setup-managed"));
+  assert!(h.shows(gpui::Role::Button, "Create cloud workspace"));
+  assert!(!h.shows(gpui::Role::RadioButton, "Treq-managed cloud workspace"));
   h.click("remote-setup-back");
-  assert!(h.drawn("remote-setup-managed"));
-  assert!(!h.drawn("cloud-create"));
+  assert!(h.shows(gpui::Role::RadioButton, "Treq-managed cloud workspace"));
+  assert!(!h.shows(gpui::Role::Button, "Create cloud workspace"));
 }
 
 #[gpui::test]
@@ -598,10 +612,10 @@ fn setup_dialog_opens_on_the_cloud_workspace_without_the_preview(cx: &mut TestAp
     FakeHost::default(),
     setup_route(false, serde_json::json!({})),
   );
-  assert!(h.drawn("cloud-create"));
-  assert!(!h.drawn("remote-setup-managed"));
+  assert!(h.shows(gpui::Role::Button, "Create cloud workspace"));
+  assert!(!h.shows(gpui::Role::RadioButton, "Treq-managed cloud workspace"));
   // Nothing to go back to.
-  assert!(!h.drawn("remote-setup-back"));
+  assert!(!h.shows(gpui::Role::Button, "Back"));
 }
 
 #[gpui::test]
@@ -625,12 +639,12 @@ fn setup_dialog_runs_the_cloud_workspace_flows_in_rust(cx: &mut TestAppContext) 
   h.click("cloud-repair");
   // Deleting asks first, in a confirmation of its own.
   h.click("cloud-delete");
-  assert!(h.drawn("cloud-delete-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Delete cloud workspace?"));
   h.click("cloud-delete-dialog-cancel");
-  assert!(!h.drawn("cloud-delete-dialog"));
+  assert!(!h.shows(gpui::Role::Dialog, "Delete cloud workspace?"));
   h.click("cloud-delete");
   h.click("cloud-delete-dialog-confirm");
-  assert!(!h.drawn("cloud-delete-dialog"));
+  assert!(!h.shows(gpui::Role::Dialog, "Delete cloud workspace?"));
 
   let ready = serde_json::json!({
     "instance": { "status": "ready", "providerResourceId": "machine-1", "diskQuotaGb": 10 },
@@ -669,7 +683,7 @@ fn setup_dialog_closes_from_its_backdrop_only(cx: &mut TestAppContext) {
     FakeHost::default(),
     setup_route(true, serde_json::json!({})),
   );
-  assert!(h.drawn("remote-setup-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Connect a remote repository"));
   // A click in the panel stays in the dialog.
   h.click("remote-setup-dialog");
   assert!(h.sent().is_empty());
@@ -689,7 +703,7 @@ fn own_vm_host() -> FakeHost {
 fn user_managed_form_confirms_the_host_key_before_registering(cx: &mut TestAppContext) {
   let (mut h, host) = remote_harness(cx, own_vm_host(), setup_route(true, serde_json::json!({})));
   h.click("remote-setup-own-vm");
-  assert!(h.drawn("remote-hostname"));
+  assert!(h.shows(gpui::Role::TextInput, "Hostname or IP address"));
   // Continue waits for a hostname and a username; the key is the default.
   h.click("remote-continue");
   assert!(host.writes().is_empty());
@@ -700,10 +714,10 @@ fn user_managed_form_confirms_the_host_key_before_registering(cx: &mut TestAppCo
   h.click("remote-continue");
   h.cx.run_until_parked();
   assert_eq!(host.writes(), ["probe devbox.example:22"]);
-  assert!(h.drawn("remote-trust-confirmation"));
+  assert!(h.shows(gpui::Role::Group, "Confirm host trust"));
   // Nothing is registered until trust is confirmed, and Continue is gone.
   assert!(h.sent().is_empty());
-  assert!(!h.drawn("remote-continue"));
+  assert!(!h.shows(gpui::Role::Button, "Continue"));
 
   h.click("remote-trust-connect");
   assert_eq!(
@@ -733,8 +747,8 @@ fn user_managed_form_can_decline_the_host_key(cx: &mut TestAppContext) {
   h.cx.run_until_parked();
   assert_eq!(host.writes(), ["probe 10.0.0.4:2222"]);
   h.click("remote-trust-cancel");
-  assert!(!h.drawn("remote-trust-confirmation"));
-  assert!(h.drawn("remote-continue"));
+  assert!(!h.shows(gpui::Role::Group, "Confirm host trust"));
+  assert!(h.shows(gpui::Role::Button, "Continue"));
   assert!(h.sent().is_empty());
   h.click("remote-continue");
   h.click("remote-trust-connect");
@@ -754,9 +768,9 @@ fn user_managed_form_shows_why_the_host_key_failed(cx: &mut TestAppContext) {
   type_into(&mut h, "remote-hostname", "10.0.0.4");
   type_into(&mut h, "remote-username", "me");
   h.click("remote-continue");
-  assert!(h.drawn("remote-probe-error"));
-  assert!(!h.drawn("remote-trust-confirmation"));
-  assert!(h.drawn("remote-continue"));
+  assert!(h.shows(gpui::Role::Alert, "Couldn't reach the host"));
+  assert!(!h.shows(gpui::Role::Group, "Confirm host trust"));
+  assert!(h.shows(gpui::Role::Button, "Continue"));
 }
 
 #[gpui::test]
@@ -773,9 +787,9 @@ fn user_managed_form_fills_from_an_ssh_alias(cx: &mut TestAppContext) {
   };
   let (mut h, host) = remote_harness(cx, host, setup_route(true, serde_json::json!({})));
   h.click("remote-setup-own-vm");
-  assert!(!h.drawn("remote-alias"));
+  assert!(!h.shows(gpui::Role::TextInput, "Alias"));
   h.click("remote-alias-toggle");
-  assert!(h.drawn("remote-alias"));
+  assert!(h.shows(gpui::Role::TextInput, "Alias"));
   h.click("remote-alias-autofill");
   // Needs an alias first.
   assert!(host.writes().is_empty());
@@ -803,12 +817,12 @@ fn user_managed_form_is_locked_while_react_registers(cx: &mut TestAppContext) {
   h.click("remote-trust-connect");
   // Back is disabled until React is done.
   h.click("remote-setup-back");
-  assert!(h.drawn("remote-hostname"));
+  assert!(h.shows(gpui::Role::TextInput, "Hostname or IP address"));
   for registering in [true, false] {
     h.update(|s| s.remote.setup.as_mut().expect("setup").registering = registering);
   }
   h.click("remote-setup-back");
-  assert!(h.drawn("remote-setup-managed"));
+  assert!(h.shows(gpui::Role::RadioButton, "Treq-managed cloud workspace"));
 }
 
 #[gpui::test]
@@ -824,9 +838,9 @@ fn terminal_dialog_lists_sessions_to_reattach(cx: &mut TestAppContext) {
     ..FakeHost::default()
   };
   let (mut h, host) = remote_harness(cx, host, terminal_remote_route());
-  assert!(h.drawn("remote-terminal-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Remote terminal"));
   assert_eq!(host.writes(), ["sessions devbox.example:/srv/project:root"]);
-  assert!(h.drawn("remote-reattach-1"));
+  assert!(h.shows(gpui::Role::Button, "Reattach shell-2"));
   // A stopped session cannot be reattached.
   h.click("remote-reattach-1");
   assert!(h.sent().is_empty());
@@ -848,8 +862,14 @@ fn terminal_dialog_starts_a_session_when_listing_fails(cx: &mut TestAppContext) 
     ..FakeHost::default()
   };
   let (mut h, _) = remote_harness(cx, host, terminal_remote_route());
-  assert!(h.drawn("remote-terminal-error"));
-  assert!(!h.drawn("remote-reattach-0"));
+  assert!(h.shows(gpui::Role::Alert, "ssh: connect refused"));
+  assert!(h
+    .rendered()
+    .query_all_by_role(
+      gpui_testing_library::by::role(gpui::Role::Button)
+        .name(gpui_testing_library::TextMatch::regex("^Reattach")),
+    )
+    .is_empty());
   h.click("remote-start-new");
   assert_eq!(
     fields(&h, "remote.terminal.open"),
@@ -860,7 +880,7 @@ fn terminal_dialog_starts_a_session_when_listing_fails(cx: &mut TestAppContext) 
 #[gpui::test]
 fn terminal_dialog_lists_again_for_another_workspace(cx: &mut TestAppContext) {
   let (mut h, host) = remote_harness(cx, FakeHost::default(), terminal_remote_route());
-  assert!(h.drawn("remote-start-new"));
+  assert!(h.shows(gpui::Role::Button, "Start new session"));
   h.update(|s| s.remote.terminal.as_mut().expect("terminal").workspace_id = "feature".into());
   h.cx.run_until_parked();
   assert_eq!(
@@ -884,8 +904,8 @@ fn ambiguous_dialog_dismisses_or_refreshes(cx: &mut TestAppContext) {
     FakeHost::default(),
     serde_json::json!({ "ambiguous": "Connection reset while pushing" }),
   );
-  assert!(h.drawn("remote-ambiguous-dialog"));
-  assert!(h.drawn("remote-ambiguous-reason"));
+  assert!(h.shows(gpui::Role::Dialog, "Remote change could not be verified"));
+  assert!(h.shows(gpui::Role::Paragraph, "Connection reset while pushing"));
   h.click("remote-ambiguous-dismiss");
   h.click("remote-ambiguous-refresh");
   assert_eq!(
@@ -896,7 +916,7 @@ fn ambiguous_dialog_dismisses_or_refreshes(cx: &mut TestAppContext) {
     ]
   );
   h.update(|s| s.remote.ambiguous = None);
-  assert!(!h.drawn("remote-ambiguous-dialog"));
+  assert!(!h.shows(gpui::Role::Dialog, "Remote change could not be verified"));
 }
 
 #[gpui::test]
@@ -918,15 +938,15 @@ fn dialogs_stack_in_react_order(cx: &mut TestAppContext) {
 fn user_managed_form_suggests_ssh_config_aliases(cx: &mut TestAppContext) {
   let (mut h, host) = remote_harness(cx, own_vm_host(), setup_route(true, serde_json::json!({})));
   h.click("remote-setup-own-vm");
-  assert!(!h.drawn("remote-hostname-suggestion-0"));
+  assert!(!h.shows(gpui::Role::ListBoxOption, "devbox"));
   type_into(&mut h, "remote-hostname", "DEV");
   h.cx.run_until_parked();
   // Aliases that contain what is typed, whatever the case; "staging" does not.
-  assert!(h.drawn("remote-hostname-suggestion-0"));
-  assert!(!h.drawn("remote-hostname-suggestion-1"));
+  assert!(h.shows(gpui::Role::ListBoxOption, "devbox"));
+  assert!(!h.shows(gpui::Role::ListBoxOption, "staging"));
   h.click("remote-hostname-suggestion-0");
   // Picking one only fills the field: nothing is probed or trusted.
-  assert!(!h.drawn("remote-hostname-suggestion-0"));
+  assert!(!h.shows(gpui::Role::ListBoxOption, "devbox"));
   type_into(&mut h, "remote-username", "me");
   h.click("remote-continue");
   h.cx.run_until_parked();
@@ -986,7 +1006,7 @@ fn prompt_history_closes_from_its_x(cx: &mut TestAppContext) {
 #[gpui::test]
 fn stash_modal_closes_on_escape_and_from_its_x(cx: &mut TestAppContext) {
   let (mut h, _) = modal_harness(cx, stash_host(), stash_modal());
-  assert!(h.drawn("stash-modal"));
+  assert!(h.shows(gpui::Role::Dialog, "Stashed changes"));
   h.cx.simulate_keystrokes("escape");
   h.click("stash-modal-close");
   h.cx.run_until_parked();
@@ -1012,7 +1032,7 @@ fn setup_dialog_closes_on_escape(cx: &mut TestAppContext) {
     FakeHost::default(),
     setup_route(true, serde_json::json!({})),
   );
-  assert!(h.drawn("remote-setup-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Connect a remote repository"));
   h.cx.simulate_keystrokes("escape");
   h.cx.run_until_parked();
   assert_eq!(h.sent(), vec![press("remote.setup.close")]);
@@ -1021,7 +1041,7 @@ fn setup_dialog_closes_on_escape(cx: &mut TestAppContext) {
 #[gpui::test]
 fn terminal_dialog_closes_on_escape(cx: &mut TestAppContext) {
   let (mut h, _) = remote_harness(cx, FakeHost::default(), terminal_remote_route());
-  assert!(h.drawn("remote-start-new"));
+  assert!(h.shows(gpui::Role::Button, "Start new session"));
   h.cx.simulate_keystrokes("escape");
   h.cx.run_until_parked();
   assert_eq!(h.sent(), vec![press("remote.terminal.close")]);
@@ -1034,7 +1054,7 @@ fn ambiguous_dialog_dismisses_on_escape_and_refreshes_on_enter(cx: &mut TestAppC
     FakeHost::default(),
     serde_json::json!({ "ambiguous": "Connection reset while pushing" }),
   );
-  assert!(h.drawn("remote-ambiguous-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Remote change could not be verified"));
   h.cx.simulate_keystrokes("escape");
   h.cx.simulate_keystrokes("enter");
   h.cx.run_until_parked();
@@ -1083,7 +1103,7 @@ fn close_prompt_dont_save_closes_without_saving(cx: &mut TestAppContext) {
   h.cx.run_until_parked();
   assert_eq!(project_calls(&host), ["close window"]);
   assert!(h.sent().contains(&press("saveProject.close")));
-  assert!(!h.drawn("save-project-dialog"));
+  assert!(!h.shows(gpui::Role::Dialog, "Save this project before closing?"));
 }
 
 #[gpui::test]
@@ -1120,7 +1140,7 @@ fn close_prompt_failed_save_keeps_the_window_open(cx: &mut TestAppContext) {
   h.cx.run_until_parked();
   assert_eq!(project_calls(&host), ["save project \"web + api\""]);
   assert!(!h.sent().contains(&press("saveProject.saved")));
-  assert!(h.drawn("save-project-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Save this project before closing?"));
 }
 
 #[gpui::test]
@@ -1128,7 +1148,7 @@ fn menu_save_project_saves_without_closing(cx: &mut TestAppContext) {
   let host = Arc::new(FakeHost::default());
   let mut h = Harness::with_host(cx, save_project_screen(false), host.clone());
   assert!(
-    !h.drawn("save-project-discard"),
+    !h.shows(gpui::Role::Button, "Don't save"),
     "no Don't save from the menu"
   );
   h.click("save-project-submit");
@@ -1152,15 +1172,15 @@ fn a_refused_login_shows_on_the_form(cx: &mut TestAppContext) {
     setup.registering = false;
     setup.register_error = Some("Authentication failed for nobody@10.0.0.4.".into());
   });
-  assert!(h.drawn("remote-probe-error"));
-  assert!(h.drawn("remote-continue"));
+  assert!(h.shows(gpui::Role::Alert, "Couldn't sign in to the host"));
+  assert!(h.shows(gpui::Role::Button, "Continue"));
 }
 
 #[gpui::test]
 fn save_project_without_teams_shows_no_owner_picker(cx: &mut TestAppContext) {
   let host = Arc::new(FakeHost::default());
   let mut h = Harness::with_host(cx, save_project_screen(false), host);
-  assert!(!h.drawn("save-project-owner"));
+  assert!(!h.shows(gpui::Role::ComboBox, "Owner"));
 }
 
 #[gpui::test]
@@ -1170,15 +1190,22 @@ fn save_project_assigns_the_team_picked(cx: &mut TestAppContext) {
     ..FakeHost::default()
   });
   let mut h = Harness::with_host(cx, save_project_screen(false), host.clone());
-  assert!(h.drawn("save-project-owner"));
-  assert!(!h.drawn("save-project-owner-menu"), "closed until clicked");
-  h.click("save-project-owner");
-  assert!(h.drawn("save-project-owner-menu"));
-  h.click("save-project-owner-o1");
-  assert!(
-    !h.drawn("save-project-owner-menu"),
-    "picking closes the menu"
+  let owner = |h: &mut Harness| {
+    h.rendered()
+      .get_by_role(gpui_testing_library::by::role(gpui::Role::ComboBox).name("Owner"))
+      .snapshot()
+  };
+  assert_eq!(
+    owner(&mut h).expanded(),
+    Some(false),
+    "closed until clicked"
   );
+  h.click("save-project-owner");
+  assert_eq!(owner(&mut h).expanded(), Some(true));
+  h.click("save-project-owner-o1");
+  let picked = owner(&mut h);
+  assert_eq!(picked.expanded(), Some(false), "picking closes the menu");
+  assert_eq!(picked.value(), Some("Acme"));
   h.click("save-project-submit");
   h.cx.run_until_parked();
   assert_eq!(project_calls(&host), ["save project \"web + api\" to o1"]);

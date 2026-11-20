@@ -277,6 +277,13 @@ pub fn skill_install_link(app: &AppHandle, label: &str, skill_id: String) {
   }
 }
 
+/// A `treq://pr/open` link for window `label`: it shows PR `number`. Any thread.
+pub fn pr_open_link(app: &AppHandle, label: &str, number: u64) {
+  if drives(label) {
+    with_controller(app, label, move |c, cx| c.open_pr(number, cx));
+  }
+}
+
 /// Window `label` gained (`focused`) or lost focus. Any thread.
 pub fn window_focused(app: &AppHandle, label: &str, focused: bool) {
   set_focused(label, focused);

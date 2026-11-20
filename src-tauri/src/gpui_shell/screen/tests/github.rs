@@ -416,9 +416,10 @@ fn github_detail_markdown_links_open_in_the_browser(cx: &mut TestAppContext) {
     },
     route("issues", Some(1), false),
   );
-  assert!(h.drawn("github-detail"));
+  assert!(h.shows(gpui::Role::Heading, "Add comment"));
   // The body, a link across its width, sits just above the comments.
-  let detail = h.cx.debug_bounds("github-detail").expect("detail");
+  // Both share the centered content column, so aim from the heading's left
+  // edge, not the pane's: in a wide pane the column has margins on each side.
   let heading = h
     .cx
     .debug_bounds("github-comments-heading")
@@ -428,7 +429,7 @@ fn github_detail_markdown_links_open_in_the_browser(cx: &mut TestAppContext) {
       .calls()
       .contains(&"open https://example.com/docs".to_string())
   };
-  let x = detail.left() + gpui::px(60.);
+  let x = heading.left() + gpui::px(60.);
   let mut y = heading.top() - gpui::px(8.);
   while !opened() && y > heading.top() - gpui::px(160.) {
     h.cx
@@ -442,9 +443,9 @@ fn github_detail_markdown_links_open_in_the_browser(cx: &mut TestAppContext) {
 #[gpui::test]
 fn github_lists_issues_and_hands_moves_to_react(cx: &mut TestAppContext) {
   let (mut h, host) = harness(cx, issues(), route("issues", None, false));
-  assert!(h.drawn("github-issue-1"));
-  assert!(h.drawn("github-issue-2"));
-  assert!(!h.drawn("github-detail"));
+  assert!(h.shows(gpui::Role::ListItem, "Crash on start"));
+  assert!(h.shows(gpui::Role::ListItem, "Slow sync"));
+  assert!(!h.shows(gpui::Role::Heading, "Add comment"));
   // The two reads run side by side, in no set order.
   let mut calls = host.calls();
   calls.sort();
@@ -495,8 +496,8 @@ fn github_loads_more_pages_once_each(cx: &mut TestAppContext) {
   let (mut h, host) = harness(cx, issues(), route("issues", None, false));
   h.click("github-load-more");
   h.cx.run_until_parked();
-  assert!(h.drawn("github-issue-3"));
-  assert!(!h.drawn("github-load-more"));
+  assert!(h.shows(gpui::Role::ListItem, "Typo"));
+  assert!(!h.shows(gpui::Role::Button, "Load more"));
   // The repeated #2 shows once.
   assert_eq!(view_mut(&mut h, |v| v.issue_items().len()), 3);
   assert!(host
@@ -558,7 +559,7 @@ fn github_shows_list_failures_and_retries(cx: &mut TestAppContext) {
     },
     route("issues", None, false),
   );
-  assert!(h.drawn("github-list-error"));
+  assert!(h.shows(gpui::Role::Status, "Couldn't load issues"));
   h.click("github-list-retry");
   h.cx.run_until_parked();
   let reads = host
@@ -584,13 +585,19 @@ fn github_pr_detail_shows_the_review_decision(cx: &mut TestAppContext) {
     ..prs()
   };
   let (mut h, _) = harness(cx, fake, route("prs", Some(1), false));
-  assert!(h.drawn("github-review-state"));
+  assert!(h.shows(gpui::Role::Status, "Review: Approved"));
 }
 
 #[gpui::test]
 fn github_pr_detail_hides_the_review_decision_without_reviews(cx: &mut TestAppContext) {
   let (mut h, _) = harness(cx, prs(), route("prs", Some(1), false));
-  assert!(!h.drawn("github-review-state"));
+  assert!(h
+    .rendered()
+    .query_by_role(
+      gpui_testing_library::by::role(gpui::Role::Status)
+        .name(gpui_testing_library::TextMatch::contains("Review: "))
+    )
+    .is_none());
 }
 
 #[gpui::test]
@@ -606,8 +613,8 @@ fn github_tabs_fit_their_triggers(cx: &mut TestAppContext) {
 #[gpui::test]
 fn github_without_a_remote_says_so(cx: &mut TestAppContext) {
   let (mut h, host) = harness(cx, Fake::default(), route("issues", Some(4), false));
-  assert!(!h.drawn("github-new"));
-  assert!(!h.drawn("github-detail"));
+  assert!(!h.shows(gpui::Role::Button, "New"));
+  assert!(!h.shows(gpui::Role::Heading, "Add comment"));
   assert_eq!(host.calls(), ["read workspaces"]);
 }
 
@@ -626,26 +633,26 @@ fn prs() -> Fake {
 #[gpui::test]
 fn github_filters_the_loaded_prs(cx: &mut TestAppContext) {
   let (mut h, _) = harness(cx, prs(), route("prs", None, false));
-  assert!(h.drawn("github-pr-1") && h.drawn("github-pr-2"));
+  assert!(h.shows(gpui::Role::ListItem, "Change 1") && h.shows(gpui::Role::ListItem, "Change 2"));
   type_into(&mut h, "github.search", "login");
-  assert!(!h.drawn("github-pr-1") && h.drawn("github-pr-2"));
+  assert!(!h.shows(gpui::Role::ListItem, "Change 1") && h.shows(gpui::Role::ListItem, "Change 2"));
   type_into(&mut h, "github.search", "");
   h.click("github-filters");
-  assert!(h.drawn("github-filters-popover"));
+  assert!(h.shows(gpui::Role::ComboBox, "Author"));
   type_into(&mut h, "github.filter.author", "ada");
-  assert!(h.drawn("github-pr-1") && !h.drawn("github-pr-2"));
+  assert!(h.shows(gpui::Role::ListItem, "Change 1") && !h.shows(gpui::Role::ListItem, "Change 2"));
   assert_eq!(view(&mut h, |v| v.filters.active_count()), 1);
   type_into(&mut h, "github.filter.author", "nobody");
-  assert!(!h.drawn("github-pr-1"));
+  assert!(!h.shows(gpui::Role::ListItem, "Change 1"));
   h.click("github-filters-clear");
-  assert!(h.drawn("github-pr-1") && h.drawn("github-pr-2"));
+  assert!(h.shows(gpui::Role::ListItem, "Change 1") && h.shows(gpui::Role::ListItem, "Change 2"));
 }
 
 #[gpui::test]
 fn github_issue_detail_comments_closes_and_reopens(cx: &mut TestAppContext) {
   let (mut h, host) = harness(cx, issues(), route("issues", Some(1), false));
-  assert!(h.drawn("github-detail"));
-  assert!(h.drawn("github-edit"));
+  assert!(h.shows(gpui::Role::Heading, "Add comment"));
+  assert!(h.shows(gpui::Role::Button, "Edit issue"));
   type_into(&mut h, "github.comment", "On it");
   h.click("github-comment");
   h.cx.run_until_parked();
@@ -655,7 +662,7 @@ fn github_issue_detail_comments_closes_and_reopens(cx: &mut TestAppContext) {
   assert_eq!(view(&mut h, |v| v.comment.clone()), "");
 
   h.click("github-close-options");
-  assert!(h.drawn("github-close-menu"));
+  assert!(h.shows(gpui::Role::MenuItem, "Close as completed"));
   h.click("github-close-not-planned");
   h.cx.run_until_parked();
   assert!(host
@@ -728,7 +735,7 @@ fn reactions_of(h: &mut Harness, comment: usize) -> Vec<GhReactionGroup> {
 #[gpui::test]
 fn github_comment_reactions_toggle_and_pick(cx: &mut TestAppContext) {
   let (mut h, host) = harness(cx, reacted_issue(), route("issues", Some(1), false));
-  assert!(h.drawn("reaction-c1-HEART"));
+  assert!(h.shows(gpui::Role::Button, "Heart (2)"));
 
   // A chip joins the reaction, then leaves it.
   h.click("reaction-c1-HEART");
@@ -740,11 +747,11 @@ fn github_comment_reactions_toggle_and_pick(cx: &mut TestAppContext) {
 
   // The picker adds a new one and closes.
   h.click("reaction-add-c1");
-  assert!(h.drawn("reaction-picker"));
+  assert!(h.shows(gpui::Role::Button, "Rocket"));
   h.click("reaction-pick-c1-THUMBS_UP");
   h.cx.run_until_parked();
-  assert!(!h.drawn("reaction-picker"));
-  assert!(h.drawn("reaction-c1-THUMBS_UP"));
+  assert!(!h.shows(gpui::Role::Button, "Rocket"));
+  assert!(h.shows(gpui::Role::Button, "Thumbs up (1, you reacted)"));
   assert_eq!(
     host
       .writes()
@@ -781,7 +788,7 @@ fn github_comment_reaction_failure_is_undone(cx: &mut TestAppContext) {
 fn github_edits_and_deletes_an_issue(cx: &mut TestAppContext) {
   let (mut h, host) = harness(cx, issues(), route("issues", Some(1), false));
   h.click("github-edit");
-  assert!(h.drawn("github-edit-save"));
+  assert!(h.shows(gpui::Role::Button, "Save"));
   type_into(&mut h, "github.edit.title", "Crash on launch");
   h.click("github-edit-save");
   h.cx.run_until_parked();
@@ -789,26 +796,26 @@ fn github_edits_and_deletes_an_issue(cx: &mut TestAppContext) {
     &"issue acme/treq#1 Edit { title: \"Crash on launch\", body: \"Steps to reproduce\" }"
       .to_string()
   ));
-  assert!(!h.drawn("github-edit-save"));
+  assert!(!h.shows(gpui::Role::Button, "Save"));
 
   h.click("github-delete");
-  assert!(h.drawn("github-delete-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Delete issue #1?"));
   h.click("github-delete-cancel");
-  assert!(!h.drawn("github-delete-dialog"));
+  assert!(!h.shows(gpui::Role::Dialog, "Delete issue #1?"));
   h.click("github-delete");
   h.click("github-delete-confirm");
   h.cx.run_until_parked();
   assert!(host
     .writes()
     .contains(&"issue acme/treq#1 Delete".to_string()));
-  assert!(!h.drawn("github-delete-dialog"));
+  assert!(!h.shows(gpui::Role::Dialog, "Delete issue #1?"));
   assert_eq!(h.sent(), [press("github.close")]);
 }
 
 #[gpui::test]
 fn github_creates_an_issue(cx: &mut TestAppContext) {
   let (mut h, host) = harness(cx, issues(), route("issues", None, true));
-  assert!(h.drawn("github-new-issue"));
+  assert!(h.shows(gpui::Role::Button, "Submit issue"));
   type_into(&mut h, "github.newIssue.title", "New bug");
   h.click("github-new-issue-submit");
   h.cx.run_until_parked();
@@ -849,13 +856,19 @@ fn github_pr_detail_collapses_passing_checks(cx: &mut TestAppContext) {
     },
     route("prs", Some(1), false),
   );
-  assert!(h.drawn("github-checks-summary"));
-  assert!(h.drawn("github-check-0"), "the failing check stays listed");
-  assert!(!h.drawn("github-check-1"), "the passing one folds away");
+  assert!(h.shows(gpui::Role::Label, "1/2 passed · 1 failed"));
+  assert!(
+    h.shows(gpui::Role::Button, "test"),
+    "the failing check stays listed"
+  );
+  assert!(
+    !h.shows(gpui::Role::Button, "lint"),
+    "the passing one folds away"
+  );
   h.click("github-checks-toggle");
-  assert!(h.drawn("github-check-1"));
+  assert!(h.shows(gpui::Role::Button, "lint"));
   h.click("github-checks-toggle");
-  assert!(!h.drawn("github-check-1"));
+  assert!(!h.shows(gpui::Role::Button, "lint"));
 }
 
 #[gpui::test]
@@ -896,13 +909,14 @@ fn github_pr_detail_changes_the_pr(cx: &mut TestAppContext) {
     },
     route("prs", Some(1), false),
   );
-  assert!(h.drawn("github-ci"));
+  assert!(h.shows(gpui::Role::Button, "1/2"));
   // Failed checks first.
-  assert!(h.drawn("github-check-0"));
+  assert!(h.shows(gpui::Role::Button, "test"));
   h.click("github-check-0");
   assert!(host.calls().contains(&"open https://ci/test".to_string()));
   h.click("github-ci");
-  assert!(h.drawn("github-ci-popover"));
+  // The popover lists the passing check the section folds away.
+  assert!(h.shows(gpui::Role::Button, "lint"));
 
   h.click("github-draft");
   h.cx.run_until_parked();
@@ -1042,8 +1056,8 @@ fn github_pr_detail_notes_when_no_treq_checks_are_configured(cx: &mut TestAppCon
     ..prs()
   };
   let (mut h, _) = harness(cx, fake, route("prs", Some(1), false));
-  assert!(!h.drawn("github-treq-checks"));
-  assert!(h.drawn("github-treq-none"));
+  assert!(!h.shows(gpui::Role::Heading, "Treq checks"));
+  assert!(h.shows(gpui::Role::Status, "No Treq checks"));
 }
 
 #[gpui::test]
@@ -1061,7 +1075,7 @@ fn github_pr_detail_hands_remote_checks_to_react(cx: &mut TestAppContext) {
     ..FakeHost::default()
   };
   let (mut h, host) = harness_with(cx, host, route("prs", Some(1), false));
-  assert!(h.drawn("github-treq-checks"));
+  assert!(h.shows(gpui::Role::Heading, "Treq checks"));
   h.click("github-run-0");
   h.click("github-run-0-0");
   h.click("github-open-logs");
@@ -1104,7 +1118,7 @@ fn github_pr_detail_hands_remote_checks_to_react(cx: &mut TestAppContext) {
   h.cx.run_until_parked();
   h.click("run-history-item-5");
   h.cx.run_until_parked();
-  assert!(h.drawn("run-job-logs-5-test"));
+  assert!(h.shows(gpui::Role::Group, "test logs"));
   assert!(host.calls().contains(&"read logs 5 test".to_string()));
 }
 
@@ -1153,12 +1167,12 @@ fn new_pr_fake() -> Fake {
 #[gpui::test]
 fn github_new_pr_from_a_workspace(cx: &mut TestAppContext) {
   let (mut h, host) = harness(cx, new_pr_fake(), route("prs", None, true));
-  assert!(h.drawn("github-new-pr-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "New pull request"));
   // The default branch's workspace and one with an open PR are not offered.
-  assert!(!h.drawn("github-new-pr-ws-1"));
-  assert!(!h.drawn("github-new-pr-ws-2"));
+  assert!(!h.shows(gpui::Role::ListBoxOption, "trunk"));
+  assert!(!h.shows(gpui::Role::ListBoxOption, "has-pr"));
   h.click("github-new-pr-ws-4");
-  assert!(h.drawn("github-new-pr-create"));
+  assert!(h.shows(gpui::Role::Button, "Create pull request"));
   h.click("github-new-pr-type");
   h.click("github-new-pr-type-draft");
   h.click("github-new-pr-create");
@@ -1247,18 +1261,23 @@ fn thread_fake(count: usize) -> Fake {
 fn github_long_comment_thread_folds_the_middle_and_expands_in_place(cx: &mut TestAppContext) {
   let (mut h, _) = harness(cx, thread_fake(8), route("prs", Some(1), false));
   h.cx.run_until_parked();
-  let shown = |h: &mut Harness| -> Vec<usize> {
-    (0..8)
-      .filter(|i| h.drawn(super::changes_large::leak(format!("reaction-add-c{i}"))))
-      .collect()
+  // Each comment offers one reaction button, some only on hover.
+  let shown = |h: &mut Harness| -> usize {
+    h.rendered()
+      .query_all_by_role(
+        gpui_testing_library::by::role(gpui::Role::Button)
+          .name("Add reaction")
+          .hidden(true),
+      )
+      .len()
   };
   // The first comment and the newest three; four are behind the fold.
-  assert_eq!(shown(&mut h), [0, 5, 6, 7]);
-  assert!(h.drawn("github-comments-show-earlier"));
+  assert_eq!(shown(&mut h), 4);
+  assert!(h.shows(gpui::Role::Button, "Show 4 earlier comments"));
   h.click("github-comments-show-earlier");
   h.cx.run_until_parked();
-  assert_eq!(shown(&mut h), (0..8).collect::<Vec<_>>());
-  assert!(!h.drawn("github-comments-show-earlier"));
+  assert_eq!(shown(&mut h), 8);
+  assert!(!h.shows(gpui::Role::Button, "Show 4 earlier comments"));
 }
 
 #[gpui::test]
@@ -1282,9 +1301,14 @@ fn github_pr_timeline_shows_who_approved(cx: &mut TestAppContext) {
   };
   let (mut h, host) = harness(cx, fake, route("prs", Some(1), false));
   h.cx.run_until_parked();
-  assert!(h.drawn("github-review-event-alice"));
+  assert!(h.shows(gpui::Role::Label, "alice approved these changes"));
   assert!(
-    !h.drawn("github-review-event-bob"),
+    h.rendered()
+      .query_by_role(
+        gpui_testing_library::by::role(gpui::Role::Label)
+          .name(gpui_testing_library::TextMatch::contains("bob"))
+      )
+      .is_none(),
     "a plain comment review is not an event"
   );
   assert!(host
@@ -1297,8 +1321,14 @@ fn github_short_comment_thread_is_not_folded(cx: &mut TestAppContext) {
   // Folding one comment would only trade it for a row.
   let (mut h, _) = harness(cx, thread_fake(5), route("prs", Some(1), false));
   h.cx.run_until_parked();
-  assert!(h.drawn("reaction-add-c2"));
-  assert!(!h.drawn("github-comments-show-earlier"));
+  assert!(h.shows(gpui::Role::Button, "Add reaction"));
+  assert!(h
+    .rendered()
+    .query_by_role(
+      gpui_testing_library::by::role(gpui::Role::Button)
+        .name(gpui_testing_library::TextMatch::contains("earlier comment"))
+    )
+    .is_none());
 }
 
 /// Round 7 `integrations-scale` measurements: the lists and details with
@@ -1437,9 +1467,8 @@ fn github_pr_detail_leaves_the_setup_script_to_the_code_tab(cx: &mut TestAppCont
     ..prs()
   };
   let (mut h, _) = harness(cx, fake, route("prs", Some(1), false));
-  assert!(h.drawn("github-treq-checks"));
-  assert!(!h.drawn("setup-script-status"));
-  assert!(!h.drawn("github-rerun-setup"));
+  assert!(h.shows(gpui::Role::Heading, "Treq checks"));
+  assert!(!h.shows(gpui::Role::Button, "Re-run setup script"));
 }
 
 /// The issue and pull request rows are `ui::Row`s: list items named by
@@ -1461,16 +1490,16 @@ fn github_rows_are_list_items_and_load_more_is_a_button(cx: &mut TestAppContext)
   let more = screen.get_by_role(by::role(Role::Button).name("Load more"));
   screen.user().click(&more);
   h.cx.run_until_parked();
-  assert!(h.drawn("github-issue-3"));
+  assert!(h.shows(gpui::Role::ListItem, "Typo"));
 }
 
 #[gpui::test]
 fn github_delete_dialog_cancels_on_escape_and_deletes_on_enter(cx: &mut TestAppContext) {
   let (mut h, host) = harness(cx, issues(), route("issues", Some(1), false));
   h.click("github-delete");
-  assert!(h.drawn("github-delete-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Delete issue #1?"));
   h.cx.simulate_keystrokes("escape");
-  assert!(!h.drawn("github-delete-dialog"));
+  assert!(!h.shows(gpui::Role::Dialog, "Delete issue #1?"));
   h.click("github-delete");
   h.cx.simulate_keystrokes("enter");
   h.cx.run_until_parked();
@@ -1483,16 +1512,24 @@ fn github_delete_dialog_cancels_on_escape_and_deletes_on_enter(cx: &mut TestAppC
 fn github_new_pr_closes_on_escape_and_creates_on_enter(cx: &mut TestAppContext) {
   let (mut h, host) = harness(cx, new_pr_fake(), route("prs", None, true));
   h.click("github-new-pr-ws-4");
-  assert!(h.drawn("github-new-pr-create"));
+  assert!(h.shows(gpui::Role::Button, "Create pull request"));
   // The X closes it; the footer holds only the verb.
-  assert!(h.drawn("github-new-pr-dialog-close"));
-  assert!(!h.drawn("github-new-pr-cancel"));
+  let dialog = h
+    .rendered()
+    .get_by_role(gpui_testing_library::by::role(gpui::Role::Dialog).name("New pull request"));
+  let dialog = gpui_testing_library::within(&dialog);
+  assert!(dialog
+    .query_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("Close"))
+    .is_some());
+  assert!(dialog
+    .query_by_role(gpui_testing_library::by::role(gpui::Role::Button).name("Cancel"))
+    .is_none());
   h.cx.simulate_keystrokes("enter");
   h.cx.run_until_parked();
   assert!(host.writes().contains(&"push 4".to_string()));
 
   let (mut h, _) = harness(cx, new_pr_fake(), route("prs", None, true));
-  assert!(h.drawn("github-new-pr-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "New pull request"));
   h.cx.simulate_keystrokes("escape");
   h.cx.run_until_parked();
   assert_eq!(h.sent(), [press("github.close")]);
