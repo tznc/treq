@@ -1420,7 +1420,8 @@ fn a_stacked_rows_elbow_reaches_up_to_its_parents_icon(cx: &mut TestAppContext) 
   let parent_icon = h.bounds("workspace-7-icon").expect("parent icon");
   let child_icon = h.bounds("workspace-8-icon").expect("child icon");
   let elbow = h.bounds("workspace-8-elbow").expect("elbow");
-  // Rows sit flush.
+  // Rows are 28px tall and sit flush.
+  assert_eq!(parent.size.height, gpui::px(28.));
   assert_eq!(child.top() - parent.bottom(), gpui::px(0.));
   // The elbow leaves the parent's icon about as close as it meets the
   // child's, so the two ends of the elbow look alike.

@@ -714,7 +714,7 @@ const ROW_GAP: f32 = 0.;
 
 /// How far a nested row's elbow reaches above the row: across the gap and
 /// the parent row's space under its 12px icon, stopping 1px short of it.
-const ELBOW_REACH: f32 = ROW_GAP + (32. - 12.) / 2. - 1.;
+const ELBOW_REACH: f32 = ROW_GAP + (theme::ROW_HEIGHT_COMPACT - 12.) / 2. - 1.;
 
 fn row_indent(depth: u32) -> f32 {
   10. + depth as f32 * 12.
@@ -1610,7 +1610,7 @@ impl Sidebar {
     let row_el = ui::Row::new(selector, palette)
       .role(Role::Button)
       .label(label.clone())
-      .density(ui::RowDensity::Default)
+      .density(ui::RowDensity::Compact)
       .selected(row.selected)
       .interactive(!row.archiving)
       .group(group.clone())
@@ -1639,12 +1639,11 @@ impl Sidebar {
             .absolute()
             .top(zpx(-ELBOW_REACH))
             .left(zpx(guide_left(row.depth) + group_indent))
-            .h(zpx(16. + ELBOW_REACH))
+            .h(zpx(theme::ROW_HEIGHT_COMPACT / 2. + ELBOW_REACH))
             .w(zpx(6.))
             .border_l_1()
             .border_b_1()
-            .border_color(palette.stack_connector())
-            .rounded_bl(ui::radius::SM),
+            .border_color(palette.stack_connector()),
         )
       })
       .leading(leading)
