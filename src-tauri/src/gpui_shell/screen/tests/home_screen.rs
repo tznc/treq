@@ -183,7 +183,7 @@ fn workspace_tabs_switch_through_react(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, feature_host(), workspace_route());
   use gpui_testing_library::{by, expect, TextMatch};
   let screen = h.rendered();
-  let count = || TextMatch::regex(r"^\d+$");
+  let count = || TextMatch::regex(r"^\d+(, uncommitted changes)?$");
   for tab in ["Commits", "Changes"] {
     let tab = screen.get_by_role(by::role(gpui::Role::Tab).name(tab));
     expect(
