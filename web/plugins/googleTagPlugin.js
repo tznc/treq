@@ -11,6 +11,10 @@ const CONSENT_REGIONS = [
 
 const CONSENT_STORAGE_KEY = 'treq-analytics-consent';
 
+// Headless and automated browsers run gtag.js like a visitor; GA4's built-in
+// bot filter misses them, so they show up as direct single-page sessions.
+const BOT_USER_AGENT = /bot|crawl|spider|slurp|headless|lighthouse|pagespeed/i;
+
 const ADS_DENIED = {ad_storage: 'denied', ad_user_data: 'denied', ad_personalization: 'denied'};
 
 /**
@@ -26,6 +30,7 @@ function buildGoogleTagHeadTags(trackingID) {
     {
       tagName: 'script',
       innerHTML: `
+if (navigator.webdriver || ${BOT_USER_AGENT}.test(navigator.userAgent)) window['ga-disable-${trackingID}'] = true;
 window.dataLayer = window.dataLayer || [];
 function gtag(){dataLayer.push(arguments);}
 gtag('consent', 'default', ${JSON.stringify(regionDefault)});
