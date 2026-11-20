@@ -208,6 +208,7 @@ pub fn snapshot(model: &Model, data: &Data) -> Option<SidebarSnapshot> {
                 target: workspace.target_branch.clone(),
                 archiving: false,
                 exiting: false,
+                path: workspace.workspace_path.clone(),
               }
             })
             .collect(),

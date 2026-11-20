@@ -128,6 +128,9 @@ pub struct SidebarRow {
   /// Archived and collapsing out of the list.
   #[serde(default)]
   pub exiting: bool,
+  /// The workspace's directory, which its terminals run in.
+  #[serde(default)]
+  pub path: String,
 }
 
 /// Moves stacks whose root has an open or draft PR above the rest, keeping
@@ -170,12 +173,14 @@ pub enum PrState {
 }
 
 impl PrState {
-  pub(super) fn label(self) -> &'static str {
+  /// The state's pill, as GitHub and the workspace header draw it: its
+  /// label, icon and tone.
+  pub(super) fn pill(self) -> (&'static str, &'static str, Tone) {
     match self {
-      PrState::Draft => "Draft PR",
-      PrState::Open => "Open PR",
-      PrState::Merged => "PR merged",
-      PrState::Closed => "PR closed",
+      PrState::Draft => ("Draft", theme::ICON_PR_DRAFT, Tone::Neutral),
+      PrState::Open => ("Open", theme::ICON_PR, Tone::GitOpen),
+      PrState::Merged => ("Merged", theme::ICON_MERGE, Tone::GitMerged),
+      PrState::Closed => ("Closed", theme::ICON_PR_CLOSED, Tone::GitClosed),
     }
   }
 }
@@ -300,8 +305,6 @@ pub enum SidebarAction {
 struct DraggedWorkspace {
   id: i64,
   title: SharedString,
-  /// The title is a branch, drawn in mono as its row draws it.
-  mono: bool,
   palette: Palette,
 }
 
@@ -315,7 +318,6 @@ impl Render for DraggedWorkspace {
       .border_color(self.palette.border)
       .bg(self.palette.sidebar)
       .text_color(self.palette.sidebar_foreground)
-      .when(self.mono, |this| this.font_family(theme::MONO_FONT))
       .shadow_md()
       .child(self.title.clone())
   }
@@ -360,6 +362,28 @@ pub struct Sidebar {
   /// not every workspace.
   items: Vec<Item>,
   list: ListState,
+  /// The directory of the terminal the pointer rests on, whose workspace
+  /// row shows a faint highlight.
+  peek: Option<String>,
+}
+
+/// The directory of the terminal under the pointer, app-wide.
+#[derive(Default)]
+struct HoveredTerminal(Option<String>);
+
+impl gpui::Global for HoveredTerminal {}
+
+/// Whether a terminal in `dir` runs in the workspace at `path`, which the
+/// database may keep absolute or relative to the repository.
+fn runs_in(dir: &str, path: &str) -> bool {
+  !path.is_empty() && (dir == path || dir.ends_with(&format!("/{}", path.trim_start_matches("./"))))
+}
+
+/// Marks the workspace whose terminal, in `dir`, the pointer rests on.
+pub fn set_hovered_terminal(dir: Option<String>, cx: &mut App) {
+  if cx.try_global::<HoveredTerminal>().map(|h| &h.0) != Some(&dir) {
+    cx.set_global(HoveredTerminal(dir));
+  }
 }
 
 /// One entry of the workspace list, in display order, by repository index.
@@ -415,7 +439,21 @@ impl Sidebar {
       hovered_row: None,
       drag_width: None,
       prefetch: prefetch::Intent::default(),
+      peek: None,
     }
+  }
+
+  /// Follows [`set_hovered_terminal`].
+  pub fn watch_terminals(self, cx: &mut Context<Self>) -> Self {
+    cx.observe_global::<HoveredTerminal>(|this, cx| {
+      let peek = cx.global::<HoveredTerminal>().0.clone();
+      if this.peek != peek {
+        this.peek = peek;
+        cx.notify();
+      }
+    })
+    .detach();
+    self
   }
 
   /// The width drawn: the dragged width while resizing, else React's.
@@ -1566,6 +1604,11 @@ impl Sidebar {
       });
 
     let interactive = repo_active && !row.archiving;
+    let peek = !row.selected
+      && self
+        .peek
+        .as_deref()
+        .is_some_and(|dir| runs_in(dir, &row.path));
     let row_el = ui::Row::new(selector, palette)
       .role(Role::Button)
       .label(label.clone())
@@ -1580,6 +1623,13 @@ impl Sidebar {
       .rounded_md()
       .text_color(palette.sidebar_foreground)
       .when(row.archiving, |this| this.opacity(0.5))
+      .when(peek, |this| {
+        // The row's own hover fill, as if the pointer rested on it.
+        let fill = this.hover_fill();
+        this
+          .when_some(fill, |this, fill| this.bg(fill))
+          .debug_selector(move || format!("workspace-peek-{id}"))
+      })
       .when(row.depth > 0, |this| {
         // An elbow into the row, not a bar that reads as a selection marker.
         this.overlay(
@@ -1605,10 +1655,6 @@ impl Sidebar {
           .flex_1()
           .min_w_0()
           .truncate()
-          // A branch is code; a title is prose.
-          .when(row.name.is_none(), |this| {
-            this.font_family(theme::MONO_FONT)
-          })
           .text_color(palette.sidebar_foreground)
           .child(label.clone()),
       )
@@ -1667,7 +1713,6 @@ impl Sidebar {
             DraggedWorkspace {
               id,
               title: label.clone().into(),
-              mono: row.name.is_none(),
               palette: *palette,
             },
             |dragged, _, _, cx| cx.new(|_| dragged.clone()),

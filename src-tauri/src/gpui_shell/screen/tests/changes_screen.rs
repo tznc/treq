@@ -5,17 +5,17 @@ use super::*;
 #[gpui::test]
 fn changes_tab_lists_files_and_their_diffs(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
-  for selector in [
-    "changes-diff-viewer",
-    "file-row-a.rs",
-    "file-row-b.rs",
-    "file-card-a.rs",
-    "file-card-b.rs",
-    "commit-button",
+  for (role, name) in [
+    (gpui::Role::Group, "Changes"),
+    (gpui::Role::Button, "a.rs"),
+    (gpui::Role::Button, "b.rs"),
+    (gpui::Role::Group, "a.rs"),
+    (gpui::Role::Group, "b.rs"),
+    (gpui::Role::Button, "Commit"),
   ] {
-    assert!(h.drawn(selector), "{selector}");
+    assert!(h.shows(role, name), "{name}");
   }
-  assert!(!h.drawn("workspace-code"));
+  assert!(!h.shows(gpui::Role::Group, "Code"));
   assert!(host.calls().contains(&"read workspace diff 7".to_string()));
   assert!(
     host.calls().iter().any(|c| c.starts_with("read hunks")),
@@ -48,10 +48,10 @@ fn changes_host_with_generated() -> FakeHost {
 #[gpui::test]
 fn changes_tab_waits_to_read_generated_diffs(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host_with_generated(), changes_route());
-  assert!(h.drawn("file-card-Cargo.lock"));
-  assert!(h.drawn("load-generated-Cargo.lock"));
-  assert!(h.drawn("load-generated-gen/api.ts"));
-  assert!(!h.drawn("load-generated-a.rs"));
+  assert!(h.shows(gpui::Role::Group, "Cargo.lock"));
+  assert!(offers_load_diff(&mut h, "Cargo.lock"));
+  assert!(offers_load_diff(&mut h, "gen/api.ts"));
+  assert!(!offers_load_diff(&mut h, "a.rs"));
   let reads: Vec<String> = host
     .calls()
     .into_iter()
@@ -69,10 +69,60 @@ fn changes_tab_loads_a_generated_diff_on_request(cx: &mut TestAppContext) {
     .calls()
     .contains(&"read hunks [\"Cargo.lock\"]".to_string()));
   assert!(
-    !h.drawn("load-generated-Cargo.lock"),
+    !offers_load_diff(&mut h, "Cargo.lock"),
     "the diff shows instead"
   );
-  assert!(h.drawn("load-generated-gen/api.ts"));
+  assert!(offers_load_diff(&mut h, "gen/api.ts"));
+}
+
+/// Whether the banner says files changed under the review.
+fn shows_stale_banner(h: &mut Harness) -> bool {
+  h.rendered()
+    .query_by_role(gpui_testing_library::by::role(gpui::Role::Status).name(
+      gpui_testing_library::TextMatch::regex(" changed since you started reviewing$"),
+    ))
+    .is_some()
+}
+
+/// Whether a group of comments named like `group` holds a comment.
+fn has_comment(h: &mut Harness, group: &str) -> bool {
+  use gpui_testing_library::by;
+  let screen = h.rendered();
+  screen
+    .query_all_by_role(
+      by::role(gpui::Role::Group).name(gpui_testing_library::TextMatch::regex(group)),
+    )
+    .iter()
+    .any(|g| {
+      gpui_testing_library::within(g)
+        .query_by_role(by::role(gpui::Role::Button).name("Edit comment"))
+        .is_some()
+    })
+}
+
+/// Whether a button named `name` is drawn, shown or waiting for hover.
+fn shows_hidden(h: &mut Harness, name: &str) -> bool {
+  h.rendered()
+    .query_by_role(
+      gpui_testing_library::by::role(gpui::Role::Button)
+        .name(name)
+        .hidden(true),
+    )
+    .is_some()
+}
+
+/// Whether `path`'s card offers "Load diff" for its deferred diff.
+fn offers_load_diff(h: &mut Harness, path: &str) -> bool {
+  use gpui_testing_library::by;
+  let screen = h.rendered();
+  screen
+    .query_all_by_role(by::role(gpui::Role::Group).name(path))
+    .iter()
+    .any(|card| {
+      gpui_testing_library::within(card)
+        .query_by_role(by::role(gpui::Role::Button).name("Load diff"))
+        .is_some()
+    })
 }
 
 /// Clicks the filter button and `item` in its menu.
@@ -85,18 +135,18 @@ fn filter(h: &mut Harness, item: &str) {
 fn changes_tab_hides_generated_files_from_the_list_and_diff(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host_with_generated(), changes_route());
   filter(&mut h, "Generated files");
-  assert!(h.drawn("file-row-a.rs"));
-  assert!(h.drawn("file-card-a.rs"));
-  for hidden in [
-    "file-row-Cargo.lock",
-    "file-card-Cargo.lock",
-    "file-row-gen/api.ts",
+  assert!(h.shows(gpui::Role::Button, "a.rs"));
+  assert!(h.shows(gpui::Role::Group, "a.rs"));
+  for (role, hidden) in [
+    (gpui::Role::Button, "Cargo.lock"),
+    (gpui::Role::Group, "Cargo.lock"),
+    (gpui::Role::Button, "gen/api.ts"),
   ] {
-    assert!(!h.drawn(hidden), "{hidden}");
+    assert!(!h.shows(role, hidden), "{hidden}");
   }
   filter(&mut h, "Generated files");
-  assert!(h.drawn("file-row-Cargo.lock"));
-  assert!(h.drawn("file-card-gen/api.ts"));
+  assert!(h.shows(gpui::Role::Button, "Cargo.lock"));
+  assert!(h.shows(gpui::Role::Group, "gen/api.ts"));
 }
 
 #[gpui::test]
@@ -105,15 +155,15 @@ fn changes_tab_keeps_a_selected_generated_file_listed(cx: &mut TestAppContext) {
   h.click("file-row-Cargo.lock");
   h.click("stage-Cargo.lock");
   filter(&mut h, "Generated files");
-  assert!(h.drawn("unstage-Cargo.lock"));
-  assert!(!h.drawn("file-row-gen/api.ts"));
+  assert!(shows_hidden(&mut h, "Unstage Cargo.lock"));
+  assert!(!h.shows(gpui::Role::Button, "gen/api.ts"));
 }
 
 #[gpui::test]
 fn changes_tab_offers_the_filter_only_with_something_to_filter(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
-  assert!(h.drawn("file-row-a.rs"));
-  assert!(!h.drawn("changes-filter"));
+  assert!(h.shows(gpui::Role::Button, "a.rs"));
+  assert!(!h.shows(gpui::Role::Button, "Filter changes"));
 }
 
 fn committed_route(show: bool) -> ScreenSnapshot {
@@ -146,9 +196,12 @@ fn changes_host_with_committed() -> FakeHost {
 #[gpui::test]
 fn changes_tab_hides_the_committed_group_from_its_checkbox(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host_with_committed(), committed_route(true));
-  assert!(h.drawn("committed-section-toggle"));
-  assert!(h.drawn("file-card-c.rs"));
-  assert!(!h.drawn("changes-filter"), "no filter button for committed");
+  assert!(h.shows(gpui::Role::Button, "Collapse Committed"));
+  assert!(h.shows(gpui::Role::Group, "c.rs"));
+  assert!(
+    !h.shows(gpui::Role::Button, "Filter changes"),
+    "no filter button for committed"
+  );
   h.click("committed-hide");
   assert_eq!(
     fields(&h, "changes.showCommitted"),
@@ -159,11 +212,14 @@ fn changes_tab_hides_the_committed_group_from_its_checkbox(cx: &mut TestAppConte
 #[gpui::test]
 fn changes_tab_hides_the_committed_group_when_filtered_out(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host_with_committed(), committed_route(false));
-  assert!(h.drawn("file-row-a.rs"));
-  assert!(!h.drawn("changes-filter"));
-  assert!(h.drawn("committed-hide"), "the header stays to unhide");
-  assert!(!h.drawn("committed-row-c.rs"));
-  assert!(!h.drawn("file-card-c.rs"));
+  assert!(h.shows(gpui::Role::Button, "a.rs"));
+  assert!(!h.shows(gpui::Role::Button, "Filter changes"));
+  assert!(
+    h.shows(gpui::Role::Button, "Expand Committed"),
+    "the header stays to unhide"
+  );
+  assert!(!h.shows(gpui::Role::Button, "c.rs"));
+  assert!(!h.shows(gpui::Role::Group, "c.rs"));
 }
 
 fn changes_host_committed_only() -> FakeHost {
@@ -187,10 +243,10 @@ fn changes_host_committed_only() -> FakeHost {
 #[gpui::test]
 fn changes_tab_offers_no_commit_box_with_nothing_to_commit(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host_committed_only(), committed_route(true));
-  assert!(h.drawn("committed-section-toggle"));
-  assert!(!h.drawn("commit-button"));
-  assert!(!h.drawn("commit-message"));
-  assert!(h.drawn("changes-nothing-to-commit"));
+  assert!(h.shows(gpui::Role::Button, "Collapse Committed"));
+  assert!(!h.shows(gpui::Role::Button, "Commit"));
+  assert!(!h.shows(gpui::Role::MultilineTextInput, "Message"));
+  assert!(h.shows(gpui::Role::Status, "Nothing to commit"));
 }
 
 /// The commit box sits in the Changes group: under its header, above its
@@ -198,7 +254,7 @@ fn changes_tab_offers_no_commit_box_with_nothing_to_commit(cx: &mut TestAppConte
 #[gpui::test]
 fn changes_tab_draws_the_commit_box_inside_the_changes_group(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host_with_committed(), committed_route(true));
-  assert!(!h.drawn("changes-nothing-to-commit"));
+  assert!(!h.shows(gpui::Role::Status, "Nothing to commit"));
   let mut top = |s: &'static str| {
     h.cx.run_until_parked();
     h.cx
@@ -222,7 +278,7 @@ fn changes_tab_asks_for_a_commit_message(cx: &mut TestAppContext) {
   h.click("commit-message");
   h.cx.simulate_keystrokes("secondary-enter");
   h.cx.run_until_parked();
-  assert!(h.drawn("commit-message-error"));
+  assert!(h.shows(gpui::Role::Alert, "Enter a commit message."));
   assert!(!host.writes().iter().any(|w| w.starts_with("commit")));
 }
 
@@ -284,8 +340,8 @@ fn changes_tab_offers_file_actions_on_unselected_rows(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
   h.click("file-row-a.rs");
   h.cx.run_until_parked();
-  for selector in ["discard-b.rs", "stage-b.rs"] {
-    assert!(h.drawn(selector), "{selector}");
+  for name in ["Discard changes to b.rs", "Stage b.rs"] {
+    assert!(shows_hidden(&mut h, name), "{name}");
   }
 }
 
@@ -295,7 +351,7 @@ fn changes_tab_commits_only_staged_files(cx: &mut TestAppContext) {
   h.click("file-row-a.rs");
   h.click("stage-a.rs");
   h.cx.run_until_parked();
-  assert!(h.drawn("unstage-a.rs"));
+  assert!(h.shows(gpui::Role::Button, "Unstage a.rs"));
   h.click("commit-message");
   h.cx.simulate_input("Part");
   h.click("commit-button");
@@ -495,8 +551,11 @@ fn expand_all_fills_a_small_gap_between_hunks(cx: &mut TestAppContext) {
     "{:?}",
     host.calls()
   );
-  assert!(!h.drawn("expand-after-c.rs-0"));
-  assert!(!h.drawn("expand-all-c.rs-0"));
+  assert!(!h.shows(gpui::Role::Button, "Show more lines of c.rs from line 5"));
+  assert!(!h.shows(
+    gpui::Role::Button,
+    "Expand all 25 lines of c.rs from line 5"
+  ));
 }
 
 /// Above the first hunk the gap runs from line 1.
@@ -520,7 +579,10 @@ fn expand_all_reads_from_the_start_of_the_file(cx: &mut TestAppContext) {
     "{:?}",
     host.calls()
   );
-  assert!(!h.drawn("expand-all-above-c.rs-0"));
+  assert!(!h.shows(
+    gpui::Role::Button,
+    "Expand all 29 lines of c.rs from line 1"
+  ));
 }
 
 /// Expanded lines number in the same columns as the hunk's own lines.
@@ -543,15 +605,20 @@ fn a_large_gap_offers_only_twenty_line_steps(cx: &mut TestAppContext) {
   let host = committed_gap_host("@@ -100,4 +100,4 @@");
   let (mut h, _) = workspace_harness(cx, host, show_committed_route());
   h.cx.run_until_parked();
-  assert!(h.drawn("expand-after-c.rs-0"));
-  assert!(!h.drawn("expand-all-c.rs-0"));
+  assert!(h.shows(gpui::Role::Button, "Show more lines of c.rs from line 5"));
+  assert!(h
+    .rendered()
+    .query_by_role(gpui_testing_library::by::role(gpui::Role::Button).name(
+      gpui_testing_library::TextMatch::regex("^Expand all .* of c.rs from line 5$")
+    ))
+    .is_none());
 }
 
 #[gpui::test]
 fn changes_tab_discards_everything_once_confirmed(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
   h.click("discard-all-changes");
-  assert!(h.drawn("discard-all-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Discard all changes?"));
   h.click("discard-all-dialog-confirm");
   h.cx.run_until_parked();
   let writes = host.writes();
@@ -564,7 +631,7 @@ fn changes_tab_discards_everything_once_confirmed(cx: &mut TestAppContext) {
     ],
     "{writes:?}"
   );
-  assert!(!h.drawn("discard-all-dialog"));
+  assert!(!h.shows(gpui::Role::Dialog, "Discard all changes?"));
 }
 
 /// Found by the fuzzer: the confirmation listens for Escape only while
@@ -573,9 +640,9 @@ fn changes_tab_discards_everything_once_confirmed(cx: &mut TestAppContext) {
 fn escape_closes_the_discard_all_confirmation(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
   h.click("discard-all-changes");
-  assert!(h.drawn("discard-all-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Discard all changes?"));
   h.cx.simulate_keystrokes("escape");
-  assert!(!h.drawn("discard-all-dialog"));
+  assert!(!h.shows(gpui::Role::Dialog, "Discard all changes?"));
   assert!(!host.writes().iter().any(|w| w.starts_with("discard")));
 }
 
@@ -642,7 +709,7 @@ fn changes_tab_follows_edits_on_disk_outside_a_review(cx: &mut TestAppContext) {
   h.drawn("changes-diff-viewer");
   edit_a_rs(&mut h, &host);
   assert_eq!(shown_lines(&mut h, "a.rs"), [" a", "+b", "+e"]);
-  assert!(!h.drawn("stale-banner"));
+  assert!(!shows_stale_banner(&mut h));
 }
 
 #[gpui::test]
@@ -824,7 +891,7 @@ fn a_review_recheck_reads_only_files_whose_content_changed(cx: &mut TestAppConte
     .skip(hunks)
     .collect();
   assert_eq!(reads, ["read hunks [\"a.rs\"]"]);
-  assert!(h.drawn("stale-banner"));
+  assert!(shows_stale_banner(&mut h));
 }
 
 #[gpui::test]
@@ -832,14 +899,14 @@ fn an_edit_on_disk_during_a_review_waits_behind_the_stale_banner(cx: &mut TestAp
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
   comment_line(&mut h, "Nit");
   edit_a_rs(&mut h, &host);
-  assert!(h.drawn("stale-banner"), "a changed diff, same file list");
+  assert!(shows_stale_banner(&mut h), "a changed diff, same file list");
   assert_eq!(
     shown_lines(&mut h, "a.rs"),
     [" a", "+b", "+c"],
     "the reviewed diff stays"
   );
   h.click("reload-stale");
-  assert!(!h.drawn("stale-banner"));
+  assert!(!shows_stale_banner(&mut h));
   assert_eq!(shown_lines(&mut h, "a.rs"), [" a", "+b", "+e"]);
 }
 
@@ -897,7 +964,7 @@ fn enter_edits_the_comment_on_the_cursor_line(cx: &mut TestAppContext) {
   h.click("gutter-a.rs-0-1");
   h.cx.simulate_keystrokes("enter");
   assert!(
-    h.drawn("comment-edit"),
+    h.shows(gpui::Role::MultilineTextInput, "Comment"),
     "Enter opens the line's comment to edit"
   );
 }
@@ -906,8 +973,16 @@ fn enter_edits_the_comment_on_the_cursor_line(cx: &mut TestAppContext) {
 fn comment_cards_have_no_hover_pencil(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
   comment_line(&mut h, "Nit");
-  assert!(h.drawn("inline-comment-card"));
-  assert!(!h.drawn("comment-card-pencil"));
+  assert!(has_comment(&mut h, "^Comments on a.rs line \\d+$"));
+  let edits = h
+    .rendered()
+    .query_all_by_role(
+      gpui_testing_library::by::role(gpui::Role::Button)
+        .name("Edit comment")
+        .hidden(true),
+    )
+    .len();
+  assert_eq!(edits, 1, "the card itself edits; no pencil inside it");
 }
 
 #[gpui::test]
@@ -915,7 +990,7 @@ fn left_comments_the_selected_lines(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
   h.click("gutter-a.rs-0-1");
   h.cx.simulate_keystrokes("shift-down left");
-  assert!(h.drawn("comment-input"));
+  assert!(h.shows(gpui::Role::MultilineTextInput, "Add a comment…"));
   h.cx.simulate_input("Both");
   h.cx.simulate_keystrokes("secondary-enter");
   settle_save(&mut h);
@@ -936,8 +1011,8 @@ fn a_suggested_change_is_drawn_and_applied_to_the_file(cx: &mut TestAppContext) 
   h.cx.simulate_keystrokes("shift-down left");
   h.click("suggest-change");
   // A code editor with the lines and a preview, not fences in the comment.
-  assert!(h.drawn("suggestion-editor"));
-  assert!(h.drawn("suggestion-preview"));
+  assert!(h.shows(gpui::Role::Group, "Suggested change"));
+  assert!(h.shows(gpui::Role::Group, "Suggestion preview"));
   let (comment, suggestion) = h.screen.read_with(&h.cx, |screen, cx| {
     let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
     let changes = workspace.changes().expect("changes").read(cx);
@@ -952,14 +1027,14 @@ fn a_suggested_change_is_drawn_and_applied_to_the_file(cx: &mut TestAppContext) 
   settle_save(&mut h);
   let saved = host.review.lock().unwrap().clone().unwrap_or_default();
   assert!(saved.contains(r"```suggestion\nb\nc\n```"), "{saved}");
-  assert!(h.drawn("agent-review-suggestion"), "drawn as a diff");
+  assert!(h.shows(gpui::Role::Group, "Suggestion"), "drawn as a diff");
   // The write changes a.rs on disk; that read is not stale.
   let mut applied = host.working.clone().expect("working");
   applied.hunks_by_file[0].hunks[0].lines = vec![" a".into(), "+B".into()];
   *host.edited.lock().unwrap() = Some(applied);
   h.click("apply-suggestion");
   h.cx.run_until_parked();
-  assert!(!h.drawn("stale-banner"), "its own write shows at once");
+  assert!(!shows_stale_banner(&mut h), "its own write shows at once");
   assert_eq!(shown_lines(&mut h, "a.rs"), [" a", "+B"]);
   assert!(
     host
@@ -970,7 +1045,7 @@ fn a_suggested_change_is_drawn_and_applied_to_the_file(cx: &mut TestAppContext) 
     host.calls()
   );
   assert!(
-    !h.drawn("inline-comment-card"),
+    !has_comment(&mut h, "^Comments on a.rs line \\d+$"),
     "the applied comment is done"
   );
 }
@@ -978,10 +1053,10 @@ fn a_suggested_change_is_drawn_and_applied_to_the_file(cx: &mut TestAppContext) 
 #[gpui::test]
 fn changes_tab_comments_a_line_and_keeps_the_review(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
-  assert!(!h.drawn("review-action-bar"));
+  assert!(!h.shows(gpui::Role::Toolbar, "Review"));
   comment_line(&mut h, "Nit");
-  assert!(h.drawn("inline-comment-card"));
-  assert!(h.drawn("review-action-bar"));
+  assert!(has_comment(&mut h, "^Comments on a.rs line \\d+$"));
+  assert!(h.shows(gpui::Role::Toolbar, "Review"));
   settle_save(&mut h);
   assert!(host.writes().contains(&"save review 7 None".to_string()));
   let saved = host.review.lock().unwrap().clone().unwrap_or_default();
@@ -989,8 +1064,8 @@ fn changes_tab_comments_a_line_and_keeps_the_review(cx: &mut TestAppContext) {
   assert!(saved.contains("\"file_path\":\"a.rs\""), "{saved}");
   h.click("delete-comment");
   h.cx.run_until_parked();
-  assert!(!h.drawn("inline-comment-card"));
-  assert!(!h.drawn("review-action-bar"));
+  assert!(!has_comment(&mut h, "^Comments on a.rs line \\d+$"));
+  assert!(!h.shows(gpui::Role::Toolbar, "Review"));
   assert!(host.writes().contains(&"clear review 7".to_string()));
 }
 
@@ -999,7 +1074,7 @@ fn changes_tab_edits_a_comment(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
   comment_line(&mut h, "Nit");
   h.click("inline-comment-card");
-  assert!(h.drawn("comment-save"));
+  assert!(h.shows(gpui::Role::Button, "Save"));
   h.click("comment-edit");
   h.cx.simulate_input("!");
   h.click("comment-save");
@@ -1012,12 +1087,12 @@ fn changes_tab_edits_a_comment(cx: &mut TestAppContext) {
 fn changes_tab_comments_a_file(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
   h.click("add-file-comment-button");
-  assert!(h.drawn("comment-input"));
+  assert!(h.shows(gpui::Role::MultilineTextInput, "Add a comment…"));
   h.click("comment-input");
   h.cx.simulate_input("Split this");
   h.click("comment-submit");
-  assert!(h.drawn("file-comment-card"));
-  assert!(h.drawn("review-action-bar"));
+  assert!(has_comment(&mut h, "^Comments on b.rs$"));
+  assert!(h.shows(gpui::Role::Toolbar, "Review"));
 }
 
 #[gpui::test]
@@ -1032,8 +1107,8 @@ fn changes_tab_reads_the_kept_review(cx: &mut TestAppContext) {
   );
   let (mut h, host) = workspace_harness(cx, host, changes_route());
   assert!(host.calls().contains(&"read review 7".to_string()));
-  assert!(h.drawn("inline-comment-card"));
-  assert!(h.drawn("review-action-bar"));
+  assert!(has_comment(&mut h, "^Comments on a.rs line \\d+$"));
+  assert!(h.shows(gpui::Role::Toolbar, "Review"));
 }
 
 #[gpui::test]
@@ -1041,7 +1116,7 @@ fn changes_tab_sends_the_review_to_an_agent(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
   comment_line(&mut h, "Nit");
   h.click("finish-review");
-  assert!(h.drawn("finish-review-popover"));
+  assert!(h.shows(gpui::Role::Dialog, "Finish your review"));
   h.click("review-plan");
   h.cx.run_until_parked();
   assert!(fields(&h, "changes.review").is_empty());
@@ -1063,8 +1138,8 @@ fn changes_tab_sends_the_review_to_an_agent(cx: &mut TestAppContext) {
     markdown.contains("Nit") && markdown.contains("a.rs"),
     "{markdown}"
   );
-  assert!(!h.drawn("review-action-bar"));
-  assert!(!h.drawn("finish-review-popover"));
+  assert!(!h.shows(gpui::Role::Toolbar, "Review"));
+  assert!(!h.shows(gpui::Role::Dialog, "Finish your review"));
   assert!(host.writes().contains(&"clear review 7".to_string()));
 }
 
@@ -1105,11 +1180,11 @@ fn changes_tab_discards_the_review_once_confirmed(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
   comment_line(&mut h, "Nit");
   h.click("discard-review");
-  assert!(h.drawn("discard-review-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Discard 1 pending comment?"));
   h.click("confirm-discard-review");
-  assert!(!h.drawn("discard-review-dialog"));
-  assert!(!h.drawn("review-action-bar"));
-  assert!(!h.drawn("inline-comment-card"));
+  assert!(!h.shows(gpui::Role::Dialog, "Discard 1 pending comment?"));
+  assert!(!h.shows(gpui::Role::Toolbar, "Review"));
+  assert!(!has_comment(&mut h, "^Comments on a.rs line \\d+$"));
 }
 
 #[gpui::test]
@@ -1150,7 +1225,7 @@ fn changes_tab_finds_text_in_the_diff(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
   h.click("file-card-a.rs");
   h.cx.simulate_keystrokes("cmd-f");
-  assert!(h.drawn("diff-search"));
+  assert!(h.shows(gpui::Role::Search, "Find"));
   // a.rs: " a", "+b", "+c"; b.rs: "+d".
   // A short diff is searched on every key: no pause is waited for.
   h.cx.simulate_input("b");
@@ -1167,7 +1242,7 @@ fn changes_tab_finds_text_in_the_diff(cx: &mut TestAppContext) {
   h.cx.simulate_keystrokes("enter");
   assert_eq!(count(&mut h), (0, 1));
   h.cx.simulate_keystrokes("escape");
-  assert!(!h.drawn("diff-search"));
+  assert!(!h.shows(gpui::Role::Search, "Find"));
 }
 
 #[gpui::test]
@@ -1175,18 +1250,20 @@ fn escape_closes_the_find_bar_after_focus_leaves_it(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
   h.click("file-card-a.rs");
   h.cx.simulate_keystrokes("cmd-f");
-  assert!(h.drawn("diff-search"));
+  assert!(h.shows(gpui::Role::Search, "Find"));
   // Clicking the diff takes focus out of the bar.
   h.click("file-card-a.rs");
   h.cx.simulate_keystrokes("escape");
   h.cx.run_until_parked();
-  assert!(!h.drawn("diff-search"));
+  assert!(!h.shows(gpui::Role::Search, "Find"));
 }
 
 #[gpui::test]
 fn changes_tab_shows_review_threads_on_their_line(cx: &mut TestAppContext) {
   let mut host = changes_host();
-  host.threads = vec![gh_thread("t1", 2, false), gh_thread("t2", 40, true)];
+  let mut folded = gh_thread("t2", 40, true);
+  folded.comments[0].body = "Folded away".into();
+  host.threads = vec![gh_thread("t1", 2, false), folded];
   let (mut h, host) = workspace_harness(cx, host, changes_route());
   assert!(
     host
@@ -1196,10 +1273,10 @@ fn changes_tab_shows_review_threads_on_their_line(cx: &mut TestAppContext) {
     host.calls()
   );
   // Line 2 is in the diff; line 40 is not, so it sits above the file.
-  assert!(h.drawn("github-comment-card"));
-  assert!(h.drawn("github-outdated-threads"));
+  assert!(h.shows(gpui::Role::Group, "Comment by octo"));
+  assert!(h.shows(gpui::Role::Group, "Outdated threads on a.rs"));
   // The resolved one starts folded.
-  assert!(h.drawn("github-thread-collapsed-preview"));
+  assert!(h.shows(gpui::Role::Paragraph, "Folded away"));
 }
 
 #[gpui::test]
@@ -1208,7 +1285,7 @@ fn changes_tab_quotes_a_review_thread(cx: &mut TestAppContext) {
   host.threads = vec![gh_thread("t1", 2, false)];
   let (mut h, host) = workspace_harness(cx, host, changes_route());
   h.click("github-comment-quote");
-  assert!(h.drawn("comment-input"));
+  assert!(h.shows(gpui::Role::MultilineTextInput, "Add a comment…"));
   h.click("comment-input");
   h.cx.simulate_input("Agreed");
   h.click("comment-submit");
@@ -1230,15 +1307,15 @@ fn changes_tab_reacts_to_a_review_comment(cx: &mut TestAppContext) {
   let mut host = changes_host();
   host.threads = vec![gh_thread("t1", 2, false)];
   let (mut h, host) = workspace_harness(cx, host, changes_route());
-  assert!(!h.drawn("reaction-t1-c-EYES"));
+  assert!(!h.shows(gpui::Role::Button, "Eyes (1, you reacted)"));
   h.click("reaction-add-t1-c");
   h.click("reaction-pick-t1-c-EYES");
   h.cx.run_until_parked();
-  assert!(h.drawn("reaction-t1-c-EYES"));
+  assert!(h.shows(gpui::Role::Button, "Eyes (1, you reacted)"));
   assert!(host.writes().contains(&"react t1-c EYES true".to_string()));
   h.click("reaction-t1-c-EYES");
   h.cx.run_until_parked();
-  assert!(!h.drawn("reaction-t1-c-EYES"));
+  assert!(!h.shows(gpui::Role::Button, "Eyes (1, you reacted)"));
   assert!(host.writes().contains(&"react t1-c EYES false".to_string()));
 }
 
@@ -1247,14 +1324,14 @@ fn changes_tab_resolves_an_agent_comment(cx: &mut TestAppContext) {
   let host = changes_host();
   *host.agent.lock().unwrap() = vec![agent_comment(Some("b and c"))];
   let (mut h, host) = workspace_harness(cx, host, changes_route());
-  assert!(h.drawn("agent-review-comment-card"));
-  assert!(h.drawn("agent-review-suggestion"));
+  assert!(h.shows(gpui::Role::Group, "Agent comment on a.rs line 2"));
+  assert!(h.shows(gpui::Role::Group, "Suggestion"));
   h.click("agent-resolve-ag");
   h.cx.run_until_parked();
   assert!(host
     .writes()
     .contains(&"resolve agent comment ag".to_string()));
-  assert!(!h.drawn("agent-review-comment-card"));
+  assert!(!h.shows(gpui::Role::Group, "Agent comment on a.rs line 2"));
 }
 
 #[gpui::test]
@@ -1262,10 +1339,10 @@ fn changes_tab_counts_open_agent_comments(cx: &mut TestAppContext) {
   let host = changes_host();
   *host.agent.lock().unwrap() = vec![agent_comment(None)];
   let (mut h, _) = workspace_harness(cx, host, changes_route());
-  assert!(h.drawn("agent-review-comment-count"));
+  assert!(h.shows(gpui::Role::Label, "1 local review comment"));
   h.click("agent-resolve-ag");
   h.cx.run_until_parked();
-  assert!(!h.drawn("agent-review-comment-count"));
+  assert!(!h.shows(gpui::Role::Label, "1 local review comment"));
 }
 
 #[gpui::test]
@@ -1273,7 +1350,7 @@ fn an_agent_comment_poll_that_reads_the_same_comments_changes_nothing(cx: &mut T
   let host = changes_host();
   *host.agent.lock().unwrap() = vec![agent_comment(None)];
   let (mut h, host) = workspace_harness(cx, host, changes_route());
-  assert!(h.drawn("agent-review-comment-card"));
+  assert!(h.shows(gpui::Role::Group, "Agent comment on a.rs line 2"));
   let revision = |h: &mut Harness| {
     h.screen.read_with(&h.cx, |screen, cx| {
       let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
@@ -1341,7 +1418,7 @@ fn changes_with_terminal(cx: &mut TestAppContext) -> (Harness, Arc<FakeHost>) {
 #[gpui::test]
 fn changes_tab_sends_an_agent_comment_to_the_idle_agent(cx: &mut TestAppContext) {
   let (mut h, host) = changes_with_terminal(cx);
-  assert!(h.drawn("terminal-column-agent"));
+  assert!(h.shows(gpui::Role::Group, "Claude 1 terminal"));
   h.click("agent-send-ag");
   h.cx.run_until_parked();
   assert!(fields(&h, "changes.agentComment").is_empty());
@@ -1379,7 +1456,7 @@ fn changes_tab_starts_an_agent_for_a_comment_without_an_idle_one(cx: &mut TestAp
   route["tab"] = "changes".into();
   route["terminal"] = serde_json::json!({ "activeSessionId": 3 });
   let (mut h, host) = workspace_harness(cx, changes, serde_json::from_value(route).expect("route"));
-  assert!(h.drawn("terminal-column-agent"));
+  assert!(h.shows(gpui::Role::Group, "Claude 1 terminal"));
   h.click("agent-send-ag");
   h.cx.run_until_parked();
   let launches = host.launches.lock().unwrap().clone();
@@ -1401,7 +1478,7 @@ fn changes_tab_sends_an_agent_comment_to_react(cx: &mut TestAppContext) {
   let host = changes_host();
   *host.agent.lock().unwrap() = vec![agent_comment(None)];
   let (mut h, _) = workspace_harness(cx, host, changes_route());
-  assert!(!h.drawn("agent-apply-ag"));
+  assert!(!h.shows(gpui::Role::Button, "Apply"));
   h.click("agent-send-ag");
   h.cx.run_until_parked();
   let sent = fields(&h, "changes.agentComment");
@@ -1414,11 +1491,11 @@ fn changes_tab_sends_an_agent_comment_to_react(cx: &mut TestAppContext) {
 fn enter_confirms_the_discard_all_confirmation(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
   h.click("discard-all-changes");
-  assert!(h.drawn("discard-all-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Discard all changes?"));
   h.cx.simulate_keystrokes("enter");
   h.cx.run_until_parked();
   assert!(host.writes().iter().any(|w| w.starts_with("discard")));
-  assert!(!h.drawn("discard-all-dialog"));
+  assert!(!h.shows(gpui::Role::Dialog, "Discard all changes?"));
 }
 
 #[gpui::test]
@@ -1427,12 +1504,12 @@ fn the_discard_review_confirmation_keeps_on_escape_and_discards_on_enter(cx: &mu
   comment_line(&mut h, "Nit");
   h.click("discard-review");
   h.cx.simulate_keystrokes("escape");
-  assert!(!h.drawn("discard-review-dialog"));
-  assert!(h.drawn("review-action-bar"));
+  assert!(!h.shows(gpui::Role::Dialog, "Discard 1 pending comment?"));
+  assert!(h.shows(gpui::Role::Toolbar, "Review"));
   h.click("discard-review");
   h.cx.simulate_keystrokes("enter");
-  assert!(!h.drawn("discard-review-dialog"));
-  assert!(!h.drawn("review-action-bar"));
+  assert!(!h.shows(gpui::Role::Dialog, "Discard 1 pending comment?"));
+  assert!(!h.shows(gpui::Role::Toolbar, "Review"));
 }
 
 /// The review toolbar's discard says what it discards, and its
@@ -1484,12 +1561,18 @@ fn file_statuses_are_named_and_committed_cards_carry_no_pill(cx: &mut TestAppCon
     changes_host_with_named_statuses(),
     committed_route(true),
   );
-  assert!(h.drawn("file-card-c.rs"), "the committed file's card");
+  assert!(
+    h.shows(gpui::Role::Group, "c.rs"),
+    "the committed file's card"
+  );
   let screen = a11y_screen(&mut h);
   for name in ["Modified", "Added", "Renamed"] {
     expect(screen.get_by_role(by::role(gpui::Role::Label).name(name))).to_be_visible();
   }
-  assert!(!h.drawn("committed-file-label"));
+  let card = screen.get_by_role(by::role(gpui::Role::Group).name("c.rs"));
+  assert!(within(&card)
+    .query_by_role(by::role(gpui::Role::Label).name("Committed"))
+    .is_none());
 }
 
 /// A file with no diff lines (here a binary) is marked viewed by its
@@ -1539,7 +1622,7 @@ fn the_changes_header_buttons_are_named(cx: &mut TestAppContext) {
   }
   let user = screen.user();
   user.click(&screen.get_by_role(by::role(gpui::Role::Button).name("Discard all changes…")));
-  assert!(h.drawn("discard-all-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Discard all changes?"));
 }
 
 /// A review thread's fold toggle is a button named for what a click does.
@@ -1555,7 +1638,7 @@ fn a_review_thread_folds_from_a_named_button(cx: &mut TestAppContext) {
   let screen = a11y_screen(&mut h);
   expect(screen.get_by_role(by::role(gpui::Role::Button).name("Hide review thread")))
     .to_be_visible();
-  assert!(!h.drawn("github-thread-collapsed-preview"));
+  assert!(!h.shows(gpui::Role::Paragraph, "Why two lines?"));
 }
 
 /// The Changes section's header is the shared section heading: a heading
@@ -1585,4 +1668,118 @@ fn a_committed_file_takes_a_file_comment(cx: &mut TestAppContext) {
       .get_by_role(by::role(Role::Button).name("Edit comment")),
   )
   .to_be_visible();
+}
+
+fn drag_mouse(h: &mut Harness, from: gpui::Point<gpui::Pixels>, to: gpui::Point<gpui::Pixels>) {
+  h.cx.simulate_event(gpui::MouseDownEvent {
+    position: from,
+    button: MouseButton::Left,
+    modifiers: Modifiers::none(),
+    click_count: 1,
+    first_mouse: false,
+  });
+  for step in 1..=4 {
+    let position = from + (to - from) * (step as f32 / 4.);
+    h.cx
+      .simulate_mouse_move(position, Some(MouseButton::Left), Modifiers::none());
+  }
+  h.cx.simulate_event(gpui::MouseUpEvent {
+    position: to,
+    button: MouseButton::Left,
+    modifiers: Modifiers::none(),
+    click_count: 1,
+  });
+  h.cx.run_until_parked();
+}
+
+fn file_list_width(h: &mut Harness) -> f32 {
+  h.cx.run_until_parked();
+  f32::from(
+    h.cx
+      .debug_bounds("changes-file-list")
+      .expect("file list drawn")
+      .size
+      .width,
+  )
+}
+
+#[gpui::test]
+fn dragging_the_file_list_edge_resizes_it_within_bounds(cx: &mut TestAppContext) {
+  let (mut h, _host) = workspace_harness(cx, changes_host(), changes_route());
+  assert_eq!(file_list_width(&mut h), 240.);
+  let list = h.cx.debug_bounds("changes-file-list").expect("drawn");
+  let handle = h
+    .cx
+    .debug_bounds("changes-file-list-resize")
+    .expect("drawn")
+    .center();
+  drag_mouse(
+    &mut h,
+    handle,
+    gpui::point(list.left() + gpui::px(320.), handle.y),
+  );
+  assert_eq!(file_list_width(&mut h), 320.);
+
+  let handle = h
+    .cx
+    .debug_bounds("changes-file-list-resize")
+    .expect("drawn")
+    .center();
+  drag_mouse(
+    &mut h,
+    handle,
+    gpui::point(list.left() + gpui::px(5.), handle.y),
+  );
+  assert_eq!(file_list_width(&mut h), 160.);
+
+  let handle = h
+    .cx
+    .debug_bounds("changes-file-list-resize")
+    .expect("drawn")
+    .center();
+  h.cx.simulate_click(handle, Modifiers::none());
+  h.cx.simulate_event(gpui::MouseDownEvent {
+    position: handle,
+    button: MouseButton::Left,
+    modifiers: Modifiers::none(),
+    click_count: 2,
+    first_mouse: false,
+  });
+  h.cx.simulate_event(gpui::MouseUpEvent {
+    position: handle,
+    button: MouseButton::Left,
+    modifiers: Modifiers::none(),
+    click_count: 2,
+  });
+  assert_eq!(file_list_width(&mut h), 240.);
+}
+
+#[gpui::test]
+fn the_file_list_width_is_saved_and_restored(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  let list = h.cx.debug_bounds("changes-file-list").expect("drawn");
+  let handle = h
+    .cx
+    .debug_bounds("changes-file-list-resize")
+    .expect("drawn")
+    .center();
+  drag_mouse(
+    &mut h,
+    handle,
+    gpui::point(list.left() + gpui::px(300.), handle.y),
+  );
+  h.cx.run_until_parked();
+  assert_eq!(
+    host.setting("changes_file_list_width").as_deref(),
+    Some("300")
+  );
+
+  let host = changes_host();
+  host
+    .settings
+    .lock()
+    .unwrap()
+    .insert("changes_file_list_width".into(), Some("410".into()));
+  let (mut h, _) = workspace_harness(cx, host, changes_route());
+  assert_eq!(file_list_width(&mut h), 410.);
 }
