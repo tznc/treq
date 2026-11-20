@@ -659,6 +659,40 @@ fn github_filters_the_loaded_prs(cx: &mut TestAppContext) {
   assert!(h.shows(gpui::Role::ListItem, "Change 1") && h.shows(gpui::Role::ListItem, "Change 2"));
 }
 
+/// Whether the comment box suggests mentioning `login`.
+fn suggests(h: &mut Harness, login: &str) -> bool {
+  h.rendered()
+    .query_by_role(gpui_testing_library::by::role(gpui::Role::ListBoxOption).name(login))
+    .is_some()
+}
+
+#[gpui::test]
+fn github_comment_suggests_participants_to_mention(cx: &mut TestAppContext) {
+  let (mut h, _) = harness(cx, issues(), route("issues", Some(1), false));
+  h.click("github-comment-box");
+  h.cx.simulate_input("Thanks @");
+  assert!(suggests(&mut h, "ada") && suggests(&mut h, "bob"));
+  h.cx.simulate_input("a");
+  assert!(suggests(&mut h, "ada") && !suggests(&mut h, "bob"));
+  h.click("github-mention-0");
+  assert_eq!(view(&mut h, |v| v.comment.clone()), "Thanks @ada ");
+  assert!(!suggests(&mut h, "ada"));
+
+  // Arrow keys and Enter pick one; Escape closes the list.
+  h.cx.simulate_input("@");
+  h.cx.simulate_keystrokes("down enter");
+  assert_eq!(view(&mut h, |v| v.comment.clone()), "Thanks @ada @ada ");
+  h.cx.simulate_input("@a");
+  h.cx.simulate_keystrokes("tab");
+  assert_eq!(
+    view(&mut h, |v| v.comment.clone()),
+    "Thanks @ada @ada @ada "
+  );
+  h.cx.simulate_input("@");
+  h.cx.simulate_keystrokes("escape");
+  assert!(!suggests(&mut h, "ada"));
+}
+
 #[gpui::test]
 fn github_issue_detail_comments_closes_and_reopens(cx: &mut TestAppContext) {
   let (mut h, host) = harness(cx, issues(), route("issues", Some(1), false));
