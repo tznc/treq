@@ -1406,6 +1406,12 @@ impl ChangesView {
     );
     if !under.is_empty() {
       let mut list = div()
+        .id(SharedString::from(format!("line-comments-{path}-{h}-{l}")))
+        .role(gpui::Role::Group)
+        .aria_label(format!(
+          "Comments on {path} line {}",
+          numbers.1.or(numbers.0).unwrap_or_default()
+        ))
         .bg(comment_strip_fill(p))
         .border_y_1()
         .border_color(p.border.opacity(0.4))
@@ -1418,7 +1424,7 @@ impl ChangesView {
       for c in under {
         list = list.child(self.comment_card(&c.id, &c.text, "inline-comment-card", p, cx));
       }
-      out.push(list.into_any_element());
+      out.push(list.test_support().into_any_element());
     }
     out.extend(self.line_threads(path, hunks, h, l, numbers, p, cx));
     let here = self
@@ -1626,12 +1632,13 @@ impl ChangesView {
           view.save_edit(cx);
         }
       }))
-      .children(self.review.edit_input.as_ref().map(|i| {
-        ui::text(
-          Textarea::new(&i.state).aria_label("Comment"),
-          TextSize::Code,
-        )
-      }))
+      .children(
+        self
+          .review
+          .edit_input
+          .as_ref()
+          .map(|i| ui::text(Textarea::new(&i.state).aria_label("Comment"), TextSize::Sm)),
+      )
       .child(
         div()
           .flex()
@@ -1677,7 +1684,7 @@ impl ChangesView {
       .draft
       .as_ref()
       .is_some_and(|d| suggestion_lines(d).is_some());
-    ui::text(div(), TextSize::Code)
+    ui::text(div(), TextSize::Sm)
       .debug_selector(|| "comment-input".into())
       .bg(p.muted)
       .border_1()
@@ -1726,7 +1733,7 @@ impl ChangesView {
       .children(self.review.draft_input.as_ref().map(|i| {
         div()
           .mb_2()
-          .child(ui::text(Textarea::new(&i.state), TextSize::Code))
+          .child(ui::text(Textarea::new(&i.state), TextSize::Sm))
       }))
       .children(self.suggestion_editor(p))
       .child(
@@ -1781,7 +1788,10 @@ impl ChangesView {
         .child(text)
     };
     let preview = div()
+      .id("suggestion-preview")
       .debug_selector(|| "suggestion-preview".into())
+      .role(gpui::Role::Group)
+      .aria_label("Suggestion preview")
       .rounded(radius::SM)
       .border_1()
       .border_color(p.border)
@@ -1799,7 +1809,10 @@ impl ChangesView {
       );
     Some(
       div()
+        .id("suggestion-editor")
         .debug_selector(|| "suggestion-editor".into())
+        .role(gpui::Role::Group)
+        .aria_label("Suggested change")
         .mb_2()
         .flex()
         .flex_col()
@@ -1827,7 +1840,8 @@ impl ChangesView {
             .text_color(p.muted_foreground)
             .child("Preview"),
         )
-        .child(ui::text(preview, TextSize::Code)),
+        .child(ui::text(preview, TextSize::Code).test_support())
+        .test_support(),
     )
   }
 
@@ -1856,6 +1870,9 @@ impl ChangesView {
       return None;
     }
     let mut section = div()
+      .id(SharedString::from(format!("file-comments-{path}")))
+      .role(gpui::Role::Group)
+      .aria_label(format!("Comments on {path}"))
       .border_b_1()
       .border_color(p.border)
       .bg(p.muted.opacity(0.2))
@@ -1881,7 +1898,7 @@ impl ChangesView {
     {
       section = section.child(self.comment_input(p, cx));
     }
-    Some(section)
+    Some(section.test_support())
   }
 
   /// The amber "Outdated" block at the top of a file's diff.
@@ -2055,7 +2072,7 @@ impl ChangesView {
           .children(self.review.note_input.as_ref().map(|i| {
             div()
               .mb_2()
-              .child(ui::text(Textarea::new(&i.state), TextSize::Code))
+              .child(ui::text(Textarea::new(&i.state), TextSize::Sm))
           }))
           .child(
             div()
@@ -2090,7 +2107,10 @@ impl ChangesView {
     let total = self.review.comments.len() + self.review.notes.len();
     let send_bg = if conflicts { p.destructive } else { p.primary };
     div()
+      .id("review-action-bar")
       .debug_selector(|| "review-action-bar".into())
+      .role(gpui::Role::Toolbar)
+      .aria_label("Review")
       .flex()
       .items_center()
       .justify_between()
@@ -2154,6 +2174,7 @@ impl ChangesView {
               .child(self.anchor("finish-review".into())),
           ),
       )
+      .test_support()
   }
 
   pub(super) fn start_review_button(&self, p: &Palette, cx: &mut Context<Self>) -> Button {
@@ -2206,7 +2227,13 @@ impl ChangesView {
     };
     Some(
       div()
+        .id("stale-banner")
         .debug_selector(|| "stale-banner".into())
+        .role(gpui::Role::Status)
+        .aria_label(format!(
+          "{} changed since you started reviewing",
+          count_label(n, "file")
+        ))
         .flex()
         .items_center()
         .justify_between()
@@ -2257,7 +2284,8 @@ impl ChangesView {
               button("reload-stale", theme::ICON_REFRESH, "Reload".into())
                 .on_click(cx.listener(|view, _, _, cx| view.reload_stale(cx))),
             ),
-        ),
+        )
+        .test_support(),
     )
   }
 
@@ -2314,6 +2342,12 @@ impl ChangesView {
     let panel = div()
       .id("finish-review-popover")
       .debug_selector(|| "finish-review-popover".into())
+      .role(gpui::Role::Dialog)
+      .aria_label(if conflicts {
+        "Resolve conflicts"
+      } else {
+        "Finish your review"
+      })
       .w(zpx(width))
       .relative()
       .p_4()
@@ -2417,7 +2451,7 @@ impl ChangesView {
               ),
           ),
       );
-    Some(deferred(anchored().position(at).child(panel)).with_priority(1))
+    Some(deferred(anchored().position(at).child(panel.test_support())).with_priority(1))
   }
 
   /// `ReviewActionBar` C: "Discard review?".

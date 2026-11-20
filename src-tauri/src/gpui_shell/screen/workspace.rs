@@ -2426,7 +2426,11 @@ impl Render for WorkspaceView {
         .border_b_1()
         .border_color(p.border)
         .debug_selector(|| "workspace-header".into()),
-    };
+    }
+    .id("workspace-header")
+    .role(gpui::Role::Banner)
+    .aria_label("Workspace header")
+    .test_support();
     let tab_row = snapshot
       .and_then(|snapshot| snapshot.tab_row)
       .map(|row| self.tab_bar(&row, &p));

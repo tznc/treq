@@ -41,6 +41,17 @@ test("code: workspace Code tab, action row, alerts and Agent", async ({ page, co
     ],
   });
 
+  // The stack panel is not observable: crop its rail (fixed 1400x900 window).
+  await capture(page, {
+    name: "03-code-stack-rail",
+    title: "Stack panel: rail alignment",
+    clip: { x: 296, y: 270, width: 240, height: 150 },
+    expectations: [
+      "The vertical rail runs through the horizontal centre of every stack dot",
+      "The rail ends at the base-branch arrow: the arrowhead is its tip, nothing runs below it",
+    ],
+  });
+
   const alerts = page.getByRole("button", { name: /^Alerts/ });
   await alerts.click();
   const conflicts = page.getByRole("alert", { name: "1 file has conflicts" });

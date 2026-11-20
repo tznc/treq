@@ -137,3 +137,28 @@ test("home-sidebar: home view, rows, menus and multi-select", async ({ page }) =
   });
   await home(page);
 });
+
+test("home-sidebar: workspaces create button is icon-only", async ({ page }) => {
+  await home(page);
+  await settle(page, 2000);
+  const create = page.getByTestId("open-workspaces");
+  await expect(create).toBeVisible();
+  await expect(create).toHaveAccessibleName("New workspace…");
+  await capture(page, {
+    name: "02-workspaces-create-icon",
+    title: "WORKSPACES heading: icon-only create button",
+    expectations: [
+      "The WORKSPACES heading has a single icon button at its right, with no text label",
+      "The icon is vertically centred with the heading text",
+    ],
+  });
+  await create.hover();
+  await settle(page, 1500);
+  await capture(page, {
+    name: "02-workspaces-create-tooltip",
+    title: "WORKSPACES create button: hover tooltip",
+    screen: true,
+    rest: false,
+    expectations: ["A tooltip reading 'New workspace…' shows above the WORKSPACES icon button, clear of the first row"],
+  });
+});
