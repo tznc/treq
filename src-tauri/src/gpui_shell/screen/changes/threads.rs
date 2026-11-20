@@ -621,7 +621,6 @@ impl ChangesView {
   ) -> impl IntoElement {
     use chrono::Datelike;
     let this_year = chrono::Local::now().year();
-    let fg = p.foreground;
     let quoted = comment.clone();
     let file = path.to_string();
     div()
@@ -632,11 +631,8 @@ impl ChangesView {
       .debug_selector(|| "github-comment-card".into())
       .role(gpui::Role::Group)
       .aria_label(format!("Comment by {}", comment.author.login))
-      .group("github-comment")
-      .relative()
       .min_w_0()
       .p_2p5()
-      .pr_9()
       .child(
         div()
           .flex()
@@ -655,37 +651,33 @@ impl ChangesView {
           .child(ui::icon(theme::ICON_GITHUB, 14., Tone::Primary.text(p))),
       )
       .child(self.github_comment_body(comment, p))
-      .child(reactions::bar(
-        &self.tips,
-        self.threads.reaction_picker.as_deref(),
-        &comment.id,
-        &comment.reactions,
-        p,
-        cx,
-      ))
       .child(
-        self.tip(
-          format!("quote-{}", comment.id),
-          "Quote this comment",
-          div()
-            .id(SharedString::from(format!("quote-{}", comment.id)))
-            .role(gpui::Role::Button)
-            .aria_label("Quote")
-            .debug_selector(|| "github-comment-quote".into())
-            .absolute()
-            .top_2()
-            .right_2()
-            .p_1()
-            .rounded(radius::SM)
-            .cursor_pointer()
-            .opacity(0.)
-            .group_hover("github-comment", |s| s.opacity(1.))
-            .hover(move |s| s.bg(p.hover()).text_color(fg))
-            .child(ui::icon(theme::ICON_QUOTE, 14., p.muted_foreground))
-            .on_click(cx.listener(move |view, _, _, cx| {
-              view.quote(&quoted, &file, anchor.clone(), line, side, cx)
-            })),
+        reactions::bar(
+          &self.tips,
+          self.threads.reaction_picker.as_deref(),
+          &comment.id,
+          &comment.reactions,
+          p,
           cx,
+        )
+        .child(
+          div()
+            .debug_selector(|| "github-comment-quote".into())
+            .child(
+              self.tip(
+                format!("quote-{}", comment.id),
+                "Quote this comment",
+                Button::new(SharedString::from(format!("quote-{}", comment.id)), p)
+                  .variant(Variant::Outline)
+                  .size(Size::Xs)
+                  .icon(theme::ICON_BOT, 12.)
+                  .label("Quote")
+                  .on_click(cx.listener(move |view, _, _, cx| {
+                    view.quote(&quoted, &file, anchor.clone(), line, side, cx)
+                  })),
+                cx,
+              ),
+            ),
         ),
       )
       .test_support()
