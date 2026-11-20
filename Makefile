@@ -10,6 +10,7 @@ bump:
 	perl -0pi -e 's/"version": "[^"]*"/"version": "'"$$NEW"'"/' package.json; \
 	perl -0pi -e 's/"version": "[^"]*"/"version": "'"$$NEW"'"/' src-tauri/tauri.conf.json; \
 	perl -0pi -e 's/^version = "[^"]*"/version = "'"$$NEW"'"/m' src-tauri/Cargo.toml; \
+	perl -0pi -e 's/("name": "treq",\s*)"version": "[^"]*"/$$1"version": "'"$$NEW"'"/g' package-lock.json; \
 	(cd src-tauri && cargo update -p treq 2>/dev/null) || true; \
 	echo "Done."
 
