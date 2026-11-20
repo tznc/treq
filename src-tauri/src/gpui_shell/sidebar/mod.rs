@@ -843,7 +843,7 @@ impl Render for Sidebar {
               .child("WORKSPACES"),
           )
           .when(snapshot.repos.iter().any(|r| r.active), |this| {
-            this.child(self.open_workspaces_button(&palette))
+            this.child(self.open_workspaces_button(&palette, cx))
           }),
       )
       .when(snapshot.repos.is_empty(), |this| {
@@ -907,8 +907,6 @@ const PALETTE_TOOLTIP: &str = "Command palette (Ctrl+K)";
 
 /// The WORKSPACES heading's create button.
 pub(super) const OPEN_WORKSPACES_LABEL: &str = "New workspace…";
-/// Its visible text; the heading already says what it creates.
-pub(super) const OPEN_WORKSPACES_TEXT: &str = "New…";
 const ADD_REPOSITORY_LABEL: &str = "Add repository…";
 
 /// A row's stack button: a new workspace on the home row, one stacked on the
@@ -937,32 +935,16 @@ impl Sidebar {
     )
   }
 
-  fn open_workspaces_button(&self, palette: &Palette) -> impl IntoElement {
-    // Short label (['button label']): 11px is fine.
-    // ast-grep-ignore: gpui-text-xs-short-label-only
-    ui::text(div(), TextSize::Xs)
-      .id("open-workspaces")
-      .debug_selector(|| "open-workspaces".into())
-      .role(Role::Button)
-      .aria_label(OPEN_WORKSPACES_LABEL)
-      .test_support()
-      .flex()
-      .flex_none()
-      .items_center()
-      .gap_1()
-      .px_1p5()
-      .h(zpx(22.))
-      .rounded_md()
-      .text_color(palette.sidebar_foreground.opacity(0.7))
-      .cursor_pointer()
-      .hover(|style| style.bg(palette.hover()))
-      .child(icon(
-        theme::ICON_PR_CREATE,
-        12.,
-        palette.sidebar_foreground.opacity(0.7),
-      ))
-      .child(OPEN_WORKSPACES_TEXT)
-      .on_click(self.on_action(SidebarAction::OpenWorkspaces))
+  fn open_workspaces_button(&self, palette: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    self.row_button(
+      "open-workspaces".into(),
+      theme::ICON_PR_CREATE,
+      OPEN_WORKSPACES_LABEL,
+      None,
+      SidebarAction::OpenWorkspaces,
+      palette,
+      cx,
+    )
   }
 
   /// A square header button with a tooltip below it.
