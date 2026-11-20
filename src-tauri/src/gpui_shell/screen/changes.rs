@@ -2192,8 +2192,8 @@ impl ChangesView {
       .bg(p.sidebar)
       .child(list)
       .child(handle)
-      .on_drag_move(cx.listener(
-        |this, event: &gpui::DragMoveEvent<SideResize>, _, cx| {
+      .on_drag_move(
+        cx.listener(|this, event: &gpui::DragMoveEvent<SideResize>, _, cx| {
           let width = f32::from(event.event.position.x - event.bounds.left())
             .round()
             .clamp(MIN_SIDE_WIDTH, MAX_SIDE_WIDTH);
@@ -2202,8 +2202,8 @@ impl ChangesView {
             this.side_resizing = true;
             cx.notify();
           }
-        },
-      ))
+        }),
+      )
       .on_mouse_up_out(
         MouseButton::Left,
         cx.listener(|this, _, _, cx| {

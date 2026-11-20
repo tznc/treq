@@ -160,7 +160,10 @@ pub const FILE_LIST_WIDTH_KEY: &str = "changes_file_list_width";
 impl ChangesHost for Backend {
   fn file_list_width(&self) -> Option<f32> {
     self
-      .with_db(|db| db.get_setting(FILE_LIST_WIDTH_KEY).map_err(|e| e.to_string()))
+      .with_db(|db| {
+        db.get_setting(FILE_LIST_WIDTH_KEY)
+          .map_err(|e| e.to_string())
+      })
       .ok()
       .flatten()
       .and_then(|w| w.parse().ok())

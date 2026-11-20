@@ -931,7 +931,10 @@ impl code_data::CodeHost for FakeHost {
 
 impl changes_data::ChangesHost for FakeHost {
   fn file_list_width(&self) -> Option<f32> {
-    self.setting(changes_data::FILE_LIST_WIDTH_KEY)?.parse().ok()
+    self
+      .setting(changes_data::FILE_LIST_WIDTH_KEY)?
+      .parse()
+      .ok()
   }
 
   fn save_file_list_width(&self, width: f32) -> Result<(), String> {
