@@ -3796,6 +3796,8 @@ impl TerminalPane {
         .test_support()
         .debug_selector(|| "terminal-workspace-label".into())
         .max_w(zpx(360.))
+        .min_w_0()
+        .overflow_hidden()
         .flex()
         .items_center()
         .gap_2()
@@ -3959,26 +3961,36 @@ impl TerminalPane {
               .flex()
               .items_center()
               .gap_1p5()
+              .flex_1()
               .min_w_0()
+              .overflow_hidden()
               .child(ui::icon(agent_icon(agent), 16., d.foreground))
               .child(self.title(&column.id, name.clone(), d.foreground, cx))
-              .child(self.tooltips.wrap(
-                format!("terminal-workspace-label-tip-{}", column.id),
-                Side::Top,
-                Some(TooltipContent::Text(label_name.clone().into())),
-                label(
-                  label_name,
-                  workspace_path.is_none(),
-                  key,
-                  self.react.clone(),
-                ),
-                cx,
-              ))
+              .child(
+                self
+                  .tooltips
+                  .wrap(
+                    format!("terminal-workspace-label-tip-{}", column.id),
+                    Side::Top,
+                    Some(TooltipContent::Text(label_name.clone().into())),
+                    label(
+                      label_name,
+                      workspace_path.is_none(),
+                      key,
+                      self.react.clone(),
+                    ),
+                    cx,
+                  )
+                  .min_w_0()
+                  .flex()
+                  .overflow_hidden(),
+              )
               .children(link),
           )
           .child(
             div()
               .flex()
+              .flex_shrink_0()
               .items_center()
               .gap_1()
               .children(waiting.map(|waiting| {
