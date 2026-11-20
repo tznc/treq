@@ -1632,12 +1632,13 @@ impl ChangesView {
           view.save_edit(cx);
         }
       }))
-      .children(self.review.edit_input.as_ref().map(|i| {
-        ui::text(
-          Textarea::new(&i.state).aria_label("Comment"),
-          TextSize::Code,
-        )
-      }))
+      .children(
+        self
+          .review
+          .edit_input
+          .as_ref()
+          .map(|i| ui::text(Textarea::new(&i.state).aria_label("Comment"), TextSize::Sm)),
+      )
       .child(
         div()
           .flex()
@@ -1683,7 +1684,7 @@ impl ChangesView {
       .draft
       .as_ref()
       .is_some_and(|d| suggestion_lines(d).is_some());
-    ui::text(div(), TextSize::Code)
+    ui::text(div(), TextSize::Sm)
       .debug_selector(|| "comment-input".into())
       .bg(p.muted)
       .border_1()
@@ -1732,7 +1733,7 @@ impl ChangesView {
       .children(self.review.draft_input.as_ref().map(|i| {
         div()
           .mb_2()
-          .child(ui::text(Textarea::new(&i.state), TextSize::Code))
+          .child(ui::text(Textarea::new(&i.state), TextSize::Sm))
       }))
       .children(self.suggestion_editor(p))
       .child(
@@ -2071,7 +2072,7 @@ impl ChangesView {
           .children(self.review.note_input.as_ref().map(|i| {
             div()
               .mb_2()
-              .child(ui::text(Textarea::new(&i.state), TextSize::Code))
+              .child(ui::text(Textarea::new(&i.state), TextSize::Sm))
           }))
           .child(
             div()
