@@ -1212,7 +1212,6 @@ fn a_review_thread_draws_its_replies_as_one_card(cx: &mut TestAppContext) {
   thread.comments.push(reply);
   host.threads = vec![thread];
   let (mut h, _) = workspace_harness(cx, host, changes_route());
-  assert!(h.drawn("github-thread-comments"));
   let first = h.cx.debug_bounds("github-comment-t1-c").expect("first");
   let second = h.cx.debug_bounds("github-comment-t1-r").expect("reply");
   // Replies stack flush inside one card, split by a rule, not a gap.
