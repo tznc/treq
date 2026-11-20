@@ -1798,7 +1798,8 @@ fn the_add_comment_tooltip_stays_open_while_hovered(cx: &mut TestAppContext) {
     .center();
   for i in 0..20 {
     let jitter = gpui::point(gpui::px((i % 2) as f32), gpui::px(0.));
-    h.cx.simulate_mouse_move(at + jitter, None, Modifiers::none());
+    h.cx
+      .simulate_mouse_move(at + jitter, None, Modifiers::none());
     h.cx
       .executor()
       .advance_clock(std::time::Duration::from_millis(100));

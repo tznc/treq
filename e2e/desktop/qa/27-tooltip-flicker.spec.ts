@@ -3,14 +3,22 @@
 // popup window opening sent a fresh hover-enter that reset it.
 import { expect, test } from "@playwright/test";
 import { capture } from "./capture.ts";
-import { openTab, openWorkspace, popupBox, settle, xPointer } from "./helpers.ts";
+import {
+  openTab,
+  openWorkspace,
+  popupBox,
+  settle,
+  xPointer,
+} from "./helpers.ts";
 
 test("diff add-comment tooltip does not flicker", async ({ page }) => {
   await openWorkspace(page, "feat/alerting-logs");
   await openTab(page, "Changes");
   await settle(page, 1500);
 
-  const button = page.getByRole("button", { name: /^Add comment on .* line \d+$/ }).first();
+  const button = page
+    .getByRole("button", { name: /^Add comment on .* line \d+$/ })
+    .first();
   const box = await button.boundingBox();
   expect(box).not.toBeNull();
   await xPointer(page, box!.x + box!.width / 2, box!.y + box!.height / 2);
