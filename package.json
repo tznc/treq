@@ -1,7 +1,7 @@
 {
   "name": "treq",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.4.2",
   "type": "module",
   "featureFlags": {
     "pro": true,
@@ -43,7 +43,7 @@
     "check:functions": "deno check supabase/functions/*/index.ts supabase/functions/tests/*.ts",
     "test:functions": "deno test --allow-env --allow-run=bash,git --allow-write --allow-read --allow-net=example.invalid supabase/functions/tests/",
     "lint": "ast-grep scan && biome lint ./test ./supabase/functions && npm run lint:subprocess && npm run lint:home-head && npm run lint:a11y && npm run lint:design",
-    "lint:e2e": "ast-grep test --skip-snapshot-tests && ast-grep scan web/e2e",
+    "lint:e2e": "ast-grep test --skip-snapshot-tests && ast-grep scan web/e2e web/docs web/learn web/compare",
     "lint:subprocess": "ast-grep scan --filter '^(no-command-for-jj-or-git-tauri-src|no-command-new-git-rust-tests|no-subprocess-conflict-pipeline-tauri-src)$'",
     "lint:home-head": "ast-grep scan --filter '^home-git-head-history-edit-needs-test$'",
     "lint:a11y": "ast-grep scan --filter '^(gpui-control-needs-accessible-name|mobile-icon-button-needs-name)$'",

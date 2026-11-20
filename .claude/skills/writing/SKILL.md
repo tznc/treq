@@ -133,7 +133,7 @@ of how good the prose is.
 tool, or workflow that has its own article elsewhere on the site, link it the
 first time it appears in the body, not every time it recurs.
 
-> Use [separate clones](./git-worktrees-vs-clones) when tasks need
+> Use [separate clones](./git-worktrees-vs-clones.mdx) when tasks need
 > independent refs, remotes, or repository configuration.
 
 This is a real sentence doing real work. The link is not bolted on. Do not
@@ -147,7 +147,7 @@ each a link plus a one-clause description of what the reader gets:
 ```markdown
 ## Next Steps
 
-- [What are Stacked PRs?](./stacked-prs): manage branches that depend on one another
+- [What are Stacked PRs?](./stacked-prs.mdx): manage branches that depend on one another
 - [Stacked PR Workflow](/learn/workflows/git/stacked-pr): apply rebasing to a pull-request stack
 ```
 
@@ -156,8 +156,10 @@ already made in prose, add the adjacent articles a reader would want next.
 
 ### Link syntax
 
-- Same directory or a near sibling: relative, no extension:
-  `[text](./git-worktrees-vs-clones)`.
+- Same directory or a near sibling: relative, with the file extension:
+  `[text](./git-worktrees-vs-clones.mdx)`. With `trailingSlash: true`, an
+  extensionless `./page` resolves under the current page and breaks; the
+  `no-extensionless-relative-links-web` ast-grep rule rejects it.
 - Anywhere else on the site: absolute from the content root, no extension:
   `[text](/learn/concepts/git/git-worktrees)`, `[text](/docs/concepts/workspaces)`.
 - Never link a bare URL or write "click here". The anchor text is the term or

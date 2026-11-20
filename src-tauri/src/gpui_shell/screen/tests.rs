@@ -930,6 +930,21 @@ impl code_data::CodeHost for FakeHost {
 }
 
 impl changes_data::ChangesHost for FakeHost {
+  fn file_list_width(&self) -> Option<f32> {
+    self
+      .setting(changes_data::FILE_LIST_WIDTH_KEY)?
+      .parse()
+      .ok()
+  }
+
+  fn save_file_list_width(&self, width: f32) -> Result<(), String> {
+    self.settings.lock().unwrap().insert(
+      changes_data::FILE_LIST_WIDTH_KEY.into(),
+      Some((width as i64).to_string()),
+    );
+    Ok(())
+  }
+
   fn changed_files(
     &self,
     _: &str,
@@ -2597,6 +2612,7 @@ fn terminal_host() -> FakeHost {
     created_at: String::new(),
     last_accessed: String::new(),
     model: None,
+    link_url: None,
   }];
   host.workspaces = host.loaded.workspace.clone().into_iter().collect();
   host

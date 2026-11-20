@@ -626,6 +626,17 @@ impl OpenWorkspacesDialog {
       .collect()
   }
 
+  /// The listed pull requests, less those whose branch already has an open
+  /// workspace.
+  fn listed_prs(&self) -> Vec<&GhPullRequest> {
+    self
+      .prs
+      .items
+      .iter()
+      .filter(|pr| !self.open_branches.contains(&pr.head_ref_name))
+      .collect()
+  }
+
   /// Lines still to check.
   fn unchecked(&self) -> usize {
     self.lines().iter().filter(|(_, c)| c.is_none()).count()
@@ -1396,7 +1407,8 @@ impl OpenWorkspacesDialog {
     } else {
       "Open pull requests"
     };
-    let list: gpui::AnyElement = if self.prs.loading && self.prs.items.is_empty() {
+    let listed = self.listed_prs();
+    let list: gpui::AnyElement = if self.prs.loading && listed.is_empty() {
       crate::gpui_shell::ui::delayed(
         "open-workspaces-prs-loading",
         div().py_12().child(crate::gpui_shell::ui::Loading::new(
@@ -1423,7 +1435,7 @@ impl OpenWorkspacesDialog {
           )),
         )
         .into_any_element()
-    } else if self.prs.items.is_empty() {
+    } else if listed.is_empty() {
       let query = self.query.trim();
       let (id, title, why) = if query.is_empty() && self.assigned {
         (
@@ -1452,11 +1464,11 @@ impl OpenWorkspacesDialog {
       // The last answer stays readable, dimmed, while a search replaces it.
       div()
         .when(self.prs.loading, |d| d.opacity(0.5))
-        .children(self.prs.items.iter().map(|pr| self.pr_row(pr, p, cx)))
+        .children(listed.iter().map(|pr| self.pr_row(pr, p, cx)))
         .into_any_element()
     };
     // The centered spinner covers a search with nothing on screen yet.
-    let searching = (self.prs.loading && !self.prs.items.is_empty()).then(|| {
+    let searching = (self.prs.loading && !listed.is_empty()).then(|| {
       div()
         .id("open-workspaces-prs-searching")
         .role(gpui::Role::ProgressIndicator)

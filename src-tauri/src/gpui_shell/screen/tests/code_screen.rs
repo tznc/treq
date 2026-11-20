@@ -4,21 +4,31 @@ use super::*;
 
 #[gpui::test]
 fn code_tab_draws_files_and_history(cx: &mut TestAppContext) {
-  let (mut h, host) = workspace_harness(cx, code_host(), code_route());
-  for selector in [
-    "workspace-code",
-    "code-action-row",
-    "code-agent",
-    "workspace-description",
-    "code-go-to-file",
-    "code-entry-src",
-    "code-entry-README.md",
-    "commit-item-a",
-    "commit-item-b",
+  let mut host = code_host();
+  host.history = serde_json::from_value(serde_json::json!({
+    "commits": [titled("a", "Add the login form"), titled("b", "Check the password")],
+    "target_branch": "main",
+    "workspace_branch": "feature/login"
+  }))
+  .ok();
+  let (mut h, host) = workspace_harness(cx, host, code_route());
+  for (role, name) in [
+    (gpui::Role::Group, "Code"),
+    (gpui::Role::Toolbar, "Code actions"),
+    (gpui::Role::Button, "Start an agent"),
+    (gpui::Role::Group, "Description"),
+    (gpui::Role::Button, "Go to file"),
+    (gpui::Role::Button, "src"),
+    (gpui::Role::Button, "README.md"),
+    (gpui::Role::Button, "Add the login form"),
+    (gpui::Role::Button, "Check the password"),
   ] {
-    assert!(h.drawn(selector), "{selector}");
+    assert!(h.shows(role, name), "{name}");
   }
-  assert!(!h.drawn("agent-task-input"), "no inline prompt card");
+  assert!(
+    !h.shows(gpui::Role::MultilineTextInput, "Describe a task…"),
+    "no inline prompt card"
+  );
   let calls = host.calls();
   assert!(
     calls.contains(&"read overview Some(7)".to_string()),
@@ -30,6 +40,24 @@ fn code_tab_draws_files_and_history(cx: &mut TestAppContext) {
   );
 }
 
+/// `commit(id, 1, 0)` with its own description, so each row has a name of
+/// its own.
+fn titled(id: &str, description: &str) -> serde_json::Value {
+  let mut c = commit(id, 1, 0);
+  c["description"] = description.into();
+  c
+}
+
+/// Whether the alerts button shows, whatever it counts.
+fn offers_alerts(h: &mut Harness) -> bool {
+  !h.rendered()
+    .query_all_by_role(
+      gpui_testing_library::by::role(gpui::Role::Button)
+        .name(gpui_testing_library::TextMatch::regex("^Alerts: ")),
+    )
+    .is_empty()
+}
+
 #[gpui::test]
 fn code_tab_says_a_remote_file_tree_is_unavailable(cx: &mut TestAppContext) {
   let host = FakeHost {
@@ -37,9 +65,12 @@ fn code_tab_says_a_remote_file_tree_is_unavailable(cx: &mut TestAppContext) {
     ..code_host()
   };
   let (mut h, _) = workspace_harness(cx, host, code_route());
-  assert!(h.drawn("code-files-unavailable"));
-  assert!(!h.drawn("code-files-empty"));
-  assert!(h.drawn("code-go-to-file"), "Go to file still opens files");
+  assert!(h.shows(gpui::Role::Status, "No file tree"));
+  assert!(!h.shows(gpui::Role::Status, "No files"));
+  assert!(
+    h.shows(gpui::Role::Button, "Go to file"),
+    "Go to file still opens files"
+  );
 }
 
 #[gpui::test]
@@ -51,16 +82,16 @@ fn code_tab_says_when_commits_fail_to_load(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, host, code_route());
   h.cx.run_until_parked();
   assert!(
-    h.drawn("code-history-error"),
+    h.shows(gpui::Role::Status, "Couldn't load commits"),
     "not stuck on Loading commits..."
   );
-  assert!(!h.drawn("code-history-error-popover"));
+  assert!(!h.shows(gpui::Role::MultilineTextInput, "Commit read error"));
   h.click("code-history-show-error");
   assert!(
-    h.drawn("code-history-error-popover"),
+    h.shows(gpui::Role::MultilineTextInput, "Commit read error"),
     "Show error opens the error"
   );
-  assert!(!h.drawn("commit-item-a"));
+  assert!(!h.shows(gpui::Role::Button, "work"), "no commit rows");
 }
 
 #[gpui::test]
@@ -98,7 +129,7 @@ fn code_tab_lists_submodules_with_their_pin_and_syncs_them_on_request(cx: &mut T
     status: None,
   });
   let (mut h, host) = workspace_harness(cx, host, home_code_route());
-  assert!(h.drawn("submodule-row-vendor/lib"));
+  assert!(h.shows(gpui::Role::Group, "Submodule vendor/lib"));
   h.click("submodule-sync-vendor/lib");
   h.cx.run_until_parked();
   assert!(
@@ -119,9 +150,9 @@ fn draw_now(h: &mut Harness) {
 #[gpui::test]
 fn code_tab_draws_what_it_read_when_returning_to_it(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, code_host(), code_route());
-  assert!(h.drawn("workspace-description"));
+  assert!(h.shows(gpui::Role::Group, "Description"));
   h.update(|s| s.view = commits_route().view);
-  assert!(h.drawn("workspace-commits"));
+  assert!(h.shows(gpui::Role::Group, "Commits"));
   h.update(|s| s.view = code_route().view);
   draw_now(&mut h);
   assert!(h.cx.debug_bounds("workspace-description").is_some());
@@ -131,7 +162,7 @@ fn code_tab_draws_what_it_read_when_returning_to_it(cx: &mut TestAppContext) {
 #[gpui::test]
 fn switching_workspaces_keeps_the_last_one_drawn_until_the_next_loads(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, code_host(), code_route());
-  assert!(h.drawn("workspace-description"));
+  assert!(h.shows(gpui::Role::Group, "Description"));
   h.update(|s| {
     let mut route = route_json(Some(8), "main");
     route["code"] = true.into();
@@ -155,7 +186,7 @@ fn switching_workspaces_keeps_the_last_one_drawn_until_the_next_loads(cx: &mut T
 fn code_tab_saves_the_description(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, code_host(), code_route());
   h.click("workspace-description-edit");
-  assert!(h.drawn("workspace-description-input"));
+  assert!(h.shows(gpui::Role::MultilineTextInput, "Workspace description"));
   h.cx.simulate_input("!");
   h.click("workspace-description-save");
   h.cx.run_until_parked();
@@ -167,7 +198,7 @@ fn code_tab_saves_the_description(cx: &mut TestAppContext) {
     "{:?}",
     host.writes()
   );
-  assert!(!h.drawn("workspace-description-input"));
+  assert!(!h.shows(gpui::Role::MultilineTextInput, "Workspace description"));
 }
 
 #[gpui::test]
@@ -185,7 +216,7 @@ fn code_tab_saves_the_description_on_secondary_enter(cx: &mut TestAppContext) {
     "{:?}",
     host.writes()
   );
-  assert!(!h.drawn("workspace-description-input"));
+  assert!(!h.shows(gpui::Role::MultilineTextInput, "Workspace description"));
 }
 
 /// A workspace not opened from a PR may still have one on its branch.
@@ -249,8 +280,8 @@ fn code_tab_says_the_description_follows_the_pr(cx: &mut TestAppContext) {
   };
   let (mut h, _) = workspace_harness(cx, host, code_route());
   h.cx.run_until_parked();
-  assert!(h.drawn("workspace-description-synced"));
-  assert!(!h.drawn("workspace-description-sync"));
+  assert!(h.shows(gpui::Role::Label, "Synced with PR #42"));
+  assert!(!h.shows(gpui::Role::Button, "Sync"));
 }
 
 /// PR #42 with a locally edited description: `code_tab`'s harness, the
@@ -262,14 +293,17 @@ fn open_sync_menu(cx: &mut TestAppContext) -> (Harness, std::sync::Arc<FakeHost>
   };
   let (mut h, host) = workspace_harness(cx, host, code_route());
   h.cx.run_until_parked();
-  assert!(!h.drawn("workspace-description-synced"));
-  assert!(h.drawn("workspace-pr-draft"));
+  assert!(!h.shows(gpui::Role::Label, "Synced with PR #42"));
+  assert!(h.shows(
+    gpui::Role::Label,
+    "Local draft, sent to PR #42 on your next push"
+  ));
   // Beside the edit button, at the top of the description.
   let sync = h.cx.debug_bounds("workspace-description-sync").unwrap();
   let edit = h.cx.debug_bounds("workspace-description-edit").unwrap();
   assert!(sync.right() <= edit.left(), "{sync:?} {edit:?}");
   assert!(sync.top() <= edit.bottom(), "{sync:?} {edit:?}");
-  assert!(!h.drawn("workspace-description-sync-local"));
+  assert!(!h.shows(gpui::Role::MenuItem, "Save local version"));
   h.click("workspace-description-sync");
   h.cx.run_until_parked();
   (h, host)
@@ -332,17 +366,17 @@ fn code_tab_shows_github_beside_a_local_draft(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, host, code_route());
   h.cx.run_until_parked();
   // The draft shows first, editable.
-  assert!(h.drawn("workspace-about-tab-draft") && h.drawn("workspace-about-tab-github"));
-  assert!(h.drawn("workspace-description-edit"));
-  assert!(!h.drawn("workspace-about-github"));
+  assert!(h.shows(gpui::Role::Tab, "Local draft") && h.shows(gpui::Role::Tab, "GitHub"));
+  assert!(h.shows(gpui::Role::Button, "Edit description"));
+  assert!(!h.shows(gpui::Role::Group, "Pull request on GitHub"));
   h.click("workspace-about-tab-github");
-  assert!(h.drawn("workspace-about-github"));
-  assert!(!h.drawn("workspace-description-edit"));
+  assert!(h.shows(gpui::Role::Group, "Pull request on GitHub"));
+  assert!(!h.shows(gpui::Role::Button, "Edit description"));
   assert!(host.calls().contains(&"read pr text".to_string()));
   // Sync shows under either tab.
-  assert!(h.drawn("workspace-description-sync"));
+  assert!(h.shows(gpui::Role::Button, "Sync"));
   h.click("workspace-about-tab-draft");
-  assert!(h.drawn("workspace-description-edit"));
+  assert!(h.shows(gpui::Role::Button, "Edit description"));
 }
 
 #[gpui::test]
@@ -354,8 +388,8 @@ fn code_tab_has_no_tabs_without_a_draft(cx: &mut TestAppContext) {
   };
   let (mut h, _) = workspace_harness(cx, host, code_route());
   h.cx.run_until_parked();
-  assert!(!h.drawn("workspace-about-tab-github"));
-  assert!(h.drawn("workspace-description-edit"));
+  assert!(!h.shows(gpui::Role::Tab, "GitHub"));
+  assert!(h.shows(gpui::Role::Button, "Edit description"));
 }
 
 #[gpui::test]
@@ -373,8 +407,8 @@ fn the_about_card_keeps_the_description_but_not_the_title(cx: &mut TestAppContex
 fn no_about_card_without_a_description_or_pull_request(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, feature_host(), code_route());
   h.cx.run_until_parked();
-  assert!(h.drawn("workspace-code"));
-  assert!(!h.drawn("workspace-about"));
+  assert!(h.shows(gpui::Role::Group, "Code"));
+  assert!(!h.shows(gpui::Role::Group, "About"));
 }
 
 #[gpui::test]
@@ -431,23 +465,26 @@ fn code_tab_saves_a_pr_title_as_a_local_draft(cx: &mut TestAppContext) {
     "{writes:?}"
   );
   assert!(!writes.contains(&"push to PR 7".to_string()), "{writes:?}");
-  assert!(!h.drawn("workspace-title-input"));
+  assert!(!h.shows(gpui::Role::MultilineTextInput, "Workspace title"));
 }
 
 #[gpui::test]
 fn code_tab_offers_no_draft_without_a_pr(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, code_host(), code_route());
   h.click("workspace-description-edit");
-  assert!(!h.drawn("workspace-description-save-menu"));
+  assert!(!h.shows(gpui::Role::Button, "More save options"));
 }
 
 #[gpui::test]
 fn code_tab_shows_no_sync_note_without_a_pr(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, code_host(), code_route());
   h.cx.run_until_parked();
-  assert!(!h.drawn("workspace-description-synced"));
-  assert!(!h.drawn("workspace-description-sync"));
-  assert!(!h.drawn("workspace-pr-draft"));
+  assert!(!h.shows(gpui::Role::Label, "Synced with PR #42"));
+  assert!(!h.shows(gpui::Role::Button, "Sync"));
+  assert!(!h.shows(
+    gpui::Role::Label,
+    "Local draft, sent to PR #42 on your next push"
+  ));
 }
 
 #[gpui::test]
@@ -468,7 +505,7 @@ fn the_header_shows_the_title_in_place_of_the_branch(cx: &mut TestAppContext) {
 fn code_tab_saves_the_title(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, code_host(), code_route());
   h.click("workspace-title-edit");
-  assert!(h.drawn("workspace-title-input"));
+  assert!(h.shows(gpui::Role::MultilineTextInput, "Workspace title"));
   h.cx.simulate_input("!");
   h.click("workspace-title-save");
   h.cx.run_until_parked();
@@ -480,7 +517,7 @@ fn code_tab_saves_the_title(cx: &mut TestAppContext) {
     "{:?}",
     host.writes()
   );
-  assert!(!h.drawn("workspace-title-input"));
+  assert!(!h.shows(gpui::Role::MultilineTextInput, "Workspace title"));
 }
 
 #[gpui::test]
@@ -489,12 +526,12 @@ fn code_tab_discards_title_edits_on_cancel_and_escape(cx: &mut TestAppContext) {
   h.click("workspace-title-edit");
   h.cx.simulate_input("!");
   h.click("workspace-title-cancel");
-  assert!(!h.drawn("workspace-title-input"));
+  assert!(!h.shows(gpui::Role::MultilineTextInput, "Workspace title"));
   h.click("workspace-title-edit");
   h.cx.simulate_input("!");
   h.cx.simulate_keystrokes("escape");
   h.cx.run_until_parked();
-  assert!(!h.drawn("workspace-title-input"));
+  assert!(!h.shows(gpui::Role::MultilineTextInput, "Workspace title"));
   assert!(
     !host.writes().iter().any(|c| c.starts_with("set title")),
     "{:?}",
@@ -512,8 +549,14 @@ fn code_tab_warns_when_rebase_held_for_a_dirty_parent(cx: &mut TestAppContext) {
   };
   let (mut h, _) = workspace_harness(cx, host, code_route());
   h.click("code-status");
-  assert!(h.drawn("code-rebase-held-parent-dirty"));
-  assert!(!h.drawn("code-rebase-held-diverged"));
+  assert!(h.shows(
+    gpui::Role::Alert,
+    "Rebase skipped: feature/base has uncommitted changes"
+  ));
+  assert!(!h.shows(
+    gpui::Role::Alert,
+    "Rebase skipped: main diverged from origin"
+  ));
 }
 
 #[gpui::test]
@@ -526,8 +569,14 @@ fn code_tab_warns_when_rebase_held_for_diverged_target(cx: &mut TestAppContext) 
   };
   let (mut h, _) = workspace_harness(cx, host, code_route());
   h.click("code-status");
-  assert!(h.drawn("code-rebase-held-diverged"));
-  assert!(!h.drawn("code-rebase-held-parent-dirty"));
+  assert!(h.shows(
+    gpui::Role::Alert,
+    "Rebase skipped: main diverged from origin"
+  ));
+  assert!(!h.shows(
+    gpui::Role::Alert,
+    "Rebase skipped: feature/base has uncommitted changes"
+  ));
 }
 
 #[gpui::test]
@@ -540,21 +589,23 @@ fn code_tab_notes_a_rebase_onto_a_stale_target(cx: &mut TestAppContext) {
   };
   let (mut h, _) = workspace_harness(cx, host, code_route());
   h.click("code-status");
-  assert!(h.drawn("code-rebase-stale-target"));
+  assert!(h.shows(gpui::Role::Alert, "Rebased without fetching"));
 }
 
 #[gpui::test]
 fn code_tab_shows_no_rebase_warning_without_a_hold(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, code_host(), code_route());
-  for selector in [
-    "code-rebase-held-parent-dirty",
-    "code-rebase-held-diverged",
-    "code-rebase-stale-target",
-  ] {
-    assert!(!h.drawn(selector), "{selector}");
-  }
+  assert!(
+    h.rendered()
+      .query_all_by_role(
+        gpui_testing_library::by::role(gpui::Role::Alert)
+          .name(gpui_testing_library::TextMatch::regex("^Rebase"))
+      )
+      .is_empty(),
+    "no rebase alerts"
+  );
   assert!(host.calls().contains(&"read rebase hold 7".to_string()));
-  assert!(!h.drawn("code-status"), "no alerts, no status button");
+  assert!(!offers_alerts(&mut h), "no alerts, no status button");
 }
 
 #[gpui::test]
@@ -570,10 +621,10 @@ fn home_code_tab_has_the_action_row_and_no_prompt_card(cx: &mut TestAppContext) 
   let mut host = code_host();
   host.loaded.workspace = None;
   let (mut h, _) = workspace_harness(cx, host, home_code_route());
-  assert!(h.drawn("code-action-row"));
-  assert!(h.drawn("code-agent"));
-  assert!(h.drawn("code-go-to-file"));
-  assert!(!h.drawn("agent-task-input"));
+  assert!(h.shows(gpui::Role::Toolbar, "Code actions"));
+  assert!(h.shows(gpui::Role::Button, "Start an agent"));
+  assert!(h.shows(gpui::Role::Button, "Go to file"));
+  assert!(!h.shows(gpui::Role::MultilineTextInput, "Describe a task…"));
 }
 
 #[gpui::test]
@@ -591,13 +642,16 @@ fn code_tab_gathers_its_alerts_behind_the_status_button(cx: &mut TestAppContext)
     .expect("code host reads a status")
     .conflicted_files = vec!["README.md".into()];
   let (mut h, _) = workspace_harness(cx, host, code_route());
-  assert!(h.drawn("code-status"));
-  assert!(!h.drawn("code-conflicts"), "alerts wait in the popover");
-  assert!(!h.drawn("code-rebase-stale-target"));
+  assert!(offers_alerts(&mut h));
+  assert!(
+    !h.shows(gpui::Role::Alert, "1 file has conflicts"),
+    "alerts wait in the popover"
+  );
+  assert!(!h.shows(gpui::Role::Alert, "Rebased without fetching"));
   h.click("code-status");
-  assert!(h.drawn("code-status-popover"));
-  assert!(h.drawn("code-conflicts"));
-  assert!(h.drawn("code-rebase-stale-target"));
+  assert!(h.shows(gpui::Role::Dialog, "Alerts"));
+  assert!(h.shows(gpui::Role::Alert, "1 file has conflicts"));
+  assert!(h.shows(gpui::Role::Alert, "Rebased without fetching"));
   h.click("code-view-conflicts");
   h.cx.run_until_parked();
   assert_eq!(
@@ -614,11 +668,11 @@ fn code_tab_offers_archive_when_the_branch_was_deleted_on_remote(cx: &mut TestAp
   };
   let (mut h, host) = workspace_harness(cx, host, code_route());
   assert!(
-    !h.drawn("code-branch-deleted"),
+    !h.shows(gpui::Role::Alert, "Branch deleted on remote"),
     "alerts wait in the popover"
   );
   h.click("code-status");
-  assert!(h.drawn("code-branch-deleted"));
+  assert!(h.shows(gpui::Role::Alert, "Branch deleted on remote"));
   h.click("code-branch-deleted-archive");
   h.cx.run_until_parked();
   assert!(host.calls().contains(&"archive workspace 7".to_string()));
@@ -627,7 +681,7 @@ fn code_tab_offers_archive_when_the_branch_was_deleted_on_remote(cx: &mut TestAp
 #[gpui::test]
 fn code_tab_shows_no_deleted_branch_alert_while_the_branch_exists(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, code_host(), code_route());
-  assert!(!h.drawn("code-status"), "no alerts, no status button");
+  assert!(!offers_alerts(&mut h), "no alerts, no status button");
   assert!(host.calls().contains(&"read branch deleted 7".to_string()));
 }
 
@@ -645,7 +699,7 @@ fn screen(h: &mut Harness) -> gpui_testing_library::Screen {
 fn code_tab_groups_trunk_commits_under_a_read_only_divider(cx: &mut TestAppContext) {
   use gpui_testing_library::prelude::*;
   let mut host = code_host();
-  let mut target = commit("t", 1, 0);
+  let mut target = titled("t", "Release 1.2");
   target["on_target_only"] = true.into();
   target["is_immutable"] = true.into();
   host.history = serde_json::from_value(serde_json::json!({
@@ -655,7 +709,7 @@ fn code_tab_groups_trunk_commits_under_a_read_only_divider(cx: &mut TestAppConte
   }))
   .ok();
   let (mut h, _) = workspace_harness(cx, host, code_route());
-  assert!(h.drawn("commit-item-t"));
+  assert!(h.shows(gpui::Role::Button, "Release 1.2"));
   let screen = screen(&mut h);
   expect(screen.get_by_text("On main (read-only)")).to_be_visible();
   assert!(screen.query_by_text("Recent on main").is_none());
@@ -713,9 +767,12 @@ fn the_files_panel_error_is_plain_with_show_error_and_no_retry(cx: &mut TestAppC
   };
   let (mut h, _) = workspace_harness(cx, host, code_route());
   h.cx.run_until_parked();
-  assert!(h.drawn("code-files-error"));
-  assert!(!h.drawn("code-files-retry"), "no Retry in the files panel");
-  assert!(!h.drawn("code-files-error-popover"));
+  assert!(h.shows(gpui::Role::Status, "Can't show this workspace's files"));
+  assert!(
+    !h.shows(gpui::Role::Button, "Retry"),
+    "no Retry in the files panel"
+  );
+  assert!(!h.shows(gpui::Role::MultilineTextInput, "File read error"));
   {
     let screen = screen(&mut h);
     expect(screen.get_by_role(by::role(Role::Status).name("Can't show this workspace's files")))
@@ -736,7 +793,7 @@ fn the_files_panel_error_is_plain_with_show_error_and_no_retry(cx: &mut TestAppC
   h.click("code-files-show-error");
   h.cx.run_until_parked();
   assert!(
-    h.drawn("code-files-error-popover"),
+    h.shows(gpui::Role::MultilineTextInput, "File read error"),
     "Show error opens the error"
   );
   let screen = screen(&mut h);
@@ -759,10 +816,10 @@ fn the_commits_panel_error_has_show_error_but_no_retry_or_message(cx: &mut TestA
   };
   let (mut h, _) = workspace_harness(cx, host, code_route());
   h.cx.run_until_parked();
-  assert!(h.drawn("code-history-error"));
-  assert!(h.drawn("code-history-show-error"));
+  assert!(h.shows(gpui::Role::Status, "Couldn't load commits"));
+  assert!(h.shows(gpui::Role::Button, "Show error"));
   assert!(
-    !h.drawn("code-history-retry"),
+    !h.shows(gpui::Role::Button, "Retry"),
     "no Retry in the Commits panel"
   );
   let screen = screen(&mut h);
@@ -777,9 +834,9 @@ fn a_workspace_code_tab_draws_no_readme(cx: &mut TestAppContext) {
   let host = code_host();
   assert!(host.overview.readme.is_some(), "the overview has a readme");
   let (mut h, _) = workspace_harness(cx, host, code_route());
-  assert!(h.drawn("workspace-code"));
-  assert!(!h.drawn("code-readme"));
-  assert!(!h.drawn("code-readme-none"));
+  assert!(h.shows(gpui::Role::Group, "Code"));
+  assert!(!h.shows(gpui::Role::Group, "README"));
+  assert!(!h.shows(gpui::Role::Status, "No README.md"));
 }
 
 #[gpui::test]
@@ -787,8 +844,8 @@ fn a_workspace_code_tab_draws_no_missing_readme_box(cx: &mut TestAppContext) {
   let mut host = code_host();
   host.overview.readme = None;
   let (mut h, _) = workspace_harness(cx, host, code_route());
-  assert!(h.drawn("workspace-code"));
-  assert!(!h.drawn("code-readme-none"));
+  assert!(h.shows(gpui::Role::Group, "Code"));
+  assert!(!h.shows(gpui::Role::Status, "No README.md"));
 }
 
 #[gpui::test]
@@ -796,5 +853,5 @@ fn the_home_code_view_still_draws_the_readme(cx: &mut TestAppContext) {
   let mut host = code_host();
   host.loaded.workspace = None;
   let (mut h, _) = workspace_harness(cx, host, home_code_route());
-  assert!(h.drawn("code-readme"));
+  assert!(h.shows(gpui::Role::Group, "README"));
 }

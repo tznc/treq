@@ -6,6 +6,7 @@ use gpui::{
 };
 
 use crate::{theme, theme::Palette, zpx};
+use gpui_kit::base::TestSupportExt as _;
 
 /// An overlay surface drawn above everything, at its place in the layout:
 /// put it in a `relative()` trigger's parent. Close it on Escape and a
@@ -27,6 +28,7 @@ pub struct Popover {
   base: Stateful<Div>,
   palette: Palette,
   children: Vec<AnyElement>,
+  label: Option<SharedString>,
 }
 
 impl Popover {
@@ -37,7 +39,14 @@ impl Popover {
       base: div().id(id).debug_selector(move || selector),
       palette: *palette,
       children: Vec::new(),
+      label: None,
     }
+  }
+
+  /// Names the panel for assistive technology.
+  pub fn aria_label(mut self, label: impl Into<SharedString>) -> Self {
+    self.label = Some(label.into());
+    self
   }
 }
 
@@ -79,6 +88,10 @@ impl RenderOnce for Popover {
       .shadow_md()
       .occlude()
       .children(self.children);
+    let surface = match self.label {
+      Some(label) => surface.aria_label(label).test_support().into_any_element(),
+      None => surface.into_any_element(),
+    };
     deferred(
       anchored()
         .snap_to_window_with_margin(gpui::px(8.))

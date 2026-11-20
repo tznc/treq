@@ -151,6 +151,21 @@ struct SideData {
   last_changed: Option<usize>,
 }
 
+/// The file list's default width, and how far its edge drags.
+const SIDE_WIDTH: f32 = 240.;
+const MIN_SIDE_WIDTH: f32 = 160.;
+const MAX_SIDE_WIDTH: f32 = 600.;
+
+/// The file list's edge being dragged.
+#[derive(Clone, Copy)]
+struct SideResize;
+
+impl Render for SideResize {
+  fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    gpui::Empty
+  }
+}
+
 pub struct ChangesView {
   host: Host,
   react: ActionSink,
@@ -212,6 +227,9 @@ pub struct ChangesView {
   /// The sidebar's rows and the list drawing them.
   side: ListRows<SideRow>,
   side_data: SideData,
+  /// The file list's width, while dragged and after.
+  side_width: f32,
+  side_resizing: bool,
   pub(super) scroll_to: Option<String>,
   /// The button a dropdown opens below, by key.
   anchors: Rc<RefCell<HashMap<String, Bounds<Pixels>>>>,
@@ -250,6 +268,7 @@ impl ChangesView {
     let mut this = Self::blank(parent, options, host, react, popups, dark, cx);
     this.hydrate_review(cx);
     this.hydrate_viewed(cx);
+    this.hydrate_side_width(cx);
     this.load(cx);
     this.watch_threads(cx);
     this.load_pr(cx);
@@ -309,6 +328,8 @@ impl ChangesView {
       diff: rows::DiffRows::default(),
       side: ListRows::default(),
       side_data: SideData::default(),
+      side_width: SIDE_WIDTH,
+      side_resizing: false,
       scroll_to: None,
       anchors: Rc::default(),
       review: review::Review::default(),
@@ -943,6 +964,36 @@ impl ChangesView {
   /// The diff a file card shows: the working copy's, else the branch's.
   fn file_hunks(&self, path: &str) -> Option<FileHunks> {
     self.shown_hunks(path).cloned()
+  }
+
+  /// The file list's width as last left.
+  fn hydrate_side_width(&mut self, cx: &mut Context<Self>) {
+    self.run(
+      |host, _| Ok::<_, String>(host.file_list_width()),
+      |view, result, cx| {
+        if let Ok(Some(width)) = result {
+          if width.is_finite() && !view.side_resizing {
+            view.side_width = width.round().clamp(MIN_SIDE_WIDTH, MAX_SIDE_WIDTH);
+            cx.notify();
+          }
+        }
+      },
+      cx,
+    );
+  }
+
+  /// Keeps the file list's width for the next window and launch.
+  fn save_side_width(&mut self, cx: &mut Context<Self>) {
+    let width = self.side_width;
+    self.run(
+      move |host, _| host.save_file_list_width(width),
+      |_, result, _| {
+        if let Err(err) = result {
+          log::warn!("Failed to save the file list width: {err}");
+        }
+      },
+      cx,
+    );
   }
 
   /// The files kept as viewed, folded as when they were marked; the stale
@@ -1807,7 +1858,7 @@ impl ChangesView {
     cx.defer(move |cx| popups(request, cx));
   }
 
-  /// Opens the "Copy link" menu for `url` at `at`, for a right-click on
+  /// Opens the copy-link menu for `url` at `at`, for a right-click on
   /// what opens it.
   fn copy_link(&self, url: String, at: gpui::Point<gpui::Pixels>, cx: &mut App) {
     let host = self.host.clone();
@@ -1881,12 +1932,16 @@ impl Render for ChangesView {
     }
     let p = theme::palette(self.dark);
     let root = ui::text(div(), TextSize::Sm)
+      .id("changes-diff-viewer")
       .debug_selector(|| "changes-diff-viewer".into())
+      .role(gpui::Role::Group)
+      .aria_label("Changes")
       .size_full()
       .flex()
       .overflow_hidden()
       .bg(p.background)
       .text_color(p.foreground)
+      .test_support()
       .track_focus(&self.focus)
       .on_key_down(cx.listener(|view, e: &KeyDownEvent, window, cx| {
         let k = &e.keystroke;
@@ -2007,16 +2062,14 @@ impl ChangesView {
         data.unstaged.push(ix);
       }
     }
-    let committed = match self.options.show_committed {
-      Some(false) => 0,
-      _ => snapshot.committed.len(),
-    };
+    let committed = snapshot.committed.len();
+    let committed_hidden = self.options.show_committed == Some(false);
     let commit_box = SideRow::CommitBox {
       lines: self.message.lines().count().max(1),
       error: self.message_error.is_some(),
       pending: self.pending.is_some(),
     };
-    if listed.is_empty() && committed == 0 && data.conflicted.is_empty() {
+    if listed.is_empty() && (committed == 0 || committed_hidden) && data.conflicted.is_empty() {
       rows.push(SideRow::Empty);
     } else if listed.is_empty() {
       // The filter button shares the "Nothing to commit" row.
@@ -2042,7 +2095,7 @@ impl ChangesView {
     }
     if committed > 0 {
       rows.push(SideRow::CommittedHeader);
-      if !self.committed_collapsed {
+      if !self.committed_collapsed && !committed_hidden {
         data.committed = self.visible_committed_at();
         rows.extend((0..data.committed.len()).map(SideRow::Committed));
       }
@@ -2107,8 +2160,33 @@ impl ChangesView {
         .size_full(),
       )
     };
+    let resizing = self.side_resizing;
+    let primary = p.primary;
+    let palette = *p;
+    let handle = div()
+      .id("changes-file-list-resize")
+      .debug_selector(|| "changes-file-list-resize".into())
+      .absolute()
+      .top_0()
+      .bottom_0()
+      .right_0()
+      .w(zpx(4.))
+      .cursor_ew_resize()
+      .when(resizing, |this| this.bg(primary))
+      .hover(move |style| style.bg(palette.handle_hover()))
+      .on_drag(SideResize, |drag, _, _, cx| cx.new(|_| *drag))
+      .on_click(cx.listener(|this, event: &gpui::ClickEvent, _, cx| {
+        cx.stop_propagation();
+        if event.click_count() >= 2 {
+          this.side_width = SIDE_WIDTH;
+          this.save_side_width(cx);
+          cx.notify();
+        }
+      }));
     div()
-      .w(zpx(240.))
+      .debug_selector(|| "changes-file-list".into())
+      .relative()
+      .w(zpx(self.side_width))
       .flex_none()
       .h_full()
       .flex()
@@ -2117,6 +2195,37 @@ impl ChangesView {
       .border_color(p.border)
       .bg(p.sidebar)
       .child(list)
+      .child(handle)
+      .on_drag_move(
+        cx.listener(|this, event: &gpui::DragMoveEvent<SideResize>, _, cx| {
+          let width = f32::from(event.event.position.x - event.bounds.left())
+            .round()
+            .clamp(MIN_SIDE_WIDTH, MAX_SIDE_WIDTH);
+          if this.side_width != width || !this.side_resizing {
+            this.side_width = width;
+            this.side_resizing = true;
+            cx.notify();
+          }
+        }),
+      )
+      .on_mouse_up_out(
+        MouseButton::Left,
+        cx.listener(|this, _, _, cx| {
+          if std::mem::take(&mut this.side_resizing) {
+            this.save_side_width(cx);
+            cx.notify();
+          }
+        }),
+      )
+      .on_mouse_up(
+        MouseButton::Left,
+        cx.listener(|this, _, _, cx| {
+          if std::mem::take(&mut this.side_resizing) {
+            this.save_side_width(cx);
+            cx.notify();
+          }
+        }),
+      )
   }
 
   /// One row of the sidebar.
@@ -2176,7 +2285,11 @@ impl ChangesView {
         .justify_between()
         .child(
           ui::text(div(), TextSize::Sm)
+            .id("changes-nothing-to-commit")
             .debug_selector(|| "changes-nothing-to-commit".into())
+            .role(gpui::Role::Status)
+            .aria_label("Nothing to commit")
+            .test_support()
             .py_2()
             .text_color(p.muted_foreground)
             .child("Nothing to commit"),
@@ -2208,21 +2321,20 @@ impl ChangesView {
     }
   }
 
-  /// The row above the file lists whose filter menu picks what they show:
-  /// generated files and the committed group, when either applies.
+  /// The row above the file lists whose filter menu hides generated files,
+  /// when there are any.
   fn filter_shown(&self) -> bool {
-    let generated = self
+    self
       .snapshot
       .as_ref()
-      .is_some_and(|s| !s.generated.is_empty());
-    generated || self.options.show_committed.is_some()
+      .is_some_and(|s| !s.generated.is_empty())
   }
 
   fn filter_row(&mut self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
     if !self.filter_shown() {
       return None;
     }
-    let filtering = self.hide_generated || self.options.show_committed == Some(false);
+    let filtering = self.hide_generated;
     let primary = p.primary;
     let filter = header_button(
       "changes-filter",
@@ -2268,20 +2380,6 @@ impl ChangesView {
             .ignore_closed();
         })
         .check(!self.hide_generated),
-      );
-    }
-    if let Some(show) = self.options.show_committed {
-      let entity = cx.entity().downgrade();
-      items.push(
-        NativeMenuItem::item("Committed", move |cx| {
-          entity
-            .update(cx, |view, cx| {
-              let show = view.options.show_committed.unwrap_or(show);
-              view.field("changes.showCommitted", (!show).into(), cx);
-            })
-            .ignore_closed();
-        })
-        .check(show),
       );
     }
     self.popup(
@@ -2648,18 +2746,36 @@ impl ChangesView {
 
   fn committed_header(&mut self, p: &Palette, cx: &mut Context<Self>) -> Div {
     let total = self.snapshot.as_ref().map_or(0, |s| s.committed.len());
-    div().pt_4().child(
-      ui::SectionHeader::new("committed-section-title", "Committed", p)
-        .collapsible(
-          "committed-section-toggle",
-          self.committed_collapsed,
-          cx.listener(|view, _, _, cx| {
+    let hidden = self.options.show_committed == Some(false);
+    let mut header = ui::SectionHeader::new("committed-section-title", "Committed", p)
+      .collapsible(
+        "committed-section-toggle",
+        self.committed_collapsed || hidden,
+        cx.listener(|view, _, _, cx| {
+          if view.options.show_committed == Some(false) {
+            view.field("changes.showCommitted", true.into(), cx);
+            view.committed_collapsed = false;
+          } else {
             view.committed_collapsed = !view.committed_collapsed;
-            cx.notify();
-          }),
-        )
-        .count(total),
-    )
+          }
+          cx.notify();
+        }),
+      )
+      .count(total);
+    if self.options.show_committed.is_some() {
+      header = header.action(
+        ui::Checkbox::new("committed-hide", p)
+          .checked(hidden)
+          .label("Hide")
+          .gap_1()
+          .text_color(p.muted_foreground)
+          .on_click(cx.listener(move |view, _, _, cx| {
+            cx.stop_propagation();
+            view.field("changes.showCommitted", hidden.into(), cx);
+          })),
+      );
+    }
+    div().pt_4().child(header)
   }
 
   /// The `i`th committed file's row.
@@ -2687,6 +2803,8 @@ impl ChangesView {
     .selected(active)
     .gap_1()
     .px_0()
+    // Matches the left inset: 2px border + 4px margin.
+    .pr_1p5()
     .rounded_none()
     .border_l_2()
     .border_color(gpui::transparent_black())
@@ -2784,8 +2902,9 @@ impl ChangesView {
     let path = file.path.clone();
     let name_color = p.foreground;
     let dir_color = p.muted_foreground.opacity(0.6);
-    let small =
-      |id: String, icon: &'static str, fg: Hsla, hidden: bool| file_action(id, icon, fg, hidden, p);
+    let small = |id: String, name: String, icon: &'static str, fg: Hsla, hidden: bool| {
+      file_action(id, name, icon, fg, hidden, p)
+    };
     let red = Tone::Danger.text(p);
     let status_color = p.muted_foreground;
     let mut actions = div()
@@ -2806,6 +2925,7 @@ impl ChangesView {
       let tip_key = format!("discard-tip-{}", file.path);
       let el = small(
         format!("discard-{}", file.path),
+        format!("Discard changes to {}", file.path),
         theme::ICON_UNDO,
         red,
         hidden,
@@ -2813,12 +2933,14 @@ impl ChangesView {
       .on_click(cx.listener(move |view, _, _, cx| {
         cx.stop_propagation();
         view.discard_files(&target, cx);
-      }));
+      }))
+      .test_support();
       actions = actions.child(self.tip(tip_key, "Discard selected files", el, cx));
       let target = path.clone();
       let tip_key = format!("stage-tip-{}", file.path);
       let el = small(
         format!("stage-{}", file.path),
+        format!("Stage {}", file.path),
         theme::ICON_PLUS,
         name_color,
         hidden,
@@ -2826,7 +2948,8 @@ impl ChangesView {
       .on_click(cx.listener(move |view, _, _, cx| {
         cx.stop_propagation();
         view.stage(&target, cx);
-      }));
+      }))
+      .test_support();
       actions = actions.child(self.tip(tip_key, "Stage file(s) for commit", el, cx));
     }
     if staged {
@@ -2834,6 +2957,7 @@ impl ChangesView {
       let tip_key = format!("unstage-tip-{}", file.path);
       let el = small(
         format!("unstage-{}", file.path),
+        format!("Unstage {}", file.path),
         theme::ICON_MINUS,
         name_color,
         !selected,
@@ -2841,7 +2965,8 @@ impl ChangesView {
       .on_click(cx.listener(move |view, _, _, cx| {
         cx.stop_propagation();
         view.unstage(&target, cx);
-      }));
+      }))
+      .test_support();
       actions = actions.child(self.tip(tip_key, "Unstage file", el, cx));
     }
     let (click, menu) = (path.clone(), path);
@@ -3305,7 +3430,7 @@ impl ChangesView {
           ),
       );
     let mut right = div().flex().items_center().gap_2();
-    if !committed && !self.read_only() {
+    if !self.read_only() {
       right = right.child(
         self.tip(
           format!("add-file-comment-tip-{path}"),
@@ -3645,6 +3770,7 @@ fn skeleton(p: &Palette) -> Div {
 /// hover when `hidden`.
 fn file_action(
   id: String,
+  name: String,
   icon: &'static str,
   fg: Hsla,
   hidden: bool,
@@ -3654,6 +3780,8 @@ fn file_action(
   div()
     .id(SharedString::from(id))
     .debug_selector(move || selector)
+    .role(gpui::Role::Button)
+    .aria_label(name)
     .p_0p5()
     .rounded(radius::SM)
     .cursor_pointer()

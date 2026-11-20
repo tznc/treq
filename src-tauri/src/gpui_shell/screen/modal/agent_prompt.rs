@@ -800,14 +800,19 @@ impl AgentPromptView {
       } else {
         ""
       };
+      let note = format!("Opens a workspace for {}{noun}", issue.key);
       return ui::text(div(), TextSize::Sm)
+        .id("agent-prompt-issue-note")
+        .role(gpui::Role::Paragraph)
+        .aria_label(note.clone())
         .debug_selector(|| "agent-prompt-issue-note".into())
         .flex()
         .items_center()
         .gap_2()
         .text_color(p.muted_foreground)
         .child(ui::icon(theme::ICON_BRANCH, 16., p.muted_foreground))
-        .child(format!("Opens a workspace for {}{noun}", issue.key))
+        .child(note)
+        .test_support()
         .into_any_element();
     }
     let name = self
@@ -869,12 +874,15 @@ impl AgentPromptView {
               .on_click(
                 cx.listener(move |view, _, window, cx| view.choose_workspace(id, window, cx)),
               )
+              .test_support()
           }))
           .into_any_element()
       };
       deferred(
         div()
           .id("agent-prompt-workspace-popover")
+          .role(gpui::Role::Dialog)
+          .aria_label("Choose a workspace")
           .debug_selector(|| "agent-prompt-workspace-popover".into())
           .absolute()
           .top(zpx(44.))
@@ -920,7 +928,8 @@ impl AgentPromptView {
               .overflow_y_scroll()
               .p_1()
               .child(list),
-          ),
+          )
+          .test_support(),
       )
       .with_priority(3)
     });
@@ -953,6 +962,9 @@ impl AgentPromptView {
         // Short label (['chip']): 11px is fine.
         // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
+          .id("issue-chip")
+          .role(gpui::Role::Group)
+          .aria_label(format!("{} {}", issue.source.label(), issue.key))
           .debug_selector(|| "issue-chip".into())
           .flex()
           .items_center()
@@ -988,7 +1000,8 @@ impl AgentPromptView {
                 view.issue = None;
                 cx.notify();
               })),
-          ),
+          )
+          .test_support(),
       )
   }
 
@@ -1034,7 +1047,14 @@ impl AgentPromptView {
               let index = view.mention.as_ref().map_or(0, |m| m.index);
               view.select_mention(index, window, cx);
               cx.stop_propagation();
-            } else if action.secondary && !action.shift {
+            }
+          }))
+          // ⌘/Ctrl+Enter is unbound in inputs (treq-ui `init`), so it
+          // arrives as a key, not an `Enter` action.
+          .capture_key_down(cx.listener(|view, e: &gpui::KeyDownEvent, _, cx| {
+            let k = &e.keystroke;
+            let held = crate::gpui_shell::keys::held(k.modifiers);
+            if k.key == "enter" && (held.platform || held.control) && !held.shift {
               view.submit(cx);
               cx.stop_propagation();
             }
