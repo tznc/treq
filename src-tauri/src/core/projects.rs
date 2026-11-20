@@ -67,6 +67,10 @@ pub fn init(conn: &Connection) -> rusqlite::Result<()> {
       "ALTER TABLE projects ADD COLUMN draft INTEGER NOT NULL DEFAULT 0",
     ),
     ("org_id", "ALTER TABLE projects ADD COLUMN org_id TEXT"),
+    (
+      "clone_directory",
+      "ALTER TABLE projects ADD COLUMN clone_directory TEXT NOT NULL DEFAULT ''",
+    ),
   ] {
     let has: i64 = conn.query_row(
       "SELECT COUNT(*) FROM pragma_table_info('projects') WHERE name = ?1",
@@ -454,6 +458,29 @@ pub fn clone_dir(db: &crate::db::Database) -> String {
     .flatten()
     .filter(|d| !d.trim().is_empty())
     .unwrap_or_else(default_clone_dir)
+}
+
+/// Project `id`'s own clone folder; `""` when it follows the app's.
+pub fn project_clone_dir(conn: &Connection, id: &str) -> Result<String, String> {
+  conn
+    .query_row(
+      "SELECT clone_directory FROM projects WHERE id = ?1",
+      [id],
+      |r| r.get(0),
+    )
+    .map_err(err)
+}
+
+/// Sets project `id`'s clone folder; `""` follows the app's.
+pub fn set_project_clone_dir(conn: &Connection, id: &str, dir: &str) -> Result<(), String> {
+  exists(conn, id)?;
+  conn
+    .execute(
+      "UPDATE projects SET clone_directory = ?2 WHERE id = ?1",
+      params![id, dir.trim()],
+    )
+    .map(drop)
+    .map_err(err)
 }
 
 /// Where Treq clones `url` inside folder `dir`: `<dir>/<owner>/<repo>`, the
@@ -1213,6 +1240,21 @@ mod tests {
     assert!(Path::new(&path).join("README.md").exists());
     assert!(path.starts_with(&tpl(root.path())), "{path}");
     assert!(path.ends_with("/owner/name"), "{path}");
+  }
+
+  #[test]
+  fn a_project_stores_its_own_clone_dir() {
+    let conn = conn();
+    let p = save(&conn, "a", &repos(&["/r/one"])).unwrap();
+    assert_eq!(project_clone_dir(&conn, &p.id).unwrap(), "");
+    set_project_clone_dir(&conn, &p.id, " /proj ").unwrap();
+    assert_eq!(project_clone_dir(&conn, &p.id).unwrap(), "/proj");
+  }
+
+  #[test]
+  fn setting_a_clone_dir_needs_an_existing_project() {
+    let conn = conn();
+    assert!(set_project_clone_dir(&conn, "nope", "/x").is_err());
   }
 
   #[test]
