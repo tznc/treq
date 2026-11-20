@@ -18,7 +18,7 @@ test("review-quote-button: in the card's bottom row", async ({ page }) => {
     name: "25-quote-01-bottom-row",
     title: "Quote button in the comment's bottom row",
     expectations: [
-      "Each review comment's bottom row shows add-reaction, any reaction chips, then a quote-icon button",
+      "Each review comment's bottom row shows add-reaction, any reaction chips, then an outlined 'Quote' button with the agent (bot) icon",
       "Nothing sits at the card's top-right and nothing is clipped between cards",
     ],
   });

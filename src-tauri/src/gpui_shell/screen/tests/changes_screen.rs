@@ -1309,6 +1309,8 @@ fn review_thread_quote_button_sits_in_the_card_bottom_row(cx: &mut TestAppContex
     "{quote:?} outside {card:?}"
   );
   assert!(quote.top() >= body.bottom(), "{quote:?} not below {body:?}");
+  // A labelled "Quote" button, not a bare 24px icon.
+  assert!(quote.size.width > gpui::px(40.), "{quote:?} has no label");
 }
 
 #[gpui::test]
