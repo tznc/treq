@@ -710,7 +710,7 @@ const GROUP_INDENT: f32 = 4.;
 /// Indentation of a row's content: one 12px icon per level, so a child's
 /// icon starts past its parent's.
 /// The space between two workspace rows.
-const ROW_GAP: f32 = 2.;
+const ROW_GAP: f32 = 0.;
 
 /// How far a nested row's elbow reaches above the row: across the gap and
 /// the parent row's space under its 12px icon, stopping 1px short of it.
