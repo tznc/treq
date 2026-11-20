@@ -1296,17 +1296,19 @@ fn a_review_thread_draws_its_replies_as_one_card(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn review_thread_quote_button_sits_inside_its_card(cx: &mut TestAppContext) {
+fn review_thread_quote_button_sits_in_the_card_bottom_row(cx: &mut TestAppContext) {
   let mut host = changes_host();
   host.threads = vec![gh_thread("t1", 2, false)];
   let (mut h, _host) = workspace_harness(cx, host, changes_route());
   h.cx.run_until_parked();
   let card = h.cx.debug_bounds("github-comment-card").expect("card");
   let quote = h.cx.debug_bounds("github-comment-quote").expect("quote");
+  let body = h.cx.debug_bounds("github-comment-body").expect("body");
   assert!(
     card.contains(&quote.origin) && card.contains(&quote.bottom_right()),
     "{quote:?} outside {card:?}"
   );
+  assert!(quote.top() >= body.bottom(), "{quote:?} not below {body:?}");
 }
 
 #[gpui::test]
