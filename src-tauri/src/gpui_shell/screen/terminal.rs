@@ -35,7 +35,7 @@ use tauri_plugin_gpui::gpui::{
   self, anchored, deferred, div, img, linear_color_stop, linear_gradient, point, prelude::*, px,
   relative, AnyElement, App, Bounds, ClipboardItem, Context, Div, Entity, ExternalPaths,
   FocusHandle, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, ObjectFit, Pixels,
-  ScrollHandle, ScrollWheelEvent, SharedString, Stateful, Subscription, Task, Window,
+  ScrollHandle, ScrollWheelEvent, SharedString, Subscription, Task, Window,
 };
 
 use super::{
@@ -1590,6 +1590,10 @@ impl TerminalView {
     );
     Some(
       div()
+        .id("terminal-search")
+        .role(gpui::Role::Search)
+        .aria_label("Find in terminal")
+        .test_support()
         .debug_selector(|| "terminal-search".into())
         .absolute()
         .top_2()
@@ -1699,7 +1703,7 @@ impl TerminalView {
     target: &RemoteTarget,
     p: &Palette,
     cx: &mut Context<Self>,
-  ) -> Option<Div> {
+  ) -> Option<AnyElement> {
     let error = match &self.status {
       Status::Failed(error) | Status::AgentFailed(error) => Some(error.clone()),
       _ => None,
@@ -1711,6 +1715,10 @@ impl TerminalView {
       });
       return Some(
         ui::text(div(), TextSize::Sm)
+          .id("remote-terminal-lost")
+          .role(gpui::Role::Alert)
+          .aria_label(message.clone())
+          .test_support()
           .debug_selector(|| "remote-terminal-lost".into())
           .absolute()
           .inset_0()
@@ -1749,15 +1757,25 @@ impl TerminalView {
                   .label("Close")
                   .on_click(cx.listener(|view, _, _, cx| (view.on_event)(TermEvent::Close, cx))),
               ),
-          ),
+          )
+          .into_any_element(),
       );
     }
     if self.status != Status::Preparing || self.remote.ended.is_some() {
       return None;
     }
     let reattaching = target.reattach || self.remote.attaches > 0;
+    let label = if reattaching {
+      "Reattaching…"
+    } else {
+      "Starting remote session…"
+    };
     Some(
       ui::text(div(), TextSize::Sm)
+        .id("remote-terminal-attaching")
+        .role(gpui::Role::Status)
+        .aria_label(label)
+        .test_support()
         .debug_selector(|| "remote-terminal-attaching".into())
         .absolute()
         .inset_0()
@@ -1772,18 +1790,19 @@ impl TerminalView {
           20.,
           p.muted_foreground,
         )))
-        .child(if reattaching {
-          "Reattaching…"
-        } else {
-          "Starting remote session…"
-        }),
+        .child(label)
+        .into_any_element(),
     )
   }
 
-  fn overlay(&self, p: &Palette, cx: &mut Context<Self>) -> Option<Div> {
+  fn overlay(&self, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
     if let Some(target) = self.remote_target() {
       return self.remote_overlay(&target.clone(), p, cx);
     }
+    self.local_overlay(p, cx).map(IntoElement::into_any_element)
+  }
+
+  fn local_overlay(&self, p: &Palette, cx: &mut Context<Self>) -> Option<Div> {
     match &self.status {
       Status::Ready => None,
       Status::Preparing => Some(
@@ -2508,6 +2527,10 @@ impl TerminalPane {
   fn title(&self, id: &str, text: String, color: gpui::Hsla, cx: &mut Context<Self>) -> AnyElement {
     if let Some(renaming) = self.renaming.as_ref().filter(|r| r.id == id) {
       return div()
+        .id("terminal-rename-input")
+        .role(gpui::Role::Group)
+        .aria_label("Rename terminal")
+        .test_support()
         .debug_selector(|| "terminal-rename-input".into())
         .w(zpx(200.))
         .min_w_0()
@@ -3556,7 +3579,7 @@ impl TerminalPane {
     cx.notify();
   }
 
-  fn controls(&mut self, p: &Palette, cx: &mut Context<Self>) -> Stateful<Div> {
+  fn controls(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     let fg = p.foreground;
     let button = |id: &'static str, icon: &'static str, name: &'static str| {
       div()
@@ -3628,7 +3651,8 @@ impl TerminalPane {
             let open = std::mem::take(&mut pane.environment_menu);
             cx.notify();
             open
-          });
+          })
+          .test_support();
           deferred(panel).with_priority(1)
         });
         buttons.push(
@@ -3692,6 +3716,9 @@ impl TerminalPane {
     }
     div()
       .id("terminal-pane-controls")
+      .role(gpui::Role::Toolbar)
+      .aria_label("Terminal pane controls")
+      .test_support()
       .debug_selector(|| "terminal-pane-controls".into())
       .flex()
       .items_center()
@@ -3767,6 +3794,7 @@ impl TerminalPane {
         .id(SharedString::from(format!("terminal-workspace-label-{id}")))
         .role(gpui::Role::Button)
         .aria_label(format!("Go to {name}"))
+        .test_support()
         .debug_selector(|| "terminal-workspace-label".into())
         .max_w(zpx(360.))
         .flex()
@@ -3988,6 +4016,7 @@ impl TerminalPane {
         });
         let detach_id = column.id.clone();
         let detach = ui::Button::new("remote-terminal-detach", p)
+          .aria_label("Detach")
           .variant(ui::Variant::Ghost)
           .size(ui::Size::IconXs)
           .icon(theme::ICON_X, 14.)
@@ -4006,6 +4035,10 @@ impl TerminalPane {
         // Wrapped so the active column's selector does not replace this one.
         div().flex_shrink_0().child(
           ui::text(div(), TextSize::Sm)
+            .id("remote-terminal-header")
+            .role(gpui::Role::Group)
+            .aria_label(format!("{} session", target.endpoint.hostname))
+            .test_support()
             .debug_selector(|| "remote-terminal-header".into())
             .h(zpx(REMOTE_HEADER_HEIGHT))
             .min_h(zpx(REMOTE_HEADER_HEIGHT))
@@ -4034,15 +4067,20 @@ impl TerminalPane {
                 )
                 .child(self.title(&column.id, column_title(&column.kind), muted, cx))
                 .children(ended.map(|status| {
+                  let text = match status {
+                    Some(code) => format!("(session ended, exit {code})"),
+                    None => "(session ended)".into(),
+                  };
                   // Short label (['status label']): 11px is fine.
                   // ast-grep-ignore: gpui-text-xs-short-label-only
                   ui::text(div(), TextSize::Xs)
+                    .id("remote-terminal-ended")
+                    .role(gpui::Role::Status)
+                    .aria_label(text.clone())
+                    .test_support()
                     .debug_selector(|| "remote-terminal-ended".into())
                     .text_color(ui::Tone::Warning.text(p))
-                    .child(match status {
-                      Some(code) => format!("(session ended, exit {code})"),
-                      None => "(session ended)".into(),
-                    })
+                    .child(text)
                 })),
             )
             .child(
@@ -4149,6 +4187,14 @@ impl TerminalPane {
       .id(SharedString::from(format!("terminal-column-{id}")))
       .role(gpui::Role::Group)
       .aria_label(name)
+      .aria_selected(active)
+      .aria_value(if current {
+        "This workspace's terminal"
+      } else if dimmed {
+        "Another workspace's terminal, dimmed"
+      } else {
+        "Another workspace's terminal"
+      })
       .test_support()
       .debug_selector(move || {
         format!(
@@ -4625,6 +4671,10 @@ impl Render for TerminalPane {
     }
     if self.collapsed {
       return div()
+        .id("workspace-terminal-pane")
+        .role(gpui::Role::Region)
+        .aria_label("Terminal pane")
+        .test_support()
         .debug_selector(|| "workspace-terminal-pane".into())
         .flex()
         .justify_end()
@@ -4779,6 +4829,10 @@ impl Render for TerminalPane {
       })
       .child(
         div()
+          .id("workspace-terminal-pane")
+          .role(gpui::Role::Region)
+          .aria_label("Terminal pane")
+          .test_support()
           .debug_selector(|| "workspace-terminal-pane".into())
           .relative()
           .flex_1()
@@ -4791,6 +4845,9 @@ impl Render for TerminalPane {
           .child(
             div()
               .id("terminal-scroll-container")
+              .role(gpui::Role::Group)
+              .aria_label("Terminals")
+              .test_support()
               .debug_selector(|| "terminal-scroll-container".into())
               .flex_1()
               .min_h_0()

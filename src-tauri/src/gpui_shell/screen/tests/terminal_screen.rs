@@ -5,14 +5,14 @@ use super::*;
 #[gpui::test]
 fn terminal_pane_hides_its_chip_without_terminals(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
-  assert!(!h.drawn("terminal-pane-controls"));
-  assert!(!h.drawn("terminal-scroll-container"));
+  assert!(!h.shows(gpui::Role::Toolbar, "Terminal pane controls"));
+  assert!(!h.shows(gpui::Role::Group, "Terminals"));
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
-  assert!(h.drawn("terminal-scroll-container"));
+  assert!(h.shows(gpui::Role::Group, "Terminals"));
   h.click("terminal-collapse");
-  assert!(!h.drawn("terminal-scroll-container"));
+  assert!(!h.shows(gpui::Role::Group, "Terminals"));
   h.click("terminal-expand");
-  assert!(h.drawn("terminal-scroll-container"));
+  assert!(h.shows(gpui::Role::Group, "Terminals"));
 }
 
 #[gpui::test]
@@ -29,9 +29,9 @@ fn terminal_pane_opens_the_active_agent_session(cx: &mut TestAppContext) {
     },
   );
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
-  assert!(h.drawn("terminal-column-agent"));
-  assert!(h.drawn("terminal-column-active"));
-  assert!(h.drawn("terminal-workspace-label"));
+  assert!(h.shows(gpui::Role::Group, "Claude 1 terminal"));
+  assert_eq!(active_column(&mut h).as_deref(), Some("Claude 1 terminal"));
+  assert!(h.shows(gpui::Role::Button, "Go to Add login"));
   let pty = agent_pty();
   let calls = host.calls();
   assert!(
@@ -84,7 +84,7 @@ fn terminal_pane_opens_an_agent_session_of_a_supporting_repo(cx: &mut TestAppCon
     &mut h,
     serde_json::json!({ "activeSessionId": pane_id, "mainRepoPath": "/repo" }),
   );
-  assert!(h.drawn("terminal-column-agent"));
+  assert!(h.shows(gpui::Role::Group, "Claude 1 terminal"));
   let pty = terminal_data::agent_pty_id("/support", 3);
   let calls = host.calls();
   assert!(
@@ -271,7 +271,7 @@ fn terminal_search_keeps_what_is_typed_out_of_the_pty(cx: &mut TestAppContext) {
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
   h.click("terminal-body");
   h.click("terminal-search-button");
-  assert!(h.drawn("terminal-search"));
+  assert!(h.shows(gpui::Role::Search, "Find in terminal"));
   h.cx.simulate_input("dark");
   h.cx.run_until_parked();
   let writes: Vec<String> = host
@@ -286,13 +286,13 @@ fn terminal_search_keeps_what_is_typed_out_of_the_pty(cx: &mut TestAppContext) {
 fn terminal_pane_drops_the_active_column_on_a_click_outside(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
-  assert!(h.drawn("terminal-column-active"));
+  assert_eq!(active_column(&mut h).as_deref(), Some("Claude 1 terminal"));
   h.click("terminal-maximize");
   // The pane's controls are part of it.
-  assert!(h.drawn("terminal-column-active"));
+  assert_eq!(active_column(&mut h).as_deref(), Some("Claude 1 terminal"));
   h.click("terminal-restore");
   h.click("workspace-header");
-  assert!(!h.drawn("terminal-column-active"));
+  assert_eq!(active_column(&mut h), None);
 }
 
 #[gpui::test]
@@ -300,12 +300,12 @@ fn terminal_pane_picks_the_environment_new_terminals_run_in(cx: &mut TestAppCont
   let mut host = terminal_host();
   host.devcontainers = true;
   let (mut h, host) = workspace_harness(cx, host, terminal_route(serde_json::json!({})));
-  assert!(!h.drawn("terminal-environment"));
+  assert!(!h.shows(gpui::Role::Button, "Local"));
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
   h.click("terminal-environment");
-  assert!(h.drawn("terminal-environment-menu"));
+  assert!(h.shows(gpui::Role::Menu, "Environment"));
   h.click("environment-local");
-  assert!(!h.drawn("terminal-environment-menu"));
+  assert!(!h.shows(gpui::Role::Menu, "Environment"));
   assert!(
     host
       .calls()
@@ -322,7 +322,7 @@ fn terminal_pane_opens_and_closes_shells_by_shortcut(cx: &mut TestAppContext) {
   h.click("terminal-body");
   h.cx.simulate_keystrokes("cmd-\\");
   h.cx.run_until_parked();
-  assert!(h.drawn("terminal-column-shell"));
+  assert!(h.shows(gpui::Role::Group, "Shell terminal"));
   let spawned_shell = host.calls().iter().any(|c| {
     c.starts_with("spawn shell--repo--treq-workspaces-login-")
       && c.contains("Some(\"/repo/.treq/workspaces/login\") running Some(\"export\")")
@@ -332,11 +332,11 @@ fn terminal_pane_opens_and_closes_shells_by_shortcut(cx: &mut TestAppContext) {
   // takes focus.
   h.cx.simulate_keystrokes("cmd-w");
   h.cx.run_until_parked();
-  assert!(!h.drawn("terminal-column-shell"));
-  assert!(h.drawn("terminal-column-agent"));
+  assert!(!h.shows(gpui::Role::Group, "Shell terminal"));
+  assert!(h.shows(gpui::Role::Group, "Claude 1 terminal"));
   h.cx.simulate_keystrokes("cmd-w");
   h.cx.run_until_parked();
-  assert!(!h.drawn("terminal-column-agent"));
+  assert!(!h.shows(gpui::Role::Group, "Claude 1 terminal"));
   assert!(host.calls().contains(&format!("close {}", agent_pty())));
   assert!(h.sent().contains(&field("terminal.closeSession", 3.into())));
   // The session's prompt and skill files go with it.
@@ -346,7 +346,7 @@ fn terminal_pane_opens_and_closes_shells_by_shortcut(cx: &mut TestAppContext) {
     .any(|c| c.starts_with("remove files") && c.contains("treq-agent-prompt-"));
   assert!(removed, "{:?}", host.calls());
   // Closing the last terminal hides the pane, chip included.
-  assert!(!h.drawn("terminal-pane-controls"));
+  assert!(!h.shows(gpui::Role::Toolbar, "Terminal pane controls"));
 }
 
 #[gpui::test]
@@ -355,7 +355,7 @@ fn terminal_pane_keeps_its_terminals_across_settings(cx: &mut TestAppContext) {
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
   h.click("terminal-body");
   h.cx.simulate_keystrokes("cmd-\\");
-  assert!(h.drawn("terminal-column-shell"));
+  assert!(h.shows(gpui::Role::Group, "Shell terminal"));
   let workspace = h.screen.read_with(&h.cx, |s, _| s.snapshot().clone());
   let spawns = |host: &FakeHost| {
     host
@@ -368,14 +368,14 @@ fn terminal_pane_keeps_its_terminals_across_settings(cx: &mut TestAppContext) {
 
   h.update(|s| *s = settings());
   h.cx.run_until_parked();
-  assert!(!h.drawn("workspace-terminal-pane"));
+  assert!(!h.shows(gpui::Role::Region, "Terminal pane"));
   // The hidden pane takes no shortcuts.
   h.cx.simulate_keystrokes("cmd-\\");
   h.update(|s| *s = workspace);
   h.cx.run_until_parked();
 
-  assert!(h.drawn("terminal-column-agent"));
-  assert!(h.drawn("terminal-column-shell"));
+  assert!(h.shows(gpui::Role::Group, "Claude 1 terminal"));
+  assert!(h.shows(gpui::Role::Group, "Shell terminal"));
   assert_eq!(spawns(&host), spawned, "{:?}", host.calls());
 }
 
@@ -385,7 +385,7 @@ fn terminal_pane_shows_a_closed_windows_terminals_again(cx: &mut TestAppContext)
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
   h.click("terminal-body");
   h.cx.simulate_keystrokes("cmd-\\");
-  assert!(h.drawn("terminal-column-shell"));
+  assert!(h.shows(gpui::Role::Group, "Shell terminal"));
   let spawns = |host: &FakeHost| {
     host
       .calls()
@@ -404,14 +404,14 @@ fn terminal_pane_shows_a_closed_windows_terminals_again(cx: &mut TestAppContext)
     .cx
     .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(900.)));
   other.cx.run_until_parked();
-  assert!(other.drawn("terminal-column-agent"));
-  assert!(other.drawn("terminal-column-shell"));
+  assert!(other.shows(gpui::Role::Group, "Claude 1 terminal"));
+  assert!(other.shows(gpui::Role::Group, "Shell terminal"));
   assert_eq!(spawns(&host), spawned, "{:?}", host.calls());
 
   // A third window on it finds none left to show.
   let mut third = Harness::with_host(cx, terminal_route(serde_json::json!({})), host);
   third.cx.run_until_parked();
-  assert!(!third.drawn("terminal-column-shell"));
+  assert!(!third.shows(gpui::Role::Group, "Shell terminal"));
 }
 
 #[gpui::test]
@@ -448,9 +448,15 @@ fn terminal_pane_runs_dashboard_commands(cx: &mut TestAppContext) {
       "commands": [{ "nonce": 2, "kind": "toggleMaximize" }],
     }),
   );
-  assert!(h.drawn("terminal-restore"));
-  assert!(!h.drawn("code-readme"), "the maximized pane covers the tab");
-  assert!(h.drawn("workspace-header"), "the header stays above it");
+  assert!(h.shows(gpui::Role::Button, "Restore"));
+  assert!(
+    !h.shows(gpui::Role::Group, "README"),
+    "the maximized pane covers the tab"
+  );
+  assert!(
+    h.shows(gpui::Role::Banner, "Workspace header"),
+    "the header stays above it"
+  );
   set_terminal(
     &mut h,
     serde_json::json!({
@@ -458,7 +464,7 @@ fn terminal_pane_runs_dashboard_commands(cx: &mut TestAppContext) {
       "commands": [{ "nonce": 3, "kind": "toggleCollapse" }],
     }),
   );
-  assert!(h.drawn("terminal-expand"));
+  assert!(h.shows(gpui::Role::Button, "Expand"));
 }
 
 /// A session that becomes active (a review that just started, say) shows:
@@ -474,13 +480,13 @@ fn terminal_pane_expands_for_a_newly_active_session(cx: &mut TestAppContext) {
       "commands": [{ "nonce": 1, "kind": "toggleCollapse" }],
     }),
   );
-  assert!(h.drawn("terminal-expand"), "collapsed");
+  assert!(h.shows(gpui::Role::Button, "Expand"), "collapsed");
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 4 }));
   assert!(
-    !h.drawn("terminal-expand"),
+    !h.shows(gpui::Role::Button, "Expand"),
     "the new session's column shows"
   );
-  assert!(h.drawn("terminal-column-active"));
+  assert!(active_column(&mut h).is_some());
 }
 
 #[gpui::test]
@@ -502,8 +508,8 @@ fn terminal_pane_activates_the_selected_workspaces_terminal(cx: &mut TestAppCont
   h.cx.run_until_parked();
   h.cx.simulate_keystrokes("cmd-w");
   h.cx.run_until_parked();
-  assert!(!h.drawn("terminal-column-shell"));
-  assert!(h.drawn("terminal-column-agent"));
+  assert!(!h.shows(gpui::Role::Group, "Shell terminal"));
+  assert!(h.shows(gpui::Role::Group, "Claude 1 terminal"));
   assert!(!host.calls().contains(&format!("close {}", agent_pty())));
 }
 
@@ -557,9 +563,9 @@ fn terminal_pane_highlights_the_shown_workspaces_terminals(cx: &mut TestAppConte
     }),
   );
   // Workspace 7 on screen: its agent is current, the home shell dimmed.
-  assert!(h.drawn("terminal-current-agent"));
-  assert!(h.drawn("terminal-dimmed-shell"));
-  assert!(!h.drawn("terminal-dimmed-agent"));
+  assert!(column_is(&mut h, "Claude 1 terminal", CURRENT));
+  assert!(column_is(&mut h, "Shell terminal", DIMMED));
+  assert!(!column_is(&mut h, "Claude 1 terminal", DIMMED));
   h.update(|s| {
     if let View::Workspace(route) = &mut s.view {
       route.workspace_id = None;
@@ -567,11 +573,16 @@ fn terminal_pane_highlights_the_shown_workspaces_terminals(cx: &mut TestAppConte
   });
   h.cx.run_until_parked();
   assert!(
-    h.drawn("terminal-current-shell"),
+    column_is(&mut h, "Shell terminal", CURRENT),
     "the home shell is current"
   );
-  assert!(h.drawn("terminal-dimmed-agent"), "workspace 7's agent dims");
-  assert!(h.drawn("terminal-column-shell") && h.drawn("terminal-column-agent"));
+  assert!(
+    column_is(&mut h, "Claude 1 terminal", DIMMED),
+    "workspace 7's agent dims"
+  );
+  assert!(
+    h.shows(gpui::Role::Group, "Shell terminal") && h.shows(gpui::Role::Group, "Claude 1 terminal")
+  );
 }
 
 /// A dimmed column stays usable: hovering it undims it.
@@ -585,7 +596,7 @@ fn terminal_pane_undims_a_hovered_column(cx: &mut TestAppContext) {
       "commands": [{ "nonce": 1, "kind": "newShell", "dir": "/repo" }],
     }),
   );
-  assert!(h.drawn("terminal-dimmed-shell"));
+  assert!(column_is(&mut h, "Shell terminal", DIMMED));
   let at = h
     .cx
     .debug_bounds("terminal-column-shell")
@@ -593,7 +604,10 @@ fn terminal_pane_undims_a_hovered_column(cx: &mut TestAppContext) {
     .center();
   h.cx.simulate_mouse_move(at, None, Modifiers::none());
   h.cx.run_until_parked();
-  assert!(!h.drawn("terminal-dimmed-shell"), "hovered, so not dimmed");
+  assert!(
+    !column_is(&mut h, "Shell terminal", DIMMED),
+    "hovered, so not dimmed"
+  );
 }
 
 /// Double-clicks the element `selector` names.
@@ -633,12 +647,12 @@ fn an_agent_terminal_is_renamed_from_its_title(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
   double_click(&mut h, "terminal-title");
-  assert!(h.drawn("terminal-rename-input"));
+  assert!(h.shows(gpui::Role::Group, "Rename terminal"));
   // The name starts selected, so typing replaces it.
   h.cx.simulate_input("Fix login");
   h.cx.simulate_keystrokes("enter");
   h.cx.run_until_parked();
-  assert!(!h.drawn("terminal-rename-input"));
+  assert!(!h.shows(gpui::Role::Group, "Rename terminal"));
   assert!(host
     .calls()
     .contains(&"rename session 3 in /repo to Fix login".to_string()));
@@ -667,7 +681,7 @@ fn a_shell_is_named_until_cleared_and_escape_keeps_its_name(cx: &mut TestAppCont
   h.cx.simulate_input("typo");
   h.cx.simulate_keystrokes("escape");
   h.cx.run_until_parked();
-  assert!(!h.drawn("terminal-rename-input"));
+  assert!(!h.shows(gpui::Role::Group, "Rename terminal"));
   assert_eq!(terminal_names(&h), ["dev server"]);
   // An empty name shows "Shell" again.
   double_click(&mut h, "terminal-title");
@@ -720,14 +734,14 @@ fn open_remote_command(nonce: u64) -> serde_json::Value {
 fn terminal_pane_attaches_a_remote_session(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
   set_terminal(&mut h, open_remote_command(1));
-  assert!(h.drawn("terminal-column-shell"));
-  assert!(h.drawn("remote-terminal-header"));
-  assert!(h.drawn("remote-terminal-stop"));
-  assert!(h.drawn("remote-terminal-detach"));
+  assert!(h.shows(gpui::Role::Group, "Remote terminal"));
+  assert!(h.shows(gpui::Role::Group, "devbox.example session"));
+  assert!(h.shows(gpui::Role::Button, "Stop"));
+  assert!(h.shows(gpui::Role::Button, "Detach"));
   let attached = host.attached();
   assert_eq!(attached.len(), 1, "{:?}", host.calls());
   assert!(attached[0].starts_with("remote-pty-ep-1-root-shell-k1-"));
-  assert!(!h.drawn("remote-terminal-attaching"), "attached");
+  assert!(!attaching(&mut h), "attached");
   h.cx.simulate_input("ls");
   h.cx.run_until_parked();
   assert!(host
@@ -739,8 +753,8 @@ fn terminal_pane_attaches_a_remote_session(cx: &mut TestAppContext) {
   host.exit(&attached[0], Some(0));
   h.cx.run_until_parked();
   assert!(host.calls().contains(&"list shell-k1".to_string()));
-  assert!(h.drawn("remote-terminal-ended"));
-  assert!(!h.drawn("remote-terminal-lost"));
+  assert!(h.shows(gpui::Role::Status, "(session ended, exit 0)"));
+  assert!(!connection_lost(&mut h));
 }
 
 #[gpui::test]
@@ -758,7 +772,7 @@ fn a_closed_windows_remote_session_shows_again(cx: &mut TestAppContext) {
     .cx
     .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(900.)));
   other.cx.run_until_parked();
-  assert!(other.drawn("remote-terminal-header"));
+  assert!(other.shows(gpui::Role::Group, "devbox.example session"));
   assert_eq!(host.attached(), attached, "{:?}", host.calls());
   // Its channel dropped since: the column attaches to the host's session.
   other.cx.update(|window, _| window.remove_window());
@@ -770,7 +784,7 @@ fn a_closed_windows_remote_session_shows_again(cx: &mut TestAppContext) {
     .cx
     .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(900.)));
   third.cx.run_until_parked();
-  assert!(third.drawn("remote-terminal-header"));
+  assert!(third.shows(gpui::Role::Group, "devbox.example session"));
   assert_eq!(
     host.attached(),
     vec![attached[0].clone(), attached[0].clone()]
@@ -794,7 +808,7 @@ fn a_dropped_remote_session_reattaches_on_every_drop(cx: &mut TestAppContext) {
   host.exit(&attached[1], None);
   h.cx.run_until_parked();
   assert_eq!(host.attached().len(), 3);
-  assert!(!h.drawn("remote-terminal-lost"));
+  assert!(!connection_lost(&mut h));
 }
 
 #[gpui::test]
@@ -807,12 +821,12 @@ fn a_lost_host_is_retried_once_before_offering_reattach(cx: &mut TestAppContext)
   host.exit(&host.attached()[0], None);
   h.cx.run_until_parked();
   assert_eq!(host.attached().len(), 2, "tried once on its own");
-  assert!(h.drawn("remote-terminal-lost"));
+  assert!(connection_lost(&mut h));
   *host.attach_down.lock().unwrap() = false;
   h.click("remote-terminal-reattach");
   h.cx.run_until_parked();
   assert_eq!(host.attached().len(), 3);
-  assert!(!h.drawn("remote-terminal-lost"));
+  assert!(!connection_lost(&mut h));
 }
 
 #[gpui::test]
@@ -823,11 +837,11 @@ fn an_unreachable_remote_session_offers_reattach_and_close(cx: &mut TestAppConte
   };
   let (mut h, host) = workspace_harness(cx, host, terminal_route(serde_json::json!({})));
   set_terminal(&mut h, open_remote_command(1));
-  assert!(h.drawn("remote-terminal-lost"));
+  assert!(connection_lost(&mut h));
   assert_eq!(host.attached().len(), 2, "retried once first");
   h.click("remote-terminal-close");
   h.cx.run_until_parked();
-  assert!(!h.drawn("terminal-column-shell"));
+  assert!(!h.shows(gpui::Role::Group, "Remote terminal"));
   assert!(host
     .calls()
     .iter()
@@ -841,7 +855,7 @@ fn stopping_a_remote_session_ends_it_on_the_host(cx: &mut TestAppContext) {
   h.click("remote-terminal-stop");
   h.cx.run_until_parked();
   assert!(host.calls().contains(&"stop shell-k1".to_string()));
-  assert!(!h.drawn("terminal-column-shell"));
+  assert!(!h.shows(gpui::Role::Group, "Remote terminal"));
 }
 
 #[gpui::test]
@@ -850,7 +864,7 @@ fn detaching_a_remote_session_keeps_it_running(cx: &mut TestAppContext) {
   set_terminal(&mut h, open_remote_command(1));
   h.click("remote-terminal-detach");
   h.cx.run_until_parked();
-  assert!(!h.drawn("terminal-column-shell"));
+  assert!(!h.shows(gpui::Role::Group, "Remote terminal"));
   assert!(!host.calls().contains(&"stop shell-k1".to_string()));
   assert!(host
     .calls()
@@ -866,21 +880,21 @@ fn a_failed_remote_write_shows_the_error_with_reattach(cx: &mut TestAppContext) 
   };
   let (mut h, host) = workspace_harness(cx, host, terminal_route(serde_json::json!({})));
   set_terminal(&mut h, open_remote_command(1));
-  assert!(!h.drawn("remote-terminal-lost"));
+  assert!(!connection_lost(&mut h));
   h.cx.simulate_input("ls");
   h.cx.run_until_parked();
   // The first failure reattaches on its own.
   assert_eq!(host.attached().len(), 2, "{:?}", host.calls());
-  assert!(!h.drawn("remote-terminal-lost"));
+  assert!(!connection_lost(&mut h));
   // Failing again before the session says anything shows the error.
   h.cx.simulate_input("ls");
   h.cx.run_until_parked();
-  assert!(h.drawn("remote-terminal-lost"), "{:?}", host.calls());
-  assert!(h.drawn("remote-terminal-reattach"));
+  assert!(connection_lost(&mut h), "{:?}", host.calls());
+  assert!(h.shows(gpui::Role::Button, "Reattach"));
   h.click("remote-terminal-reattach");
   h.cx.run_until_parked();
   assert_eq!(host.attached().len(), 3);
-  assert!(!h.drawn("remote-terminal-lost"));
+  assert!(!connection_lost(&mut h));
 }
 
 #[gpui::test]
@@ -888,8 +902,8 @@ fn a_remote_terminal_has_no_search(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
   set_terminal(&mut h, open_remote_command(1));
   h.cx.simulate_keystrokes("cmd-f");
-  assert!(!h.drawn("terminal-search"));
-  assert!(h.drawn("remote-terminal-header"));
+  assert!(!h.shows(gpui::Role::Search, "Find in terminal"));
+  assert!(h.shows(gpui::Role::Group, "devbox.example session"));
 }
 
 fn drop_files(h: &mut Harness, at: gpui::Point<gpui::Pixels>) {
@@ -1122,7 +1136,7 @@ fn a_remote_repository_asks_react_for_new_shells(cx: &mut TestAppContext) {
     vec![serde_json::json!("/srv/app")]
   );
   assert!(!host.calls().iter().any(|c| c.starts_with("spawn ")));
-  assert!(!h.drawn("terminal-column-shell"));
+  assert!(!h.shows(gpui::Role::Group, "Shell terminal"));
 }
 
 #[gpui::test]
@@ -1149,13 +1163,16 @@ fn terminal_pane_tooltips_show_shortcuts_as_kbd(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn header_buttons_open_their_popovers_over_the_window(cx: &mut TestAppContext) {
-  for button in ["workspace-details", "workspace-checks"] {
+  for (button, name) in [
+    ("workspace-details", "Workspace details"),
+    ("workspace-checks", "Checks"),
+  ] {
     let (mut h, _) = workspace_harness(cx, feature_host(), workspace_route());
     h.click(button);
     h.cx.run_until_parked();
     // Drawn in the repo window itself, over an in-window backdrop.
-    assert!(h.drawn("header-popover-backdrop"), "{button}");
-    assert!(h.drawn("workspace-header"));
+    assert!(h.shows(gpui::Role::Dialog, name), "{button}");
+    assert!(h.shows(gpui::Role::Banner, "Workspace header"));
     assert!(h.sent().is_empty(), "{button}");
   }
 }
@@ -1202,7 +1219,7 @@ fn opening_details_hides_its_tooltip(cx: &mut TestAppContext) {
     "{popups:?}"
   );
   drop(popups);
-  assert!(h.drawn("header-popover-backdrop"));
+  assert!(h.shows(gpui::Role::Dialog, "Workspace details"));
 }
 
 fn send_assets() -> serde_json::Value {
@@ -1692,7 +1709,7 @@ fn a_remote_agent_session_registers_for_messages_and_a_shell_does_not(cx: &mut T
 fn terminal_pane_shows_on_the_github_view(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
-  assert!(h.drawn("terminal-scroll-container"));
+  assert!(h.shows(gpui::Role::Group, "Terminals"));
   h.update(|s| {
     *s = serde_json::from_value(serde_json::json!({
       "kind": "github",
@@ -1706,7 +1723,41 @@ fn terminal_pane_shows_on_the_github_view(cx: &mut TestAppContext) {
     }))
     .expect("github route");
   });
-  assert!(h.drawn("terminal-scroll-container"));
+  assert!(h.shows(gpui::Role::Group, "Terminals"));
+}
+
+/// The name of the terminal column the user last picked.
+fn active_column(h: &mut Harness) -> Option<String> {
+  use gpui_testing_library::by;
+  h.rendered()
+    .query_all_by_role(by::role(gpui::Role::Group).selected(true))
+    .first()
+    .and_then(|column| column.name())
+}
+
+const CURRENT: &str = "This workspace's terminal";
+const DIMMED: &str = "Another workspace's terminal, dimmed";
+
+/// Whether the terminal column `name` reads as `state`.
+fn column_is(h: &mut Harness, name: &str, state: &str) -> bool {
+  use gpui_testing_library::by;
+  h.rendered()
+    .query_by_role(by::role(gpui::Role::Group).name(name).value_text(state))
+    .is_some()
+}
+
+/// Whether a remote column says its connection was lost.
+fn connection_lost(h: &mut Harness) -> bool {
+  use gpui_testing_library::by;
+  !h.rendered()
+    .query_all_by_role(by::role(gpui::Role::Alert))
+    .is_empty()
+}
+
+/// Whether a remote column says it is attaching.
+fn attaching(h: &mut Harness) -> bool {
+  h.shows(gpui::Role::Status, "Starting remote session…")
+    || h.shows(gpui::Role::Status, "Reattaching…")
 }
 
 /// Clicking an agent header's workspace label navigates to that workspace.
