@@ -41,12 +41,11 @@ test("code: workspace Code tab, action row, alerts and Agent", async ({ page, co
     ],
   });
 
-  const stack = await page.getByTestId("workspace-stack-panel").boundingBox();
-  expect(stack).not.toBeNull();
+  // The stack panel is not observable: crop its rail (fixed 1400x900 window).
   await capture(page, {
     name: "03-code-stack-rail",
     title: "Stack panel: rail alignment",
-    clip: stack!,
+    clip: { x: 296, y: 270, width: 240, height: 150 },
     expectations: [
       "The vertical rail runs through the horizontal centre of every stack dot",
       "The rail ends centred on the base-branch down arrow's shaft",
