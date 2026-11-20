@@ -28,7 +28,7 @@ fn browser_host() -> FakeHost {
       BASE.to_string(),
       vec![
         entry("src", true),
-        entry(".git", true),
+        entry(".github", true),
         entry("README.md", false),
         entry("a.rs", false),
         entry("logo.png", false),
@@ -105,7 +105,7 @@ fn file_browser_replaces_the_code_tab_and_opens_the_readme(cx: &mut TestAppConte
   // Markdown offers its preview; hidden directories are left out.
   assert!(h.shows(gpui::Role::Tab, "Preview"));
   assert!(h.shows(gpui::Role::Button, "src"));
-  assert!(!h.shows(gpui::Role::Button, ".git"));
+  assert!(h.shows(gpui::Role::Button, ".github"));
   assert!(host
     .calls()
     .contains(&format!("read file {BASE}/README.md")));

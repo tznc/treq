@@ -12,6 +12,7 @@
 
 use crate::core::pty_remote_supervisor::clean_title;
 use crate::gpui_shell::native::Toast;
+use crate::gpui_shell::sidebar;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use crate::lock_ext::LockExt as _;
@@ -4128,6 +4129,7 @@ impl TerminalPane {
       }
     );
     let hover_id = id.clone();
+    let hover_dir = self.column_key(column);
     let focus_id = id.clone();
     let double_id = id.clone();
     let name = match &column.kind {
@@ -4176,8 +4178,10 @@ impl TerminalPane {
         let id = Some(hover_id.clone());
         if *hovered {
           pane.hovered_column = id;
+          sidebar::set_hovered_terminal(Some(hover_dir.clone()), cx);
         } else if pane.hovered_column == id {
           pane.hovered_column = None;
+          sidebar::set_hovered_terminal(None, cx);
         }
         cx.notify();
       }))
