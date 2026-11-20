@@ -523,6 +523,20 @@ struct PopupView {
 }
 
 /// The width of `text` in `family` at `text-sm`, without kerning.
+/// A PR state pill's width: its padding, icon, gap and caption label.
+fn pr_pill_width(cx: &App, pr: PrState) -> f32 {
+  let label = pr.pill().0;
+  let size = cx
+    .try_global::<theme::Density>()
+    .copied()
+    .unwrap_or_default()
+    .caption();
+  2. * 6.
+    + ui::BADGE_ICON_SIZE
+    + ui::BADGE_ICON_GAP
+    + text_width_at(cx, label, theme::SANS_FONT, size) * 1.03
+}
+
 fn text_width(cx: &App, text: &str, family: &'static str) -> f32 {
   text_width_at(cx, text, family, TEXT_SIZE)
 }
@@ -611,7 +625,7 @@ fn tooltip_size(cx: &App, content: &TooltipContent) -> (f32, f32) {
         lines += 1;
       }
       if let Some(pr) = pr {
-        width = width.max(text_width(cx, pr.label(), theme::SANS_FONT));
+        width = width.max(pr_pill_width(cx, *pr));
         lines += 1;
       }
       (width, lines)
@@ -868,10 +882,11 @@ impl PopupView {
           )
         })
         .when_some(*pr, |this, pr| {
+          let (label, icon, tone) = pr.pill();
           this.child(
             div()
-              .text_color(super::sidebar::pr_color(pr, palette))
-              .child(pr.label()),
+              .flex()
+              .child(ui::Badge::new(label, palette).tone(tone).icon(icon)),
           )
         })
         .into_any_element(),
@@ -1741,6 +1756,32 @@ mod tests {
       let (width, long) = tooltip_size(cx, &branch(Some(&"word ".repeat(40))));
       assert!(width <= TOOLTIP_MAX_WIDTH);
       assert!(long >= titled + 2. * LINE_HEIGHT);
+    });
+  }
+
+  #[gpui::test]
+  fn sizes_a_branch_tooltip_with_its_pr_pill(cx: &mut gpui::TestAppContext) {
+    cx.update(|cx| {
+      theme::init(cx);
+      let branch = |pr| TooltipContent::Branch {
+        name: None,
+        title: "a".into(),
+        target: None,
+        conflicted: false,
+        pr,
+      };
+      let (_, bare) = tooltip_size(cx, &branch(None));
+      for pr in [
+        PrState::Draft,
+        PrState::Open,
+        PrState::Merged,
+        PrState::Closed,
+      ] {
+        let (width, height) = tooltip_size(cx, &branch(Some(pr)));
+        // The pill sits on its own row, as wide as its icon and label.
+        assert_eq!(height, bare + LINE_HEIGHT + 4.);
+        assert!(width >= pr_pill_width(cx, pr) + 16.);
+      }
     });
   }
 

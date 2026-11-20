@@ -482,7 +482,7 @@ impl Shell {
         let label = self.label.to_string();
         let sink = action_sink(self.app.clone(), label.clone());
         let popups = popup_sink(self.app.clone(), label);
-        self.sidebar = Some(cx.new(|_| Sidebar::new(snapshot, sink, popups)));
+        self.sidebar = Some(cx.new(|cx| Sidebar::new(snapshot, sink, popups).watch_terminals(cx)));
       }
     }
   }

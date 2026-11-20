@@ -743,6 +743,8 @@ impl StashView {
     let new_active = selected == filtered.len();
     let panel = div()
       .id("stash-apply-popover")
+      .role(gpui::Role::Dialog)
+      .aria_label("Apply stash")
       .debug_selector(|| "stash-apply-popover".into())
       .absolute()
       .top(zpx(32.))
@@ -810,7 +812,9 @@ impl StashView {
               ),
           ),
       );
-    deferred(panel).with_priority(3).into_any_element()
+    deferred(panel.test_support())
+      .with_priority(3)
+      .into_any_element()
   }
 }
 
@@ -859,6 +863,9 @@ impl StashView {
         .into_any_element();
     }
     div()
+      .id("stash-diff-pane")
+      .role(gpui::Role::Group)
+      .aria_label("Stash diff")
       .debug_selector(|| "stash-diff-pane".into())
       .size_full()
       .child(
@@ -868,6 +875,7 @@ impl StashView {
         )
         .size_full(),
       )
+      .test_support()
       .into_any_element()
   }
 
@@ -981,8 +989,22 @@ impl Render for StashView {
         .flex()
         .gap_4()
         .overflow_hidden()
-        .child(self.list(entries, &p, cx))
-        .child(self.detail(&p, cx))
+        .child(
+          self
+            .list(entries, &p, cx)
+            .id("stash-list")
+            .role(gpui::Role::List)
+            .aria_label("Stashes")
+            .test_support(),
+        )
+        .child(
+          self
+            .detail(&p, cx)
+            .id("stash-detail")
+            .role(gpui::Role::Group)
+            .aria_label("Stash details")
+            .test_support(),
+        )
         .into_any_element(),
     };
     // Escape closes an open menu first.
