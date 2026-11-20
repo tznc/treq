@@ -48,7 +48,7 @@ test("code: workspace Code tab, action row, alerts and Agent", async ({ page, co
     clip: { x: 296, y: 270, width: 240, height: 150 },
     expectations: [
       "The vertical rail runs through the horizontal centre of every stack dot",
-      "The rail ends centred on the base-branch down arrow's shaft",
+      "The rail ends at the base-branch arrow: the arrowhead is its tip, nothing runs below it",
     ],
   });
 

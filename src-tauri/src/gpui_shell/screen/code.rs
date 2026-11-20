@@ -1953,7 +1953,8 @@ impl CodeView {
                 // Centre the 2px rail on the 14px dots/arrow (centre x = 7px).
                 .left(zpx(6.))
                 .top_2()
-                .bottom_2()
+                // End at the base-branch arrow's tip, not the row's padding.
+                .bottom(zpx(15.))
                 .w(zpx(2.))
                 .bg(p.border),
             )
