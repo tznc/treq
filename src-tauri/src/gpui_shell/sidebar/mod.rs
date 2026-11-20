@@ -1158,6 +1158,7 @@ impl Sidebar {
   ) -> impl IntoElement {
     let label = repo.home_ref.clone().unwrap_or_else(|| "…".into());
     let key = SharedString::from(format!("home:{}", repo.path));
+    let group_header = fold.is_some();
     let title: gpui::AnyElement = match &repo.label {
       // Several repositories: the name over the checked-out branch.
       Some(name) => div()
@@ -1220,6 +1221,9 @@ impl Sidebar {
       .relative()
       .gap_1p5()
       .mx_2()
+      // A group header spans its rows' width, so its fold chevron ends
+      // where their status dots do; the padding keeps its name in place.
+      .when(group_header, |this| this.mx_0().pl_4())
       .rounded_md()
       .text_color(palette.sidebar_foreground)
       .when(repo.missing, |this| this.opacity(0.5))

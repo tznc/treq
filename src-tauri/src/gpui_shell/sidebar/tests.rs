@@ -1385,3 +1385,29 @@ fn a_long_group_name_truncates_before_its_fold_chevron(cx: &mut TestAppContext) 
   assert!(fold.right() <= home.right());
   assert!(fold.size.width > gpui::px(0.));
 }
+
+#[gpui::test]
+fn a_truncated_group_chevron_lines_up_with_its_rows_status_dots(cx: &mut TestAppContext) {
+  const NAME: &str = "an-organisation-with-a-long-name/a-repository-with-an-even-longer-name";
+  let mut snapshot = two_repos();
+  snapshot.repos[0].label = Some(NAME.into());
+  snapshot.repos[0].workspaces[0].status = Some(RowStatus {
+    color: StatusColor::Yellow,
+    spin: false,
+  });
+  let mut h = Harness::new(cx, snapshot);
+  let fold = h
+    .bounds(concat!(
+      "group-",
+      "an-organisation-with-a-long-name/a-repository-with-an-even-longer-name"
+    ))
+    .expect("fold chevron");
+  let dot = h.bounds("status-7").expect("status dot");
+  // One right edge for the group: the chevron ends where the dots end.
+  assert!(
+    (fold.right() - dot.right()).abs() <= gpui::px(1.),
+    "chevron ends at {:?}, dot at {:?}",
+    fold.right(),
+    dot.right()
+  );
+}
