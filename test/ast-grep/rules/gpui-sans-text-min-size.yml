@@ -1,0 +1,48 @@
+id: gpui-sans-text-min-size
+language: rust
+severity: error
+message: >
+  Sans text is at least 13px (`TextSize::Sm`). `TextSize::Code` (12px) is for
+  the mono font only: chain `.font_family(theme::MONO_FONT)` on the same
+  element, or use `TextSize::Sm`.
+note: >
+  Where a parent sets the mono font, or the size feeds a mono view, mark the
+  line above with a short reason and
+  `// ast-grep-ignore: gpui-sans-text-min-size`. Short 11px labels are
+  covered by gpui-text-xs-short-label-only.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+  - "src-tauri/src/mobile/**/*.rs"
+  - "crates/treq-ui/src/**/*.rs"
+ignores:
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+rule:
+  kind: scoped_identifier
+  regex: (^|::)TextSize::Code$
+  not:
+    any:
+      - inside:
+          kind: mod_item
+          has:
+            field: name
+            regex: ^tests$
+          stopBy: end
+      # Inside a call chain that sets the mono font: on this element, an
+      # argument or a parent.
+      - inside:
+          kind: call_expression
+          has:
+            kind: call_expression
+            all:
+              - has:
+                  field: function
+                  kind: field_expression
+                  has:
+                    field: field
+                    regex: ^font_family$
+              - has:
+                  field: arguments
+                  regex: MONO
+            stopBy: end
+          stopBy: end
