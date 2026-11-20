@@ -320,6 +320,13 @@ pub fn suggestion_diff(original: Option<&str>, suggested: &str) -> Option<Vec<Ro
   (!rows.is_empty()).then_some(rows)
 }
 
+/// The line a GitHub suggestion replaces: the last line of the comment's
+/// `diffHunk`, which GitHub ends on the commented line.
+pub fn github_suggestion_original(diff_hunk: &str) -> Option<String> {
+  let last = diff_hunk.lines().next_back()?;
+  (!last.starts_with("@@")).then(|| last.get(1..).unwrap_or("").to_string())
+}
+
 /// `formatGithubCommentDate`: "Mar 4", with the year when not this one.
 pub fn comment_date(iso: &str, this_year: i32) -> String {
   use chrono::Datelike;
@@ -509,6 +516,22 @@ mod tests {
     );
     assert_eq!(suggestion_diff(None, "x"), None);
     assert_eq!(suggestion_diff(Some("x"), "x"), None);
+  }
+
+  #[test]
+  fn github_suggestion_original_is_the_hunks_last_line() {
+    let hunk = "@@ -1,2 +1,3 @@\n context\n+No scrape endpoint.";
+    assert_eq!(
+      github_suggestion_original(hunk).as_deref(),
+      Some("No scrape endpoint.")
+    );
+    assert_eq!(github_suggestion_original(""), None);
+  }
+
+  #[test]
+  fn an_empty_suggestion_removes_the_line() {
+    let rows = suggestion_diff(Some("No scrape endpoint."), "").expect("rows");
+    assert_eq!(rows, vec![plain(RowKind::Removed, "No scrape endpoint.")]);
   }
 
   #[test]

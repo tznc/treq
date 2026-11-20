@@ -1319,6 +1319,17 @@ fn changes_tab_quotes_a_review_thread(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn changes_tab_draws_a_github_suggestion_as_a_diff(cx: &mut TestAppContext) {
+  let mut host = changes_host();
+  let mut thread = gh_thread("t1", 2, false);
+  thread.comments[0].body = "Drop it.\n\n```suggestion\n```".into();
+  thread.comments[0].diff_hunk = "@@ -1,2 +1,2 @@\n a\n+b".into();
+  host.threads = vec![thread];
+  let (mut h, _host) = workspace_harness(cx, host, changes_route());
+  assert!(h.shows(gpui::Role::Heading, "Suggested change"));
+}
+
+#[gpui::test]
 fn changes_tab_reacts_to_a_review_comment(cx: &mut TestAppContext) {
   let mut host = changes_host();
   host.threads = vec![gh_thread("t1", 2, false)];
