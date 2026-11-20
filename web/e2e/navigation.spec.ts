@@ -424,5 +424,5 @@ test.describe('Footer navigation', () => {
 
 test('homepage title leads with the brand', async ({ page }) => {
   await page.goto('/');
-  await expect(page).toHaveTitle('Treq AI: isolated workspaces and stacked PRs for coding agents');
+  await expect(page).toHaveTitle('Treq: isolated workspaces and stacked PRs for AI coding agents');
 });
