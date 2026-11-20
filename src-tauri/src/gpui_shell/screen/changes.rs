@@ -268,6 +268,7 @@ impl ChangesView {
     let mut this = Self::blank(parent, options, host, react, popups, dark, cx);
     this.hydrate_review(cx);
     this.hydrate_viewed(cx);
+    this.hydrate_side_width(cx);
     this.load(cx);
     this.watch_threads(cx);
     this.load_pr(cx);
@@ -963,6 +964,36 @@ impl ChangesView {
   /// The diff a file card shows: the working copy's, else the branch's.
   fn file_hunks(&self, path: &str) -> Option<FileHunks> {
     self.shown_hunks(path).cloned()
+  }
+
+  /// The file list's width as last left.
+  fn hydrate_side_width(&mut self, cx: &mut Context<Self>) {
+    self.run(
+      |host, _| Ok::<_, String>(host.file_list_width()),
+      |view, result, cx| {
+        if let Ok(Some(width)) = result {
+          if width.is_finite() && !view.side_resizing {
+            view.side_width = width.round().clamp(MIN_SIDE_WIDTH, MAX_SIDE_WIDTH);
+            cx.notify();
+          }
+        }
+      },
+      cx,
+    );
+  }
+
+  /// Keeps the file list's width for the next window and launch.
+  fn save_side_width(&mut self, cx: &mut Context<Self>) {
+    let width = self.side_width;
+    self.run(
+      move |host, _| host.save_file_list_width(width),
+      |_, result, _| {
+        if let Err(err) = result {
+          log::warn!("Failed to save the file list width: {err}");
+        }
+      },
+      cx,
+    );
   }
 
   /// The files kept as viewed, folded as when they were marked; the stale
@@ -2144,6 +2175,7 @@ impl ChangesView {
         cx.stop_propagation();
         if event.click_count() >= 2 {
           this.side_width = SIDE_WIDTH;
+          this.save_side_width(cx);
           cx.notify();
         }
       }));
@@ -2176,6 +2208,7 @@ impl ChangesView {
         MouseButton::Left,
         cx.listener(|this, _, _, cx| {
           if std::mem::take(&mut this.side_resizing) {
+            this.save_side_width(cx);
             cx.notify();
           }
         }),
@@ -2184,6 +2217,7 @@ impl ChangesView {
         MouseButton::Left,
         cx.listener(|this, _, _, cx| {
           if std::mem::take(&mut this.side_resizing) {
+            this.save_side_width(cx);
             cx.notify();
           }
         }),

@@ -1650,3 +1650,18 @@ fn dragging_the_file_list_edge_resizes_it_within_bounds(cx: &mut TestAppContext)
   });
   assert_eq!(file_list_width(&mut h), 240.);
 }
+
+#[gpui::test]
+fn the_file_list_width_is_saved_and_restored(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  let list = h.cx.debug_bounds("changes-file-list").expect("drawn");
+  let handle = h.cx.debug_bounds("changes-file-list-resize").expect("drawn").center();
+  drag_mouse(&mut h, handle, gpui::point(list.left() + gpui::px(300.), handle.y));
+  h.cx.run_until_parked();
+  assert_eq!(host.setting("changes_file_list_width").as_deref(), Some("300"));
+
+  let mut host = changes_host();
+  host.settings.lock().unwrap().insert("changes_file_list_width".into(), Some("410".into()));
+  let (mut h, _) = workspace_harness(cx, host, changes_route());
+  assert_eq!(file_list_width(&mut h), 410.);
+}
