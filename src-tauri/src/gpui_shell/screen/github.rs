@@ -12,6 +12,7 @@ use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use crate::result_ext::ResultExt;
+use gpui_kit::base::TestSupportExt as _;
 use std::{
   collections::{HashMap, HashSet},
   rc::Rc,
@@ -1799,10 +1800,13 @@ impl GithubView {
                   .child(parts::state_chip(&issue.state, false, &p))
                   .child(
                     div()
-                      .debug_selector(move || format!("github-issue-author-{n}"))
+                      .id(format!("github-issue-author-{n}"))
+                      .role(gpui::Role::Paragraph)
+                      .aria_label(issue.author.login.clone())
                       .max_w(zpx(160.))
                       .truncate()
-                      .child(issue.author.login.clone()),
+                      .child(issue.author.login.clone())
+                      .test_support(),
                   )
                   .child(
                     div()

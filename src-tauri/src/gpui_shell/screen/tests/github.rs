@@ -571,8 +571,19 @@ fn github_shows_list_failures_and_retries(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn github_issue_rows_show_the_author(cx: &mut TestAppContext) {
-  let (mut h, _) = harness(cx, issues(), route("issues", None, false));
-  assert!(h.drawn("github-issue-author-1"));
+  use gpui_testing_library::prelude::*;
+  let mut grace = issue(1, "Crash on start");
+  grace.author = author("grace");
+  let fake = Fake {
+    issue_pages: vec![page(vec![grace], false, None)],
+    ..issues()
+  };
+  let (mut h, _) = harness(cx, fake, route("issues", None, false));
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  expect(screen.get_by_text("grace")).to_be_visible();
 }
 
 #[gpui::test]
