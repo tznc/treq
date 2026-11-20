@@ -140,8 +140,10 @@ test("home-sidebar: home view, rows, menus and multi-select", async ({ page }) =
 
 test("home-sidebar: workspaces create button is icon-only", async ({ page }) => {
   await home(page);
-  const create = page.getByRole("button", { name: "New workspace…" }).first();
+  await settle(page, 2000);
+  const create = page.getByTestId("open-workspaces");
   await expect(create).toBeVisible();
+  await expect(create).toHaveAccessibleName("New workspace…");
   await capture(page, {
     name: "02-workspaces-create-icon",
     title: "WORKSPACES heading: icon-only create button",
@@ -156,6 +158,7 @@ test("home-sidebar: workspaces create button is icon-only", async ({ page }) => 
     name: "02-workspaces-create-tooltip",
     title: "WORKSPACES create button: hover tooltip",
     screen: true,
-    expectations: ["A tooltip reading 'New workspace…' shows below the icon button"],
+    rest: false,
+    expectations: ["A tooltip reading 'New workspace…' shows below the WORKSPACES icon button"],
   });
 });
