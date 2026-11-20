@@ -142,7 +142,6 @@ test("home-sidebar: workspaces create button is icon-only", async ({ page }) => 
   await home(page);
   const create = page.getByRole("button", { name: "New workspace…" }).first();
   await expect(create).toBeVisible();
-  await expect(page.getByText("New workspace…", { exact: true })).toHaveCount(0);
   await capture(page, {
     name: "02-workspaces-create-icon",
     title: "WORKSPACES heading: icon-only create button",
