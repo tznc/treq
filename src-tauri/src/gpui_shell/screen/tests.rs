@@ -402,6 +402,10 @@ impl machines::MachinesHost for FakeHost {
 impl onboarding::OnboardingHost for FakeHost {}
 
 impl settings_data::SettingsHost for FakeHost {
+  fn pick_clone_folder(&self) -> Option<String> {
+    self.picked.clone()
+  }
+
   fn settings(&self, keys: &[String]) -> Result<settings_data::Values, String> {
     self.record("read settings".into());
     Ok(keys.iter().map(|k| (k.clone(), self.setting(k))).collect())

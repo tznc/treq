@@ -262,6 +262,9 @@ pub struct Application {
   pub checklist: checklist::Checklist,
   pub setup_script: SetupScript,
   pub agent_instructions: String,
+  pub clone_directory: String,
+  /// What an empty template means, shown as its placeholder.
+  pub default_clone_dir: String,
   pub profiles: Vec<ProfileRow>,
   pub default_profiles: Vec<DefaultProfile>,
   pub profile_agent_options: Vec<SelectOption>,
@@ -677,6 +680,23 @@ impl SettingsView {
         .ignore_closed();
     })
     .detach();
+  }
+
+  /// Picks the clone folder in the system dialog and saves it at once.
+  fn browse_clone_dir(&mut self, cx: &mut Context<Self>) {
+    self.spawn(
+      cx,
+      |host| host.pick_clone_folder(),
+      |view, picked, cx| {
+        let (Some(path), Some(app)) = (picked, view.app.as_mut()) else {
+          return;
+        };
+        app.clone_directory = path;
+        let field = "app.cloneDirectory".to_string();
+        view.pending.remove(&field);
+        view.save_fields(vec![field], cx);
+      },
+    );
   }
 
   fn load_app(&mut self, cx: &mut Context<Self>) {
@@ -1538,6 +1558,7 @@ impl SettingsView {
           }
           "app.setupScript.run" => self.run_setup(cx),
           "app.addProfile" => self.add_profile(cx),
+          "app.cloneDirectory.browse" => self.browse_clone_dir(cx),
           "repo.reviewPrompt.tune" => self.tune_review_prompt(cx),
           "repo.promptEdits.dismissAll" => self.dismiss_all_prompt_edits(cx),
           "repo.yaml.reload" => self.load_repo(cx),
@@ -1638,6 +1659,7 @@ impl SettingsView {
           "app.conflictMarkerStyle" => app.conflict_marker_style = text,
           "app.notifyAgentFinished" => app.notify_agent_finished = value.as_bool().unwrap_or(true),
           "app.agentInstructions" => app.agent_instructions = text,
+          "app.cloneDirectory" => app.clone_directory = text,
           "app.newProfileAgent" => self.new_profile.0 = text,
           "app.newProfileName" => {
             self.new_profile.1 = text;
@@ -1794,6 +1816,8 @@ impl SettingsView {
         new_profile_agent: self.new_profile.0.clone(),
         new_profile_name: self.new_profile.1.clone(),
         profile_error: self.profile_error.clone(),
+        clone_directory: app.clone_directory,
+        default_clone_dir: crate::core::projects::default_clone_dir(),
         checklist: checklist::from_statuses(
           "Command-line tools",
           self.statuses.as_deref(),
@@ -2509,6 +2533,13 @@ impl SettingsView {
       window,
       cx,
     );
+    let clone_dir = self.controls.input(
+      "app.cloneDirectory",
+      &app.clone_directory,
+      &app.default_clone_dir,
+      window,
+      cx,
+    );
     let script = self.controls.textarea(
       "app.setupScript",
       &app.setup_script.script,
@@ -2707,6 +2738,31 @@ impl SettingsView {
         form::textarea_field(&instructions, true, false),
         Some("Added to every agent terminal in every repository."),
         self.mark_of("app.agentInstructions"),
+        p,
+      ))
+      .child(saved_field_block(
+        "Clone directory",
+        div()
+          .flex()
+          .items_center()
+          .gap_2()
+          .child(div().flex_1().min_w_0().child(form::input_field(
+            "settings-clone-directory",
+            &clone_dir,
+            true,
+            false,
+          )))
+          .child(
+            ui::IconButton::new(
+              "settings-clone-directory-browse",
+              theme::ICON_FOLDER_OPEN,
+              "Browse for clone directory",
+              p,
+            )
+            .on_click(self.press("app.cloneDirectory.browse")),
+          ),
+        Some("Repositories Treq clones go here, in <owner>/<repo> folders. Projects can choose their own."),
+        self.mark_of("app.cloneDirectory"),
         p,
       ))
   }

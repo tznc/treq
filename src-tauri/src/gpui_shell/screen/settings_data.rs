@@ -11,6 +11,7 @@ use crate::{
     agent_command::AGENT_INSTRUCTIONS_SETTING,
     app_setup_script::{self, AppSetupScriptStatus},
     feature_preview::{self, PreviewFeature},
+    projects::CLONE_DIRECTORY_SETTING,
     skills::{
       self, CustomSkill, CustomizedSkill, InstalledSkill, SkillCatalogEntry, SkillCatalogSkillView,
       SkillInstallScope,
@@ -28,6 +29,8 @@ pub type Values = HashMap<String, Option<String>>;
 pub trait SettingsHost: ToolsHost + AccountHost {
   fn settings(&self, keys: &[String]) -> Result<Values, String>;
   fn set_settings(&self, values: &[(String, String)]) -> Result<(), String>;
+  /// The folder picker, for where Treq clones repositories.
+  fn pick_clone_folder(&self) -> Option<String>;
   fn setup_script(&self) -> Result<AppSetupScriptStatus, String>;
   fn save_setup_script(&self, script: &str, always_run: bool) -> Result<(), String>;
   /// Starts a run; the status reports it as running once this returns.
@@ -105,6 +108,18 @@ impl SettingsHost for Backend {
         .try_for_each(|(key, value)| db.set_setting(key, value))
         .map_err(|e| e.to_string())
     })
+  }
+
+  fn pick_clone_folder(&self) -> Option<String> {
+    use tauri_plugin_dialog::DialogExt;
+    self
+      .app()
+      .dialog()
+      .file()
+      .set_title("Select clone directory")
+      .blocking_pick_folder()
+      .and_then(|folder| folder.into_path().ok())
+      .map(|path| path.to_string_lossy().into_owned())
   }
 
   fn setup_script(&self) -> Result<AppSetupScriptStatus, String> {
@@ -413,6 +428,8 @@ pub struct AppFields {
   pub conflict_marker_style: String,
   pub notify_agent_finished: bool,
   pub agent_instructions: String,
+  /// Where Treq clones repositories; `""` uses the default.
+  pub clone_directory: String,
   pub profiles: Vec<AgentProfile>,
   /// Each profile agent's default profile name, `""` for its own sign-in.
   pub default_profiles: Vec<(String, String)>,
@@ -437,6 +454,7 @@ pub fn app_keys() -> Vec<String> {
     "conflict_marker_style",
     NOTIFY_AGENT_FINISHED,
     AGENT_INSTRUCTIONS_SETTING,
+    CLONE_DIRECTORY_SETTING,
   ]
   .into_iter()
   .map(str::to_string)
@@ -480,6 +498,7 @@ impl AppFields {
           (agent.to_string(), name.unwrap_or_default())
         })
         .collect(),
+      clone_directory: string(values, CLONE_DIRECTORY_SETTING).unwrap_or_default(),
     }
   }
 
@@ -494,6 +513,7 @@ impl AppFields {
         self.notify_agent_finished.to_string(),
       ),
       (AGENT_INSTRUCTIONS_SETTING, self.agent_instructions.clone()),
+      (CLONE_DIRECTORY_SETTING, self.clone_directory.clone()),
       ("terminal_font_size", self.font_size.to_string()),
       ("ui_zoom", (self.zoom.round() as i64).to_string()),
       (
@@ -703,7 +723,8 @@ pub fn save_timing(field: &str) -> Option<SaveTiming> {
     | "repo.reviewPrompt"
     | "repo.agentInstructions"
     | "app.setupScript"
-    | "app.agentInstructions" => Some(SaveTiming::Debounced),
+    | "app.agentInstructions"
+    | "app.cloneDirectory" => Some(SaveTiming::Debounced),
     "repo.defaultModel"
     | "repo.defaultAgent"
     | "repo.autoPush"

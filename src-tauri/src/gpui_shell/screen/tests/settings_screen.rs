@@ -182,15 +182,20 @@ fn settings_saves_the_application_itself(cx: &mut TestAppContext) {
   h.cx.run_until_parked();
   send(&mut h, field("app.defaultAgent", "codex".into()));
   h.cx.run_until_parked();
+  send(
+    &mut h,
+    field("app.cloneDirectory", "~/src/{owner}/{repo}".into()),
+  );
+  h.cx.run_until_parked();
   // Each choice saves as it is made, without a toast.
   assert_eq!(
     host.writes(),
     [
       "set theme=dark",
       "notify settingsChanged",
-      "set default_model= default_agent= conflict_marker_style=git notify_agent_finished=true agent_instructions= terminal_font_size=16 ui_zoom=120 agent_profiles=[] default_profile_claude= default_profile_codex=",
+      "set default_model= default_agent= conflict_marker_style=git notify_agent_finished=true agent_instructions= clone_directory= terminal_font_size=16 ui_zoom=120 agent_profiles=[] default_profile_claude= default_profile_codex=",
       "notify settingsChanged",
-      "set default_model= default_agent=codex conflict_marker_style=git notify_agent_finished=true agent_instructions= terminal_font_size=16 ui_zoom=120 agent_profiles=[] default_profile_claude= default_profile_codex=",
+      "set default_model= default_agent=codex conflict_marker_style=git notify_agent_finished=true agent_instructions= clone_directory= terminal_font_size=16 ui_zoom=120 agent_profiles=[] default_profile_claude= default_profile_codex=",
       "notify settingsChanged",
     ]
   );
@@ -258,6 +263,45 @@ fn settings_manages_agent_account_profiles(cx: &mut TestAppContext) {
   let app = drawn_settings(&mut h).application.expect("drawn");
   assert_eq!(app.profiles.len(), 2);
   assert_eq!(host.setting("default_profile_claude").as_deref(), Some(""));
+}
+
+#[gpui::test]
+fn settings_saves_the_clone_location_after_a_pause(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::default());
+  let mut h = Harness::with_host(cx, settings_route("application"), host.clone());
+  // Tall enough to show the whole tab.
+  h.cx
+    .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(3000.)));
+  h.click("settings-clone-directory");
+  h.cx.simulate_input("~/src");
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_millis(600));
+  h.cx.run_until_parked();
+  let writes = host.writes();
+  assert!(writes[0].contains(" clone_directory=~/src "), "{writes:?}");
+}
+
+#[gpui::test]
+fn settings_browses_for_the_clone_directory(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost {
+    picked: Some("/picked/clones".into()),
+    ..FakeHost::default()
+  });
+  let mut h = Harness::with_host(cx, settings_route("application"), host.clone());
+  h.cx
+    .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(3000.)));
+  assert!(h.shows(gpui::Role::Button, "Browse for clone directory"));
+  h.click("settings-clone-directory-browse");
+  let writes = host.writes();
+  assert!(
+    writes
+      .iter()
+      .any(|w| w.contains(" clone_directory=/picked/clones ")),
+    "{writes:?}"
+  );
+  let app = drawn_settings(&mut h).application.expect("application tab");
+  assert_eq!(app.clone_directory, "/picked/clones");
 }
 
 #[gpui::test]
