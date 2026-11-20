@@ -15,7 +15,9 @@ function repoSetting(name: string, value: string | null): void {
   const db = new DatabaseSync(join(home, ".local/share/com.treq/treq.db"));
   if (value === null) db.prepare("DELETE FROM settings WHERE key = ?").run(key);
   else
-    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(key, value);
+    db.prepare(
+      "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+    ).run(key, value);
   db.close();
 }
 
@@ -35,8 +37,12 @@ for (const [label, pattern, branch] of [
     await home(page);
     await page.getByRole("button", { name: "New workspace…" }).first().click();
     await page.getByRole("tab", { name: "Linear" }).click();
-    await expect(page.getByRole("heading", { name: "Your issues" })).toBeVisible({ timeout: 20_000 });
-    await page.getByRole("checkbox", { name: "ENG-142 Retry webhook deliveries" }).click();
+    await expect(
+      page.getByRole("heading", { name: "Your issues" }),
+    ).toBeVisible({ timeout: 20_000 });
+    await page
+      .getByRole("checkbox", { name: "ENG-142 Retry webhook deliveries" })
+      .click();
     await page.getByRole("status").click();
     const list = page.getByRole("list", { name: "Workspaces to open" });
     await expect(list).toBeVisible();
