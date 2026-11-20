@@ -2158,7 +2158,7 @@ impl ChangesView {
     };
     let resizing = self.side_resizing;
     let primary = p.primary;
-    let hover = p.handle_hover();
+    let palette = *p;
     let handle = div()
       .id("changes-file-list-resize")
       .debug_selector(|| "changes-file-list-resize".into())
@@ -2169,7 +2169,7 @@ impl ChangesView {
       .w(zpx(4.))
       .cursor_ew_resize()
       .when(resizing, |this| this.bg(primary))
-      .hover(move |style| style.bg(hover))
+      .hover(move |style| style.bg(palette.handle_hover()))
       .on_drag(SideResize, |drag, _, _, cx| cx.new(|_| *drag))
       .on_click(cx.listener(|this, event: &gpui::ClickEvent, _, cx| {
         cx.stop_propagation();
