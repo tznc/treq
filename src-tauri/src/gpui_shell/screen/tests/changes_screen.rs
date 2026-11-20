@@ -1691,7 +1691,7 @@ fn the_file_list_width_is_saved_and_restored(cx: &mut TestAppContext) {
     Some("300")
   );
 
-  let mut host = changes_host();
+  let host = changes_host();
   host
     .settings
     .lock()
