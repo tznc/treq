@@ -211,7 +211,7 @@ async fn sync_projects(cloud: Arc<Cloud>) {
             .collect();
           let mapper = project_sync::GitMapper {
             known,
-            clones_root: projects::clones_root(),
+            clone_dir: projects::clone_dir(&db),
           };
           let transport = project_sync::SupabaseTransport(supabase);
           tauri::async_runtime::block_on(project_sync::sync(
