@@ -1838,3 +1838,18 @@ fn terminal_link_labels_name_the_pull_request() {
     "linear.app"
   );
 }
+
+/// A file thumbnail is a square chip with its name centered under the icon.
+#[gpui::test]
+fn send_file_thumbnail_is_square_with_centered_name(cx: &mut TestAppContext) {
+  let (mut h, _) = send_harness(cx);
+  let chip = h.cx.debug_bounds("terminal-send-preview-t1").expect("chip");
+  assert_eq!(chip.size.width, chip.size.height, "square chip");
+  let title = h.cx.debug_bounds("terminal-send-title-t1").expect("title");
+  assert!(
+    title.size.width < chip.size.width - gpui::px(8.),
+    "title hugs its text"
+  );
+  let offset = (title.center().x - chip.center().x).abs();
+  assert!(offset < gpui::px(1.), "title centered, off by {offset:?}");
+}
