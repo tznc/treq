@@ -463,7 +463,8 @@ impl Button {
       Variant::Warning => p.warning_foreground,
       Variant::Success | Variant::Github => p.primary_foreground,
       Variant::DestructiveOutline => p.destructive,
-      Variant::DestructiveGhost | Variant::Command => p.muted_foreground,
+      Variant::DestructiveGhost => p.muted_foreground,
+      Variant::Command => p.primary,
     }
   }
 }
@@ -510,7 +511,7 @@ impl Button {
         p.destructive.opacity(0.1),
       ),
       Variant::DestructiveGhost => (clear, clear, p.destructive.opacity(0.1)),
-      Variant::Command => (p.background, p.border, p.hover()),
+      Variant::Command => (p.background, p.primary.opacity(0.5), p.primary.opacity(0.1)),
     };
     let hover_bg = self.hover_bg.unwrap_or(hover_bg);
     let (bg, hover_bg) = if self.selected && !self.filled() {
@@ -974,7 +975,7 @@ mod tests {
   }
 
   #[test]
-  fn a_command_button_is_a_muted_field_with_its_shortcut_last() {
+  fn a_command_button_is_a_primary_outlined_field_with_its_shortcut_last() {
     let p = theme::palette(false);
     let command = Button::new("c", &p)
       .variant(Variant::Command)
@@ -983,9 +984,9 @@ mod tests {
       .label("Go to file");
     assert!(!command.filled());
     assert_eq!(command.colors().bg, p.background);
-    assert_eq!(command.colors().border, p.border);
-    assert_eq!(command.colors().hover_bg, p.hover());
-    assert_eq!(command.foreground(), p.muted_foreground);
+    assert_eq!(command.colors().border, p.primary.opacity(0.5));
+    assert_eq!(command.colors().hover_bg, p.primary.opacity(0.1));
+    assert_eq!(command.foreground(), p.primary);
     assert!(matches!(
       command.children[..],
       [ButtonChild::Icon(..), ButtonChild::Element(_)]
