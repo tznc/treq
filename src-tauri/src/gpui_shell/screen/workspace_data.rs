@@ -31,6 +31,12 @@ use crate::{
 /// `ShowWorkspace`'s `defaultBranch`: the literal it compares branches with.
 pub const DEFAULT_BRANCH: &str = "main";
 
+/// Whether `workspace` has commits of its own to show: its branch is not
+/// the branch it targets. Not the home checkout's branch, which can be any.
+pub fn has_committed_changes(workspace: &local_db::Workspace) -> bool {
+  workspace.branch_name != workspace.target_branch.as_deref().unwrap_or(DEFAULT_BRANCH)
+}
+
 /// What the window model presents: which workspace shows, and the state of
 /// the flows it runs (target branch, Changes refresh, PR creation, checks).
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -173,7 +179,7 @@ fn changed_counts(
   workspace: Option<&local_db::Workspace>,
 ) -> (usize, usize) {
   let warn = |what: &str, err: String| log::warn!("workspace header: {what}: {err}");
-  let include_committed = workspace.is_some_and(|w| w.branch_name != route.default_target());
+  let include_committed = workspace.is_some_and(has_committed_changes);
   match route.workspace_id {
     Some(id) if include_committed => core::workspace_diff(repo, id)
       .map(|diff| {
@@ -447,9 +453,7 @@ fn read_remote_header(remote: &Remote, route: &Route) -> RemoteHeader {
         super::joined(home_ahead),
       )
     });
-  let include_committed = workspace
-    .as_ref()
-    .is_some_and(|w| w.branch_name != route.default_target());
+  let include_committed = workspace.as_ref().is_some_and(has_committed_changes);
   let changed = |files: Result<Vec<JjFileChange>, String>| {
     files
       .map(|files| {

@@ -8,8 +8,6 @@ message: >
 # Baseline: files that already asserted on drawn ids. Do not add to it;
 # migrate a file and drop it from this list instead.
 ignores:
-  - "src-tauri/src/gpui_shell/screen/tests/changes_screen.rs"
-  - "src-tauri/src/gpui_shell/screen/tests/dialogs.rs"
   - "src-tauri/src/gpui_shell/screen/tests/terminal_screen.rs"
 rule:
   kind: macro_invocation

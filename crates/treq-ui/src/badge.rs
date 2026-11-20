@@ -70,12 +70,18 @@ impl Tone {
   }
 }
 
+/// A [`Badge`]'s icon size and its gap to the label.
+pub const BADGE_ICON_SIZE: f32 = 12.;
+pub const BADGE_ICON_GAP: f32 = 4.;
+
 /// A short label in a pill, such as `Draft` or `PRO`: 20 tall, caption
 /// text, the tone's color over its tint.
 #[derive(IntoElement)]
 pub struct Badge {
   label: SharedString,
   tone: Tone,
+  /// A 12px icon before the label, in the label's colour.
+  icon: Option<&'static str>,
   palette: Palette,
 }
 
@@ -84,12 +90,18 @@ impl Badge {
     Self {
       label: label.into(),
       tone: Tone::Neutral,
+      icon: None,
       palette: *palette,
     }
   }
 
   pub fn tone(mut self, tone: Tone) -> Self {
     self.tone = tone;
+    self
+  }
+
+  pub fn icon(mut self, path: &'static str) -> Self {
+    self.icon = Some(path);
     self
   }
 }
@@ -104,7 +116,15 @@ impl RenderOnce for Badge {
         (color, color.opacity(if p.dark { 0.2 } else { 0.12 }))
       }
     };
-    pill(cx).px(zpx(6.)).bg(bg).text_color(fg).child(self.label)
+    pill(cx)
+      .px(zpx(6.))
+      .gap(zpx(BADGE_ICON_GAP))
+      .bg(bg)
+      .text_color(fg)
+      .when_some(self.icon, |this, path| {
+        this.child(crate::icon(path, BADGE_ICON_SIZE, fg))
+      })
+      .child(self.label)
   }
 }
 
@@ -274,6 +294,9 @@ mod tests {
     let p = theme::palette(true);
     let badge = Badge::new("Draft", &p).tone(Tone::GitMerged);
     assert_eq!(badge.tone, Tone::GitMerged);
+    assert_eq!(badge.icon, None);
+    let badge = badge.icon(theme::ICON_MERGE);
+    assert_eq!(badge.icon, Some(theme::ICON_MERGE));
     assert_eq!(Tone::GitMerged.color(&p), p.pr_merged);
     assert_eq!(Tone::default().color(&p), p.muted_foreground);
     assert_eq!(Tone::Danger.text(&p), theme::tw::color(theme::tw::RED_400));

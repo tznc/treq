@@ -517,13 +517,6 @@ impl Overlay {
         let Some(row) = list.get(index) else {
           return;
         };
-        if let Some(workspace) = &row.workspace {
-          self.send(
-            field("branchSwitcher.openWorkspace", workspace.id.into()),
-            cx,
-          );
-          return;
-        }
         if row.group == 0 {
           self.close(cx);
           return;
@@ -673,10 +666,10 @@ fn group_branches(
         .iter()
         .find(|w| w.branch_name == branch.name)
         .cloned();
-      let group = if workspace.is_some() {
-        1
-      } else if current == Some(branch.name.as_str()) {
+      let group = if current == Some(branch.name.as_str()) {
         0
+      } else if workspace.is_some() {
+        1
       } else if branch.name.contains('@') {
         3
       } else {

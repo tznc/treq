@@ -6,6 +6,7 @@ use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
+use gpui_kit::base::TestSupportExt as _;
 use serde::Deserialize;
 use serde_json::json;
 use std::{ops::Range, rc::Rc};
@@ -257,8 +258,16 @@ impl PromptHistoryView {
   }
 
   /// The prompts, a row each, built only while on screen.
-  fn list(&self, entries: &[PromptHistoryEntry], p: &Palette, cx: &mut Context<Self>) -> gpui::Div {
+  fn list(
+    &self,
+    entries: &[PromptHistoryEntry],
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
     div()
+      .id("prompt-history-list")
+      .role(gpui::Role::List)
+      .aria_label("Prompts")
       .debug_selector(|| "prompt-history-list".into())
       .w(zpx(256.))
       .flex_none()
@@ -274,6 +283,7 @@ impl PromptHistoryView {
         )
         .size_full(),
       )
+      .test_support()
   }
 
   fn rows(&mut self, range: Range<usize>, cx: &mut Context<Self>) -> Vec<gpui::AnyElement> {
@@ -417,8 +427,12 @@ impl PromptHistoryView {
         .child(header)
         .child(
           ui::text(div(), TextSize::Sm)
+            .id("prompt-history-detail-text")
+            .role(gpui::Role::Paragraph)
+            .aria_label(entry.prompt_text.clone())
             .debug_selector(|| "prompt-history-detail-text".into())
-            .child(entry.prompt_text.clone()),
+            .child(entry.prompt_text.clone())
+            .test_support(),
         )
         .child(
           div().child(
