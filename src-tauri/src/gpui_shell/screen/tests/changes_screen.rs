@@ -1259,7 +1259,7 @@ fn changes_tab_resolves_an_agent_comment(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn changes_tab_marks_a_sent_review_comment_and_resolves_it(cx: &mut TestAppContext) {
+fn changes_tab_marks_a_sent_review_comment_and_folds_it_once_resolved(cx: &mut TestAppContext) {
   let host = changes_host();
   let mut sent = agent_comment(None);
   sent.source = "sent-review".into();
@@ -1273,7 +1273,12 @@ fn changes_tab_marks_a_sent_review_comment_and_resolves_it(cx: &mut TestAppConte
   assert!(host
     .writes()
     .contains(&"resolve agent comment ag".to_string()));
-  assert!(!h.drawn("agent-review-comment-card"));
+  // Resolved, it stays on its line, folded to its header.
+  assert!(h.drawn("sent-review-collapsed-ag"));
+  assert!(!h.drawn("agent-resolve-ag"));
+  h.click("sent-review-collapsed-ag");
+  assert!(h.drawn("agent-review-comment-card"));
+  assert!(!h.drawn("agent-resolve-ag"));
 }
 
 #[gpui::test]

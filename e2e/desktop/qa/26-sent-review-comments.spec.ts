@@ -22,7 +22,7 @@ test("sent review comments stay on the diff until resolved", async ({ page }) =>
 
   await page.getByRole("button", { name: /^Finish review/ }).click();
   await page.getByRole("button", { name: "Plan", exact: true }).click();
-  const resolve = page.getByRole("button", { name: "Resolve" });
+  const resolve = page.getByRole("button", { name: "Resolve", exact: true });
   await expect(resolve).toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole("button", { name: "Delete" })).toHaveCount(0);
   await settle(page, 800);
@@ -38,10 +38,26 @@ test("sent review comments stay on the diff until resolved", async ({ page }) =>
 
   await resolve.click();
   await expect(resolve).toHaveCount(0, { timeout: 10_000 });
+  const folded = page.getByRole("button", { name: "Show resolved comment" });
+  await expect(folded).toBeVisible();
   await settle(page, 600);
   await capture(page, {
     name: "26-sent-review-02-resolved",
-    title: "Resolving removes the sent comment",
-    expectations: ["The sent comment card is gone and the diff line shows no comment"],
+    title: "A resolved sent comment folds to one line",
+    expectations: [
+      "Under the commented line a one-line row shows a chevron, a paper-plane, 'Resolved' and the comment text, all muted",
+      "No Resolve button and no full card",
+    ],
+  });
+
+  await folded.click();
+  await expect(page.getByRole("button", { name: "Hide resolved comment" })).toBeVisible();
+  await settle(page, 600);
+  await capture(page, {
+    name: "26-sent-review-03-unfolded",
+    title: "Clicking the folded row shows the comment again",
+    expectations: [
+      "The full sent card shows its text again, with 'Hide resolved comment' instead of Resolve",
+    ],
   });
 });
