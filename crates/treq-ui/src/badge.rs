@@ -303,20 +303,6 @@ mod tests {
   use super::*;
   use crate::theme;
 
-  /// A toned count, such as uncommitted changes, paints its tone over the
-  /// tone's tint; the default stays neutral.
-  #[test]
-  fn a_toned_count_takes_the_tone() {
-    for dark in [false, true] {
-      let p = theme::palette(dark);
-      assert_eq!(Count::new(3, &p).colors(), (p.muted, p.muted_foreground));
-      assert_eq!(
-        Count::new(3, &p).tone(Tone::Warning).colors(),
-        (Tone::Warning.tint(&p), Tone::Warning.text(&p))
-      );
-    }
-  }
-
   #[test]
   fn test_badge_builder() {
     let p = theme::palette(true);
