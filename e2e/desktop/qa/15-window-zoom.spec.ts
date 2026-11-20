@@ -2,7 +2,7 @@
 // window's minimum size.
 import { expect, test } from "@playwright/test";
 import { capture } from "./capture.ts";
-import { mod, openTab, openWorkspace, settle } from "./helpers.ts";
+import { mod, openTab, openWorkspace, row, settle } from "./helpers.ts";
 
 const BRANCH = "feat/empty-event-message";
 
@@ -45,6 +45,37 @@ test("window-zoom: minimum window size", async ({ page }) => {
     });
   } finally {
     await page.setViewportSize({ width: 1400, height: 900 });
+    await settle(page, 500);
+  }
+});
+
+test("window-zoom: terminal text follows the UI zoom", async ({ page }) => {
+  await openWorkspace(page, BRANCH);
+  await openTab(page, "Commits");
+  await row(page, BRANCH).hover();
+  await row(page, BRANCH).getByRole("button", { name: "Open shell" }).click();
+  await settle(page, 2500);
+  await page.mouse.click(1000, 780);
+  await page.keyboard.type("PS1='$ '; clear; echo zoom-check-0123456789\n");
+  await settle(page, 1000);
+  // Zoom changes after the shell opened: the bug kept its open-time size.
+  const steps: [number, number][] = [[80, -4], [100, 4], [150, 10]];
+  try {
+    for (const [zoom, by] of steps) {
+      const key = by < 0 ? `${mod}+-` : `${mod}+=`;
+      for (let i = 0; i < Math.abs(by); i++) await page.keyboard.press(key);
+      await settle(page, 1500);
+      await capture(page, {
+        name: `15-window-zoom-terminal-${zoom}`,
+        title: `Terminal at ${zoom}% zoom`,
+        expectations: [
+          `The terminal's text is scaled like the rest of the UI at ${zoom}%`,
+          "The echoed line and prompt sit on whole cells, with no overlap or clipping",
+        ],
+      });
+    }
+  } finally {
+    for (let i = 0; i < 10; i++) await page.keyboard.press(`${mod}+-`);
     await settle(page, 500);
   }
 });
