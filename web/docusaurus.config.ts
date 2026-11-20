@@ -156,9 +156,10 @@ const config: Config = {
         },
         sitemap: {
           ignorePatterns: [
-            '/dashboard',
-            '/login',
-            '/sign-in',
+            // trailingSlash: true makes these routes /login/, so match the folder.
+            '/dashboard/**',
+            '/login/**',
+            '/sign-in/**',
             '/auth/**',
             '/integrations/**',
           ],

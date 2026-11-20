@@ -332,6 +332,18 @@ impl Global for Shells {}
 const MIN_WIDTH: f64 = 900.;
 const MIN_HEIGHT: f64 = 500.;
 
+/// How far each window opens down and right of the last, so windows opened
+/// together (session restore) stack with their title bars visible.
+const CASCADE_STEP: f64 = 28.;
+/// Cascades restart at the first position after this many windows.
+const CASCADE_WRAP: usize = 10;
+
+/// The offset, in logical pixels on both axes, for a window opened while
+/// `open` other windows are open.
+fn cascade_offset(open: usize) -> f64 {
+  (open % CASCADE_WRAP) as f64 * CASCADE_STEP
+}
+
 /// Opens a repo window in the GPUI shell. Must run on the main thread.
 /// `repo` is the repository it opens on (`None`: the start screen).
 pub fn open_window(
@@ -353,6 +365,7 @@ pub fn open_window(
     .hidden_title(true);
   let window = window.build()?;
   crate::startup::mark("window built");
+  cascade(app, &window);
   #[cfg(target_os = "linux")]
   hide_menu_bar(&window)?;
 
@@ -384,6 +397,23 @@ pub fn open_window(
   window::start(app, label, repo)?;
   crate::startup::mark("window model started");
   Ok(())
+}
+
+/// Moves a new window off the default centred spot by one cascade step per
+/// other open window.
+fn cascade(app: &AppHandle, window: &tauri::Window) {
+  use tauri::Manager as _;
+  let offset = cascade_offset(app.windows().len().saturating_sub(1));
+  if offset == 0. {
+    return;
+  }
+  let (Ok(at), Ok(scale)) = (window.outer_position(), window.scale_factor()) else {
+    return;
+  };
+  let at = at.to_logical::<f64>(scale);
+  window
+    .set_position(tauri::LogicalPosition::new(at.x + offset, at.y + offset))
+    .warn_on_err("cascade window");
 }
 
 /// GPUI paints over GTK's menu bar, which still took the clicks on the top
@@ -482,7 +512,7 @@ impl Shell {
         let label = self.label.to_string();
         let sink = action_sink(self.app.clone(), label.clone());
         let popups = popup_sink(self.app.clone(), label);
-        self.sidebar = Some(cx.new(|_| Sidebar::new(snapshot, sink, popups)));
+        self.sidebar = Some(cx.new(|cx| Sidebar::new(snapshot, sink, popups).watch_terminals(cx)));
       }
     }
   }
@@ -839,5 +869,27 @@ mod block_on_tests {
       .expect("spawn")
       .join();
     assert!(on_main.is_err());
+  }
+}
+
+#[cfg(test)]
+mod cascade_tests {
+  use super::cascade_offset;
+
+  #[test]
+  fn first_window_is_not_offset() {
+    assert_eq!(cascade_offset(0), 0.);
+  }
+
+  #[test]
+  fn each_open_window_shifts_the_next_one() {
+    assert_eq!(cascade_offset(1), 28.);
+    assert_eq!(cascade_offset(3), 84.);
+  }
+
+  #[test]
+  fn wraps_so_windows_stay_on_screen() {
+    assert_eq!(cascade_offset(10), 0.);
+    assert_eq!(cascade_offset(11), 28.);
   }
 }
