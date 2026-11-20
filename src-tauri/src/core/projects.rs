@@ -456,6 +456,21 @@ pub fn clone_dir(db: &crate::db::Database) -> String {
     .unwrap_or_else(default_clone_dir)
 }
 
+/// Project `id`'s own clone folder on this machine; `""` when it follows
+/// the app's. Kept as a project-scoped, local-only app setting.
+pub fn project_clone_dir(db: &crate::db::Database, id: &str) -> Result<String, String> {
+  db.get_project_setting(id, CLONE_DIRECTORY_SETTING)
+    .map(Option::unwrap_or_default)
+    .map_err(|e| e.to_string())
+}
+
+/// Sets project `id`'s clone folder on this machine; `""` follows the app's.
+pub fn set_project_clone_dir(db: &crate::db::Database, id: &str, dir: &str) -> Result<(), String> {
+  exists(db.conn(), id)?;
+  db.set_project_setting(id, CLONE_DIRECTORY_SETTING, dir.trim())
+    .map_err(|e| e.to_string())
+}
+
 /// Where Treq clones `url` inside folder `dir`: `<dir>/<owner>/<repo>`, the
 /// owner holding every group between host and name. `None` for anything
 /// that is not a repository URL.
@@ -1216,6 +1231,42 @@ mod tests {
     assert!(Path::new(&path).join("README.md").exists());
     assert!(path.starts_with(&tpl(root.path())), "{path}");
     assert!(path.ends_with("/owner/name"), "{path}");
+  }
+
+  fn app_db() -> (tempfile::TempDir, crate::db::Database) {
+    let dir = tempfile::TempDir::new().unwrap();
+    let db = crate::db::Database::new(dir.path().join("app.db")).unwrap();
+    db.init().unwrap();
+    (dir, db)
+  }
+
+  #[test]
+  fn a_project_keeps_its_clone_dir_in_local_settings() {
+    let (_dir, db) = app_db();
+    let p = save(db.conn(), "a", &repos(&["/r/one"])).unwrap();
+    assert_eq!(project_clone_dir(&db, &p.id).unwrap(), "");
+    set_project_clone_dir(&db, &p.id, " /proj ").unwrap();
+    assert_eq!(project_clone_dir(&db, &p.id).unwrap(), "/proj");
+    // A project-scoped row of the local-only setting, apart from the app's.
+    assert_eq!(
+      db.get_project_setting(&p.id, CLONE_DIRECTORY_SETTING)
+        .unwrap()
+        .as_deref(),
+      Some("/proj")
+    );
+    assert_eq!(db.get_setting(CLONE_DIRECTORY_SETTING).unwrap(), None);
+    assert!(crate::core::config_sync::is_local_only_setting(
+      CLONE_DIRECTORY_SETTING
+    ));
+    // The project row, which syncs, holds no folder.
+    let row = get(db.conn(), &p.id).unwrap().unwrap();
+    assert!(!format!("{row:?}").contains("/proj"));
+  }
+
+  #[test]
+  fn setting_a_clone_dir_needs_an_existing_project() {
+    let (_dir, db) = app_db();
+    assert!(set_project_clone_dir(&db, "nope", "/x").is_err());
   }
 
   #[test]

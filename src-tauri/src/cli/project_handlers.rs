@@ -140,8 +140,11 @@ fn run(
         "invalid_arguments: add-repo needs a folder, URL or owner/name".to_string()
       })?;
       let project = current_project(db, repo_path)?;
-      let (path, cloned) =
-        projects::ensure_repo(spec, clone_dir, &projects::all_repos(db.conn())?)?;
+      // The project's own clone folder, else the app's.
+      let own = projects::project_clone_dir(db, &project.id)?;
+      let dir = if own.is_empty() { clone_dir } else { &own };
+      let known = projects::all_repos(db.conn())?;
+      let (path, cloned) = projects::ensure_repo(spec, dir, &known)?;
       core::init(&path).map_err(|e| e.to_string())?;
       let added = projects::add_repo(db.conn(), &project.id, &path)?;
       match format {
@@ -323,6 +326,27 @@ mod tests {
       )
       .unwrap_err();
     assert!(err.starts_with("not_found:"), "{err}");
+  }
+
+  #[test]
+  #[cfg(unix)]
+  fn add_repo_clones_into_the_project_folder() {
+    let env = env();
+    let p = env.save("Checkout", &["/r/web"]);
+    let origin = TestRepo::new().unwrap();
+    // Reached as <tmp>/host/owner/app so the URL reads as a repository.
+    let hosts = TempDir::new().unwrap();
+    std::fs::create_dir_all(hosts.path().join("host/owner")).unwrap();
+    std::os::unix::fs::symlink(&origin.repo_path, hosts.path().join("host/owner/app")).unwrap();
+    let dir = TempDir::new().unwrap();
+    projects::set_project_clone_dir(&env.db, &p.id, &dir.path().display().to_string()).unwrap();
+    let url = format!("file://{}/host/owner/app", hosts.path().display());
+    let json = env.json("/r/web", "add-repo", Some(&url));
+    assert_eq!(json["cloned"], true);
+    // A file:// URL has no host, so its whole path nests under the folder.
+    let expected = projects::clone_path(&dir.path().display().to_string(), &url).unwrap();
+    assert!(expected.starts_with(dir.path()) && expected.ends_with("owner/app"));
+    assert_eq!(json["path"], expected.to_string_lossy().as_ref());
   }
 
   #[test]
