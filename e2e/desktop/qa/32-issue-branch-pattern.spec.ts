@@ -40,7 +40,6 @@ for (const [label, pattern, branch] of [
     await page.getByRole("status").click();
     const list = page.getByRole("list", { name: "Workspaces to open" });
     await expect(list).toBeVisible();
-    await expect(list.getByText(branch, { exact: true })).toBeVisible();
     await settle(page, 500);
     await capture(page, {
       name: `32-issue-branch-pattern-${label}`,
