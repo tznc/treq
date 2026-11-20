@@ -10,6 +10,14 @@ test("review thread: replies share one card", async ({ page }) => {
   await settle(page, 1500);
   await page.mouse.click(326, 320); // client.ts under Committed
   await settle(page, 1500);
+  await capture(page, {
+    name: "31-review-thread-card-00-collapsed",
+    title: "Resolved review thread, folded",
+    expectations: [
+      "The resolved thread folds to one row on line 7: avatar, @octocat, Resolved, a preview",
+      "The folded row keeps the thread's card border and sits within the diff width",
+    ],
+  });
   await page.getByRole("button", { name: "Show review thread" }).click();
   await expect(page.getByRole("button", { name: "Hide review thread" })).toBeVisible();
   await settle(page, 800);
