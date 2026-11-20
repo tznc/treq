@@ -1210,6 +1210,8 @@ impl Lightbox {
             cx.listener(move |view, e: &MouseMoveEvent, _, cx| view.line_over(n, e, cx)),
           )
           .child(
+            // Line-number gutter: aligned digits.
+            // ast-grep-ignore: gpui-sans-text-min-size
             ui::text(div(), TextSize::Code)
               .w_8()
               .flex_none()

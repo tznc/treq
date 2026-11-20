@@ -56,7 +56,9 @@ impl Tooltips {
       }
       return;
     }
-    tips.current = Some((key.clone(), false));
+    if !enter(&mut tips.current, &key) {
+      return;
+    }
     cx.spawn(async move |this, cx| {
       cx.background_executor().timer(DELAY).await;
       this
@@ -131,5 +133,36 @@ impl Tooltips {
           .size_full(),
         )
       })
+  }
+}
+
+/// Marks `key` pending on hover-enter. Returns `false` when `key` is already
+/// pending or shown: a repeat enter (as the popup window opening sends) must
+/// not reset a shown tooltip, which hides and re-shows it in a loop.
+fn enter(current: &mut Option<(SharedString, bool)>, key: &SharedString) -> bool {
+  if current.as_ref().is_some_and(|(k, _)| k == key) {
+    return false;
+  }
+  *current = Some((key.clone(), false));
+  true
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn repeat_enter_keeps_shown_tooltip() {
+    let key = SharedString::from("a");
+    let mut current = Some((key.clone(), true));
+    assert!(!enter(&mut current, &key));
+    assert_eq!(current, Some((key, true)));
+  }
+
+  #[test]
+  fn enter_other_key_starts_pending() {
+    let mut current = Some((SharedString::from("a"), true));
+    assert!(enter(&mut current, &SharedString::from("b")));
+    assert_eq!(current, Some((SharedString::from("b"), false)));
   }
 }
