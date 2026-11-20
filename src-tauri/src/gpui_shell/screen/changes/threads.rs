@@ -40,6 +40,8 @@ pub(in crate::gpui_shell::screen) struct Threads {
   collapsed: HashSet<String>,
   seen: HashSet<String>,
   pub(in crate::gpui_shell::screen) agent: Vec<AgentReviewComment>,
+  /// Resolved sent comments unfolded.
+  expanded: HashSet<String>,
   /// Agent comments with an action running.
   busy: HashSet<String>,
   placed: Placed,
@@ -232,6 +234,13 @@ impl ChangesView {
       serde_json::to_value(comment).unwrap_or_default(),
       cx,
     );
+  }
+
+  fn toggle_sent(&mut self, id: &str, cx: &mut Context<Self>) {
+    if !self.threads.expanded.remove(id) {
+      self.threads.expanded.insert(id.to_string());
+    }
+    cx.notify();
   }
 
   fn toggle_thread(&mut self, id: &str, cx: &mut Context<Self>) {
@@ -609,9 +618,20 @@ impl ChangesView {
     original: Option<String>,
     p: &Palette,
     cx: &mut Context<Self>,
-  ) -> impl IntoElement {
+  ) -> AnyElement {
     let busy = self.threads.busy.contains(&comment.id);
     let muted = p.muted_foreground;
+    // A comment from a review the user sent to an agent, not the agent's.
+    let sent = comment.source == crate::core::agent_review::SENT_REVIEW_SOURCE;
+    let resolved = comment.status == "resolved";
+    if sent && resolved && !self.threads.expanded.contains(&comment.id) {
+      return self.folded_sent_card(comment, p, cx).into_any_element();
+    }
+    let (icon, tone, label) = if sent {
+      (theme::ICON_SEND, Tone::Primary, "Sent to agent")
+    } else {
+      (theme::ICON_BOT, Tone::GitMerged, "Local")
+    };
     let range = if comment.end_line != comment.start_line {
       format!("{}-{}", comment.start_line, comment.end_line)
     } else {
@@ -634,14 +654,21 @@ impl ChangesView {
           .flex()
           .items_center()
           .gap_2()
-          .child(ui::icon(theme::ICON_BOT, 14., Tone::GitMerged.color(p)))
           .child(
-            // Short label (['tag']): 11px is fine.
-            // ast-grep-ignore: gpui-text-xs-short-label-only
-            ui::text(div(), TextSize::Xs)
-              .font_weight(FontWeight::MEDIUM)
-              .text_color(Tone::GitMerged.color(p))
-              .child("Local"),
+            div()
+              .flex()
+              .items_center()
+              .gap_2()
+              .when(sent, |d| d.debug_selector(|| "sent-review-badge".into()))
+              .child(ui::icon(icon, 14., tone.color(p)))
+              .child(
+                // Short label (['tag']): 11px is fine.
+                // ast-grep-ignore: gpui-text-xs-short-label-only
+                ui::text(div(), TextSize::Xs)
+                  .font_weight(FontWeight::MEDIUM)
+                  .text_color(tone.color(p))
+                  .child(label),
+              ),
           )
           .child(
             ui::text(div(), TextSize::Sm)
@@ -673,18 +700,22 @@ impl ChangesView {
           ),
       );
     }
-    let sent = comment.clone();
+    let comment_sent = comment.clone();
     actions = actions
-      .child(
-        Button::new(SharedString::from(format!("agent-send-{id}")), p)
-          .variant(Variant::Outline)
-          .size(Size::Sm)
-          .gap_1p5()
-          .disabled(busy)
-          .icon(theme::ICON_TERMINAL, 12.)
-          .label("Send to agent")
-          .on_click(cx.listener(move |view, _, _, cx| view.send_agent_comment(&sent, cx))),
-      )
+      .when(!sent, |a| {
+        a.child(
+          Button::new(SharedString::from(format!("agent-send-{id}")), p)
+            .variant(Variant::Outline)
+            .size(Size::Sm)
+            .gap_1p5()
+            .disabled(busy)
+            .icon(theme::ICON_TERMINAL, 12.)
+            .label("Send to agent")
+            .on_click(
+              cx.listener(move |view, _, _, cx| view.send_agent_comment(&comment_sent, cx)),
+            ),
+        )
+      })
       .child({
         let id = id.clone();
         Button::new(SharedString::from(format!("agent-resolve-{id}")), p)
@@ -698,20 +729,96 @@ impl ChangesView {
             cx.listener(move |view, _, _, cx| view.agent_action(&id, AgentAction::Resolve, cx)),
           )
       })
-      .child(
-        Button::new(SharedString::from(format!("agent-delete-{id}")), p)
-          .variant(Variant::Ghost)
-          .size(Size::Sm)
-          .gap_1p5()
-          .text_color(muted)
-          .disabled(busy)
-          .icon(theme::ICON_TRASH, 12.)
-          .label("Delete")
-          .on_click(
-            cx.listener(move |view, _, _, cx| view.agent_action(&id, AgentAction::Delete, cx)),
+      .when(!sent, |a| {
+        a.child(
+          Button::new(SharedString::from(format!("agent-delete-{id}")), p)
+            .variant(Variant::Ghost)
+            .size(Size::Sm)
+            .gap_1p5()
+            .text_color(muted)
+            .disabled(busy)
+            .icon(theme::ICON_TRASH, 12.)
+            .label("Delete")
+            .on_click(
+              cx.listener(move |view, _, _, cx| view.agent_action(&id, AgentAction::Delete, cx)),
+            ),
+        )
+      });
+    if resolved {
+      // A resolved sent comment, unfolded: it only folds again.
+      let id = comment.id.clone();
+      return card
+        .child(
+          div().flex().child(
+            Button::new(SharedString::from(format!("sent-review-expanded-{id}")), p)
+              .variant(Variant::Ghost)
+              .size(Size::Sm)
+              .gap_1p5()
+              .icon(theme::ICON_CHEVRON_DOWN, 12.)
+              .label("Hide resolved comment")
+              .on_click(cx.listener(move |view, _, _, cx| view.toggle_sent(&id, cx))),
           ),
-      );
-    card.child(actions)
+        )
+        .into_any_element();
+    }
+    card.child(actions).into_any_element()
+  }
+
+  /// A resolved sent comment, folded to one line that unfolds it.
+  fn folded_sent_card(
+    &self,
+    comment: &AgentReviewComment,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
+    let muted = p.muted_foreground;
+    let id = comment.id.clone();
+    let first_line = comment
+      .comment_text
+      .lines()
+      .next()
+      .unwrap_or("")
+      .to_string();
+    div()
+      .id(SharedString::from(format!("sent-review-collapsed-{id}")))
+      .debug_selector({
+        let id = id.clone();
+        move || format!("sent-review-collapsed-{id}")
+      })
+      .role(gpui::Role::Button)
+      .aria_label("Show resolved comment")
+      .aria_expanded(false)
+      .max_w(zpx(CARD_MAX_W))
+      .min_w_0()
+      .flex()
+      .items_center()
+      .gap_2()
+      .px_3()
+      .py_1p5()
+      .rounded(radius::MD)
+      .border_1()
+      .border_color(p.border)
+      .cursor_pointer()
+      .hover(move |s| s.bg(p.hover()))
+      .on_click(cx.listener(move |view, _, _, cx| view.toggle_sent(&id, cx)))
+      .child(ui::icon(theme::ICON_CHEVRON_RIGHT, 12., muted))
+      .child(ui::icon(theme::ICON_SEND, 14., muted))
+      .child(
+        // Short label (['tag']): 11px is fine.
+        // ast-grep-ignore: gpui-text-xs-short-label-only
+        ui::text(div(), TextSize::Xs)
+          .font_weight(FontWeight::MEDIUM)
+          .text_color(muted)
+          .child("Resolved"),
+      )
+      .child(
+        ui::text(div(), TextSize::Sm)
+          .min_w_0()
+          .truncate()
+          .text_color(muted)
+          .child(first_line),
+      )
+      .test_support()
   }
 }
 
