@@ -1,15 +1,19 @@
-id: no-selector-click
+id: no-selector-interaction
 language: rust
 severity: error
 message: >
-  Do not click an element by its debug selector. Find it the way the user
+  Do not act on an element by its debug selector. Find it the way the user
   does with gpui-testing-library (`get_by_role`, `get_by_text`) and act with
-  `screen.user().click(&node)`.
+  `screen.user()` (`click`, `right_click`, `dbl_click`, `hover`, `type_text`).
 note: >
-  `h.click(selector)` clicks the centre of the selector's painted bounds. It
-  skips the role, name, visibility and enabled checks, and hits whatever is on
-  top at that point.
-# Baseline: files that already click by selector. Do not add to it;
+  Selector helpers act at the centre of the selector's painted bounds, so they
+  never check the element's role or accessible name, act on elements that are
+  painted but hidden, and silently pick one of two elements sharing a selector.
+  Role queries skip hidden elements and fail on ambiguous matches.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+  - "crates/treq-ui/**/*.rs"
+# Baseline: files that already act by selector. Do not add to it;
 # migrate a file and drop it from this list instead.
 ignores:
   - "src-tauri/src/gpui_shell/overlay/tests.rs"
@@ -40,6 +44,7 @@ ignores:
   - "src-tauri/src/gpui_shell/screen/tests/merge_screen.rs"
   - "src-tauri/src/gpui_shell/screen/tests/onboarding_screen.rs"
   - "src-tauri/src/gpui_shell/screen/tests/pr_review.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/prefetch.rs"
   - "src-tauri/src/gpui_shell/screen/tests/remote_dialog_overflow.rs"
   - "src-tauri/src/gpui_shell/screen/tests/review_comments.rs"
   - "src-tauri/src/gpui_shell/screen/tests/settings_screen.rs"
@@ -58,6 +63,11 @@ rule:
   any:
     - pattern: $H.click($$$ARGS)
     - pattern: $H.right_click($$$ARGS)
+    - pattern: $H.hover($$$ARGS)
+    - pattern: type_into($H, $$$ARGS)
+    - pattern: double_click($H, $$$ARGS)
+    - pattern: hover($H, $$$ARGS)
+    - pattern: right_click($H, $$$ARGS)
 constraints:
   H:
-    regex: ^(self\.)?h$
+    regex: ^(&mut )?(self\.)?h$
