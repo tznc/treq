@@ -488,6 +488,8 @@ impl ProjectHomeView {
               .on_click(self.send(open_tab_press("changes", &repo.path))),
           )
           .children(files.iter().map(|file| {
+            // Pre-existing mixed sizes, to triage.
+            // ast-grep-ignore: gpui-row-one-text-size
             div()
               .flex()
               .items_center()

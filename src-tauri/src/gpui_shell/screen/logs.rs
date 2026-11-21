@@ -1357,6 +1357,8 @@ impl LogsView {
           .disabled(disabled)
       };
     Some(
+      // Pre-existing mixed sizes, to triage.
+      // ast-grep-ignore: gpui-row-one-text-size
       div()
         .id("logs-find")
         .debug_selector(|| "logs-find".into())

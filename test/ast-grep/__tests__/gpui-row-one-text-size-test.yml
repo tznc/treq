@@ -1,0 +1,21 @@
+id: gpui-row-one-text-size
+valid:
+  - |
+    fn f() { div().flex().child(profile_link(&l, TextSize::Sm, p, cx)).child(ui::text(div(), TextSize::Sm).child(x)); }
+  - |
+    fn f() { div().child(ui::text(div(), TextSize::Xs).child(a)).child(div().child(ui::text(div(), TextSize::Xs).child(b))); }
+  - |
+    fn f() { div().child(ui::text(div(), TextSize::Sm).child(a)).child(div().flex_col().child(div().child(ui::text(div(), TextSize::Xs).child(b)))); }
+  - |
+    fn f() { div().child(ui::text(div(), TextSize::Sm).child(a)).child(ui::text(div(), TextSize::Xs).px_1().rounded(r).bg(c).child("Resolved")); }
+  - |
+    fn f() { div().flex().flex_col().child(ui::text(div(), TextSize::Sm).child(title)).child(ui::text(div(), TextSize::Xs).child(caption)); }
+  - |
+    fn f() { div().child(ui::text(div(), TextSize::Sm).child(title)).child(ui::text(div(), TextSize::Xs).child(caption)); }
+invalid:
+  - |
+    fn f() { div().flex().child(profile_link(&l, TextSize::Xs, p, cx)).child(ui::text(div(), TextSize::Sm).child(x)); }
+  - |
+    fn f() { div().flex().child(ui::text(div(), TextSize::Sm).child(a)).child(
+      // ast-grep-ignore: gpui-text-xs-short-label-only
+      ui::text(div(), TextSize::Xs).child(b)); }
