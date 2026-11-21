@@ -2085,7 +2085,7 @@ pub struct GhReviewComment {
   pub reactions: Vec<GhReactionGroup>,
   /// The author's GitHub user id, for a co-author trailer; `None` for bots
   /// and deleted users.
-  #[serde(default)]
+  #[serde(default, skip_serializing_if = "Option::is_none")]
   pub author_id: Option<u64>,
 }
 
