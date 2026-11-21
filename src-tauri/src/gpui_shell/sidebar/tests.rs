@@ -156,19 +156,11 @@ impl Harness {
   }
 
   fn click(&mut self, selector: &'static str) {
-    let bounds = self
-      .bounds(selector)
-      .unwrap_or_else(|| panic!("{selector} is not drawn"));
-    self.cx.simulate_click(bounds.center(), Modifiers::none());
+    crate::gpui_shell::test_actions::act(&mut self.cx, selector, crate::gpui_shell::test_actions::Action::Click);
   }
 
   fn hover(&mut self, selector: &'static str) {
-    let bounds = self
-      .bounds(selector)
-      .unwrap_or_else(|| panic!("{selector} is not drawn"));
-    self
-      .cx
-      .simulate_mouse_move(bounds.center(), None, Modifiers::none());
+    crate::gpui_shell::test_actions::act(&mut self.cx, selector, crate::gpui_shell::test_actions::Action::Hover);
   }
 
   /// A mouse down and up at `position`, the `click_count`th in a row.

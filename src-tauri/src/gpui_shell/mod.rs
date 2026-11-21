@@ -41,6 +41,8 @@ pub use screen::bench;
 mod shortcuts;
 mod sidebar;
 mod sidebar_actions;
+#[cfg(test)]
+mod test_actions;
 use treq_ui::theme;
 mod time;
 mod title_bar;
