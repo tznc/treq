@@ -2557,6 +2557,7 @@ fn gh_thread(id: &str, line: i64, resolved: bool) -> crate::github::GhReviewThre
     start_line: None,
     diff_side: "RIGHT".into(),
     comments: vec![crate::github::GhReviewComment {
+      author_id: None,
       id: format!("{id}-c"),
       body: "Why two lines?".into(),
       author: crate::github::GhAuthor {
