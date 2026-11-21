@@ -1,0 +1,34 @@
+.treq-open-in {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 0;
+}
+
+.treq-open-in--floating {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 100;
+  padding: 8px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  background: var(--bgColor-default, #fff);
+  box-shadow: var(--shadow-floating-small, 0 1px 3px rgba(0, 0, 0, 0.12));
+}
+
+.treq-open-in__link {
+  display: block;
+  padding: 5px 12px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  color: var(--fgColor-default, #1f2328);
+  background: var(--bgColor-muted, #f6f8fa);
+  font-weight: 600;
+  text-align: center;
+}
+
+.treq-open-in__link:hover {
+  background: var(--bgColor-neutral-muted, #eaeef2);
+  text-decoration: none;
+}
