@@ -449,9 +449,10 @@ pub fn clones_root() -> std::path::PathBuf {
 }
 
 /// A repository on this machine for `spec`: an existing folder as it is, or
-/// a URL (or `owner/name`) cloned once under `root` and reused after.
+/// a URL (or `owner/name`) cloned once under `root` and reused after. A
+/// `known` repo whose `origin` names the same repository is reused instead.
 /// Returns the folder and whether this call cloned it.
-pub fn ensure_repo(spec: &str, root: &Path) -> Result<(String, bool), String> {
+pub fn ensure_repo(spec: &str, root: &Path, known: &[String]) -> Result<(String, bool), String> {
   let as_path = Path::new(spec.trim());
   if as_path.is_dir() {
     let path = std::fs::canonicalize(as_path).map_err(|e| e.to_string())?;
@@ -459,6 +460,9 @@ pub fn ensure_repo(spec: &str, root: &Path) -> Result<(String, bool), String> {
   }
   let dest = managed_clone_path(root, spec)
     .ok_or_else(|| format!("'{spec}' is not a folder or a repository URL"))?;
+  if let Some(found) = known_clone(spec, known) {
+    return Ok((found, false));
+  }
   if dest.join(".git").exists() {
     return Ok((dest.to_string_lossy().to_string(), false));
   }
@@ -468,6 +472,30 @@ pub fn ensure_repo(spec: &str, root: &Path) -> Result<(String, bool), String> {
   let dest_str = dest.to_string_lossy().to_string();
   crate::core::remote::clone_repository(&clone_url(spec), &dest_str)?;
   Ok((dest_str, true))
+}
+
+/// The first of `known` whose `origin` is the repository `spec` names.
+fn known_clone(spec: &str, known: &[String]) -> Option<String> {
+  let id = |url: &str| managed_clone_path(Path::new(""), url);
+  let want = id(spec)?;
+  known.iter().find_map(|repo| {
+    let out = std::process::Command::new("git")
+      .args(["remote", "get-url", "origin"])
+      .current_dir(repo)
+      .output()
+      .ok()?;
+    let origin = String::from_utf8(out.stdout).ok()?;
+    (out.status.success() && id(origin.trim()).as_ref() == Some(&want)).then(|| repo.clone())
+  })
+}
+
+/// Every local repository of any project, saved or draft, once.
+pub fn all_repos(conn: &Connection) -> Result<Vec<String>, String> {
+  let mut stmt = conn
+    .prepare("SELECT DISTINCT repo_path FROM project_repos WHERE repo_path NOT LIKE 'ssh:%'")
+    .map_err(err)?;
+  let rows = stmt.query_map([], |r| r.get(0)).map_err(err)?;
+  rows.collect::<Result<_, _>>().map_err(err)
 }
 
 /// A repository on an SSH machine, as a project stores it: the remote
@@ -1109,7 +1137,7 @@ mod tests {
   #[test]
   fn ensure_repo_takes_an_existing_folder_as_is() {
     let dir = tempfile::TempDir::new().unwrap();
-    let (path, cloned) = ensure_repo(dir.path().to_str().unwrap(), Path::new("/unused")).unwrap();
+    let (path, cloned) = ensure_repo(dir.path().to_str().unwrap(), Path::new("/unused"), &[]).unwrap();
     assert!(!cloned);
     assert_eq!(Path::new(&path), std::fs::canonicalize(dir.path()).unwrap());
   }
@@ -1119,7 +1147,7 @@ mod tests {
     let root = tempfile::TempDir::new().unwrap();
     let dest = root.path().join("github.com/tznc/app");
     std::fs::create_dir_all(dest.join(".git")).unwrap();
-    let (path, cloned) = ensure_repo("tznc/app", root.path()).unwrap();
+    let (path, cloned) = ensure_repo("tznc/app", root.path(), &[]).unwrap();
     assert!(!cloned, "no second clone");
     assert_eq!(Path::new(&path), dest);
   }
@@ -1189,20 +1217,48 @@ mod tests {
     let (_src, url) = local_origin();
     let root = tempfile::TempDir::new().unwrap();
     let expected = managed_clone_path(root.path(), &url).unwrap();
-    let (path, cloned) = ensure_repo(&url, root.path()).unwrap();
+    let (path, cloned) = ensure_repo(&url, root.path(), &[]).unwrap();
     assert!(cloned);
     assert_eq!(Path::new(&path), expected);
     assert!(expected.join("README.md").exists());
     assert!(expected.starts_with(root.path()));
-    let (again, cloned) = ensure_repo(&url, root.path()).unwrap();
+    let (again, cloned) = ensure_repo(&url, root.path(), &[]).unwrap();
     assert!(!cloned, "the second call reuses the clone");
     assert_eq!(again, path);
   }
 
   #[test]
+  fn ensure_repo_reuses_a_known_repo_with_the_same_origin() {
+    let known = tempfile::TempDir::new().unwrap();
+    let path = known.path().to_string_lossy().to_string();
+    let git = |args: &[&str]| {
+      assert!(std::process::Command::new("git").args(args).current_dir(&path).status().unwrap().success());
+    };
+    git(&["init", "-q"]);
+    git(&["remote", "add", "origin", "git@github.com:tznc/treq.git"]);
+    let root = tempfile::TempDir::new().unwrap();
+    let other = "/no/such/repo".to_string();
+    let (got, cloned) =
+      ensure_repo("tznc/treq", root.path(), &[other, path.clone()]).unwrap();
+    assert!(!cloned, "no clone for a repo treq already has");
+    assert_eq!(got, path);
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+  }
+
+  #[test]
+  fn all_repos_lists_local_repos_of_saved_and_draft_projects_once() {
+    let conn = conn();
+    save(&conn, "a", &repos(&["/r/one", "/r/two"])).unwrap();
+    draft(&conn, &repos(&["/r/two", "/r/three"])).unwrap();
+    let mut got = all_repos(&conn).unwrap();
+    got.sort();
+    assert_eq!(got, repos(&["/r/one", "/r/three", "/r/two"]));
+  }
+
+  #[test]
   fn ensure_repo_rejects_what_is_neither_folder_nor_url() {
     let root = tempfile::TempDir::new().unwrap();
-    let err = ensure_repo("no such thing", root.path()).unwrap_err();
+    let err = ensure_repo("no such thing", root.path(), &[]).unwrap_err();
     assert!(err.contains("not a folder or a repository URL"), "{err}");
     assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
   }
@@ -1211,7 +1267,7 @@ mod tests {
   fn ensure_repo_trims_a_folder_spec() {
     let dir = tempfile::TempDir::new().unwrap();
     let spec = format!("  {}  ", dir.path().display());
-    let (path, cloned) = ensure_repo(&spec, Path::new("/unused")).unwrap();
+    let (path, cloned) = ensure_repo(&spec, Path::new("/unused"), &[]).unwrap();
     assert!(!cloned);
     assert_eq!(Path::new(&path), std::fs::canonicalize(dir.path()).unwrap());
   }
@@ -1222,7 +1278,7 @@ mod tests {
     let missing = tempfile::TempDir::new().unwrap();
     let url = format!("file://{}/host/owner/gone", missing.path().display());
     let (result, dest) = (
-      ensure_repo(&url, root.path()),
+      ensure_repo(&url, root.path(), &[]),
       managed_clone_path(root.path(), &url).unwrap(),
     );
     assert!(result.is_err());
