@@ -831,6 +831,22 @@ mod tests {
   }
 
   #[test]
+  fn teleports_a_claude_web_session_instead_of_sending_a_prompt() {
+    let command = build_auto_command(
+      &AutoCommand {
+        teleport: Some("session_01AbC"),
+        pending_prompt: Some("fix the bug"),
+        ..opts("claude")
+      },
+      &files(),
+    )
+    .unwrap();
+    assert!(command.contains("claude --permission-mode acceptEdits"));
+    assert!(command.contains(" --teleport 'session_01AbC'"));
+    assert!(!command.contains("fix the bug"));
+  }
+
+  #[test]
   fn reads_codex_and_cursor_prompts_with_cat() {
     let files = AgentCliFiles {
       settings_path: None,

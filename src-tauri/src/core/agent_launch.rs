@@ -1119,6 +1119,21 @@ mod tests {
   }
 
   #[test]
+  fn a_teleport_reaches_the_sessions_terminal() {
+    let start = launch_session(
+      &FakeStore::default(),
+      &LaunchRequest {
+        repo_path: "/repo".into(),
+        agent: Some("claude".into()),
+        teleport: Some("session_1".into()),
+        ..Default::default()
+      },
+    )
+    .unwrap();
+    assert_eq!(start.pending().teleport.as_deref(), Some("session_1"));
+  }
+
+  #[test]
   fn records_the_session_link() {
     let store = FakeStore::default();
     launch_session(
