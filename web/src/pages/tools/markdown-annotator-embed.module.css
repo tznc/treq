@@ -100,7 +100,7 @@
   text-decoration: none;
   color: var(--ifm-color-emphasis-700);
   font-size: 0.72rem;
-  font-weight: 600;
+  font-weight: 500;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
   transition: box-shadow 0.15s, transform 0.12s;
   pointer-events: auto;
@@ -110,7 +110,7 @@
 .badge:hover {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
   transform: translateY(-1px);
-  color: var(--ifm-color-primary);
+  color: var(--treq-link);
   text-decoration: none;
 }
 

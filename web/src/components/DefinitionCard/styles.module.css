@@ -16,16 +16,16 @@
 
 .label {
   font-size: 0.68rem;
-  font-weight: 700;
+  font-weight: 500;
   letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: var(--ifm-color-primary);
+  text-transform: none;
+  color: var(--treq-link);
   margin-bottom: 0.5rem;
 }
 
 .term {
   font-size: 1rem;
-  font-weight: 700;
+  font-weight: 500;
   color: var(--ifm-font-color-base);
   margin: 0 0 0.4rem;
   line-height: 1.3;

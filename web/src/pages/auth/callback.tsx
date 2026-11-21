@@ -144,7 +144,7 @@ function CallbackContent() {
     <div style={styles.container}>
       <div style={styles.card}>
         <h2 style={styles.title}>Authentication Error</h2>
-        <p style={{ ...styles.text, color: "#ef4444" }}>{error}</p>
+        <p style={{ ...styles.text, color: "var(--treq-danger)" }}>{error}</p>
         <a href="/sign-in" style={styles.link}>
           Try again
         </a>
@@ -177,7 +177,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   title: {
     fontSize: "1.25rem",
-    fontWeight: 700,
+    fontWeight: 500,
     marginBottom: "0.75rem",
   },
   text: {
@@ -193,7 +193,7 @@ const styles: Record<string, React.CSSProperties> = {
   link: {
     display: "inline-block",
     marginTop: "1rem",
-    color: "var(--ifm-color-primary)",
+    color: "var(--treq-link)",
     fontWeight: 500,
   },
   linkBox: {
@@ -207,10 +207,10 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: "0.5rem",
     padding: "0.6rem 1.5rem",
     borderRadius: "8px",
-    background: "linear-gradient(135deg, var(--ifm-color-primary) 0%, var(--ifm-color-primary-dark) 100%)",
-    color: "#fff",
+    background: "var(--treq-brand)",
+    color: "var(--treq-on-brand)",
     fontSize: "0.9rem",
-    fontWeight: 600,
+    fontWeight: 500,
     textDecoration: "none",
   },
 };
