@@ -1253,17 +1253,17 @@ fn hover(h: &mut Harness, selector: &'static str) {
 #[gpui::test]
 fn terminal_shows_its_send_attachments_and_dismisses_them(cx: &mut TestAppContext) {
   let (mut h, host) = send_harness(cx);
-  assert!(h.drawn("terminal-send-previews"));
-  assert!(h.drawn("terminal-send-preview-t1"));
-  assert!(h.drawn("terminal-send-preview-i1"));
+  assert!(h.shows(gpui::Role::Group, "Attachments"));
+  assert!(h.shows(gpui::Role::Button, "Open notes.txt"));
+  assert!(h.shows(gpui::Role::Button, "Open shot.png"));
   // Browser previews are the browser panel's; other terminals keep theirs.
-  assert!(!h.drawn("terminal-send-preview-b1"));
-  assert!(!h.drawn("terminal-send-preview-o1"));
-  assert!(!h.drawn("terminal-send-dismiss-t1"));
+  assert!(!h.shows(gpui::Role::Button, "Open page"));
+  assert!(!h.shows(gpui::Role::Button, "Open other.txt"));
+  assert!(!h.shows(gpui::Role::Button, "Remove notes.txt"));
   hover(&mut h, "terminal-send-preview-t1");
-  assert!(h.drawn("terminal-send-dismiss-t1"));
+  assert!(h.shows(gpui::Role::Button, "Remove notes.txt"));
   // The name is its own element, clipped at the end, with a tooltip.
-  assert!(h.drawn("terminal-send-title-t1"));
+  assert!(h.shows(gpui::Role::Label, "notes.txt"));
   // Cmd+C over a thumbnail copies its quoted path.
   h.cx.simulate_keystrokes("cmd-c");
   assert_eq!(
@@ -1277,27 +1277,27 @@ fn terminal_shows_its_send_attachments_and_dismisses_them(cx: &mut TestAppContex
     value: "t1".into(),
   }));
   assert!(host.calls().contains(&"dismiss asset t1".to_string()));
-  assert!(!h.drawn("terminal-send-preview-t1"));
-  assert!(!h.drawn("treq-send-preview-lightbox"));
+  assert!(!h.shows(gpui::Role::Button, "Open notes.txt"));
+  assert!(!h.shows(gpui::Role::Dialog, "Preview"));
 }
 
 #[gpui::test]
 fn lightbox_sends_line_comments_on_a_text_attachment(cx: &mut TestAppContext) {
   let (mut h, host) = send_harness(cx);
   h.click("terminal-send-preview-t1");
-  assert!(h.drawn("treq-send-preview-lightbox"));
+  assert!(h.shows(gpui::Role::Dialog, "Preview"));
   assert!(host
     .calls()
     .contains(&"read asset /tmp/notes.txt".to_string()));
-  assert!(h.drawn("treq-send-text-line-3"));
+  assert!(h.shows(gpui::Role::Row, "Line 3"));
   // Text has no zoom.
-  assert!(!h.drawn("treq-send-zoom-in"));
+  assert!(!h.shows(gpui::Role::Button, "Zoom in"));
   h.click("treq-send-text-line-2");
-  assert!(h.drawn("treq-send-line-comment-composer"));
+  assert!(h.shows(gpui::Role::Group, "New comment"));
   h.cx.simulate_input("rename this");
   h.click("treq-send-line-comment-save");
-  assert!(!h.drawn("treq-send-line-comment-composer"));
-  assert!(h.drawn("treq-send-line-comment-1"));
+  assert!(!h.shows(gpui::Role::Group, "New comment"));
+  assert!(h.shows(gpui::Role::Group, "Comment on line 2"));
   h.click("treq-send-review-input");
   h.cx.simulate_input("Thanks");
   h.cx.simulate_keystrokes("enter");
@@ -1311,9 +1311,9 @@ fn lightbox_sends_line_comments_on_a_text_attachment(cx: &mut TestAppContext) {
   let sent = format!("write {} {:?}", agent_pty(), format!("{prompt}\r"));
   assert!(pty_writes(&host).contains(&sent), "{:?}", pty_writes(&host));
   // Sent: nothing is left to lose on close.
-  assert!(!h.drawn("treq-send-line-comment-1"));
+  assert!(!h.shows(gpui::Role::Group, "Comment on line 2"));
   h.click("treq-send-close");
-  assert!(!h.drawn("treq-send-preview-lightbox"));
+  assert!(!h.shows(gpui::Role::Dialog, "Preview"));
 }
 
 #[gpui::test]
@@ -1321,18 +1321,18 @@ fn lightbox_asks_before_dropping_unsent_comments(cx: &mut TestAppContext) {
   let (mut h, _) = send_harness(cx);
   h.click("terminal-send-preview-t1");
   h.click("treq-send-close");
-  assert!(!h.drawn("treq-send-preview-lightbox"));
+  assert!(!h.shows(gpui::Role::Dialog, "Preview"));
   h.click("terminal-send-preview-t1");
   h.click("treq-send-review-input");
   h.cx.simulate_input("hmm");
   h.cx.simulate_keystrokes("escape");
-  assert!(h.drawn("treq-send-unsaved-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Discard unsent comments?"));
   h.click("treq-send-unsaved-keep");
-  assert!(!h.drawn("treq-send-unsaved-dialog"));
-  assert!(h.drawn("treq-send-preview-lightbox"));
+  assert!(!h.shows(gpui::Role::Dialog, "Discard unsent comments?"));
+  assert!(h.shows(gpui::Role::Dialog, "Preview"));
   h.click("treq-send-close");
   h.click("treq-send-unsaved-discard");
-  assert!(!h.drawn("treq-send-preview-lightbox"));
+  assert!(!h.shows(gpui::Role::Dialog, "Preview"));
 }
 
 /// The e2e suite finds a `treq send` thumbnail and its lightbox by role.
@@ -1341,12 +1341,9 @@ fn send_thumbnail_and_lightbox_are_accessible(cx: &mut TestAppContext) {
   use gpui_testing_library::prelude::*;
   let (mut h, _) = send_harness(cx);
   let screen = a11y_screen(&mut h);
-  let previews = screen.query_all_by_role(by::role(gpui::Role::Button).name("Open preview"));
-  assert_eq!(
-    previews.len(),
-    2,
-    "text and image; browser previews are the panel's"
-  );
+  for name in ["Open notes.txt", "Open shot.png"] {
+    expect(screen.get_by_role(by::role(gpui::Role::Button).name(name))).to_be_visible();
+  }
   h.click("terminal-send-preview-t1");
   let screen = a11y_screen(&mut h);
   expect(screen.get_by_role(by::role(gpui::Role::Dialog).name("Preview"))).to_be_visible();
@@ -1356,12 +1353,12 @@ fn send_thumbnail_and_lightbox_are_accessible(cx: &mut TestAppContext) {
 fn lightbox_moves_between_attachments(cx: &mut TestAppContext) {
   let (mut h, _) = send_harness(cx);
   h.click("terminal-send-preview-t1");
-  assert!(h.drawn("treq-send-text-preview"));
+  assert!(h.shows(gpui::Role::Group, "Text preview"));
   h.click("treq-send-next");
-  assert!(h.drawn("treq-send-highlight-surface"));
-  assert!(h.drawn("treq-send-zoom-in"));
+  assert!(h.shows(gpui::Role::Image, "Drag to highlight a region"));
+  assert!(h.shows(gpui::Role::Button, "Zoom in"));
   h.cx.simulate_keystrokes("left");
-  assert!(h.drawn("treq-send-text-preview"));
+  assert!(h.shows(gpui::Role::Group, "Text preview"));
 }
 
 #[gpui::test]
@@ -1375,25 +1372,25 @@ fn lightbox_comments_on_markdown_in_preview_and_markdown_tabs(cx: &mut TestAppCo
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
   h.click("terminal-send-preview-m1");
   // Markdown opens as a preview, commented on by block.
-  assert!(h.drawn("treq-send-markdown"));
-  assert!(!h.drawn("treq-send-text-line-2"));
+  assert!(h.shows(gpui::Role::Document, "Rendered markdown"));
+  assert!(!h.shows(gpui::Role::Row, "Line 2"));
   h.click("treq-send-block-0");
-  assert!(h.drawn("treq-send-line-comment-composer"));
+  assert!(h.shows(gpui::Role::Group, "New comment"));
   h.cx.simulate_input("reword");
   h.click("treq-send-line-comment-save");
-  assert!(h.drawn("treq-send-line-comment-1"));
+  assert!(h.shows(gpui::Role::Group, "Comment on lines 1–3"));
   // The block's comment is a line comment on its source lines.
   h.click("treq-send-view-markdown");
-  assert!(!h.drawn("treq-send-markdown"));
-  assert!(h.drawn("treq-send-line-comment-1"));
+  assert!(!h.shows(gpui::Role::Document, "Rendered markdown"));
+  assert!(h.shows(gpui::Role::Group, "Comment on lines 1–3"));
   h.click("treq-send-text-line-2");
   h.cx.simulate_input("rename this");
   h.click("treq-send-line-comment-save");
-  assert!(h.drawn("treq-send-line-comment-2"));
+  assert!(h.shows(gpui::Role::Group, "Comment on line 2"));
   // Both show in the preview, in one review.
   h.click("treq-send-view-preview");
-  assert!(h.drawn("treq-send-line-comment-1"));
-  assert!(h.drawn("treq-send-line-comment-2"));
+  assert!(h.shows(gpui::Role::Group, "Comment on lines 1–3"));
+  assert!(h.shows(gpui::Role::Group, "Comment on line 2"));
   h.click("treq-send-review-input");
   h.cx.simulate_keystrokes("enter");
   h.cx.run_until_parked();
@@ -1413,14 +1410,14 @@ fn lightbox_shows_comments_in_a_margin_beside_what_they_annotate(cx: &mut TestAp
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
   h.click("terminal-send-preview-m1");
   // No comments, no margin.
-  assert!(!h.drawn("treq-send-margin"));
+  assert!(!h.shows(gpui::Role::Group, "Comments"));
   h.click("treq-send-block-0");
   // The Preview's comment box is written in the margin.
-  assert!(h.drawn("treq-send-margin"));
+  assert!(h.shows(gpui::Role::Group, "Comments"));
   h.cx.simulate_input("reword");
   h.click("treq-send-line-comment-save");
   h.cx.run_until_parked();
-  assert!(h.drawn("treq-send-margin"));
+  assert!(h.shows(gpui::Role::Group, "Comments"));
   let beside = |h: &mut Harness, anchor: &'static str| {
     let doc = h.cx.debug_bounds(anchor).expect(anchor);
     let card = h.cx.debug_bounds("treq-send-line-comment-1").expect("card");
@@ -1453,12 +1450,16 @@ fn lightbox_comments_can_suggest_a_change_without_applying_it(cx: &mut TestAppCo
   h.cx.simulate_input("2nd");
   h.click("treq-send-line-comment-save");
   h.cx.run_until_parked();
-  assert!(h.drawn("treq-send-line-comment-1"));
-  assert!(h.drawn("agent-review-suggestion"));
+  assert!(h.shows(gpui::Role::Group, "Comment on line 2"));
+  assert!(shows_hidden(&mut h, gpui::Role::Group, "Suggestion"));
   // Nothing to apply it to: the agent gets it in the review.
-  assert!(!h.drawn("apply-suggestion"));
+  assert!(!shows_hidden(
+    &mut h,
+    gpui::Role::Button,
+    "Apply suggestion"
+  ));
   h.click("treq-send-view-preview");
-  assert!(h.drawn("agent-review-suggestion"));
+  assert!(shows_hidden(&mut h, gpui::Role::Group, "Suggestion"));
   h.click("treq-send-review-input");
   h.cx.simulate_keystrokes("enter");
   h.cx.run_until_parked();
@@ -1517,14 +1518,14 @@ fn lightbox_highlights_an_image_region_for_the_review(cx: &mut TestAppContext) {
   let width = f32::from(surface.size.width);
   // A click without a drag zooms in, and again out.
   h.click("treq-send-highlight-surface");
-  assert!(h.drawn("treq-send-highlight-layer"));
+  assert!(h.shows(gpui::Role::Group, "Image at 200%"));
   let zoomed = h.cx.debug_bounds("treq-send-highlight-layer").unwrap();
   assert!((f32::from(zoomed.size.width) - width * 2.).abs() < 1.);
   h.cx.simulate_click(
     zoomed.origin + gpui::point(gpui::px(50.), gpui::px(50.)),
     Modifiers::none(),
   );
-  assert!(h.drawn("treq-send-highlight-surface"));
+  assert!(h.shows(gpui::Role::Image, "Drag to highlight a region"));
   let surface = h.cx.debug_bounds("treq-send-highlight-surface").unwrap();
   let from = surface.origin + gpui::point(gpui::px(10.), gpui::px(10.));
   let to = surface.origin + gpui::point(gpui::px(200.), gpui::px(150.));
@@ -1534,8 +1535,8 @@ fn lightbox_highlights_an_image_region_for_the_review(cx: &mut TestAppContext) {
     .simulate_mouse_move(to, Some(MouseButton::Left), Modifiers::none());
   h.cx
     .simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
-  assert!(h.drawn("treq-send-highlight-1"));
-  assert!(h.drawn("treq-send-highlight-comment-1"));
+  assert!(h.shows(gpui::Role::Group, "Region 1"));
+  assert!(h.shows(gpui::Role::Group, "Comment on region 1"));
   h.click("treq-send-review-input");
   h.cx.simulate_input("too big");
   h.cx.simulate_keystrokes("enter");
@@ -1551,7 +1552,7 @@ fn lightbox_highlights_an_image_region_for_the_review(cx: &mut TestAppContext) {
     ),
     "{writes:?}"
   );
-  assert!(!h.drawn("treq-send-highlight-1"));
+  assert!(!h.shows(gpui::Role::Group, "Region 1"));
 }
 
 #[gpui::test]
@@ -1583,15 +1584,15 @@ fn lightbox_unsent_comments_dialog_keeps_on_escape_and_discards_on_enter(cx: &mu
   h.click("treq-send-review-input");
   h.cx.simulate_input("hmm");
   h.click("treq-send-close");
-  assert!(h.drawn("treq-send-unsaved-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Discard unsent comments?"));
   h.cx.simulate_keystrokes("escape");
-  assert!(!h.drawn("treq-send-unsaved-dialog"));
-  assert!(h.drawn("treq-send-preview-lightbox"));
+  assert!(!h.shows(gpui::Role::Dialog, "Discard unsent comments?"));
+  assert!(h.shows(gpui::Role::Dialog, "Preview"));
   h.click("treq-send-close");
-  assert!(h.drawn("treq-send-unsaved-dialog"));
+  assert!(h.shows(gpui::Role::Dialog, "Discard unsent comments?"));
   h.cx.simulate_keystrokes("enter");
   h.cx.run_until_parked();
-  assert!(!h.drawn("treq-send-preview-lightbox"));
+  assert!(!h.shows(gpui::Role::Dialog, "Preview"));
 }
 
 #[gpui::test]
@@ -1650,7 +1651,7 @@ fn waiting_messages_show_a_badge_and_a_banner(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
   let pty = agent_pty();
-  assert!(!h.drawn("terminal-msg-banner"));
+  assert!(!h.shows(gpui::Role::Status, "1 message from codex-1 is waiting."));
   host.msg_waiting.lock().unwrap().insert(
     pty.clone(),
     terminal_data::WaitingMessages {
@@ -1662,15 +1663,22 @@ fn waiting_messages_show_a_badge_and_a_banner(cx: &mut TestAppContext) {
     .executor()
     .advance_clock(std::time::Duration::from_secs(2));
   h.cx.run_until_parked();
-  assert!(h.drawn("terminal-msg-banner"));
-  assert!(h.drawn("terminal-msg-badge"));
+  assert!(h.shows(gpui::Role::Status, "1 message from codex-1 is waiting."));
+  assert!(h.shows(gpui::Role::Status, "1 message waiting"));
   assert!(
-    !h.drawn("terminal-msg-show"),
+    !h.shows(gpui::Role::Button, "Show message"),
     "the banner has no Show message toggle"
   );
-  assert!(
-    !h.drawn("terminal-msg-body"),
-    "the banner never shows the text"
+  let screen = h.rendered();
+  let banner = screen.get_by_role(
+    gpui_testing_library::by::role(gpui::Role::Status).name("1 message from codex-1 is waiting."),
+  );
+  assert_eq!(
+    gpui_testing_library::within(&banner)
+      .query_all_by_role(gpui_testing_library::by::role(gpui::Role::Button))
+      .len(),
+    1,
+    "the banner never shows the text, only Deliver"
   );
   h.click("terminal-msg-deliver");
   assert!(
@@ -1808,7 +1816,8 @@ fn terminal_agent_header_links_to_what_it_reviews(cx: &mut TestAppContext) {
   host.sessions[0].link_url = Some("https://github.com/o/r/pull/4305".into());
   let (mut h, host) = workspace_harness(cx, host, terminal_route(serde_json::json!({})));
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
-  assert!(h.drawn("terminal-workspace-label"));
+  assert!(h.shows(gpui::Role::Button, "Go to Add login"));
+  assert!(h.shows(gpui::Role::Link, "https://github.com/o/r/pull/4305"));
   h.click("terminal-link-label");
   assert!(
     host
@@ -1823,8 +1832,11 @@ fn terminal_agent_header_links_to_what_it_reviews(cx: &mut TestAppContext) {
 fn terminal_agent_header_has_no_link_without_one(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
-  assert!(h.drawn("terminal-workspace-label"));
-  assert!(!h.drawn("terminal-link-label"));
+  assert!(h.shows(gpui::Role::Button, "Go to Add login"));
+  assert!(h
+    .rendered()
+    .query_all_by_role(gpui_testing_library::by::role(gpui::Role::Link))
+    .is_empty());
 }
 
 #[test]
@@ -1876,4 +1888,11 @@ fn terminal_workspace_label_truncates_before_actions(cx: &mut TestAppContext) {
     label.right() <= search.left(),
     "label {label:?} overlaps search {search:?}"
   );
+}
+
+/// Whether an element of `role` named `name` is in the tree, shown or not.
+fn shows_hidden(h: &mut Harness, role: gpui::Role, name: &str) -> bool {
+  h.rendered()
+    .query_by_role(gpui_testing_library::by::role(role).name(name).hidden(true))
+    .is_some()
 }
