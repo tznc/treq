@@ -252,6 +252,9 @@ pub struct AutoCommand<'a> {
   pub session_model: Option<&'a str>,
   pub pending_prompt: Option<&'a str>,
   pub treq_bin_dir: Option<&'a str>,
+  /// A Claude Code on the web session to pull in (`claude --teleport`);
+  /// it replaces the prompt.
+  pub teleport: Option<&'a str>,
 }
 
 /// The PTY auto-command for an agent CLI.
@@ -337,7 +340,10 @@ pub fn build_auto_command(
         " --append-system-prompt-file {}",
         shell_quote(&files.prompt_path)
       ));
-      with_task(command)
+      match options.teleport {
+        Some(session) => format!("{command} --teleport {}", shell_quote(session)),
+        None => with_task(command),
+      }
     }
   };
 
@@ -484,6 +490,7 @@ mod tests {
       session_model: None,
       pending_prompt: None,
       treq_bin_dir: None,
+      teleport: None,
     }
   }
 
