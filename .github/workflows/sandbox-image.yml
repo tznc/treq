@@ -1,7 +1,7 @@
 name: Sandbox Image
 
 # Builds and publishes the base sandbox image (sandbox-image/) to GHCR.
-# Called by release.yml (tag v<version>) and nightly.yml (tag nightly) only.
+# Called by release.yml (tag v<version>); dispatch it by hand for tag nightly.
 #
 # Each arch builds the musl treq CLI from the same commit and bakes it into
 # the image, with bootstrap rendered for that version, so the image never
