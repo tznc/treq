@@ -1910,3 +1910,79 @@ fn changes_tab_offers_no_resolve_on_a_resolved_thread(cx: &mut TestAppContext) {
     .query_by_role(by::role(Role::Button).name("Resolve"))
     .is_none());
 }
+
+fn suggestion_thread(path: &str, line: i64) -> crate::github::GhReviewThread {
+  let mut t = gh_thread("t1", line, false);
+  t.path = path.into();
+  t.comments[0].author_id = Some(42);
+  t.comments[0].body = "Rename:\n```suggestion\nB\n```".into();
+  t.comments[0].diff_hunk = "@@ -1 +1 @@\n-x\n+old".into();
+  t
+}
+
+#[gpui::test]
+fn changes_tab_applies_a_github_suggestion_and_resolves_it(cx: &mut TestAppContext) {
+  let mut host = changes_host();
+  host.threads = vec![suggestion_thread("a.rs", 2)];
+  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  h.click("gh-apply-t1-c");
+  h.cx.run_until_parked();
+  let writes = host.writes();
+  assert!(
+    writes.iter().any(|w| w.starts_with("apply suggestion")
+      && w.contains("a.rs 2..2")
+      && w.ends_with("[\"old\"] -> \"B\"")),
+    "{writes:?}"
+  );
+  assert!(
+    writes.contains(&"resolve thread t1".to_string()),
+    "{writes:?}"
+  );
+  assert!(!writes.iter().any(|w| w.starts_with("split")), "{writes:?}");
+}
+
+#[gpui::test]
+fn changes_tab_commits_a_github_suggestion_with_its_author(cx: &mut TestAppContext) {
+  let mut host = changes_host_with_committed();
+  host.threads = vec![suggestion_thread("c.rs", 1)];
+  let (mut h, host) = workspace_harness(cx, host, committed_route(true));
+  h.click("gh-commit-t1-c");
+  h.cx.run_until_parked();
+  let writes = host.writes();
+  let apply = writes
+    .iter()
+    .position(|w| w.starts_with("apply suggestion"))
+    .expect("applied");
+  let split = writes
+    .iter()
+    .position(|w| {
+      w == "split \"Apply suggestion from @octo\\n\\nCo-authored-by: octo <42+octo@users.noreply.github.com>\" [\"c.rs\"]"
+    })
+    .unwrap_or_else(|| panic!("{writes:?}"));
+  let resolve = writes
+    .iter()
+    .position(|w| w == "resolve thread t1")
+    .expect("resolved");
+  assert!(apply < split && split < resolve, "{writes:?}");
+}
+
+#[gpui::test]
+fn changes_tab_will_not_commit_a_suggestion_into_a_file_with_other_edits(cx: &mut TestAppContext) {
+  let mut host = changes_host();
+  host.threads = vec![suggestion_thread("a.rs", 2)];
+  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  h.click("gh-commit-t1-c");
+  h.cx.run_until_parked();
+  assert!(host.writes().is_empty(), "{:?}", host.writes());
+}
+
+#[gpui::test]
+fn changes_tab_keeps_the_thread_open_when_a_suggestion_fails(cx: &mut TestAppContext) {
+  let mut host = changes_host();
+  host.threads = vec![suggestion_thread("a.rs", 2)];
+  host.fail_apply = true;
+  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  h.click("gh-apply-t1-c");
+  h.cx.run_until_parked();
+  assert!(!host.writes().contains(&"resolve thread t1".to_string()));
+}
