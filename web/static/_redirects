@@ -1,6 +1,5 @@
 # Cloudflare Pages redirects. plugins/redirects.test.js checks every 301.
-# Shared PR links: the one /open/pr/ page reads the PR from the path.
-/open/pr/*  /open/pr/  200
+# Static rules go first: Cloudflare caps dynamic ones at 100.
 /learn/how-to/git-worktrees-vs-clones-for-agents/ /learn/concepts/git/git-worktrees-vs-clones/ 301
 /learn/how-to/git-worktrees-vs-clones-for-agents /learn/concepts/git/git-worktrees-vs-clones/ 301
 # Docs and Learn pages that moved or were removed. Each has a slashless twin.
@@ -113,3 +112,5 @@
 /skills/mattpocock/productivity/writing-great-skills /skills/mattpocock/ 301
 /skills/microsoft/azure-cost/ /skills/microsoft/ 301
 /skills/microsoft/azure-cost /skills/microsoft/ 301
+# Shared PR links: the one /open/pr/ page reads the PR from the path.
+/open/pr/*  /open/pr/  200
