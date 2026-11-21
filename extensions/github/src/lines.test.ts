@@ -1,29 +1,63 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { blobFile, blobLine, diffLine, prHeadRef } from "./lines";
+import { blobContext, blobFile, blobLine, diffContext, prHeadRef } from "./lines";
 
 beforeEach(() => {
   document.body.innerHTML = "";
 });
 
-describe("diffLine", () => {
-  const diff = `<div data-tagsearch-path="src/a.rs"><table><tbody>
-    <tr id="ctx"><td data-line-number="9"></td><td data-line-number="10"></td><td class="code">x</td></tr>
-    <tr id="del"><td data-line-number="11"></td><td></td><td class="code">-y</td></tr>
-  </tbody></table></div>`;
+describe("diffContext", () => {
+  const row = (id: string, left: string, right: string, code: string, selected = false) =>
+    `<tr id="${id}"><td ${left ? `data-line-number="${left}"` : ""} class="${selected ? "selected-line" : ""}"></td>
+      <td ${right ? `data-line-number="${right}"` : ""}></td>
+      <td class="blob-code"><span class="blob-code-inner">${code}</span></td></tr>`;
+  const diff = (rows: string) =>
+    `<div data-tagsearch-path="src/a.rs"><table><tbody>${rows}</tbody></table></div>`;
 
-  it("names the file and new-side line of a hovered diff row", () => {
-    document.body.innerHTML = diff;
-    expect(diffLine(document.querySelector("#ctx .code")!)).toEqual({ path: "src/a.rs", line: 10 });
+  it("takes the hovered row's new-side line and code", () => {
+    document.body.innerHTML = diff(row("a", "9", "10", "let x = 1;"));
+    expect(diffContext(document.querySelector("#a .blob-code")!)).toEqual({
+      path: "src/a.rs",
+      lines: [{ line: 10, text: "let x = 1;" }],
+    });
   });
 
-  it("falls back to the old side for a deleted line", () => {
-    document.body.innerHTML = diff;
-    expect(diffLine(document.querySelector("#del .code")!)).toEqual({ path: "src/a.rs", line: 11 });
+  it("takes the old side of a deleted line", () => {
+    document.body.innerHTML = diff(row("a", "11", "", "gone"));
+    expect(diffContext(document.querySelector("#a")!)?.lines).toEqual([{ line: 11, text: "gone" }]);
+  });
+
+  it("takes every selected row when the hovered one is selected", () => {
+    document.body.innerHTML = diff(
+      row("a", "1", "1", "a", true) + row("b", "2", "", "b", true) + row("c", "", "2", "c", true) + row("d", "3", "3", "d"),
+    );
+    expect(diffContext(document.querySelector("#b")!)?.lines.map((l) => l.text)).toEqual(["a", "b", "c"]);
+    expect(diffContext(document.querySelector("#d")!)?.lines.map((l) => l.text)).toEqual(["d"]);
   });
 
   it("ignores anything outside a diff", () => {
     document.body.innerHTML = `<p id="p">hi</p>`;
-    expect(diffLine(document.querySelector("#p")!)).toBeNull();
+    expect(diffContext(document.querySelector("#p")!)).toBeNull();
+  });
+});
+
+describe("blobContext", () => {
+  beforeEach(() => {
+    document.body.innerHTML = `<textarea id="read-only-cursor-text-area">one\ntwo\nthree\nfour</textarea>`;
+  });
+
+  it("takes the hovered line", () => {
+    expect(blobContext(document, 2, "")).toEqual([{ line: 2, text: "two" }]);
+  });
+
+  it("takes the selected lines when the hovered one is among them", () => {
+    expect(blobContext(document, 3, "#L2-L4").map((l) => l.line)).toEqual([2, 3, 4]);
+    expect(blobContext(document, 1, "#L2-L4").map((l) => l.line)).toEqual([1]);
+    expect(blobContext(document, 2, "#L2").map((l) => l.line)).toEqual([2]);
+  });
+
+  it("reads drawn lines without the file text", () => {
+    document.body.innerHTML = `<div id="LC7">seven</div>`;
+    expect(blobContext(document, 7, "")).toEqual([{ line: 7, text: "seven" }]);
   });
 });
 

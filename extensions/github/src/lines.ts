@@ -1,9 +1,41 @@
-/** The file and line of the diff row holding `target`: the new side, else the old. */
-export function diffLine(target: Element): { path: string; line: number } | null {
-  const numbers = target.closest("tr")?.querySelectorAll("td[data-line-number]");
-  const path = target.closest("[data-tagsearch-path]")?.getAttribute("data-tagsearch-path");
-  const last = numbers?.[numbers.length - 1]?.getAttribute("data-line-number");
-  return path && last ? { path, line: Number(last) } : null;
+import type { CodeLine } from "./prompt";
+
+const rowLine = (row: Element): CodeLine | null => {
+  const numbers = row.querySelectorAll("td[data-line-number]");
+  const line = numbers[numbers.length - 1]?.getAttribute("data-line-number");
+  const text = row.querySelector(".blob-code-inner")?.textContent ?? "";
+  return line ? { line: Number(line), text: text.replace(/\n$/, "") } : null;
+};
+
+/**
+ * The file and lines of the diff row holding `target` (each row's new side,
+ * else its old): every selected row when it is one of them, else its own.
+ */
+export function diffContext(target: Element): { path: string; lines: CodeLine[] } | null {
+  const file = target.closest("[data-tagsearch-path]");
+  const row = target.closest("tr");
+  const path = file?.getAttribute("data-tagsearch-path");
+  if (!file || !row || !path || !rowLine(row)) return null;
+  const selected = [...file.querySelectorAll("tr")].filter((r) => r.querySelector("td.selected-line"));
+  const rows = selected.includes(row) ? selected : [row];
+  return { path, lines: rows.map(rowLine).filter((l): l is CodeLine => l !== null) };
+}
+
+/**
+ * Line `line` of the blob view, or the selected lines (`#L2-L4`) when it is
+ * one of them. The view draws only lines on screen; its hidden textarea
+ * holds the whole file.
+ */
+export function blobContext(doc: Document, line: number, hash: string): CodeLine[] {
+  const m = /^#L(\d+)(?:-L(\d+))?$/.exec(hash);
+  const [start, end] = m ? [Number(m[1]), Number(m[2] ?? m[1])] : [line, line];
+  const [from, to] = line >= start && line <= end ? [start, end] : [line, line];
+  const file = doc.querySelector<HTMLTextAreaElement>("#read-only-cursor-text-area")?.value.split("\n");
+  const lines: CodeLine[] = [];
+  for (let n = from; n <= to; n++) {
+    lines.push({ line: n, text: file?.[n - 1] ?? doc.getElementById(`LC${n}`)?.textContent ?? "" });
+  }
+  return lines;
 }
 
 /** The blob view's line number drawn at height `y`; code there sits under a textarea. */
