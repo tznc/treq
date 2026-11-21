@@ -1964,27 +1964,19 @@ impl Harness {
   }
 
   fn click(&mut self, selector: &'static str) {
-    self.cx.run_until_parked();
-    let bounds = self
-      .cx
-      .debug_bounds(selector)
-      .unwrap_or_else(|| panic!("{selector} is not drawn"));
-    self.cx.simulate_click(bounds.center(), Modifiers::none());
+    crate::gpui_shell::test_actions::act(
+      &mut self.cx,
+      selector,
+      crate::gpui_shell::test_actions::Action::Click,
+    );
   }
 
   fn right_click(&mut self, selector: &'static str) {
-    self.cx.run_until_parked();
-    let at = self
-      .cx
-      .debug_bounds(selector)
-      .unwrap_or_else(|| panic!("{selector} is not drawn"))
-      .center();
-    self
-      .cx
-      .simulate_mouse_down(at, gpui::MouseButton::Right, Modifiers::none());
-    self
-      .cx
-      .simulate_mouse_up(at, gpui::MouseButton::Right, Modifiers::none());
+    crate::gpui_shell::test_actions::act(
+      &mut self.cx,
+      selector,
+      crate::gpui_shell::test_actions::Action::RightClick,
+    );
   }
 
   fn sent(&self) -> Vec<ScreenAction> {
@@ -2526,8 +2518,18 @@ fn selected_lines(h: &mut Harness) -> Option<(String, Vec<(usize, usize)>)> {
   })
 }
 
+/// Rests the pointer on the diff line with element id `id`, which shows its
+/// Add comment button.
+fn hover_line(h: &mut Harness, id: &str) {
+  use gpui_testing_library::prelude::*;
+  let screen = h.rendered();
+  let row = screen.get_by_element_id(gpui::SharedString::from(id.to_owned()));
+  screen.user().hover(&row);
+}
+
 /// Comments line `+b` of a.rs with `text`.
 fn comment_line(h: &mut Harness, text: &str) {
+  hover_line(h, "diff-line-a.rs-0-1");
   h.click("add-comment-a.rs-0-1");
   let screen = h.rendered();
   gpui_testing_library::expect(screen.get_by_role(
