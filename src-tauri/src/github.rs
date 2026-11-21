@@ -2092,6 +2092,9 @@ pub struct GhReviewThread {
   pub is_outdated: bool,
   pub path: String,
   pub line: Option<i64>,
+  /// First line of a multi-line comment; `None` for a single line.
+  #[serde(default)]
+  pub start_line: Option<i64>,
   pub diff_side: String,
   pub comments: Vec<GhReviewComment>,
 }
@@ -2107,6 +2110,7 @@ pub(crate) const REVIEW_THREADS_QUERY: &str = r#"query($owner: String!, $repo: S
           isOutdated
           path
           line
+          startLine
           diffSide
           comments(first: 50) {
             nodes {
@@ -2175,6 +2179,8 @@ struct GqlReviewThread {
   is_outdated: bool,
   path: String,
   line: Option<i64>,
+  #[serde(rename = "startLine", default)]
+  start_line: Option<i64>,
   #[serde(rename = "diffSide")]
   diff_side: String,
   comments: GqlCommentsConnection,
@@ -2223,6 +2229,7 @@ impl GqlResponse {
         is_outdated: node.is_outdated,
         path: node.path,
         line: node.line,
+        start_line: node.start_line,
         diff_side: node.diff_side,
         comments: node
           .comments
@@ -2604,6 +2611,7 @@ mod tests {
       is_outdated: false,
       path: "a.rs".into(),
       line: Some(4),
+      start_line: None,
       diff_side: "RIGHT".into(),
       comments: vec![GhReviewComment {
         id: "r1".into(),
