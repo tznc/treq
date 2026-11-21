@@ -284,6 +284,14 @@ pub fn pr_open_link(app: &AppHandle, label: &str, number: u64) {
   }
 }
 
+/// A `treq://claude/session` link for window `label`: it opens the New
+/// Workspaces dialog. Any thread.
+pub fn open_workspaces_link(app: &AppHandle, label: &str) {
+  if drives(label) {
+    with_controller(app, label, |c, cx| c.open_workspaces(cx));
+  }
+}
+
 /// Window `label` gained (`focused`) or lost focus. Any thread.
 pub fn window_focused(app: &AppHandle, label: &str, focused: bool) {
   set_focused(label, focused);

@@ -268,6 +268,7 @@ pub fn auto_review(app: &AppHandle, event: crate::auto_review::AutoReviewEvent) 
         agent: launch::agent_kind(agent.as_deref()),
         session_name: Some("AI Review".into()),
         link: None,
+        teleport: None,
       };
       if let Err(err) = backend.launch_session(&request, true) {
         backend.toast(ToastTone::Error, "Failed to start automatic review", err);
@@ -302,6 +303,7 @@ pub(super) fn start_deep_link(host: &dyn WindowHost, request: &AgentDeepLinkRequ
     agent: Some(request.agent.clone()),
     session_name: None,
     link: None,
+    teleport: None,
   };
   match host.launch(&launched, true) {
     Ok(()) => launch::deep_links()
@@ -342,6 +344,46 @@ pub(super) fn start_kickoff(
     repo_path: repo.to_string(),
     workspace_id: launch::find_workspace_by_branch(&workspaces, &link.branch).map(|w| w.id),
     prompt: Some(link.prompt.clone()),
+    ..Default::default()
+  };
+  if let Err(err) = host.launch(&request, true) {
+    host.show_toast(Toast::error("Failed to start agent").description(&err));
+  }
+}
+
+/// A `treq://claude/session` link for window `label`, open on `repo_path`:
+/// the New Workspaces dialog opens, to pick pull requests, beside the
+/// session's terminal agent.
+pub fn claude_session(
+  app: &AppHandle,
+  label: String,
+  repo_path: Option<String>,
+  link: crate::core::pr_link::ClaudeSessionLink,
+) {
+  super::open_workspaces_link(app, &label);
+  let backend = Backend::new(app.clone(), label);
+  std::thread::spawn(move || start_claude_session(&backend, repo_path.as_deref(), &link));
+}
+
+/// Runs a Claude Code on the web session as a Claude terminal agent in the
+/// home repository of `repo` (`claude --teleport`); toasts without one.
+/// Blocks.
+pub(super) fn start_claude_session(
+  host: &dyn WindowHost,
+  repo: Option<&str>,
+  link: &crate::core::pr_link::ClaudeSessionLink,
+) {
+  let Some(repo) = repo else {
+    host.show_toast(
+      Toast::error("No repository open").description("Open the session's repository in Treq."),
+    );
+    return;
+  };
+  let request = LaunchRequest {
+    repo_path: repo.to_string(),
+    agent: Some("claude".into()),
+    link: Some(format!("https://claude.ai/code/{}", link.session)),
+    teleport: Some(link.session.clone()),
     ..Default::default()
   };
   if let Err(err) = host.launch(&request, true) {

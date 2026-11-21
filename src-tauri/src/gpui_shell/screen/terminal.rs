@@ -109,6 +109,7 @@ impl Pending {
       permission_mode: self.permission_mode.clone(),
       agent: self.agent.clone(),
       workspace_path: self.workspace_path.clone(),
+      teleport: None,
     }
   }
 }
@@ -4614,6 +4615,7 @@ fn agent_session(
       session_id: session.id,
       pending_prompt: pending.and_then(|p| p.pending_prompt.clone()),
       permission_mode: pending.and_then(|p| p.permission_mode.clone()),
+      teleport: pending.and_then(|p| p.teleport.clone()),
     };
     let kind = Kind::Agent {
       pane_id,

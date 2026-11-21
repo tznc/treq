@@ -3,6 +3,8 @@
 //! `treq://repo/open?repo={owner}/{repo}` shows the repository's window, and
 //! `treq://agent/kickoff?repo={owner}/{repo}&branch={b}&prompt={p}` starts an
 //! agent in it: the links a browser can make, knowing only the GitHub names.
+//! `treq://claude/session?id={session}[&repo={owner}/{repo}&pr={n}]` runs a
+//! Claude Code on the web session as a terminal agent.
 
 /// The PR a `treq://pr/open` link names.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,6 +50,36 @@ pub fn parse_agent_kickoff_link(url: &str) -> Option<KickoffLink> {
     branch: filled("branch")?,
     prompt: filled("prompt")?,
   })
+}
+
+/// What a `treq://claude/session` link asks: Claude Code on the web session
+/// `session` as a terminal agent, in the window open on `repo` when given.
+/// `pr` is the pull request it was opened from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClaudeSessionLink {
+  pub session: String,
+  pub repo: Option<String>,
+  pub pr: Option<u64>,
+}
+
+/// The session a `treq://claude/session` link names, or `None` for any other
+/// link or a malformed value. The session id reaches a shell command, so it
+/// is `session_` and letters or digits only.
+pub fn parse_claude_session_link(url: &str) -> Option<ClaudeSessionLink> {
+  let parsed = treq_link(url, "claude", "/session")?;
+  let session = param(&parsed, "id").filter(|id| {
+    id.strip_prefix("session_")
+      .is_some_and(|rest| !rest.is_empty() && rest.chars().all(|c| c.is_ascii_alphanumeric()))
+  })?;
+  let repo = match param(&parsed, "repo") {
+    Some(_) => Some(github_repo(&parsed)?),
+    None => None,
+  };
+  let pr = match param(&parsed, "pr") {
+    Some(n) => Some(n.parse::<u64>().ok().filter(|n| *n > 0)?),
+    None => None,
+  };
+  Some(ClaudeSessionLink { session, repo, pr })
 }
 
 /// `url` when it is a `treq://{host}{path}` link.
@@ -227,6 +259,37 @@ mod tests {
       "treq://agent/start?repo=tznc%2Ftreq&branch=main&prompt=why",
     ] {
       assert_eq!(parse_agent_kickoff_link(url), None, "{url}");
+    }
+  }
+
+  #[test]
+  fn reads_a_claude_session_link() {
+    assert_eq!(
+      parse_claude_session_link("treq://claude/session?id=session_01AbC"),
+      Some(ClaudeSessionLink {
+        session: "session_01AbC".into(),
+        repo: None,
+        pr: None,
+      })
+    );
+    assert_eq!(
+      parse_claude_session_link("treq://claude/session?id=session_1&repo=tznc%2Ftreq&pr=7"),
+      Some(ClaudeSessionLink {
+        session: "session_1".into(),
+        repo: Some("tznc/treq".into()),
+        pr: Some(7),
+      })
+    );
+    for url in [
+      "treq://claude/session",
+      "treq://claude/session?id=abc",
+      "treq://claude/session?id=session_",
+      "treq://claude/session?id=session_1%20%3B%20rm",
+      "treq://claude/session?id=session_1&repo=tznc",
+      "treq://claude/session?id=session_1&repo=tznc%2Ftreq&pr=0",
+      "treq://claude/other?id=session_1",
+    ] {
+      assert_eq!(parse_claude_session_link(url), None, "{url}");
     }
   }
 }
