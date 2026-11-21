@@ -232,7 +232,11 @@ impl Harness {
   }
 
   fn click(&mut self, selector: &'static str) {
-    crate::gpui_shell::test_actions::act(&mut self.cx, selector, crate::gpui_shell::test_actions::Action::Click);
+    crate::gpui_shell::test_actions::act(
+      &mut self.cx,
+      selector,
+      crate::gpui_shell::test_actions::Action::Click,
+    );
   }
 
   fn keys(&mut self, keys: &str) {

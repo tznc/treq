@@ -156,11 +156,19 @@ impl Harness {
   }
 
   fn click(&mut self, selector: &'static str) {
-    crate::gpui_shell::test_actions::act(&mut self.cx, selector, crate::gpui_shell::test_actions::Action::Click);
+    crate::gpui_shell::test_actions::act(
+      &mut self.cx,
+      selector,
+      crate::gpui_shell::test_actions::Action::Click,
+    );
   }
 
   fn hover(&mut self, selector: &'static str) {
-    crate::gpui_shell::test_actions::act(&mut self.cx, selector, crate::gpui_shell::test_actions::Action::Hover);
+    crate::gpui_shell::test_actions::act(
+      &mut self.cx,
+      selector,
+      crate::gpui_shell::test_actions::Action::Hover,
+    );
   }
 
   /// A mouse down and up at `position`, the `click_count`th in a row.
