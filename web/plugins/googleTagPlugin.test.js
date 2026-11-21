@@ -3,9 +3,8 @@ const vm = require('vm');
 const {buildGoogleTagHeadTags, CONSENT_REGIONS} = require('./googleTagPlugin');
 
 /**
- * Runs the inline head script the way a browser would and returns every
- * gtag() call it queued, e.g. ['consent', 'default', {...}].
- * @returns {any[][]}
+ * Runs the inline head script the way a browser would and returns its window.
+ * @returns {any}
  */
 function runHeadScript(navigator = {userAgent: 'Mozilla/5.0 Chrome/131.0', webdriver: false}) {
   const script = buildGoogleTagHeadTags('G-TEST').find((t) => t.innerHTML)?.innerHTML ?? '';
@@ -16,6 +15,10 @@ function runHeadScript(navigator = {userAgent: 'Mozilla/5.0 Chrome/131.0', webdr
   return page;
 }
 
+/**
+ * Every gtag() call the head script queued, e.g. ['consent', 'default', {...}].
+ * @returns {any[][]}
+ */
 function gtagCalls() {
   return runHeadScript().dataLayer.map((/** @type {IArguments} */ args) => Array.from(args));
 }
