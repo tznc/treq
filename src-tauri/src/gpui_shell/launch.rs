@@ -311,6 +311,44 @@ pub(super) fn start_deep_link(host: &dyn WindowHost, request: &AgentDeepLinkRequ
   }
 }
 
+/// A `treq://agent/kickoff` link for window `label`, open on `repo_path`
+/// (`None`: no window has the link's repository open).
+pub fn agent_kickoff(
+  app: &AppHandle,
+  label: String,
+  repo_path: Option<String>,
+  link: crate::core::pr_link::KickoffLink,
+) {
+  let backend = Backend::new(app.clone(), label);
+  std::thread::spawn(move || start_kickoff(&backend, repo_path.as_deref(), &link));
+}
+
+/// Starts a kickoff link's agent in `repo` on the workspace of its branch,
+/// else in the home repository; toasts without the repository. Blocks.
+pub(super) fn start_kickoff(
+  host: &dyn WindowHost,
+  repo: Option<&str>,
+  link: &crate::core::pr_link::KickoffLink,
+) {
+  let Some(repo) = repo else {
+    host.show_toast(Toast::error("Repository not open").description(format!(
+      "Open {} in Treq to start agents from GitHub.",
+      link.repo
+    )));
+    return;
+  };
+  let workspaces = host.workspaces(repo).unwrap_or_default();
+  let request = LaunchRequest {
+    repo_path: repo.to_string(),
+    workspace_id: launch::find_workspace_by_branch(&workspaces, &link.branch).map(|w| w.id),
+    prompt: Some(link.prompt.clone()),
+    ..Default::default()
+  };
+  if let Err(err) = host.launch(&request, true) {
+    host.show_toast(Toast::error("Failed to start agent").description(&err));
+  }
+}
+
 /// `processAgentDeepLinkRequests` for a `treq://agent/start` link meant for
 /// window `label` (`None`: no window shows its repository, so one opens
 /// and starts it once it shows the repository).
