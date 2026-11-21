@@ -28,7 +28,7 @@ export interface BootManifest {
   agents: BootManifestAgent[];
 }
 
-export const CURRENT_MANIFEST_VERSION = 5;
+export const CURRENT_MANIFEST_VERSION = 6;
 
 // sha256 of jj-v0.40.0-<arch>-unknown-linux-musl.tar.gz.
 const JJ_0_40_SHA256: TreqSha256 = {
@@ -101,6 +101,18 @@ const MANIFESTS: Record<number, BootManifest> = {
     treq_version: "0.4.0",
     // The release workflow pins these (scripts/bump-boot-manifest.ts).
     treq_sha256: { x86_64: "PLACEHOLDER-treq-0.4.0-x86_64", aarch64: "PLACEHOLDER-treq-0.4.0-aarch64" },
+    jj_version: "0.40.0",
+    jj_sha256: JJ_0_40_SHA256,
+    git_version: "2.45",
+    agents: [
+      { name: "claude", version: "1.0.0" },
+      { name: "codex", version: "1.0.0" },
+    ],
+  },
+  6: {
+    manifest_version: 6,
+    treq_version: "0.4.2",
+    treq_sha256: { x86_64: "6657039e0c1e74f40f99c6b35dfb70005043ca439b8608a11d4866ab4bcb1e38", aarch64: "892bfa76f453bfcfee5bd7a1f3a67ee903f9febf473cda48f41376bedc9f9742" },
     jj_version: "0.40.0",
     jj_sha256: JJ_0_40_SHA256,
     git_version: "2.45",
