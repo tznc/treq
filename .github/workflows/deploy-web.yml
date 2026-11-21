@@ -9,6 +9,8 @@ on:
     paths:
       - "web/**"
       - "e2e/desktop/landing/**"
+      # The hero the site serves as /img/code.png.
+      - "assets/screenshots/code.png"
       - ".github/workflows/deploy-web.yml"
   # Rebuild so /version and the download links pick up the new release.
   release:
