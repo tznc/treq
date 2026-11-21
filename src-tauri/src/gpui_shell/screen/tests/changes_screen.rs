@@ -1871,3 +1871,42 @@ fn the_add_comment_tooltip_stays_open_while_hovered(cx: &mut TestAppContext) {
     .collect();
   assert_eq!(log, vec!["show"], "tooltip popup requests: {log:?}");
 }
+
+#[gpui::test]
+fn changes_tab_resolves_a_github_thread(cx: &mut TestAppContext) {
+  use gpui::Role;
+  use gpui_testing_library::prelude::*;
+  let mut host = changes_host();
+  host.threads = vec![gh_thread("t1", 2, false)];
+  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  let screen = h.rendered();
+  screen
+    .user()
+    .click(&screen.get_by_role(by::role(Role::Button).name("Resolve")));
+  h.cx.run_until_parked();
+  assert!(host.writes().contains(&"resolve thread t1".to_string()));
+  // Resolved threads fold, as they do when read resolved.
+  let screen = h.rendered();
+  expect(screen.get_by_role(by::role(Role::Button).name("Show review thread"))).to_be_visible();
+  assert!(screen
+    .query_by_role(by::role(Role::Button).name("Resolve"))
+    .is_none());
+}
+
+#[gpui::test]
+fn changes_tab_offers_no_resolve_on_a_resolved_thread(cx: &mut TestAppContext) {
+  use gpui::Role;
+  use gpui_testing_library::prelude::*;
+  let mut host = changes_host();
+  host.threads = vec![gh_thread("t1", 2, true)];
+  let (mut h, _) = workspace_harness(cx, host, changes_route());
+  let screen = h.rendered();
+  screen
+    .user()
+    .click(&screen.get_by_role(by::role(Role::Button).name("Show review thread")));
+  let screen = h.rendered();
+  expect(screen.get_by_role(by::role(Role::Button).name("Hide review thread"))).to_be_visible();
+  assert!(screen
+    .query_by_role(by::role(Role::Button).name("Resolve"))
+    .is_none());
+}

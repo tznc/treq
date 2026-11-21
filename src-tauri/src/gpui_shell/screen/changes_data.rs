@@ -131,6 +131,8 @@ pub trait ChangesHost: CommitsHost {
   fn review_threads(&self, repo_path: &str, branch: &str) -> Result<Vec<GhReviewThread>, String>;
   /// Adds (`on`) or removes the user's `content` reaction on a review comment.
   fn react(&self, comment_id: &str, content: &str, on: bool) -> Result<(), String>;
+  /// Marks a pull request review thread resolved on GitHub.
+  fn resolve_thread(&self, thread_id: &str) -> Result<(), String>;
   /// The review agent's comments on the workspace's diff.
   fn agent_comments(
     &self,
@@ -316,6 +318,10 @@ impl ChangesHost for Backend {
 
   fn react(&self, comment_id: &str, content: &str, on: bool) -> Result<(), String> {
     crate::core::github_cli::set_reaction(comment_id, content, on)
+  }
+
+  fn resolve_thread(&self, thread_id: &str) -> Result<(), String> {
+    crate::core::github_cli::resolve_review_thread(thread_id)
   }
 
   fn agent_comments(
