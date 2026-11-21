@@ -352,45 +352,7 @@ pub fn comment_date(iso: &str, this_year: i32) -> String {
   }
 }
 
-/// A GitHub review comment's ```` ```suggestion ````, with the lines it
-/// replaces as GitHub showed them (the tail of the comment's diff hunk).
-#[derive(Debug, Clone, PartialEq)]
-pub struct GithubSuggestion {
-  pub lines: (u32, u32),
-  pub original: Vec<String>,
-  pub suggested: String,
-}
-
-/// `None` when the comment has no suggestion, or it is on the old side or
-/// outdated, where it no longer lines up with the file.
-pub fn github_suggestion(
-  thread: &GhReviewThread,
-  comment: &crate::github::GhReviewComment,
-) -> Option<GithubSuggestion> {
-  if thread.is_outdated || thread.diff_side != "RIGHT" {
-    return None;
-  }
-  let suggested = crate::core::review::parse_suggestion(&comment.body)?.suggested;
-  let end = u32::try_from(thread.line?).ok()?;
-  let start = thread
-    .start_line
-    .and_then(|l| u32::try_from(l).ok())
-    .unwrap_or(end);
-  let count = (end.checked_sub(start)? + 1) as usize;
-  let new_side: Vec<String> = comment
-    .diff_hunk
-    .lines()
-    .skip(1)
-    .filter(|l| !l.starts_with('-'))
-    .map(|l| l.get(1..).unwrap_or("").to_string())
-    .collect();
-  let original = new_side.get(new_side.len().checked_sub(count)?..)?.to_vec();
-  Some(GithubSuggestion {
-    lines: (start, end),
-    original,
-    suggested,
-  })
-}
+pub use crate::github::github_suggestion;
 
 /// A collapsed thread's one-line preview of its first comment, with
 /// shortcodes as emoji.

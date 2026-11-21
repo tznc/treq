@@ -34,9 +34,9 @@ use super::{
   mutation_message, on_epoch,
   pr_detail::{self, emoji, toggle_reaction, REACTIONS},
   pr_review_logic::{
-    allowed, can_submit, collapsed, detached_threads, extends, parse_diff, pending_for,
-    submit_action, suggestion, thread_count, threads_at, Event, PendingComment, PrFile,
-    OWN_PR_HINT,
+    allowed, can_submit, collapsed, commit_suggestion_action, detached_threads, extends,
+    parse_diff, pending_for, submit_action, suggestion, thread_count, threads_at, Event,
+    PendingComment, PrFile, OWN_PR_HINT,
   },
 };
 use crate::mobile::{
@@ -400,6 +400,65 @@ impl PrReviewScreen {
     cx.notify();
   }
 
+  /// GitHub's "Commit suggestion", on the right of the comment's reactions.
+  fn commit_button(
+    &self,
+    thread: &GhReviewThread,
+    comment: &GhReviewComment,
+    cx: &mut Context<Self>,
+  ) -> Option<AnyElement> {
+    let action = commit_suggestion_action(thread, comment, self.number)?;
+    let thread_id = thread.id.clone();
+    Some(
+      Button::new(SharedString::from(format!(
+        "commit-suggestion-{}",
+        comment.id
+      )))
+      .ml_auto()
+      .h(px(TAP))
+      .primary()
+      .small()
+      .label("Commit suggestion")
+      .disabled(self.busy.is_some())
+      .on_click(cx.listener(move |this, _, window, cx| {
+        this.commit_suggestion(action.clone(), thread_id.clone(), window, cx)
+      }))
+      .touch()
+      .into_any_element(),
+    )
+  }
+
+  /// Commits the suggestion to the PR's branch, then resolves its thread.
+  fn commit_suggestion(
+    &mut self,
+    action: GithubAction,
+    thread_id: String,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) {
+    self.write(
+      "pr-review-commit-suggestion",
+      vec![self.repo.clone(), thread_id.clone()],
+      action,
+      "Suggestion committed.",
+      window,
+      cx,
+      move |this, window, cx| this.resolve(thread_id, window, cx),
+    );
+  }
+
+  fn resolve(&mut self, thread_id: String, window: &mut Window, cx: &mut Context<Self>) {
+    self.write(
+      "pr-review-resolve",
+      vec![self.repo.clone(), thread_id.clone()],
+      GithubAction::ResolveReviewThread { thread_id },
+      "Thread resolved.",
+      window,
+      cx,
+      |_, _, _| {},
+    );
+  }
+
   fn reply(
     &mut self,
     thread_id: String,
@@ -669,14 +728,31 @@ impl PrReviewScreen {
             &c.body,
             cx,
           )))
-          .child(self.reactions(c, cx))
+          .child(
+            h_flex()
+              .items_center()
+              .gap_2()
+              .child(self.reactions(c, cx))
+              .children(self.commit_button(thread, c, cx)),
+          )
       })
       .collect();
     let thread_id = thread.id.clone();
+    let resolve = (!thread.is_resolved).then(|| {
+      let id = thread.id.clone();
+      Button::new(SharedString::from(format!("resolve-{}", thread.id)))
+        .h(px(TAP))
+        .outline()
+        .small()
+        .label("Resolve")
+        .disabled(self.busy.is_some())
+        .on_click(cx.listener(move |this, _, window, cx| this.resolve(id.clone(), window, cx)))
+        .touch()
+    });
     card
       .children(comments)
       .child(
-        h_flex().px_3().pb_2().child(
+        h_flex().px_3().pb_2().gap_2().children(resolve).child(
           Button::new(SharedString::from(format!("reply-{}", thread.id)))
             .h(px(TAP))
             .outline()
@@ -1019,7 +1095,8 @@ impl PrReviewScreen {
         .label(label)
         .loading(self.busy == Some("pr-review-submit"))
         .on_click(cx.listener(|this, _, _, cx| this.open_submit(cx)))
-        .touch(),
+        .touch()
+        .into_any_element(),
     )
   }
 }
