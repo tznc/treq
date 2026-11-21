@@ -4,20 +4,68 @@ defaults:
   run:
     shell: bash
 
+# Daily, this rebuilds the draft release for the version in tauri.conf.json
+# until that version is published, so a version bump always has a fresh
+# draft to publish from the releases page. Once published, runs skip until
+# the next bump.
 on:
+  schedule:
+    - cron: "17 3 * * *" # 03:17 UTC daily, off the hour to avoid schedule delays
   workflow_dispatch:
+
+# Two runs at once would race to delete and recreate the same draft.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   prepare:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      should_run: ${{ steps.gate.outputs.should_run }}
+      version: ${{ steps.gate.outputs.version }}
+      build_number: ${{ steps.gate.outputs.build_number }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
+      # Skips a released version, and a scheduled run when the draft is
+      # already built from this commit. A manual run always rebuilds.
+      - name: Check the version is unreleased
+        id: gate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          VERSION=$(jq -r '.version' src-tauri/tauri.conf.json)
+          TAG="v${VERSION}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          # The Android versionCode and iOS build number. They must stay above
+          # the retired nightly workflow's run numbers, and a re-run needs a
+          # new one for TestFlight.
+          echo "build_number=$((GITHUB_RUN_NUMBER * 100 + GITHUB_RUN_ATTEMPT))" >> "$GITHUB_OUTPUT"
+
+          # A failed API call fails the job rather than reading as "unreleased".
+          PUBLISHED=$(gh api "repos/${{ github.repository }}/releases" --paginate \
+            --jq ".[] | select(.tag_name == \"${TAG}\" and .draft == false) | .id")
+          DRAFT_SHA=$(gh api "repos/${{ github.repository }}/releases" --paginate \
+            --jq ".[] | select(.tag_name == \"${TAG}\" and .draft == true) | .target_commitish")
+
+          if [ -n "$PUBLISHED" ]; then
+            echo "${TAG} is already released; skipping until the next version bump."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          elif [ "$EVENT" = schedule ] && [ "$DRAFT_SHA" = "$GITHUB_SHA" ]; then
+            echo "The ${TAG} draft is already built from ${GITHUB_SHA}; skipping."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Delete pre-existing draft release for this version
+        if: steps.gate.outputs.should_run == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -52,6 +100,7 @@ jobs:
 
   release:
     needs: prepare
+    if: needs.prepare.outputs.should_run == 'true'
     permissions:
       contents: write
     strategy:
@@ -139,13 +188,290 @@ jobs:
         if: runner.os == 'macOS'
         run: bash scripts/verify-macos-bundle.sh "${{ matrix.app_bundle }}"
 
+  # Release builds of the GPUI mobile app (src-tauri with the `mobile-ui`
+  # feature), rendered through tauri-plugin-gpui. mobile-gpui.yml builds and
+  # smoke-tests the same app per push.
+  #
+  # Signed when the signing secrets exist: Android attaches a signed APK to the
+  # draft release (plus a signed AAB artifact for Play), iOS uploads to
+  # TestFlight. Without them both fall back to the unsigned debug builds.
+  android:
+    name: android build (gpui)
+    # Runs alongside the desktop builds; mobile-assets attaches the APK once
+    # the draft release exists.
+    needs: prepare
+    if: needs.prepare.outputs.should_run == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    # The signing secrets live in the prod environment, as for the desktop
+    # release job.
+    environment: prod
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_PROFILE_RELEASE_LTO: "thin"
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+      NDK_VERSION: 27.0.12077973
+      SIGNED: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY"
+          df -h /
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+          targets: aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          cache-on-failure: true
+          key: release-android
+          workspaces: ". -> target"
+
+      - name: Setup Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+        with:
+          packages: platform-tools
+
+      - name: Install NDK
+        run: |
+          sdkmanager --install "ndk;$NDK_VERSION"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      # arm64 only: phones. The generated Gradle project calls back into the
+      # Tauri CLI, so it is a local npm install.
+      - name: Generate the Android project
+        run: |
+          npm ci --no-audit --no-fund
+          npm run tauri -- android init --ci
+          scripts/mobile/apply-icons.sh
+          scripts/mobile/android-compile-sdk.sh
+          # `android init` regenerates gen/android without the plugin entries;
+          # only treq's build script adds them back (tauri-plugin-gpui's
+          # GpuiView), and a warm Rust cache skips it. Force it to rerun.
+          cargo clean -p treq --target aarch64-linux-android
+
+      - name: Add release signing
+        if: env.SIGNED == 'true'
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: scripts/mobile/android-signing.sh
+
+      - name: Build APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          config='{"bundle":{"android":{"versionCode":${{ needs.prepare.outputs.build_number }}}}}'
+          if [ "$SIGNED" = true ]; then
+            # `--apk --aab` runs Gradle's Rust build once per output. Build
+            # the AAB only and derive a signed universal APK from it.
+            npm run tauri -- android build --features mobile-ui --aab --target aarch64 --ci --config "$config"
+            aab=$(find src-tauri/gen/android/app/build/outputs/bundle -name '*-release.aab' | head -n1)
+            test -n "$aab"
+            cp "$aab" "$GITHUB_WORKSPACE/treq-${VERSION}-android.aab"
+            curl -fsSL -o "$RUNNER_TEMP/bundletool.jar" \
+              https://github.com/google/bundletool/releases/download/1.18.1/bundletool-all-1.18.1.jar
+            # bundletool takes only `pass:` or `file:` passwords; a file keeps
+            # the secret out of the process arguments.
+            ks_pass=$RUNNER_TEMP/ks-pass
+            (umask 077; printf '%s' "$ANDROID_KEYSTORE_PASSWORD" > "$ks_pass")
+            trap 'rm -f "$ks_pass"' EXIT
+            java -jar "$RUNNER_TEMP/bundletool.jar" build-apks --mode=universal \
+              --bundle="$aab" --output="$RUNNER_TEMP/treq.apks" \
+              --ks=src-tauri/gen/android/upload.jks --ks-key-alias="$ANDROID_KEY_ALIAS" \
+              --ks-pass="file:$ks_pass" --key-pass="file:$ks_pass"
+            rm -f "$ks_pass"
+            unzip -o -q "$RUNNER_TEMP/treq.apks" universal.apk -d "$RUNNER_TEMP"
+            apk=$RUNNER_TEMP/universal.apk
+          else
+            npm run tauri -- android build --features mobile-ui --debug --apk --target aarch64 --ci --config "$config"
+            apk=$(find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' | head -n1)
+          fi
+          test -n "$apk"
+          ls -la "$apk"
+          cp "$apk" "$GITHUB_WORKSPACE/treq-${VERSION}-android-arm64.apk"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-apk
+          path: |
+            treq-${{ env.VERSION }}-android-arm64.apk
+            treq-${{ env.VERSION }}-android.aab
+          if-no-files-found: error
+          retention-days: 7
+
+  ios:
+    name: ios build (gpui)
+    needs: prepare
+    if: needs.prepare.outputs.should_run == 'true'
+    # App Store Connect only accepts builds from the iOS 26 SDK (Xcode 26).
+    runs-on: macos-26
+    timeout-minutes: 90
+    # The signing secrets live in the prod environment, as for the desktop
+    # release job.
+    environment: prod
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_PROFILE_RELEASE_LTO: "thin"
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+      SIGNED: ${{ secrets.IOS_CERTIFICATE_P12 != '' && secrets.IOS_MOBILE_PROVISION != '' && secrets.APPLE_API_KEY_P8 != '' }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          cache-on-failure: true
+          key: release-ios
+          workspaces: ". -> target"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      # No `cdylib` on iOS: GPUI's core-video dependency asks rustc to link
+      # the OpenGL framework, which iOS lacks. Xcode links the staticlib.
+      # (The lockfile keeps libc at 0.2.189: 0.2.190 made the `_dyld_*`
+      # functions macOS-only, which breaks `backtrace`, and GPUI, on iOS.)
+      - name: Prepare the crate for iOS
+        run: |
+          sed -i.bak 's/^crate-type = .*/crate-type = ["staticlib", "rlib"]/' src-tauri/Cargo.toml
+          grep -qx 'crate-type = \["staticlib", "rlib"\]' src-tauri/Cargo.toml
+          rm src-tauri/Cargo.toml.bak
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Generate the Xcode project
+        env:
+          APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # An empty team fails `ios init`; unset it for the unsigned build.
+          [ -n "$APPLE_DEVELOPMENT_TEAM" ] || unset APPLE_DEVELOPMENT_TEAM
+          command -v xcodegen >/dev/null || brew install xcodegen
+          npm ci --no-audit --no-fund
+          npm run tauri -- ios init --ci
+          scripts/mobile/apply-icons.sh
+
+      # The Tauri CLI imports IOS_CERTIFICATE into a temporary keychain and
+      # signs with the App Store profile in IOS_MOBILE_PROVISION; it ignores
+      # the certificate without the profile.
+      - name: Build signed .ipa
+        if: env.SIGNED == 'true'
+        env:
+          APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          IOS_CERTIFICATE: ${{ secrets.IOS_CERTIFICATE_P12 }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_MOBILE_PROVISION: ${{ secrets.IOS_MOBILE_PROVISION }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          keydir="$HOME/.appstoreconnect/private_keys"
+          mkdir -p "$keydir"
+          printf '%s' "$APPLE_API_KEY_P8" > "$keydir/AuthKey_$APPLE_API_KEY.p8"
+          export APPLE_API_KEY_PATH="$keydir/AuthKey_$APPLE_API_KEY.p8"
+          config='{"bundle":{"iOS":{"bundleVersion":"${{ needs.prepare.outputs.build_number }}"}}}'
+          npm run tauri -- ios build --features mobile-ui --target aarch64 --export-method app-store-connect --ci --config "$config"
+          ipa=$(find src-tauri/gen/apple/build -name '*.ipa' | head -n 1)
+          test -n "$ipa"
+          # App Store Connect rejects an .ipa without its profile.
+          unzip -Z1 "$ipa" | grep 'Payload/.*\.app/embedded\.mobileprovision$' >/dev/null \
+            || { echo "::error::$ipa has no embedded.mobileprovision"; exit 1; }
+          cp "$ipa" "$RUNNER_TEMP/treq.ipa"
+
+      - name: Upload to TestFlight
+        if: env.SIGNED == 'true'
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          xcrun altool --upload-app --type ios --file "$RUNNER_TEMP/treq.ipa" \
+            --apiKey "$APPLE_API_KEY" --apiIssuer "$APPLE_API_ISSUER"
+
+      - name: Remove the API key
+        if: always()
+        run: rm -rf "$HOME/.appstoreconnect"
+
+      # Without signing secrets: simulator build, since device builds need a
+      # development team and certificate.
+      - name: Build debug app bundle (simulator)
+        if: env.SIGNED != 'true'
+        run: |
+          npm run tauri -- ios build --features mobile-ui --debug --target aarch64-sim --no-sign --ci
+          app=$(find src-tauri/gen/apple/build -name '*.app' -path '*arm64-sim*' -maxdepth 3 | head -n 1)
+          test -n "$app"
+          # Simulator only: unzip, then `xcrun simctl install booted <app>`.
+          ditto -c -k --keepParent "$app" "$GITHUB_WORKSPACE/treq-${VERSION}-ios-simulator-arm64.zip"
+
+      - name: Upload app bundle
+        if: env.SIGNED != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-simulator-app
+          path: treq-${{ env.VERSION }}-ios-simulator-arm64.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  # Attaches the mobile builds to the draft release, which the release job
+  # recreates. Still runs if a desktop target fails; the draft exists either
+  # way.
+  mobile-assets:
+    name: attach mobile builds
+    needs: [prepare, release, android, ios]
+    if: ${{ !cancelled() && needs.prepare.outputs.should_run == 'true' }}
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: "{android-apk,ios-simulator-app}"
+          merge-multiple: true
+      - name: Attach to the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          files=$(ls "treq-${VERSION}-android-arm64.apk" "treq-${VERSION}-ios-simulator-arm64.zip" 2>/dev/null || true)
+          test -n "$files" || { echo "no mobile builds to attach"; exit 0; }
+          gh release upload "v${VERSION}" $files --clobber --repo "${{ github.repository }}"
+
   # Headless `treq` CLI for Linux hosts without a desktop (devcontainers,
   # remote VMs). Built without the `gui` feature and linked statically
   # against musl, so it runs on any distro, Alpine included.
   linux-cli:
-    needs: release
+    needs: [prepare, release]
     # A failed desktop bundle must not block the CLI the cloud machines install.
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && needs.prepare.outputs.should_run == 'true' }}
     permissions:
       contents: write
     strategy:
@@ -204,8 +530,8 @@ jobs:
 
   # Base sandbox image for this version (sandbox-image/), on GHCR.
   sandbox-image:
-    needs: release
-    if: ${{ !cancelled() }}
+    needs: [prepare, release]
+    if: ${{ !cancelled() && needs.prepare.outputs.should_run == 'true' }}
     permissions:
       contents: read
       packages: write
