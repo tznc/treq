@@ -1,3 +1,4 @@
+import { loadSettings, providers, type Store } from "./settings";
 import { LineComposer } from "./composer";
 import { blobContext, blobFile, blobLine, diffContext, prHeadRef } from "./lines";
 import type { CodeAt } from "./prompt";
@@ -57,3 +58,12 @@ document.addEventListener(
   },
   { passive: true },
 );
+
+// Which agents the line buttons offer, from the options page.
+const store = chrome.storage.sync as Store;
+const applySettings = () =>
+  loadSettings(store).then((settings) => {
+    composer.providers = providers(settings);
+  });
+applySettings();
+chrome.storage.onChanged.addListener((_, area) => area === "sync" && applySettings());
