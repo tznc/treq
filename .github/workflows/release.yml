@@ -37,6 +37,19 @@ jobs:
             gh api -X DELETE "repos/${{ github.repository }}/git/refs/tags/${TAG}"
           fi
 
+      # tauri-action reuses this draft and leaves its body alone.
+      - name: Create draft release without chore, lint and style PRs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(jq -r '.version' src-tauri/tauri.conf.json)
+          TAG="v${VERSION}"
+
+          gh api -X POST "repos/${{ github.repository }}/releases/generate-notes" \
+            -f tag_name="$TAG" -f target_commitish="$GITHUB_SHA" --jq .body \
+            | bash scripts/filter-release-notes.sh \
+            | gh release create "$TAG" --draft --title "$TAG" --target "$GITHUB_SHA" --notes-file -
+
   release:
     needs: prepare
     permissions:
@@ -117,7 +130,6 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: "v__VERSION__"
-          generateReleaseNotes: true
           releaseDraft: true
           prerelease: false
           releaseAssetNamePattern: "[name]-[version]-[platform]-[arch][ext]"
