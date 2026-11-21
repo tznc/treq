@@ -25,3 +25,57 @@ test.each(moved)('%s -> %s (%s) targets a live page and shadows none', (from, to
   expect(routes.has(to)).toBe(true);
   expect(routes.has(from.endsWith('/') ? from : `${from}/`)).toBe(false);
 });
+
+// Pages that moved or were deleted. Search Console reported each as a 404, so
+// each needs a 301 with and without the trailing slash.
+const retired = [
+  '/docs/cli/',
+  '/docs/contributing/',
+  '/docs/keyboard-shortcuts/',
+  '/docs/concepts/reviews/',
+  '/docs/concepts/trello-and-jira-integrations/',
+  '/docs/features/code-review/',
+  '/docs/features/commit-management/',
+  '/docs/features/implementation-plans/',
+  '/docs/features/reviews/',
+  '/docs/features/terminal-sessions/',
+  '/docs/features/workspaces/',
+  '/docs/how-to/scheduling-workspaces/',
+  '/docs/how-to/using-the-merge-queue/',
+  '/docs/guides/getting-started/installation/',
+  '/docs/guides/getting-started/your-first-workspace/',
+  '/docs/guides/common-tasks/discarding-changes/',
+  '/docs/guides/common-tasks/moving-files-between-workspaces/',
+  '/docs/guides/common-tasks/pushing-to-remote/',
+  '/docs/guides/tips-and-tricks/customizing-settings/',
+  '/docs/guides/core-workflows/code-review-workflow/',
+  '/docs/guides/core-workflows/committing-changes/',
+  '/docs/guides/core-workflows/creating-terminal-sessions/',
+  '/docs/guides/core-workflows/executing-implementation-plans/',
+  '/docs/guides/core-workflows/managing-workspaces/',
+  '/docs/guides/core-workflows/merging-workspaces/',
+  '/docs/guides/core-workflows/staging-and-committing/',
+  '/docs/guides/core-workflows/using-treq-with-git-repo/',
+  '/learn/troubleshooting/',
+  '/learn/how-to/customizing-settings/',
+  '/learn/how-to/discarding-changes/',
+  '/learn/how-to/moving-files-between-workspaces/',
+  '/learn/how-to/pushing-to-remote/',
+  '/learn/tutorials/code-review-workflow/',
+  '/learn/tutorials/committing-changes/',
+  '/learn/tutorials/creating-terminal-sessions/',
+  '/learn/tutorials/managing-workspaces/',
+  '/learn/tutorials/merging-workspaces/',
+  '/learn/tutorials/using-treq-with-git-repo/',
+  '/learn/workflows/stacks/',
+  '/learn/workflows/stacks/elixir-ai/',
+  '/learn/workflows/stacks/react-development/',
+  '/learn/workflows/stacks/rust-refactoring/',
+  '/learn/workflows/stacks/tauri-development/',
+];
+
+test.each(retired)('%s redirects with and without the trailing slash', (url) => {
+  const from = new Set(moved.map(([source]) => source));
+  expect(from.has(url)).toBe(true);
+  expect(from.has(url.slice(0, -1))).toBe(true);
+});
