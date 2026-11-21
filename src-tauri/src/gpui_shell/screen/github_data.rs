@@ -169,6 +169,8 @@ pub trait GithubHost: WorkspaceHost {
   fn change_pr(&self, repo: &str, number: u64, change: &PrChange) -> Result<(), String>;
   /// Adds (`on`) or removes the user's `content` reaction on a comment.
   fn react(&self, comment_id: &str, content: &str, on: bool) -> Result<(), String>;
+  /// Who `@` can mention in `repo` besides the thread's participants.
+  fn mentionable_users(&self, repo: &str) -> Result<Vec<String>, String>;
   fn create_issue(&self, repo: &str, title: &str, body: &str) -> Result<u64, String>;
   fn create_pr(
     &self,
@@ -269,6 +271,10 @@ impl GithubHost for Backend {
       PrChange::Reopen => gh::reopen_pr(repo, number),
       PrChange::Draft(draft) => gh::set_pr_draft(repo, number, *draft),
     }
+  }
+
+  fn mentionable_users(&self, repo: &str) -> Result<Vec<String>, String> {
+    core::github_cli::mentionable_users(repo)
   }
 
   fn react(&self, comment_id: &str, content: &str, on: bool) -> Result<(), String> {
