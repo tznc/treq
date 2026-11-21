@@ -1,0 +1,15 @@
+{
+  "name": "treq-enhancements-for-claude",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/content.ts --bundle --format=iife --target=chrome120 --outfile=dist/content.js",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.0",
+    "happy-dom": "^20.0.0",
+    "vitest": "^4.0.15"
+  }
+}
