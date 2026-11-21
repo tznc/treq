@@ -257,6 +257,8 @@ enum DeepLinkKind {
   SkillInstall,
   /// `treq://pr/open?repo=owner/repo&number=N`: show a pull request.
   PrOpen,
+  /// `treq://repo/open?repo=owner/repo`: show a repository's window.
+  RepoOpen,
   Unknown,
 }
 
@@ -288,6 +290,13 @@ fn classify_deep_link(url: &str) -> DeepLinkKind {
         && parsed.path() == "/open" =>
     {
       DeepLinkKind::PrOpen
+    }
+    Ok(parsed)
+      if parsed.scheme() == "treq"
+        && parsed.host_str() == Some("repo")
+        && parsed.path() == "/open" =>
+    {
+      DeepLinkKind::RepoOpen
     }
     _ => DeepLinkKind::Unknown,
   }
@@ -399,6 +408,25 @@ pub(crate) fn pr_launch_link_window(app: &AppHandle, label: &str, path: &str) {
   gpui_shell::pr_open_link(app, label, link.number);
   #[cfg(not(feature = "gpui-shell"))]
   let _ = (app, label, link);
+}
+
+/// `treq://repo/open?repo=owner/repo`: brings the window open on that GitHub
+/// repository to the front, or the last focused window when none is.
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+fn repo_open_deep_link(app: &AppHandle, url: &str) {
+  let Some(repo) = crate::core::pr_link::parse_repo_open_link(url) else {
+    log::info!("repo deep link ignored (malformed)");
+    return;
+  };
+  match window_label_for_github_repo(app, &repo).and_then(|l| app.get_window(&l)) {
+    Some(window) => {
+      window.unminimize().ignore_closed();
+      window.show().ignore_closed();
+      window.set_focus().ignore_closed();
+    }
+    None => focus_target_window(app),
+  }
 }
 
 /// The window open on GitHub repository `repo` (`owner/repo`), the focused
@@ -974,6 +1002,7 @@ pub fn run() {
               // One window asks: installing is app-wide, not per repository.
               DeepLinkKind::SkillInstall => skill_install_deep_link(&handle, &url),
               DeepLinkKind::PrOpen => pr_open_deep_link(&handle, &url),
+              DeepLinkKind::RepoOpen => repo_open_deep_link(&handle, &url),
               DeepLinkKind::Unknown => log::info!("deep link ignored (unrecognized url)"),
             }
           }

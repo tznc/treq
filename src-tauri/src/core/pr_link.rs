@@ -1,5 +1,6 @@
 //! Links to a pull request in Treq: `treq://pr/open?repo={owner}/{repo}&number={n}`.
 //! treq.dev/open/pr/{owner}/{repo}/{n} redirects to it in the browser.
+//! `treq://repo/open?repo={owner}/{repo}` shows the repository's window.
 
 /// The PR a `treq://pr/open` link names.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -11,23 +12,40 @@ pub struct PrLink {
 
 /// The PR a `treq://pr/open` link names, or `None` for any other link.
 pub fn parse_pr_open_link(url: &str) -> Option<PrLink> {
-  let parsed = url::Url::parse(url).ok()?;
-  if parsed.scheme() != "treq" || parsed.host_str() != Some("pr") || parsed.path() != "/open" {
-    return None;
-  }
-  let param = |name: &str| {
-    parsed
-      .query_pairs()
-      .find(|(key, _)| key == name)
-      .map(|(_, value)| value.into_owned())
-  };
-  let repo = param("repo")?;
-  let (owner, name) = repo.split_once('/')?;
-  if !is_github_name(owner) || !is_github_name(name) {
-    return None;
-  }
-  let number = param("number")?.parse::<u64>().ok().filter(|n| *n > 0)?;
+  let parsed = treq_link(url, "pr", "/open")?;
+  let repo = github_repo(&parsed)?;
+  let number = param(&parsed, "number")?
+    .parse::<u64>()
+    .ok()
+    .filter(|n| *n > 0)?;
   Some(PrLink { repo, number })
+}
+
+/// The GitHub `owner/repo` a `treq://repo/open` link names, or `None` for
+/// any other link.
+pub fn parse_repo_open_link(url: &str) -> Option<String> {
+  github_repo(&treq_link(url, "repo", "/open")?)
+}
+
+/// `url` when it is a `treq://{host}{path}` link.
+fn treq_link(url: &str, host: &str, path: &str) -> Option<url::Url> {
+  let parsed = url::Url::parse(url).ok()?;
+  (parsed.scheme() == "treq" && parsed.host_str() == Some(host) && parsed.path() == path)
+    .then_some(parsed)
+}
+
+fn param(parsed: &url::Url, name: &str) -> Option<String> {
+  parsed
+    .query_pairs()
+    .find(|(key, _)| key == name)
+    .map(|(_, value)| value.into_owned())
+}
+
+/// A link's `repo` parameter, when it is a GitHub `owner/repo`.
+fn github_repo(parsed: &url::Url) -> Option<String> {
+  let repo = param(parsed, "repo")?;
+  let (owner, name) = repo.split_once('/')?;
+  (is_github_name(owner) && is_github_name(name)).then_some(repo)
 }
 
 static PENDING: std::sync::Mutex<Option<PrLink>> = std::sync::Mutex::new(None);
