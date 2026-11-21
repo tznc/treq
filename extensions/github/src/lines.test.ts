@@ -9,7 +9,7 @@ describe("diffContext", () => {
   const row = (id: string, left: string, right: string, code: string, selected = false) =>
     `<tr id="${id}"><td ${left ? `data-line-number="${left}"` : ""} class="${selected ? "selected-line" : ""}"></td>
       <td ${right ? `data-line-number="${right}"` : ""}></td>
-      <td class="blob-code"><span class="blob-code-inner">${code}</span></td></tr>`;
+      <td class="blob-code"><span class="blob-code-inner" data-code-marker="${left && right ? " " : left ? "-" : "+"}">${code}</span></td></tr>`;
   const diff = (rows: string) =>
     `<div data-tagsearch-path="src/a.rs"><table><tbody>${rows}</tbody></table></div>`;
 
@@ -17,21 +17,21 @@ describe("diffContext", () => {
     document.body.innerHTML = diff(row("a", "9", "10", "let x = 1;"));
     expect(diffContext(document.querySelector("#a .blob-code")!)).toEqual({
       path: "src/a.rs",
-      lines: [{ line: 10, text: "let x = 1;" }],
+      lines: [{ line: 10, text: " let x = 1;" }],
     });
   });
 
-  it("takes the old side of a deleted line", () => {
+  it("takes the old side of a deleted line, marking each line as the diff does", () => {
     document.body.innerHTML = diff(row("a", "11", "", "gone"));
-    expect(diffContext(document.querySelector("#a")!)?.lines).toEqual([{ line: 11, text: "gone" }]);
+    expect(diffContext(document.querySelector("#a")!)?.lines).toEqual([{ line: 11, text: "-gone" }]);
   });
 
   it("takes every selected row when the hovered one is selected", () => {
     document.body.innerHTML = diff(
       row("a", "1", "1", "a", true) + row("b", "2", "", "b", true) + row("c", "", "2", "c", true) + row("d", "3", "3", "d"),
     );
-    expect(diffContext(document.querySelector("#b")!)?.lines.map((l) => l.text)).toEqual(["a", "b", "c"]);
-    expect(diffContext(document.querySelector("#d")!)?.lines.map((l) => l.text)).toEqual(["d"]);
+    expect(diffContext(document.querySelector("#b")!)?.lines.map((l) => l.text)).toEqual([" a", "-b", "+c"]);
+    expect(diffContext(document.querySelector("#d")!)?.lines.map((l) => l.text)).toEqual([" d"]);
   });
 
   it("ignores anything outside a diff", () => {

@@ -3,13 +3,15 @@ import type { CodeLine } from "./prompt";
 const rowLine = (row: Element): CodeLine | null => {
   const numbers = row.querySelectorAll("td[data-line-number]");
   const line = numbers[numbers.length - 1]?.getAttribute("data-line-number");
-  const text = row.querySelector(".blob-code-inner")?.textContent ?? "";
+  const code = row.querySelector(".blob-code-inner");
+  const text = `${code?.getAttribute("data-code-marker") ?? ""}${code?.textContent ?? ""}`;
   return line ? { line: Number(line), text: text.replace(/\n$/, "") } : null;
 };
 
 /**
  * The file and lines of the diff row holding `target` (each row's new side,
- * else its old): every selected row when it is one of them, else its own.
+ * else its old, its code after its ` `, `+` or `-` marker): every selected
+ * row when it is one of them, else its own.
  */
 export function diffContext(target: Element): { path: string; lines: CodeLine[] } | null {
   const file = target.closest("[data-tagsearch-path]");
