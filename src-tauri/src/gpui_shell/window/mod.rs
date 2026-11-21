@@ -15,6 +15,7 @@
 mod actions;
 mod controller;
 mod data;
+mod history;
 mod host;
 mod keys;
 mod model;

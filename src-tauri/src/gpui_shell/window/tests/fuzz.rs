@@ -66,6 +66,8 @@ fn shortcut() -> impl Strategy<Value = Shortcut> {
     Just(Shortcut::NewShell),
     Just(Shortcut::ZoomIn),
     Just(Shortcut::ZoomOut),
+    Just(Shortcut::Back),
+    Just(Shortcut::Forward),
   ]
 }
 

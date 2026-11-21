@@ -55,6 +55,10 @@ pub enum Shortcut {
   NewShell,
   ZoomIn,
   ZoomOut,
+  /// The mouse's back button.
+  Back,
+  /// The mouse's forward button.
+  Forward,
 }
 
 /// What a handler did: changed the model with these effects, or left the
@@ -110,6 +114,8 @@ impl Model {
       Shortcut::NewShell if self.shows_terminal() => self.terminal("newShell", json!({})),
       Shortcut::ZoomIn => return vec![self.zoom(super::model::ZOOM_STEP as i32)],
       Shortcut::ZoomOut => return vec![self.zoom(-(super::model::ZOOM_STEP as i32))],
+      Shortcut::Back if free => self.go(true),
+      Shortcut::Forward if free => self.go(false),
       _ => {}
     }
     Vec::new()
