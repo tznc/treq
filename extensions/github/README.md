@@ -8,7 +8,9 @@ code line (file view and pull request diffs) that starts an agent about it.
 - Codex: Codex on the web.
 - Treq: `treq://repo/open` on a repository, `treq://pr/open` on a pull request.
 
-Hover a code line and press the Treq icon: type a prompt and send it with
+Hover a code line and press the Treq icon (Claude and Codex can be turned
+on in the extension's options; Claude opens Claude Code on the web, Codex the
+Codex app through `codex://new`): type a prompt and send it with
 ⌘/Ctrl + Enter. The prompt starts with the file, line numbers and code of
 the line, or of the selected lines around it (at most 10, eliding the
 middle), and starts an agent through `treq://agent/kickoff` on the pull

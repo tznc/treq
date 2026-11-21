@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "build": "esbuild src/content.ts --bundle --format=iife --target=chrome120 --loader:.svg=text --outfile=dist/content.js",
+    "build": "esbuild src/content.ts src/options.ts --bundle --format=iife --target=chrome120 --loader:.svg=text --outdir=dist",
     "test": "vitest run"
   },
   "devDependencies": {
