@@ -1855,6 +1855,27 @@ fn deep_links_start_on_their_branch_or_toast_that_it_is_missing() {
     .is_processed("window-test-found"));
 }
 
+/// A `treq://agent/kickoff` link from GitHub starts on its branch's
+/// workspace, else in the home repository, and toasts when no window has
+/// its repository open.
+#[test]
+fn kickoffs_start_on_their_branch_else_the_home_repository() {
+  use crate::{core::pr_link::KickoffLink, gpui_shell::launch::start_kickoff};
+  let host = repo_host();
+  let link = |branch: &str| KickoffLink {
+    repo: "tznc/treq".into(),
+    branch: branch.into(),
+    prompt: "Fix it".into(),
+  };
+
+  start_kickoff(&*host, Some("/repo"), &link("b"));
+  assert_eq!(host.calls().last().unwrap(), "launch /repo Some(2) true");
+  start_kickoff(&*host, Some("/repo"), &link("main"));
+  assert_eq!(host.calls().last().unwrap(), "launch /repo None true");
+  start_kickoff(&*host, None, &link("b"));
+  assert_eq!(host.calls().last().unwrap(), "toast Repository not open");
+}
+
 /// A remote poll reads every workspace's status in one request, not one
 /// per workspace, and falls back to those reads when the host has none.
 #[test]

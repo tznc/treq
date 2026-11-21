@@ -259,6 +259,9 @@ enum DeepLinkKind {
   PrOpen,
   /// `treq://repo/open?repo=owner/repo`: show a repository's window.
   RepoOpen,
+  /// `treq://agent/kickoff?repo=owner/repo&branch=b&prompt=p`: start an agent
+  /// from a browser, which knows the GitHub repository but not its checkout.
+  AgentKickoff,
   Unknown,
 }
 
@@ -297,6 +300,13 @@ fn classify_deep_link(url: &str) -> DeepLinkKind {
         && parsed.path() == "/open" =>
     {
       DeepLinkKind::RepoOpen
+    }
+    Ok(parsed)
+      if parsed.scheme() == "treq"
+        && parsed.host_str() == Some("agent")
+        && parsed.path() == "/kickoff" =>
+    {
+      DeepLinkKind::AgentKickoff
     }
     _ => DeepLinkKind::Unknown,
   }
@@ -427,6 +437,37 @@ fn repo_open_deep_link(app: &AppHandle, url: &str) {
     }
     None => focus_target_window(app),
   }
+}
+
+/// `treq://agent/kickoff?repo=owner/repo&branch=b&prompt=p`: the window open
+/// on that GitHub repository starts the agent; with none, the last focused
+/// window says so.
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+fn agent_kickoff_deep_link(app: &AppHandle, url: &str) {
+  let Some(link) = crate::core::pr_link::parse_agent_kickoff_link(url) else {
+    log::info!("agent kickoff deep link ignored (malformed)");
+    return;
+  };
+  let found = window_label_for_github_repo(app, &link.repo);
+  let repo_path = found.as_ref().and_then(|label| {
+    let state = app.state::<AppState>();
+    let paths = state.window_repo_paths.lock_or_recover();
+    paths.get(label).cloned()
+  });
+  let Some(label) = found.or_else(|| resolve_menu_target_label(app)) else {
+    log::info!("agent kickoff deep link ignored (no window)");
+    return;
+  };
+  if let Some(window) = app.get_window(&label) {
+    window.unminimize().ignore_closed();
+    window.show().ignore_closed();
+    window.set_focus().ignore_closed();
+  }
+  #[cfg(feature = "gpui-shell")]
+  gpui_shell::launch::agent_kickoff(app, label, repo_path, link);
+  #[cfg(not(feature = "gpui-shell"))]
+  let _ = (repo_path, link);
 }
 
 /// The window open on GitHub repository `repo` (`owner/repo`), the focused
@@ -1003,6 +1044,7 @@ pub fn run() {
               DeepLinkKind::SkillInstall => skill_install_deep_link(&handle, &url),
               DeepLinkKind::PrOpen => pr_open_deep_link(&handle, &url),
               DeepLinkKind::RepoOpen => repo_open_deep_link(&handle, &url),
+              DeepLinkKind::AgentKickoff => agent_kickoff_deep_link(&handle, &url),
               DeepLinkKind::Unknown => log::info!("deep link ignored (unrecognized url)"),
             }
           }
@@ -1436,6 +1478,15 @@ mod tests {
     assert_eq!(
       super::classify_deep_link(url),
       super::DeepLinkKind::RepoOpen
+    );
+  }
+
+  #[test]
+  fn classifies_agent_kickoff_link_as_agent_kickoff() {
+    let url = "treq://agent/kickoff?repo=tznc%2Ftreq&branch=main&prompt=why";
+    assert_eq!(
+      super::classify_deep_link(url),
+      super::DeepLinkKind::AgentKickoff
     );
   }
 

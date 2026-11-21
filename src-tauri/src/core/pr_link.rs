@@ -1,6 +1,8 @@
 //! Links to a pull request in Treq: `treq://pr/open?repo={owner}/{repo}&number={n}`.
 //! treq.dev/open/pr/{owner}/{repo}/{n} redirects to it in the browser.
-//! `treq://repo/open?repo={owner}/{repo}` shows the repository's window.
+//! `treq://repo/open?repo={owner}/{repo}` shows the repository's window, and
+//! `treq://agent/kickoff?repo={owner}/{repo}&branch={b}&prompt={p}` starts an
+//! agent in it: the links a browser can make, knowing only the GitHub names.
 
 /// The PR a `treq://pr/open` link names.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,6 +27,27 @@ pub fn parse_pr_open_link(url: &str) -> Option<PrLink> {
 /// any other link.
 pub fn parse_repo_open_link(url: &str) -> Option<String> {
   github_repo(&treq_link(url, "repo", "/open")?)
+}
+
+/// What a `treq://agent/kickoff` link asks: an agent with `prompt` on
+/// `branch` of GitHub repository `repo`, wherever a window has it open.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KickoffLink {
+  pub repo: String,
+  pub branch: String,
+  pub prompt: String,
+}
+
+/// The agent a `treq://agent/kickoff` link asks for, or `None` for any other
+/// link.
+pub fn parse_agent_kickoff_link(url: &str) -> Option<KickoffLink> {
+  let parsed = treq_link(url, "agent", "/kickoff")?;
+  let filled = |name: &str| param(&parsed, name).filter(|v| !v.trim().is_empty());
+  Some(KickoffLink {
+    repo: github_repo(&parsed)?,
+    branch: filled("branch")?,
+    prompt: filled("prompt")?,
+  })
 }
 
 /// `url` when it is a `treq://{host}{path}` link.
@@ -181,6 +204,29 @@ mod tests {
       "treq://pr/open?repo=tznc%2Ftreq&number=42",
     ] {
       assert_eq!(parse_repo_open_link(url), None, "{url}");
+    }
+  }
+
+  #[test]
+  fn reads_an_agent_kickoff_link() {
+    assert_eq!(
+      parse_agent_kickoff_link(
+        "treq://agent/kickoff?repo=tznc%2Ftreq&branch=claude%2Fx&prompt=src%2Fa.rs%3A4%0A%0Awhy%3F"
+      ),
+      Some(KickoffLink {
+        repo: "tznc/treq".into(),
+        branch: "claude/x".into(),
+        prompt: "src/a.rs:4\n\nwhy?".into(),
+      })
+    );
+    for url in [
+      "treq://agent/kickoff?repo=tznc%2Ftreq&branch=main",
+      "treq://agent/kickoff?repo=tznc%2Ftreq&prompt=why",
+      "treq://agent/kickoff?repo=tznc%2Ftreq&branch=main&prompt=%20",
+      "treq://agent/kickoff?repo=tznc&branch=main&prompt=why",
+      "treq://agent/start?repo=tznc%2Ftreq&branch=main&prompt=why",
+    ] {
+      assert_eq!(parse_agent_kickoff_link(url), None, "{url}");
     }
   }
 }
