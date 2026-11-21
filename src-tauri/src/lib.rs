@@ -1402,6 +1402,15 @@ mod tests {
   }
 
   #[test]
+  fn classifies_repo_open_link_as_repo_open() {
+    let url = "treq://repo/open?repo=tznc%2Ftreq";
+    assert_eq!(
+      super::classify_deep_link(url),
+      super::DeepLinkKind::RepoOpen
+    );
+  }
+
+  #[test]
   fn classifies_other_links_as_unknown() {
     for url in [
       "treq://auth/other?token=abc",

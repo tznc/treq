@@ -148,4 +148,21 @@ mod tests {
       assert_eq!(parse_pr_open_link(url), None, "{url}");
     }
   }
+
+  #[test]
+  fn reads_the_repo_of_a_repo_open_link() {
+    assert_eq!(
+      parse_repo_open_link("treq://repo/open?repo=tznc%2Ftreq").as_deref(),
+      Some("tznc/treq")
+    );
+    for url in [
+      "treq://repo/open",
+      "treq://repo/open?repo=tznc",
+      "treq://repo/open?repo=..%2Ftreq",
+      "treq://repo/close?repo=tznc%2Ftreq",
+      "treq://pr/open?repo=tznc%2Ftreq&number=42",
+    ] {
+      assert_eq!(parse_repo_open_link(url), None, "{url}");
+    }
+  }
 }
