@@ -162,6 +162,7 @@ const config: Config = {
             '/sign-in/**',
             '/auth/**',
             '/integrations/**',
+            '/search/**',
           ],
         },
       } satisfies Preset.Options,

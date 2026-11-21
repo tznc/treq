@@ -5,11 +5,15 @@
 const fs = require('fs');
 const path = require('path');
 const {collectMarkdownPages} = require('./rawMarkdownPlugin');
+const {buildAuthorPages} = require('./skillsPlugin');
 
 const siteDir = path.join(__dirname, '..');
 const routes = new Set(
   collectMarkdownPages(siteDir).map((p) => `/${p.outputPath.replace(/(\/index)?\.md$/, '')}/`),
 );
+// Skill and author pages come from the generated catalog (npm run build:skills-catalog).
+const catalog = require('../src/data/skills.json');
+for (const {route} of [...catalog.skills, ...buildAuthorPages(catalog)]) routes.add(`${route}/`);
 const rules = fs
   .readFileSync(path.join(siteDir, 'static/_redirects'), 'utf8')
   .split('\n')
@@ -26,9 +30,20 @@ test.each(moved)('%s -> %s (%s) targets a live page and shadows none', (from, to
   expect(routes.has(from.endsWith('/') ? from : `${from}/`)).toBe(false);
 });
 
-// Pages that moved or were deleted. Search Console reported each as a 404, so
-// each needs a 301 with and without the trailing slash.
+// Pages and skills that moved or were deleted. Search Console reported each as
+// a 404, so each needs a 301 with and without the trailing slash.
 const retired = [
+  '/skills/mattpocock/engineering/resolving-merge-conflicts/',
+  '/skills/mattpocock/in-progress/batch-grill-me/',
+  '/skills/mattpocock/in-progress/implement-spec/',
+  '/skills/mattpocock/in-progress/pr/',
+  '/skills/mattpocock/in-progress/retro/',
+  '/skills/mattpocock/in-progress/to-questionnaire/',
+  '/skills/mattpocock/in-progress/wizard/',
+  '/skills/mattpocock/personal/edit-article/',
+  '/skills/mattpocock/personal/obsidian-vault/',
+  '/skills/mattpocock/productivity/writing-great-skills/',
+  '/skills/microsoft/azure-cost/',
   '/docs/cli/',
   '/docs/contributing/',
   '/docs/keyboard-shortcuts/',
