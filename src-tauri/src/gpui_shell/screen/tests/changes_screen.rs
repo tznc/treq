@@ -1141,6 +1141,9 @@ fn changes_tab_sends_the_review_to_an_agent(cx: &mut TestAppContext) {
   assert!(!h.shows(gpui::Role::Toolbar, "Review"));
   assert!(!h.shows(gpui::Role::Dialog, "Finish your review"));
   assert!(host.writes().contains(&"clear review 7".to_string()));
+  assert!(host
+    .writes()
+    .contains(&"keep sent comments 7 a.rs:Nit".to_string()));
 }
 
 #[gpui::test]

@@ -137,6 +137,13 @@ pub trait ChangesHost: CommitsHost {
     repo_path: &str,
     workspace_id: i64,
   ) -> Result<Vec<AgentReviewComment>, String>;
+  /// Keeps a sent review's line comments on the workspace's diff.
+  fn keep_sent_comments(
+    &self,
+    repo_path: &str,
+    workspace_id: i64,
+    comments: &[crate::core::review::LineComment],
+  ) -> Result<(), String>;
   fn resolve_agent_comment(&self, repo_path: &str, id: &str) -> Result<(), String>;
   fn delete_agent_comment(&self, repo_path: &str, id: &str) -> Result<(), String>;
   /// Splices the comment's suggested change into its file.
@@ -324,6 +331,19 @@ impl ChangesHost for Backend {
     workspace_id: i64,
   ) -> Result<Vec<AgentReviewComment>, String> {
     crate::core::agent_review::workspace_comments(&self.state_scope(repo_path), workspace_id)
+  }
+
+  fn keep_sent_comments(
+    &self,
+    repo_path: &str,
+    workspace_id: i64,
+    comments: &[crate::core::review::LineComment],
+  ) -> Result<(), String> {
+    crate::core::agent_review::keep_sent_comments(
+      &self.state_scope(repo_path),
+      workspace_id,
+      comments,
+    )
   }
 
   fn resolve_agent_comment(&self, repo_path: &str, id: &str) -> Result<(), String> {
