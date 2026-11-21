@@ -1361,6 +1361,28 @@ fn lightbox_moves_between_attachments(cx: &mut TestAppContext) {
   assert!(h.shows(gpui::Role::Group, "Text preview"));
 }
 
+/// On a narrow window the previous/next buttons shrink into the actions row
+/// instead of floating over the slide.
+#[gpui::test]
+fn lightbox_nav_sits_in_the_actions_row_when_narrow(cx: &mut TestAppContext) {
+  let (mut h, _) = send_harness(cx);
+  h.cx
+    .simulate_resize(gpui::size(gpui::px(1000.), gpui::px(800.)));
+  h.click("terminal-send-preview-t1");
+  h.cx.run_until_parked();
+  let close = h.cx.debug_bounds("treq-send-close").expect("close");
+  for id in ["treq-send-previous", "treq-send-next"] {
+    let nav = h.cx.debug_bounds(id).expect(id);
+    assert!(nav.size.width <= gpui::px(32.), "{id} too big: {nav:?}");
+    assert!(
+      nav.top() < close.bottom() && close.top() < nav.bottom(),
+      "{id} not in the actions row: {nav:?} vs {close:?}"
+    );
+  }
+  h.click("treq-send-next");
+  assert!(h.drawn("treq-send-highlight-surface"));
+}
+
 #[gpui::test]
 fn lightbox_comments_on_markdown_in_preview_and_markdown_tabs(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
