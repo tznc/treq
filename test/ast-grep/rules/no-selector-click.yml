@@ -1,0 +1,63 @@
+id: no-selector-click
+language: rust
+severity: error
+message: >
+  Do not click an element by its debug selector. Find it the way the user
+  does with gpui-testing-library (`get_by_role`, `get_by_text`) and act with
+  `screen.user().click(&node)`.
+note: >
+  `h.click(selector)` clicks the centre of the selector's painted bounds. It
+  skips the role, name, visibility and enabled checks, and hits whatever is on
+  top at that point.
+# Baseline: files that already click by selector. Do not add to it;
+# migrate a file and drop it from this list instead.
+ignores:
+  - "src-tauri/src/gpui_shell/overlay/tests.rs"
+  - "src-tauri/src/gpui_shell/popover/tests.rs"
+  - "src-tauri/src/gpui_shell/screen/tests.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/account_screen.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/allocs.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/changes_large.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/changes_screen.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/code_files_large.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/code_screen.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/commit_diffs.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/commits_large.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/commits_screen.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/dialogs.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/diff_extremes.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/file_browser.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/fuzz.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/github.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/gutter_drag.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/home_screen.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/idle.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/input_latency.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/linear_view.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/logs_explorer.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/logs_screen.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/machines_chaos.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/merge_screen.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/onboarding_screen.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/pr_review.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/remote_dialog_overflow.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/review_comments.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/settings_screen.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/skills_screen.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/stack_panel.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/team_screen.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/terminal_perf.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/terminal_screen.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/testing_library.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/text_editing.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/virtual_lists.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/workspace_actions.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/workspace_dialogs.rs"
+  - "src-tauri/src/gpui_shell/sidebar/tests.rs"
+rule:
+  any:
+    - pattern: $H.click($$$ARGS)
+    - pattern: $H.right_click($$$ARGS)
+constraints:
+  H:
+    regex: ^(self\.)?h$

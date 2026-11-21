@@ -1,0 +1,34 @@
+id: no-selector-click
+valid:
+  - |
+    fn t(h: &mut Harness) {
+      let screen = h.rendered();
+      screen.user().click(&screen.get_by_role(by::role(Role::Button).name("Send")));
+    }
+  - |
+    fn t(user: &User, node: &Node) {
+      user.click(&node);
+    }
+  - |
+    fn t(cx: &mut VisualTestContext) {
+      cx.simulate_click(point(px(1.), px(1.)), Modifiers::none());
+    }
+invalid:
+  - |
+    fn t(h: &mut Harness) {
+      h.click("merge-confirm");
+    }
+  - |
+    fn t(h: &mut Harness) {
+      h.right_click("workspace-row");
+    }
+  - |
+    fn t(h: &mut Harness, path: &str) {
+      h.click(leak(format!("file-row-{path}")));
+    }
+  - |
+    impl Ctx {
+      fn t(&mut self) {
+        self.h.click("x");
+      }
+    }
