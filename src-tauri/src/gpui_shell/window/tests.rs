@@ -260,8 +260,13 @@ impl WindowHost for FakeHost {
   }
 
   fn launch(&self, request: &LaunchRequest, select: bool) -> Result<(), String> {
+    let teleport = request
+      .teleport
+      .as_ref()
+      .map(|s| format!(" teleport {s}"))
+      .unwrap_or_default();
     self.record(format!(
-      "launch {} {:?} {select}",
+      "launch {} {:?} {select}{teleport}",
       request.repo_path, request.workspace_id
     ));
     Ok(())
@@ -1874,6 +1879,38 @@ fn kickoffs_start_on_their_branch_else_the_home_repository() {
   assert_eq!(host.calls().last().unwrap(), "launch /repo None true");
   start_kickoff(&*host, None, &link("b"));
   assert_eq!(host.calls().last().unwrap(), "toast Repository not open");
+}
+
+/// A `treq://claude/session` link runs the web session as a Claude terminal
+/// agent in the home repository, and toasts without a repository.
+#[test]
+fn claude_sessions_start_as_terminal_agents_in_the_home_repository() {
+  use crate::{core::pr_link::ClaudeSessionLink, gpui_shell::launch::start_claude_session};
+  let host = repo_host();
+  let link = ClaudeSessionLink {
+    session: "session_1".into(),
+    repo: None,
+    pr: None,
+  };
+
+  start_claude_session(&*host, Some("/repo"), &link);
+  assert_eq!(
+    host.calls().last().unwrap(),
+    "launch /repo None true teleport session_1"
+  );
+  start_claude_session(&*host, None, &link);
+  assert_eq!(host.calls().last().unwrap(), "toast No repository open");
+}
+
+/// The link also opens the New Workspaces dialog, whose pull request list
+/// picks the workspaces to open.
+#[gpui::test]
+fn a_claude_session_link_opens_the_new_workspaces_dialog(cx: &mut TestAppContext) {
+  let window = Window::open(cx, repo_host(), Some("/repo"));
+  window.controller.update(cx, |c, cx| c.open_workspaces(cx));
+  cx.run_until_parked();
+  let modal = format!("{:?}", window.screen_snapshot().modal);
+  assert!(modal.contains("OpenWorkspaces(Route"), "{modal}");
 }
 
 /// A remote poll reads every workspace's status in one request, not one

@@ -289,6 +289,13 @@ impl WindowController {
     self.run(Vec::new(), cx);
   }
 
+  /// A `treq://claude/session` link: the New Workspaces dialog, whose pull
+  /// request list picks the workspaces to open.
+  pub fn open_workspaces(&mut self, cx: &mut Context<Self>) {
+    self.model.new_workspaces(None);
+    self.run(Vec::new(), cx);
+  }
+
   /// A folder the menu bar's "Open…" picked: opens it in this window.
   pub fn open_folder(&mut self, path: String, cx: &mut Context<Self>) {
     self.run(vec![Effect::OpenRepoAt(path)], cx);

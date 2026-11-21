@@ -351,6 +351,46 @@ pub(super) fn start_kickoff(
   }
 }
 
+/// A `treq://claude/session` link for window `label`, open on `repo_path`:
+/// the New Workspaces dialog opens, to pick pull requests, beside the
+/// session's terminal agent.
+pub fn claude_session(
+  app: &AppHandle,
+  label: String,
+  repo_path: Option<String>,
+  link: crate::core::pr_link::ClaudeSessionLink,
+) {
+  super::open_workspaces_link(app, &label);
+  let backend = Backend::new(app.clone(), label);
+  std::thread::spawn(move || start_claude_session(&backend, repo_path.as_deref(), &link));
+}
+
+/// Runs a Claude Code on the web session as a Claude terminal agent in the
+/// home repository of `repo` (`claude --teleport`); toasts without one.
+/// Blocks.
+pub(super) fn start_claude_session(
+  host: &dyn WindowHost,
+  repo: Option<&str>,
+  link: &crate::core::pr_link::ClaudeSessionLink,
+) {
+  let Some(repo) = repo else {
+    host.show_toast(
+      Toast::error("No repository open").description("Open the session's repository in Treq."),
+    );
+    return;
+  };
+  let request = LaunchRequest {
+    repo_path: repo.to_string(),
+    agent: Some("claude".into()),
+    link: Some(format!("https://claude.ai/code/{}", link.session)),
+    teleport: Some(link.session.clone()),
+    ..Default::default()
+  };
+  if let Err(err) = host.launch(&request, true) {
+    host.show_toast(Toast::error("Failed to start agent").description(&err));
+  }
+}
+
 /// `processAgentDeepLinkRequests` for a `treq://agent/start` link meant for
 /// window `label` (`None`: no window shows its repository, so one opens
 /// and starts it once it shows the repository).
