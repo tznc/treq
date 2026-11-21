@@ -32,3 +32,132 @@
   background: var(--bgColor-neutral-muted, #eaeef2);
   text-decoration: none;
 }
+
+/* The line buttons and composer follow the desktop app's composer. */
+.treq-line {
+  --treq-primary: hsl(211deg 100% 55%);
+}
+
+.treq-line__icons,
+.treq-composer {
+  position: absolute;
+  z-index: 100;
+}
+
+.treq-line__icons {
+  display: flex;
+  gap: 2px;
+  margin: -2px 8px 0 0;
+}
+
+.treq-line__icon,
+.treq-composer__send {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 4px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 8px;
+  color: var(--fgColor-default, #1f2328);
+  background: var(--bgColor-default, #fff);
+  cursor: pointer;
+}
+
+.treq-line__icon:hover {
+  background: var(--bgColor-neutral-muted, #eaeef2);
+}
+
+.treq-line svg,
+.treq-composer svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+[data-tip]:hover::after,
+[data-tip]:focus-visible::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  border-radius: 6px;
+  color: var(--fgColor-onEmphasis, #fff);
+  background: var(--bgColor-emphasis, #25292e);
+  font-size: 12px;
+  line-height: 16px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.treq-composer {
+  width: min(520px, 90vw);
+  margin: 4px 8px 0 0;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 12px;
+  background: var(--bgColor-default, #fff);
+  box-shadow: var(--shadow-floating-medium, 0 8px 24px rgba(0, 0, 0, 0.12));
+}
+
+.treq-composer textarea {
+  display: block;
+  width: 100%;
+  min-height: 72px;
+  padding: 12px 12px 4px;
+  border: 0;
+  outline: none;
+  color: var(--fgColor-default, #1f2328);
+  background: transparent;
+  font: inherit;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.treq-composer__footer,
+.treq-composer__actions,
+.treq-composer__agent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.treq-composer__footer {
+  justify-content: space-between;
+  padding: 4px 8px 8px;
+}
+
+.treq-composer__context,
+.treq-composer__agent {
+  color: var(--fgColor-muted, #59636e);
+  font-size: 12px;
+}
+
+.treq-composer__context {
+  overflow: hidden;
+  font-family: var(--fontStack-monospace, monospace);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.treq-composer__agent {
+  gap: 4px;
+}
+
+.treq-composer__send {
+  border-color: transparent;
+  color: #fff;
+  background: var(--treq-primary);
+}
+
+.treq-composer__send:hover {
+  background: hsl(211deg 100% 55% / 85%);
+}
+
+.treq-composer__send:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
