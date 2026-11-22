@@ -12,7 +12,7 @@ Machines are disposable. Only the repo list (`remote_repositories`, with `remote
 
 - **Adapters** (`_shared/remote/*-adapter.ts`) implement `SandboxProvider` (`provider.ts`): create, start, stop, destroy, get, exec, `gatewayEndpoint`, plus a `capabilities` descriptor. `provider-registry.ts` resolves a provider by kind and placement, so a BYOS placement gets an adapter built with its owner's key. Vendor types and states never leave the adapter; errors map to `ProviderError.kind`.
 - **Edge Functions:** `remote-instance` (the owner's API: ensure, wake, stop, resize, delete, process pins, migration acknowledgement, BYOS keys), `remote-ssh-relay` (ssh-over-WSS to the active placement), `remote-admin` (operator and maintenance actions), `stripe-webhook`.
-- **Scheduling:** there is no pg_cron. `.github/workflows/remote-maintenance.yml` calls `remote-admin` on a schedule: `report_usage` hourly, `advance_migrations` + `destroy_retired_placements` hourly, `enforce_idle` every 5 min, `enforce_spend_caps` every 15 min, `sweep_lapsed_instances` hourly.
+- **Scheduling:** pg_cron jobs (`082_remote_maintenance_cron.sql`) call `remote-admin` on a schedule: `report_usage` hourly, `advance_migrations` + `destroy_retired_placements` hourly, `enforce_idle` every 5 min, `enforce_spend_caps` every 15 min, `sweep_lapsed_instances` hourly.
 - **Postgres** holds the catalog, placements, ledger, migrations and their invariants. Every write goes through `security definer` functions; customer-facing ones check `auth.uid()`, the rest call `treq_internal.require_service_role()`.
 
 ## Providers

@@ -36,6 +36,8 @@ pub(super) struct Fake {
   logs_enabled: bool,
   /// Calls that fail, by name.
   pub(super) fail: Vec<&'static str>,
+  /// The repository's collaborators and PR authors.
+  mentionable: Vec<String>,
 }
 
 fn author(login: &str) -> GhAuthor {
@@ -192,6 +194,10 @@ impl GithubHost for FakeHost {
   fn change_pr(&self, repo: &str, number: u64, change: &PrChange) -> Result<(), String> {
     self.record(format!("pr {repo}#{number} {change:?}"));
     self.gh_fails("change_pr")
+  }
+
+  fn mentionable_users(&self, _: &str) -> Result<Vec<String>, String> {
+    Ok(self.github.mentionable.clone())
   }
 
   fn react(&self, comment_id: &str, content: &str, on: bool) -> Result<(), String> {
@@ -657,6 +663,53 @@ fn github_filters_the_loaded_prs(cx: &mut TestAppContext) {
   assert!(!h.shows(gpui::Role::ListItem, "Change 1"));
   h.click("github-filters-clear");
   assert!(h.shows(gpui::Role::ListItem, "Change 1") && h.shows(gpui::Role::ListItem, "Change 2"));
+}
+
+/// Whether the comment box suggests mentioning `login`.
+fn suggests(h: &mut Harness, login: &str) -> bool {
+  h.rendered()
+    .query_by_role(gpui_testing_library::by::role(gpui::Role::ListBoxOption).name(login))
+    .is_some()
+}
+
+#[gpui::test]
+fn github_comment_suggests_participants_to_mention(cx: &mut TestAppContext) {
+  let (mut h, _) = harness(cx, issues(), route("issues", Some(1), false));
+  h.click("github-comment-box");
+  h.cx.simulate_input("Thanks @");
+  assert!(suggests(&mut h, "ada") && suggests(&mut h, "bob"));
+  h.cx.simulate_input("a");
+  assert!(suggests(&mut h, "ada") && !suggests(&mut h, "bob"));
+  h.click("github-mention-0");
+  assert_eq!(view(&mut h, |v| v.comment.clone()), "Thanks @ada ");
+  assert!(!suggests(&mut h, "ada"));
+
+  // Arrow keys and Enter pick one; Escape closes the list.
+  h.cx.simulate_input("@");
+  h.cx.simulate_keystrokes("down enter");
+  assert_eq!(view(&mut h, |v| v.comment.clone()), "Thanks @ada @ada ");
+  h.cx.simulate_input("@a");
+  h.cx.simulate_keystrokes("tab");
+  assert_eq!(
+    view(&mut h, |v| v.comment.clone()),
+    "Thanks @ada @ada @ada "
+  );
+  h.cx.simulate_input("@");
+  h.cx.simulate_keystrokes("escape");
+  assert!(!suggests(&mut h, "ada"));
+}
+
+#[gpui::test]
+fn github_comment_suggests_collaborators_after_participants(cx: &mut TestAppContext) {
+  let fake = Fake {
+    mentionable: vec!["carol".into(), "ada".into()],
+    ..issues()
+  };
+  let (mut h, _) = harness(cx, fake, route("issues", Some(1), false));
+  h.click("github-comment-box");
+  h.cx.simulate_input("@");
+  h.cx.simulate_keystrokes("down down enter");
+  assert_eq!(view(&mut h, |v| v.comment.clone()), "@carol ");
 }
 
 #[gpui::test]

@@ -10,7 +10,7 @@
 
 .title {
   font-size: 2.5rem;
-  font-weight: 700;
+  font-weight: 500;
   margin: 0 0 0.5rem;
 }
 
@@ -56,7 +56,7 @@
 
 .cardTitle {
   font-size: 1.05rem;
-  font-weight: 600;
+  font-weight: 500;
   margin: 0;
   color: var(--ifm-font-color-base);
 }

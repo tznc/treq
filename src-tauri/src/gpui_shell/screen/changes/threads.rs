@@ -19,8 +19,8 @@ use crate::{
   gpui_shell::screen::{
     changes_review::{count_label, number_and_side, Pending, Quote, Side},
     changes_threads::{
-      agent_by_line, comment_date, original_text, place_threads, preview, suggestion_diff, Placed,
-      RowKind,
+      agent_by_line, comment_date, github_suggestion_original, original_text, place_threads,
+      preview, suggestion_diff, suggestion_span, Placed, RowKind,
     },
     commits_data::LineRef,
     reactions::{self, Reacts},
@@ -553,13 +553,56 @@ impl ChangesView {
         .children(resolved),
     );
     if !collapsed {
-      let mut body = div().w_full().flex().flex_col().gap_2();
-      for comment in &thread.comments {
-        body = body.child(self.thread_comment(comment, path, anchor.clone(), line, side, p, cx));
+      // One card per thread; replies follow flush, split by a rule.
+      let mut comments = div()
+        .debug_selector(|| "github-thread-comments".into())
+        .min_w_0()
+        .flex()
+        .flex_col()
+        .bg(p.background)
+        .rounded(radius::MD)
+        .border_1()
+        .border_color(p.border.opacity(0.6));
+      let lines = suggestion_span(thread);
+      for (i, comment) in thread.comments.iter().enumerate() {
+        let id = comment.id.clone();
+        let mut c = div()
+          .debug_selector(move || format!("github-comment-{id}"))
+          .child(self.thread_comment(comment, lines, path, anchor.clone(), line, side, p, cx));
+        if i > 0 {
+          c = c.border_t_1().border_color(p.border.opacity(0.6));
+        }
+        comments = comments.child(c);
       }
+      let body = div().w_full().flex().flex_col().gap_2().child(comments);
       card = card.child(body.children(self.thread_reply(thread, p, cx)));
     }
     card.into_any_element()
+  }
+
+  /// A GitHub comment's text, its ```` ```suggestion ```` block drawn as a
+  /// diff against the line it replaces rather than as a code block.
+  fn github_comment_body(&self, comment: &GhReviewComment, lines: usize, p: &Palette) -> Div {
+    let md = |key: &str, text: &str| {
+      super::super::code::markdown(
+        format!("github-comment-{}{key}", comment.id),
+        text,
+        TextSize::Sm.metrics().0,
+        self.dark,
+      )
+    };
+    let body = div().debug_selector(|| "github-comment-body".into());
+    let Some(s) = crate::core::review::parse_suggestion(&comment.body) else {
+      return body.child(md("", &comment.body));
+    };
+    let original = github_suggestion_original(&comment.diff_hunk, lines);
+    body
+      .flex()
+      .flex_col()
+      .gap_2()
+      .when(!s.before.is_empty(), |b| b.child(md("-before", &s.before)))
+      .child(suggestion_box(original.as_deref(), &s.suggested, p))
+      .when(!s.after.is_empty(), |b| b.child(md("-after", &s.after)))
   }
 
   /// `GithubCommentBody`: author, date and text, with a Quote button.
@@ -570,6 +613,7 @@ impl ChangesView {
   fn thread_comment(
     &self,
     comment: &GhReviewComment,
+    lines: usize,
     path: &str,
     anchor: Option<(String, LineRef)>,
     line: u32,
@@ -579,7 +623,6 @@ impl ChangesView {
   ) -> impl IntoElement {
     use chrono::Datelike;
     let this_year = chrono::Local::now().year();
-    let fg = p.foreground;
     let quoted = comment.clone();
     let file = path.to_string();
     div()
@@ -590,15 +633,8 @@ impl ChangesView {
       .debug_selector(|| "github-comment-card".into())
       .role(gpui::Role::Group)
       .aria_label(format!("Comment by {}", comment.author.login))
-      .group("github-comment")
-      .relative()
       .min_w_0()
-      .bg(p.background)
-      .rounded(radius::MD)
       .p_2p5()
-      .pr_9()
-      .border_1()
-      .border_color(p.border.opacity(0.6))
       .child(
         div()
           .flex()
@@ -616,45 +652,34 @@ impl ChangesView {
           )
           .child(ui::icon(theme::ICON_GITHUB, 14., Tone::Primary.text(p))),
       )
-      .child(div().debug_selector(|| "github-comment-body".into()).child(
-        super::super::code::markdown(
-          format!("github-comment-{}", comment.id),
-          &comment.body,
-          TextSize::Sm.metrics().0,
-          self.dark,
-        ),
-      ))
-      .child(reactions::bar(
-        &self.tips,
-        self.threads.reaction_picker.as_deref(),
-        &comment.id,
-        &comment.reactions,
-        p,
-        cx,
-      ))
+      .child(self.github_comment_body(comment, lines, p))
       .child(
-        self.tip(
-          format!("quote-{}", comment.id),
-          "Quote this comment",
-          div()
-            .id(SharedString::from(format!("quote-{}", comment.id)))
-            .role(gpui::Role::Button)
-            .aria_label("Quote")
-            .debug_selector(|| "github-comment-quote".into())
-            .absolute()
-            .top_2()
-            .right_2()
-            .p_1()
-            .rounded(radius::SM)
-            .cursor_pointer()
-            .opacity(0.)
-            .group_hover("github-comment", |s| s.opacity(1.))
-            .hover(move |s| s.bg(p.hover()).text_color(fg))
-            .child(ui::icon(theme::ICON_QUOTE, 14., p.muted_foreground))
-            .on_click(cx.listener(move |view, _, _, cx| {
-              view.quote(&quoted, &file, anchor.clone(), line, side, cx)
-            })),
+        reactions::bar(
+          &self.tips,
+          self.threads.reaction_picker.as_deref(),
+          &comment.id,
+          &comment.reactions,
+          p,
           cx,
+        )
+        .child(
+          div()
+            .debug_selector(|| "github-comment-quote".into())
+            .child(
+              self.tip(
+                format!("quote-{}", comment.id),
+                "Quote this comment",
+                Button::new(SharedString::from(format!("quote-{}", comment.id)), p)
+                  .variant(Variant::Outline)
+                  .size(Size::Xs)
+                  .icon(theme::ICON_BOT, 12.)
+                  .label("Quote")
+                  .on_click(cx.listener(move |view, _, _, cx| {
+                    view.quote(&quoted, &file, anchor.clone(), line, side, cx)
+                  })),
+                cx,
+              ),
+            ),
         ),
       )
       .test_support()

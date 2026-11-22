@@ -255,3 +255,22 @@ test("code: workspace title in the header, edited inline", async ({ page }) => {
   await expect(input).toHaveCount(0);
   await home(page);
 });
+
+test("code: Go to file shrinks in a narrow window", async ({ page }) => {
+  await openWorkspace(page, BRANCH);
+  await openTab(page, "Code");
+  await overview(page);
+  await page.setViewportSize({ width: 1000, height: 900 });
+  await settle(page, 1200);
+  const goToFile = page.getByRole("button", { name: "Go to file" });
+  await expect(goToFile).toBeVisible();
+  await capture(page, {
+    name: "03-code-go-to-file-narrow",
+    title: "Code tab at 1000px: Go to file shrinks",
+    expectations: [
+      "Go to file is narrower than 280px but its icon, label and shortcut are not clipped by the right panel",
+      "Start an agent keeps its full label on the left",
+    ],
+  });
+  await page.setViewportSize({ width: 1400, height: 900 });
+});

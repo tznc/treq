@@ -36,7 +36,7 @@
 
 .title {
   font-size: 2rem;
-  font-weight: 700;
+  font-weight: 500;
   margin: 0 0 0.5rem;
   font-family: var(--ifm-font-family-monospace);
 }
@@ -57,7 +57,7 @@
 
 .badge {
   font-size: 0.72rem;
-  font-weight: 600;
+  font-weight: 500;
   padding: 2px 9px;
   border-radius: 999px;
   background: var(--ifm-color-emphasis-100);
@@ -82,7 +82,7 @@
 .githubButton {
   flex-shrink: 0;
   font-size: 0.85rem;
-  font-weight: 600;
+  font-weight: 500;
   padding: 0.5rem 1rem;
   border-radius: 8px;
   border: 1px solid var(--ifm-color-emphasis-300);
@@ -196,7 +196,7 @@
 }
 
 .treeFolder {
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .treeFolder:hover,
@@ -206,7 +206,7 @@
 
 .treeFileActive {
   background: var(--ifm-color-primary-lightest);
-  color: var(--ifm-color-primary-darkest);
+  color: var(--treq-link);
 }
 
 .treeIcon {
@@ -257,7 +257,7 @@
 .viewerGithub {
   margin-left: auto;
   flex-shrink: 0;
-  color: var(--ifm-color-primary) !important;
+  color: var(--treq-link) !important;
   text-decoration: none !important;
   white-space: nowrap;
 }
@@ -276,7 +276,7 @@
 .tab,
 .tabActive {
   font-size: 0.8rem;
-  font-weight: 600;
+  font-weight: 500;
   padding: 0.4rem 0.75rem;
   border: none;
   background: none;
@@ -290,7 +290,7 @@
 }
 
 .tabActive {
-  color: var(--ifm-color-primary);
+  color: var(--treq-link);
   border-bottom-color: var(--ifm-color-primary);
 }
 
@@ -365,7 +365,7 @@
 
 .relatedName {
   font-family: var(--ifm-font-family-monospace);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .relatedAuthor {

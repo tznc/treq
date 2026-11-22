@@ -151,7 +151,7 @@ function IntegrationsTab({ onUpgrade }: { onUpgrade: () => void }) {
                 <li>Issues and PR management</li>
                 <li>
                   GitHub App Integration{" "}
-                  <span style={styles.featureProBadge}>PRO</span>
+                  <span style={styles.featureProBadge}>Pro</span>
                 </li>
               </ul>
             </div>
@@ -193,7 +193,7 @@ function IntegrationsTab({ onUpgrade }: { onUpgrade: () => void }) {
         </div>
 
         {installError && (
-          <div style={{ color: "#ef4444", fontSize: "0.85rem", marginTop: "0.5rem" }}>
+          <div style={{ color: "var(--treq-danger)", fontSize: "0.85rem", marginTop: "0.5rem" }}>
             {installError}
           </div>
         )}
@@ -202,7 +202,7 @@ function IntegrationsTab({ onUpgrade }: { onUpgrade: () => void }) {
           <div style={{ fontSize: "0.85rem", marginTop: "0.75rem" }}>
             <div>
               {installNeedsPro}
-              <span style={styles.featureProBadge}>PRO</span>
+              <span style={styles.featureProBadge}>Pro</span>
             </div>
             <button
               type="button"
@@ -423,7 +423,7 @@ function SubscriptionTab({
               style={{
                 color:
                   status === "active" || status === "trialing"
-                    ? "#10b981"
+                    ? "var(--treq-ok)"
                     : "#f59e0b",
               }}
             >
@@ -1364,7 +1364,7 @@ function TeamTab({
               height="16"
               viewBox="0 0 24 24"
               fill="none"
-              stroke="#10b981"
+              stroke="var(--treq-ok)"
               strokeWidth="3"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -1866,14 +1866,14 @@ const styles: Record<string, React.CSSProperties> = {
     height: "40px",
     borderRadius: "50%",
     backgroundColor: "var(--ifm-color-primary)",
-    color: "#fff",
+    color: "var(--treq-on-brand)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    fontWeight: 600,
+    fontWeight: 500,
     fontSize: "1.1rem",
   },
-  userName: { fontWeight: 600, fontSize: "0.9rem" },
+  userName: { fontWeight: 500, fontSize: "0.9rem" },
   userEmail: { fontSize: "0.75rem", color: "var(--dashboard-text-muted)" },
   nav: { display: "flex", flexDirection: "column", gap: "0.25rem" },
   navItem: {
@@ -1891,7 +1891,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   navItemActive: {
     backgroundColor: "var(--ifm-color-emphasis-100)",
-    fontWeight: 600,
+    fontWeight: 500,
   },
   signOutButton: {
     display: "block",
@@ -1901,7 +1901,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: "6px",
     border: "none",
     backgroundColor: "transparent",
-    color: "#ef4444",
+    color: "var(--treq-danger)",
     fontSize: "0.9rem",
     cursor: "pointer",
     marginTop: "auto",
@@ -1939,14 +1939,14 @@ const styles: Record<string, React.CSSProperties> = {
     border: "none",
     borderRadius: "6px",
     backgroundColor: "transparent",
-    color: "#ef4444",
+    color: "var(--treq-danger)",
     fontSize: "0.9rem",
     cursor: "pointer",
   },
   content: { flex: 1, minWidth: 0, overflowWrap: "anywhere" },
-  pageTitle: { fontSize: "1.5rem", fontWeight: 700, marginBottom: "1.25rem" },
+  pageTitle: { fontSize: "1.5rem", fontWeight: 500, marginBottom: "1.25rem" },
   accountSection: { marginTop: "2.5rem" },
-  sectionTitle: { fontSize: "1.25rem", fontWeight: 700, marginBottom: "1rem" },
+  sectionTitle: { fontSize: "1.25rem", fontWeight: 500, marginBottom: "1rem" },
   sectionHeader: {
     display: "flex",
     alignItems: "baseline",
@@ -1954,7 +1954,7 @@ const styles: Record<string, React.CSSProperties> = {
     gap: "1rem",
     marginBottom: "1rem",
   },
-  comparisonLink: { fontSize: "0.85rem", fontWeight: 600 },
+  comparisonLink: { fontSize: "0.85rem", fontWeight: 500 },
   card: {
     padding: "1.5rem",
     borderRadius: "10px",
@@ -1978,9 +1978,9 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "0.2rem 0.6rem",
     borderRadius: "12px",
     backgroundColor: "rgba(16,185,129,0.1)",
-    color: "#10b981",
+    color: "var(--treq-ok)",
     fontSize: "0.8rem",
-    fontWeight: 600,
+    fontWeight: 500,
   },
   freeBadge: {
     padding: "0.2rem 0.6rem",
@@ -1988,7 +1988,7 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: "var(--ifm-color-emphasis-100)",
     color: "var(--dashboard-text-subtle)",
     fontSize: "0.8rem",
-    fontWeight: 600,
+    fontWeight: 500,
   },
   primaryButton: {
     display: "inline-block",
@@ -1996,10 +1996,10 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: "8px",
     border: "none",
     background:
-      "linear-gradient(135deg, var(--ifm-color-primary) 0%, var(--ifm-color-primary-dark) 100%)",
-    color: "#fff",
+      "var(--treq-brand)",
+    color: "var(--treq-on-brand)",
     fontSize: "0.9rem",
-    fontWeight: 600,
+    fontWeight: 500,
     cursor: "pointer",
     transition: "all 0.2s",
     textDecoration: "none",
@@ -2017,7 +2017,7 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: "transparent",
     color: "var(--ifm-font-color-base)",
     fontSize: "0.9rem",
-    fontWeight: 600,
+    fontWeight: 500,
     cursor: "pointer",
   },
   billingActions: {
@@ -2037,10 +2037,10 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "0.6rem 0.75rem",
     borderRadius: "6px",
     backgroundColor: "rgba(16,185,129,0.1)",
-    color: "#059669",
+    color: "var(--treq-ok)",
     fontSize: "0.85rem",
   },
-  errorText: { color: "#ef4444", fontSize: "0.85rem", marginTop: "0.75rem" },
+  errorText: { color: "var(--treq-danger)", fontSize: "0.85rem", marginTop: "0.75rem" },
   dangerSection: { marginTop: "2.5rem" },
   dangerCard: { borderColor: "rgba(239,68,68,0.4)" },
   dangerLabel: { display: "block", fontSize: "0.85rem", marginBottom: "0.4rem" },
@@ -2074,7 +2074,7 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "center",
     flexShrink: 0,
   },
-  integrationName: { fontWeight: 600, fontSize: "0.9rem", marginBottom: "0.15rem" },
+  integrationName: { fontWeight: 500, fontSize: "0.9rem", marginBottom: "0.15rem" },
   integrationDesc: { fontSize: "0.8rem", color: "var(--dashboard-text-muted)" },
   integrationFeatureList: {
     margin: "0.4rem 0 0",
@@ -2089,9 +2089,9 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "0.05rem 0.35rem",
     borderRadius: "4px",
     backgroundColor: "rgba(16,185,129,0.12)",
-    color: "#10b981",
+    color: "var(--treq-ok)",
     fontSize: "0.7rem",
-    fontWeight: 700,
+    fontWeight: 500,
     letterSpacing: "0.04em",
     verticalAlign: "middle",
   },
@@ -2099,9 +2099,9 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "0.2rem 0.6rem",
     borderRadius: "12px",
     backgroundColor: "rgba(16,185,129,0.1)",
-    color: "#10b981",
+    color: "var(--treq-ok)",
     fontSize: "0.8rem",
-    fontWeight: 600,
+    fontWeight: 500,
   },
   repoSection: { marginTop: "1.25rem" },
   repoSectionHeader: {
@@ -2110,10 +2110,10 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     marginBottom: "0.75rem",
   },
-  repoSectionTitle: { fontSize: "0.85rem", fontWeight: 600 },
+  repoSectionTitle: { fontSize: "0.85rem", fontWeight: 500 },
   manageLink: {
     fontSize: "0.8rem",
-    color: "var(--ifm-color-primary)",
+    color: "var(--treq-link)",
     textDecoration: "none",
   },
   loadingText: {
@@ -2137,7 +2137,7 @@ const styles: Record<string, React.CSSProperties> = {
     userSelect: "none",
   },
   repoMeta: { display: "flex", alignItems: "center", gap: "0.5rem" },
-  repoName: { fontSize: "0.875rem", fontWeight: 600, fontFamily: "monospace" },
+  repoName: { fontSize: "0.875rem", fontWeight: 500, fontFamily: "monospace" },
   privateBadge: {
     fontSize: "0.75rem",
     padding: "0.1rem 0.4rem",
@@ -2168,15 +2168,14 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: "var(--ifm-background-color)",
     marginBottom: "1rem",
   },
-  orgName: { fontWeight: 700, fontSize: "1rem", marginBottom: "0.25rem" },
+  orgName: { fontWeight: 500, fontSize: "1rem", marginBottom: "0.25rem" },
   teamSubheading: {
     marginTop: "1.25rem",
     marginBottom: "0.4rem",
     fontSize: "0.78rem",
-    fontWeight: 600,
+    fontWeight: 500,
     color: "var(--dashboard-text-subtle)",
-    textTransform: "uppercase",
-    letterSpacing: "0.03em",
+    letterSpacing: 0,
   },
   teamList: { listStyle: "none", margin: 0, padding: 0 },
   teamRow: {
@@ -2203,7 +2202,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   teamPerk: { display: "flex", alignItems: "center", gap: "0.4rem" },
   teamPrice: { margin: "0.5rem 0 0", fontSize: "0.9rem" },
-  teamPriceAmount: { fontSize: "1.75rem", fontWeight: 700 },
+  teamPriceAmount: { fontSize: "1.75rem", fontWeight: 500 },
   teamCreateForm: {
     display: "flex",
     flexDirection: "column",
@@ -2223,14 +2222,14 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: "6px",
     border: "none",
     backgroundColor: "transparent",
-    color: "#ef4444",
+    color: "var(--treq-danger)",
     cursor: "pointer",
   },
   linkButton: {
     border: "none",
     background: "none",
     padding: 0,
-    color: "var(--ifm-color-primary)",
+    color: "var(--treq-link)",
     fontSize: "0.8rem",
     cursor: "pointer",
   },
@@ -2239,9 +2238,9 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: "6px",
     border: "1px solid rgba(239,68,68,0.4)",
     backgroundColor: "transparent",
-    color: "#ef4444",
+    color: "var(--treq-danger)",
     fontSize: "0.85rem",
-    fontWeight: 600,
+    fontWeight: 500,
     cursor: "pointer",
   },
   saveButton: {
@@ -2250,10 +2249,10 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: "6px",
     border: "none",
     background:
-      "linear-gradient(135deg, var(--ifm-color-primary) 0%, var(--ifm-color-primary-dark) 100%)",
-    color: "#fff",
+      "var(--treq-brand)",
+    color: "var(--treq-on-brand)",
     fontSize: "0.85rem",
-    fontWeight: 600,
+    fontWeight: 500,
     cursor: "pointer",
   },
 };
