@@ -75,9 +75,7 @@ impl PtyBackend {
 
 /// Whether tmux is installed, for [`PtyBackend::Tmux`].
 pub fn tmux_available() -> bool {
-  // Every remote attach is a new process, and the login shell that
-  // `detect_binary` asks for the full PATH takes a shell start. tmux found
-  // on the PATH the process already has needs no other answer.
+  // Each remote attach is a new process, so skip `detect_binary`'s login shell when PATH has tmux.
   #[cfg(unix)]
   if std::env::var_os("PATH")
     .and_then(|path| crate::binary_paths::detect_binary_in("tmux", path))
@@ -431,15 +429,13 @@ fn tmux_sessions() -> Vec<ListedSession> {
     return vec![];
   }
   let Ok(output) = Command::new("tmux")
-    // -u: print titles as UTF-8 whatever the host's locale; tmux replaces
-    // non-ASCII with `_` otherwise.
+    // -u: UTF-8 titles whatever the host locale. Otherwise tmux replaces non-ASCII with `_`.
     .args(["-u", "list-sessions", "-F", TMUX_LIST_FORMAT])
     .output()
   else {
     return vec![];
   };
-  // tmux exits non-zero ("no server running") when there are no sessions
-  // at all — that is an empty list, not an error.
+  // With no sessions tmux exits non-zero ("no server running"), which is an empty list.
   if !output.status.success() {
     return vec![];
   }
@@ -497,8 +493,7 @@ pub fn rename_session(
   match backend {
     PtyBackend::Daemon => {
       let paths = daemon::paths()?;
-      // A client names a new session right after attaching, which can be
-      // before the attach has created it: give it a moment to appear.
+      // A client may name a session before its attach creates it, so give it a moment to appear.
       for _ in 0..RENAME_WAIT_TRIES {
         match daemon::rename(&paths, &name, title.as_deref()) {
           Err(e) if e.starts_with("session_not_found") => std::thread::sleep(RENAME_WAIT_STEP),
@@ -516,8 +511,7 @@ pub fn rename_session(
         }
         std::thread::sleep(RENAME_WAIT_STEP);
       }
-      // `=` for an exact match; the trailing `:` makes it a session target,
-      // which set-option needs (a bare `=name` reads as a pane and fails).
+      // `=` is an exact match. The trailing `:` makes a session target, which set-option needs.
       let target = format!("={name}:");
       let mut args = vec!["set-option", "-t", target.as_str()];
       match &title {
@@ -566,8 +560,7 @@ pub fn stop_session(
 }
 
 fn tmux_kill(name: &str) {
-  // `=` asks tmux for an exact match. Without it tmux falls back to prefix
-  // matching, so stopping `...-shell` could kill `...-shell_2d2`.
+  // `=` forces an exact match, or prefix matching could kill `...-shell_2d2` for `...-shell`.
   Command::new("tmux")
     .args(["kill-session", "-t", &format!("={name}")])
     .status()
@@ -1515,8 +1508,7 @@ mod tests {
 
   #[test]
   fn tmux_mode_errors_clearly_when_tmux_is_missing() {
-    // Cannot force `detect_binary` to fail where tmux exists, so this only
-    // runs on hosts that genuinely lack it.
+    // `detect_binary` can't be forced to fail, so this only runs on hosts without tmux.
     if tmux_available() {
       return;
     }
@@ -1691,8 +1683,7 @@ mod tests {
     )
     .unwrap();
 
-    // `sh` encodes to a strict prefix of `sh-2`'s name. tmux's default
-    // prefix matching would otherwise resolve it to the running session.
+    // `sh` encodes to a strict prefix of `sh-2`'s name, which tmux prefix matching would resolve.
     stop_session(PtyBackend::Tmux, repo_path, workspace, "sh").unwrap();
     let sessions = list_sessions(PtyBackend::Tmux, repo_path, Some(workspace)).unwrap();
     assert!(sessions.iter().any(|s| s.label == "sh-2"));

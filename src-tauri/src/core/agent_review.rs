@@ -128,8 +128,7 @@ pub fn apply_agent_review_suggestion(repo_path: String, comment_id: String) -> R
     .as_deref()
     .ok_or_else(|| "Review comment has no suggested change".to_string())?;
 
-  // A workspace diff's file lives in that workspace, not the home repo, and
-  // its comment quotes the lines it covered: refuse if they have moved since.
+  // A workspace diff's file lives in that workspace. Refuse if its quoted lines have moved since.
   let workspace = workspace_root(&repo_path, &comment.target_type, &comment.target_id)?;
   let expected: Option<Vec<String>> = workspace
     .as_ref()

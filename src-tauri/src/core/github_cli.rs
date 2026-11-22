@@ -118,8 +118,7 @@ pub fn pr_checks(repo: &str, number: u64) -> Result<Option<PrCiStatus>, String> 
 
 /// The signed-in user's login.
 pub fn current_user() -> Result<String, String> {
-  // `gh api user` is a network round trip and the login rarely changes; a
-  // switch of `gh auth` account shows up after the TTL.
+  // `gh api user` is a round trip and logins rarely change. An account switch shows after the TTL.
   const TTL: std::time::Duration = std::time::Duration::from_secs(600);
   static CACHE: std::sync::Mutex<Option<(String, std::time::Instant)>> =
     std::sync::Mutex::new(None);

@@ -87,11 +87,7 @@ pub async fn force_cutoff(app: &tauri::AppHandle, endpoint_id: &str, reason: Cut
     .0
     .force_cutoff(endpoint_id, reason)
     .await;
-  // PRD "Hard cutoff on revocation or expiry": tears down open exec *and*
-  // PTY channels for the endpoint. `force_cutoff` above only tears down the
-  // pooled SSH connection itself; the PTY manager's own session map (which
-  // holds a channel handle per session, not the pool) must be swept
-  // separately so no PTY session for this endpoint outlives the cutoff.
+  // PRD "Hard cutoff": `force_cutoff` drops only the pooled connection, so sweep PTY sessions too.
   app
     .state::<crate::commands::remote_pty_commands::RemotePtyState>()
     .0
@@ -138,9 +134,7 @@ mod tests {
 
   #[test]
   fn dispatch_local_rejects_arbitrary_unlisted_shapes_at_the_type_boundary() {
-    // The request is always a `TreqCommandRequest` variant, so a raw string
-    // cannot reach `execute_local_request`; JSON deserialization of the enum
-    // rejects an unknown tag rather than accepting it.
+    // Requests are typed, so deserializing the enum rejects an unknown tag before execution.
     let raw = serde_json::json!({ "kind": "ExecArbitraryShellCommand", "cmd": "rm -rf /" });
     let parsed = serde_json::from_value::<TreqCommandRequest>(raw);
     assert!(parsed.is_err());

@@ -70,8 +70,7 @@ fn clean_branch_name_trailing(name: &str) -> String {
 
 /// `applyBranchNamePattern`.
 pub fn apply_branch_name_pattern(pattern: &str, name: &str) -> String {
-  // Drop a trailing one-letter word from the name only, so a pattern
-  // prefix like `treq/` never strips a whole one-letter name.
+  // Trim a trailing one-letter word before applying the pattern, so `treq/a` keeps its `a`.
   let name = clean_branch_name_trailing(&sanitize_for_branch_name(name));
   let result = TRAILING_SEPARATORS
     .replace(&pattern.replace("{name}", &name), "")
@@ -505,8 +504,7 @@ fn create(
     metadata,
     copy_files,
   )?;
-  // Stacked on a workspace's branch, creation already targets it (and starts
-  // on its tip); only a plain branch as the base needs the retarget.
+  // A stacked workspace already targets its base. Only a plain branch base needs the retarget.
   if stacked && workspace.target_branch.as_deref() != Some(base) {
     workspaces::apply_workspace_target_branch_after(
       repo_path,
@@ -620,8 +618,7 @@ mod tests {
 
   #[test]
   fn titles_that_share_a_branch_get_different_suffixes() {
-    // The branch name drops a trailing single letter, so both titles
-    // would be treq/fix-the-page.
+    // The branch name drops a trailing single letter, so both titles map to treq/fix-the-page.
     let rows = plan_rows(
       "Fix the page A\nFix the page B\n  Add tests\n",
       "main",
@@ -672,8 +669,7 @@ mod tests {
 
   #[test]
   fn a_title_skips_a_suffixed_branch_a_line_names() {
-    // Whatever suffix `fix c` would take first, a branch line naming it
-    // (above or below) keeps it, and the title moves on.
+    // A branch line naming `fix c`'s first suffix, above or below, keeps it, so the title moves on.
     let first = plan_rows("fix c\n", "main", fake)[0]
       .branch
       .clone()
@@ -691,8 +687,7 @@ mod tests {
 
   #[test]
   fn a_hex_suffix_ending_in_a_letter_is_kept() {
-    // `-a1b2c3`-style suffixes can end in a single hex letter; trailing
-    // cleanup must not strip it.
+    // `-a1b2c3`-style suffixes can end in a hex letter that trailing cleanup must keep.
     for n in 0..64 {
       let rows = plan_rows(&format!("Title number {n}\n"), "main", fake);
       let branch = rows[0].branch.as_deref().unwrap();
