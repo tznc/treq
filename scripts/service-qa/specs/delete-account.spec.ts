@@ -33,7 +33,7 @@ import {
 import { recordOutcome } from "../record";
 import {
   createTestUser,
-  deleteTestUser,
+  cleanUpTestUser,
   linkGithubRepo,
   signInWithEmailPassword,
   type TestUser,
@@ -196,7 +196,7 @@ it("rejects callers without a valid token and changes nothing", async () => {
       details: { missing, forged },
     });
   } finally {
-    await deleteTestUser(admin, target.user.id).catch(() => {});
+    await cleanUpTestUser(admin, target.user.id);
   }
 }, 60000);
 
@@ -408,7 +408,7 @@ it("deletes only the caller and releases their billing, machines and integration
     });
   } finally {
     for (const user of [owner, bystander, teammate]) {
-      await deleteTestUser(admin, user.user.id).catch(() => {});
+      await cleanUpTestUser(admin, user.user.id);
     }
     for (const orgId of orgIds) {
       await admin.from("organizations").delete().eq("id", orgId);
@@ -474,7 +474,7 @@ it("keeps the account when Stripe fails and finishes on retry", async () => {
       details: { done, again, signInError: signInError?.message },
     });
   } finally {
-    await deleteTestUser(admin, user.user.id).catch(() => {});
+    await cleanUpTestUser(admin, user.user.id);
     await clearBilling(admin, [user.user.id]);
   }
 }, 60000);
@@ -515,7 +515,7 @@ it("serves delete-account over HTTP through the real Edge runtime", async () => 
       details: { anon: anon.status, ok: ok.status },
     });
   } finally {
-    await deleteTestUser(admin, user.user.id).catch(() => {});
-    await deleteTestUser(admin, bystander.user.id).catch(() => {});
+    await cleanUpTestUser(admin, user.user.id);
+    await cleanUpTestUser(admin, bystander.user.id);
   }
 }, 60000);

@@ -19,7 +19,7 @@ import { FEATURES } from "../features";
 import {
   createDesktopToken,
   createTestUser,
-  deleteTestUser,
+  cleanUpTestUser,
   signInWithEmailPassword,
   type TestUser,
 } from "../seed";
@@ -31,11 +31,7 @@ afterEach(async () => {
   const admin = getServiceClient();
   while (usersToDelete.length > 0) {
     const id = usersToDelete.pop()!;
-    try {
-      await deleteTestUser(admin, id);
-    } catch {
-      // already deleted
-    }
+    await cleanUpTestUser(admin, id);
   }
 });
 

@@ -9,7 +9,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { it, expect, afterEach } from "@jest/globals";
 import { getAnonKey, getServiceClient, resolveLocalKeys } from "../clients";
-import { createTestUser, deleteTestUser } from "../seed";
+import { createTestUser, cleanUpTestUser } from "../seed";
 import { recordOutcome } from "../record";
 
 const REDIRECT = "treq://auth/callback";
@@ -19,7 +19,7 @@ const usersToDelete: string[] = [];
 afterEach(async () => {
   const admin = getServiceClient();
   while (usersToDelete.length > 0) {
-    await deleteTestUser(admin, usersToDelete.pop()!).catch(() => {});
+    await cleanUpTestUser(admin, usersToDelete.pop()!);
   }
 });
 

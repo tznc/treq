@@ -39,8 +39,10 @@ export function parseGithubUrl(url: string): { rawUrl: string; displayUrl: strin
     const filePath = rest.slice(1).join('/');
     const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${filePath}`;
     return { rawUrl, displayUrl: url };
-  } catch {
-    return null;
+  } catch (err) {
+    // Not a URL at all: new URL rejects it with a TypeError.
+    if (err instanceof TypeError) return null;
+    throw err;
   }
 }
 

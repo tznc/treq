@@ -26,7 +26,9 @@ http
 function isDir(p) {
   try {
     return fs.statSync(p).isDirectory();
-  } catch {
-    return false;
+  } catch (err) {
+    // No such path, or a path through a file (/version/x): not a folder.
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return false;
+    throw err;
   }
 }

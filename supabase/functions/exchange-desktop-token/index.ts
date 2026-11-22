@@ -1,3 +1,4 @@
+import { jsonBodyOrNull } from "../_shared/http/json.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.95.3";
 import { consumeDesktopToken, exchangeDesktopToken } from "./lib.ts";
 
@@ -20,7 +21,7 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_ANON_KEY") ?? ""
   );
 
-  const body = await req.json().catch(() => null);
+  const body = await jsonBodyOrNull(req);
   const { status, body: payload } = await exchangeDesktopToken(
     {
       consumeToken: (token, now) =>

@@ -9,13 +9,6 @@ message: >
   words inside the catch that says why and which error is expected.
 # Same rule as no-swallowed-catch-ts; see its note.
 files: ["**/*.tsx"]
-ignores:
-  # Not fixed yet. The fix PRs stacked on this one remove these entries.
-  - "web/src/components/landing/BranchLines.tsx"
-  - "web/src/pages/tools/_GherkinEditorContent.tsx"
-  - "web/src/pages/tools/_MarkdownAnnotatorContent.tsx"
-  - "web/src/pages/tools/branch-visualizer.tsx"
-  - "web/src/theme/SearchBar/index.tsx"
 utils:
   silent-block:
     kind: statement_block

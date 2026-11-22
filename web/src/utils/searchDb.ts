@@ -23,7 +23,9 @@ export function getDb(): Promise<Database> {
 }
 
 export function preWarm(): void {
-  getDb().catch(() => {});
+  getDb().catch(() => {
+    // Prefetch only: getDb resets after a failure, and the first search retries and logs it.
+  });
 }
 
 export type SearchResult = { title: string; url: string; excerpt: string };

@@ -2,6 +2,8 @@
 // Edge Functions need no Stripe SDK. Callers pass Stripe's bracketed keys
 // directly, for example `line_items[0][price]`.
 
+import { jsonBodyOrNull } from "../http/json.ts";
+
 export type StripeParams = Record<string, string | number | boolean>;
 
 export class StripeApiError extends Error {
@@ -72,7 +74,7 @@ export function createStripeClient(
       }
 
       const response = await fetchImpl(url, init);
-      const body = (await response.json().catch(() => null)) as {
+      const body = (await jsonBodyOrNull(response)) as {
         error?: { message?: string };
       } | null;
       if (!response.ok) {

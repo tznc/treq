@@ -12,6 +12,10 @@ export async function proRequiredMessage(error: unknown): Promise<string | null>
   const body = (await context
     .clone()
     .json()
-    .catch(() => null)) as { error?: unknown } | null;
+    .catch((err: unknown) => {
+      // A body that is not JSON carries no message.
+      if (err instanceof SyntaxError) return null;
+      throw err;
+    })) as { error?: unknown } | null;
   return typeof body?.error === "string" ? body.error : "This feature needs Pro.";
 }
