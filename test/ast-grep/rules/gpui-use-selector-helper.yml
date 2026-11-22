@@ -23,6 +23,7 @@ ignores:
   - "crates/treq-ui/src/card.rs"
   - "crates/treq-ui/src/dialog.rs"
   - "crates/treq-ui/src/empty_state.rs"
+  - "crates/treq-ui/src/fold_toggle.rs"
   - "crates/treq-ui/src/form.rs"
   - "crates/treq-ui/src/input_group.rs"
   - "crates/treq-ui/src/path_field.rs"
