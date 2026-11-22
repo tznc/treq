@@ -95,6 +95,34 @@ export async function screenChanged(box: Box, from: Buffer): Promise<Buffer> {
   return last;
 }
 
+type Clip = { x: number; y: number; width: number; height: number };
+
+/** The terminal pane under the tabs, in the 1400x900 window. */
+export const TERMINAL: Clip = { x: 280, y: 603, width: 1120, height: 297 };
+
+/**
+ * Waits until the window's pixels in `clip` hold still from one screenshot
+ * to the next, and differ from `before` when given: for what the app draws
+ * but does not expose as an element, such as terminal output. Returns the
+ * last screenshot.
+ */
+export async function drawn(page: Page, clip: Clip, before?: Buffer): Promise<Buffer> {
+  let last: Buffer | undefined;
+  let now: Buffer = Buffer.alloc(0);
+  await expect
+    .poll(
+      async () => {
+        const previous = last;
+        now = await page.screenshot({ clip });
+        last = now;
+        return !!previous && now.equals(previous) && !before?.equals(now);
+      },
+      { message: "the window draws and holds still", intervals: [100] },
+    )
+    .toBe(true);
+  return now;
+}
+
 /**
  * The demo repository's home view. Only the selected repository's home row
  * has an accessible name (its branch, "main").

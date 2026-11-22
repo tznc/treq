@@ -12,10 +12,11 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { copyFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { chromium, expect, test, type Browser, type Page } from "@playwright/test";
+import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
 import { appBinary, port } from "../env.ts";
-import { appEnv, makeFixture } from "../harness.ts";
+import { appEnv, connectApp, makeFixture, serverUp } from "../harness.ts";
 import { capture, theme } from "./capture.ts";
+import { drawn, loaded, TERMINAL } from "./helpers.ts";
 
 const env = {
   host: process.env.QA_SSH_HOST ?? "",
@@ -38,29 +39,8 @@ async function launch(): Promise<void> {
     stdio: process.env.QA_DEBUG ? "inherit" : "ignore",
     env: { ...appEnv(fixture), GPUI_PLAYWRIGHT: String(sshPort), GDK_SCALE: process.env.GDK_SCALE ?? "2" },
   });
-  const deadline = Date.now() + 120_000;
-  let lastError: unknown;
-  for (;;) {
-    try {
-      if ((await fetch(`http://127.0.0.1:${sshPort}/`)).ok) break;
-    } catch (err) {
-      lastError = err;
-    }
-    if (Date.now() > deadline) throw new Error("ssh app did not start", { cause: lastError });
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  // The server can answer before the window is ready for a context.
-  for (let attempt = 1; ; attempt++) {
-    try {
-      browser = await chromium.connect(`ws://127.0.0.1:${sshPort}/`);
-      page = await (await browser.newContext()).newPage();
-      break;
-    } catch (error) {
-      await browser?.close();
-      if (attempt >= 10) throw error;
-      await new Promise((r) => setTimeout(r, 1000));
-    }
-  }
+  await serverUp(app, sshPort);
+  ({ browser, page } = await connectApp(sshPort));
   await page.setViewportSize({ width: 1400, height: 900 });
 }
 
@@ -123,8 +103,49 @@ test.afterAll(async () => {
   app?.kill("SIGTERM");
 });
 
+/** A machine's tools popover has every check's answer (none reads "Checking…"). */
+async function toolsChecked(): Promise<void> {
+  await expect(page.getByRole("button", { name: "Check again" }).first()).toBeEnabled({ timeout: 30_000 });
+  await expect(page.getByText("Checking…")).toHaveCount(0, { timeout: 30_000 });
+}
+
+/** The workspace checkout on the server. */
+const workspaceDir = () => `'${env.repo}/.treq/workspaces/'*/`;
+
+/**
+ * Types `text` into the terminal pane and waits until the pane has drawn
+ * the echo and output and holds still. `ran`, when given, is a command on
+ * the server that succeeds once the typed command has run.
+ */
+async function typeInTerminal(text: string, ran?: string): Promise<void> {
+  await page.mouse.click(700, 780);
+  const before = await page.screenshot({ clip: TERMINAL });
+  await page.keyboard.type(text);
+  if (ran) await expect(() => onServer(ran)).toPass({ timeout: 30_000 });
+  await drawn(page, TERMINAL, before);
+}
+
+/** The terminal sessions `backend` holds on the host. */
+function hostSessions(backend: "daemon" | "tmux"): number {
+  const status = terminalStatus();
+  return backend === "daemon" ? (status.daemon?.sessions ?? 0) : status.tmux_sessions;
+}
+
+/**
+ * Opens a shell from the workspace `row`, then waits for its session on the
+ * host and for the pane to draw its prompt.
+ */
+async function openShell(row: Locator, backend: "daemon" | "tmux"): Promise<void> {
+  const sessions = hostSessions(backend);
+  const before = await page.screenshot({ clip: TERMINAL });
+  await row.getByRole("button", { name: "Open shell" }).click();
+  await expect
+    .poll(() => hostSessions(backend), { message: `a new ${backend} session on the host`, timeout: 30_000 })
+    .toBeGreaterThan(sessions);
+  await drawn(page, TERMINAL, before);
+}
+
 async function shot(name: string, title: string, expectations: string[]): Promise<void> {
-  await page.waitForTimeout(1500);
   if (process.env.QA_DEBUG) console.log(`--- ${name}\n${await page.ariaSnapshot()}`);
   await capture(page, { name: `18-ssh-${name}`, title, screen: true, expectations });
 }
@@ -141,6 +162,7 @@ test("ssh remote: connect and open a Git repository", async () => {
     "Right panel is headed 'Open a repository' with the Open repository… button; no recents yet says where they appear",
   ]);
   await page.getByRole("button", { name: /on This computer$/ }).click();
+  await toolsChecked();
   await shot("local-tools", "This computer's tools popover", [
     "A popover beside the row lists Required (Git), Agent CLI and Optional tools with Installed or Install",
   ]);
@@ -148,13 +170,14 @@ test("ssh remote: connect and open a Git repository", async () => {
   // Other machines' + offers Add SSH host, which opens the own-VM form.
   await other.click();
   await open.click();
-  await page.waitForTimeout(1500);
+  await expect(page.getByRole("button", { name: "Continue" })).toBeVisible();
   // Display name, hostname, port, username: the form's text fields in order.
   const fields = page.getByRole("textbox");
   await fields.nth(0).fill("QA container");
   await fields.nth(1).fill(env.host);
   await fields.nth(2).fill(env.port);
   await fields.nth(3).fill(env.user);
+  await expect(page.getByRole("button", { name: "Continue" })).toBeEnabled();
   await shot("own-vm", "Your own VM form, filled in", [
     "The SSH key select shows id_ed25519 (ssh-ed25519) from ~/.ssh",
     "Continue is enabled",
@@ -183,7 +206,7 @@ test("ssh remote: connect and open a Git repository", async () => {
   expect(terminalStatus().daemon).toBeNull();
   await expect(page.getByRole("status", { name: /Treq daemon not running/ })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole("button", { name: "Reset terminals…" })).toBeVisible();
-  await page.waitForTimeout(3000);
+  await toolsChecked();
   await shot("host-tools", "The SSH host's tools popover", [
     "Asked over SSH (`treq repo tools`): Git and Jujutsu are installed; tmux is listed under Optional",
     "A Terminals section says they are held by the Treq daemon and that the daemon is not running yet (no terminal has started), with Use tmux… and Reset terminals…",
@@ -199,7 +222,8 @@ test("ssh remote: connect and open a Git repository", async () => {
   await openRemote.click();
   await expect(page.getByRole("tab", { name: "Commits" })).toBeVisible({ timeout: 60_000 });
   await page.getByRole("tab", { name: "Commits" }).click();
-  await page.waitForTimeout(3000);
+  await loaded(page);
+  await expect(page.getByText("Add lib", { exact: true })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole("status", { name: "Couldn't load commits" })).toHaveCount(0);
   await shot("commits", "Remote repository: Commits", [
     "The repository path and Terminal/Refresh links head the window",
@@ -226,13 +250,11 @@ test("ssh remote: shell, Changes, Commits and agent", async () => {
   const row = page.getByRole("button", { name: WORKSPACE, exact: true });
   await row.click();
   await row.hover();
-  await row.getByRole("button", { name: "Open shell" }).click();
-  await page.waitForTimeout(4000);
-  await page.mouse.click(700, 780);
-  await page.keyboard.type(
+  await openShell(row, "daemon");
+  await typeInTerminal(
     "hostname; pwd; printf 'pub fn sub(a: i32, b: i32) -> i32 { a - b }\\n' >> src/lib.rs; echo notes > NOTES.md\n",
+    `grep -q notes ${workspaceDir()}NOTES.md`,
   );
-  await page.waitForTimeout(2000);
   await shot("shell", "Remote shell in the workspace", [
     "The prompt and output come from the server: its hostname and the workspace's path under .treq/workspaces",
     "No tmux status line at the bottom of the pane",
@@ -240,47 +262,54 @@ test("ssh remote: shell, Changes, Commits and agent", async () => {
   // Away to Settings and back: the same remote shell, still attached.
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect(page.getByRole("button", { name: "Back", exact: true })).toBeVisible();
-  await page.waitForTimeout(1500);
   await row.click();
-  await page.waitForTimeout(3000);
-  await page.mouse.click(700, 780);
-  await page.keyboard.type("echo back from settings\n");
-  await page.waitForTimeout(2000);
+  await expect(page.getByRole("group", { name: /terminal$/ }).first()).toBeVisible();
+  await typeInTerminal("echo back from settings\n");
   await shot("shell-after-settings", "The remote shell after a trip to Settings", [
     "The same shell column shows the hostname and pwd output, then 'back from settings'",
     "No Reattach overlay: the channel stayed open while Settings showed",
   ]);
   await page.getByRole("button", { name: "Refresh" }).click();
   await page.getByRole("tab", { name: "Changes" }).click();
-  await page.waitForTimeout(3000);
+  await loaded(page);
+  await expect(page.getByRole("button", { name: "NOTES.md", exact: true })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("button", { name: "src/lib.rs", exact: true })).toBeVisible();
   await shot("changes", "Remote workspace: Changes", [
     "NOTES.md (A) and lib.rs (M) are listed with their diffs",
   ]);
   await page.getByRole("textbox", { name: "Message" }).fill("Add sub");
   await page.getByRole("button", { name: "Commit", exact: true }).click();
-  await page.waitForTimeout(4000);
+  await expect
+    .poll(() => onServer(`cd ${workspaceDir()} && jj log --no-graph -r @- -T description`), {
+      message: "the commit lands on the server",
+      timeout: 30_000,
+    })
+    .toContain("Add sub");
   await page.getByRole("tab", { name: "Commits" }).click();
-  await page.waitForTimeout(3000);
-  expect(onServer(`cd '${env.repo}/.treq/workspaces/'*/ && jj log --no-graph -r @- -T description`)).toContain("Add sub");
+  await loaded(page);
+  await expect(page.getByText("Add sub", { exact: true })).toBeVisible({ timeout: 30_000 });
   await shot("ws-commits", "Remote workspace: committed", ["'Add sub' is the workspace's commit"]);
 });
 
-/** Picks the agent at `row` in Settings' Default Agent select and saves. */
-async function setDefaultAgent(row: number): Promise<void> {
+/** Picks the agent `label` at `row` in Settings' Default Agent select and saves. */
+async function setDefaultAgent(row: number, label: string): Promise<void> {
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   // The application's agent: a remote repository's setting is not read.
   await page.getByRole("tab", { name: "Application" }).click();
-  await page.waitForTimeout(800);
   const select = page.getByRole("combobox", { name: "Default agent" });
+  await expect(select).toBeVisible();
   await select.scrollIntoViewIfNeeded();
   const box = await select.boundingBox();
   if (!box) throw new Error("no Default Agent select");
+  const agent = new RegExp(label, "i");
+  const was = (await select.getAttribute("value")) ?? "";
   await select.click();
-  await page.waitForTimeout(800);
+  await expect(page.getByRole("combobox", { name: "Default agent", expanded: true })).toBeVisible();
   // Options: Default, Claude, Codex, Cursor, Copilot.
   await page.mouse.click(box.x + 40, box.y + box.height + 26 + row * 30);
-  await page.waitForTimeout(500);
-  await page.waitForTimeout(1000);
+  await expect(select).toHaveValue(agent);
+  // A changed setting shows its Saved tick once it is stored.
+  if (!agent.test(was)) await expect(page.getByTestId("settings-saved-app.defaultAgent")).toBeVisible();
   await page.getByRole("button", { name: "Back", exact: true }).click();
 }
 
@@ -314,19 +343,23 @@ for (const [label, row, bin] of [
   test(`ssh remote: start ${label} and send it input`, async () => {
     // One agent at a time, so its pane has the full width.
     for (const stop of await page.getByRole("button", { name: "Stop", exact: true }).all()) await stop.click();
-    await setDefaultAgent(row);
+    await setDefaultAgent(row, label);
     const workspace = page.getByRole("button", { name: WORKSPACE, exact: true });
     await workspace.click();
     await workspace.hover();
+    const before = await page.screenshot({ clip: TERMINAL });
     await workspace.getByRole("button", { name: "Start agent" }).click();
-    await page.waitForTimeout(12_000);
+    // The CLI runs on the host, then draws its first-run screen.
+    await expect(() => onServer(`pgrep -f '[${bin[0]}]${bin.slice(1)}'`)).toPass({ timeout: 30_000 });
+    await drawn(page, TERMINAL, before);
     await shot(`agent-${bin}`, `${label}: the real CLI's first-run screen`, [
       `The agent pane, titled '${bin.replace("-", "_")}-…', shows ${label}'s own welcome or sign-in screen`,
     ]);
     await page.mouse.click(700, 780);
+    const idle = await page.screenshot({ clip: TERMINAL });
     await page.keyboard.press("ArrowDown");
     await page.keyboard.type("hello");
-    await page.waitForTimeout(3000);
+    await drawn(page, TERMINAL, idle);
     await shot(`agent-${bin}-input`, `${label} after typed input`, [
       "The screen reacts to the keys: a moved selection, typed text, or the next first-run step",
     ]);
@@ -339,20 +372,25 @@ test("ssh remote: install Claude Code and run it as an agent", async () => {
   // The official installer, typed into the remote shell as a user would.
   await page.mouse.click(700, 780);
   await page.keyboard.type("clear; curl -fsSL https://claude.ai/install.sh | bash\n");
-  const deadline = Date.now() + 480_000;
-  while (!onServer("test -x ~/.local/bin/claude && echo yes || true").includes("yes")) {
-    if (Date.now() > deadline) throw new Error("Claude Code did not install");
-    await page.waitForTimeout(5000);
-  }
-  await page.waitForTimeout(5000);
-  await page.keyboard.type("~/.local/bin/claude --version\n");
+  await expect
+    .poll(() => onServer("test -x ~/.local/bin/claude && echo yes || true"), {
+      message: "Claude Code installs",
+      intervals: [5000],
+      timeout: 480_000,
+    })
+    .toContain("yes");
+  // The installer's last lines, then the prompt.
+  await drawn(page, TERMINAL);
+  await typeInTerminal("~/.local/bin/claude --version\n");
   await shot("claude-installed", "Claude Code installed on the server", [
     "The installer's output ends with 'Installation complete!' in the remote shell",
     "`claude --version` prints the installed version",
   ]);
   await row.hover();
+  const before = await page.screenshot({ clip: TERMINAL });
   await row.getByRole("button", { name: "Start agent" }).click();
-  await page.waitForTimeout(10_000);
+  await expect(() => onServer("pgrep -f '[.]local/bin/claude'")).toPass({ timeout: 30_000 });
+  await drawn(page, TERMINAL, before);
   await shot("agent", "Claude Code running as a remote agent", [
     "The agent pane runs the real Claude Code TUI on the server, in the workspace directory",
     "Without credentials it stops at its first-run sign-in screen",
@@ -366,17 +404,20 @@ test("ssh remote: dropped connection reattaches on its own", async () => {
   const workspace = page.getByRole("button", { name: WORKSPACE, exact: true });
   await workspace.click();
   await workspace.hover();
-  await workspace.getByRole("button", { name: "Open shell" }).click();
-  await page.waitForTimeout(4000);
-  await page.mouse.click(700, 780);
-  await page.keyboard.type("echo before-drop-$((40+2))\n");
-  await page.waitForTimeout(2000);
+  await openShell(workspace, "daemon");
+  await typeInTerminal("echo before-drop-$((40+2))\n");
   expect(terminalStatus().daemon?.sessions).toBeGreaterThanOrEqual(1);
   // Detached, so killing this command's own connection does not stop it
-  // half way through.
-  onServer(`setsid sh -c "sleep 1; pkill -f 'sshd: .*@'" </dev/null >/dev/null 2>&1 &`);
-  await page.waitForTimeout(10_000);
+  // half way through. The marker says the drop has happened.
+  onServer(
+    `rm -f ~/.qa-dropped; setsid sh -c "sleep 1; pkill -f 'sshd: .*@'; touch ~/.qa-dropped" </dev/null >/dev/null 2>&1 &`,
+  );
+  // Then the app connects again: a session besides this check's own.
+  await expect(() => {
+    expect(Number(onServer("test -f ~/.qa-dropped && pgrep -c -f '[s]shd: .*@'"))).toBeGreaterThanOrEqual(2);
+  }, "the app reconnects after the drop").toPass({ timeout: 60_000 });
   await expect(page.getByRole("button", { name: "Reattach" })).toHaveCount(0);
+  await drawn(page, TERMINAL);
   // The Treq daemon holds the sessions, not tmux, as the host's treq says.
   const status = terminalStatus();
   expect(status.daemon?.sessions).toBeGreaterThanOrEqual(1);
@@ -387,6 +428,7 @@ test("ssh remote: dropped connection reattaches on its own", async () => {
   ]);
   await page.getByRole("button", { name: "Refresh" }).click();
   await page.getByRole("tab", { name: "Changes" }).click();
+  await loaded(page);
   await shot("refreshed", "Refresh after the drop", ["The tab reloads over a new connection with no error"]);
 });
 
@@ -425,9 +467,10 @@ test("ssh remote: the machine shows the daemon holding its terminals after a res
 test("ssh remote: switching the machine to tmux keeps its terminals in tmux", async () => {
   // The popover from the previous step is open on the Overview.
   await page.getByRole("button", { name: "Use tmux…" }).click();
-  await page.getByRole("button", { name: "Use tmux", exact: true }).click();
+  const confirm = page.getByRole("button", { name: "Use tmux", exact: true });
+  await confirm.click();
   // Confirming closes the popover; open it again to read the result.
-  await page.waitForTimeout(3000);
+  await expect(confirm).toHaveCount(0);
   await page.getByRole("button", { name: /on QA container$/ }).click();
   // Switching closed the daemon's terminals and stopped it.
   await expect(page.getByRole("status", { name: /^tmux: 0 terminals/ })).toBeVisible({ timeout: 30_000 });
@@ -443,11 +486,8 @@ test("ssh remote: switching the machine to tmux keeps its terminals in tmux", as
   await expect(row).toBeVisible({ timeout: 60_000 });
   await row.click();
   await row.hover();
-  await row.getByRole("button", { name: "Open shell" }).click();
-  await page.waitForTimeout(4000);
-  await page.mouse.click(700, 780);
-  await page.keyboard.type("echo in-tmux-$((6*7))\n");
-  await page.waitForTimeout(2000);
+  await openShell(row, "tmux");
+  await typeInTerminal("echo in-tmux-$((6*7))\n");
   const status = terminalStatus();
   expect(status.daemon).toBeNull();
   expect(status.tmux_sessions).toBeGreaterThanOrEqual(1);
