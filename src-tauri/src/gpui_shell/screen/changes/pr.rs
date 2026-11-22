@@ -240,8 +240,7 @@ impl ChangesView {
       move |host, t| {
         let diff = host.pr_diff(&t.full_name, t.number)?;
         let parsed = pr_review_data::parse_unified_diff(&diff);
-        // The poll reads the diff again; a file that reads the same keeps
-        // its hunks, so its rows and placed drafts are not redone.
+        // A file the poll reads unchanged keeps its hunks, so its rows and drafts are not redone.
         let hunks: HashMap<String, FileHunks> = parsed
           .hunks
           .into_iter()
@@ -313,8 +312,7 @@ impl ChangesView {
           if let Some(pr) = view.pr.as_mut() {
             pr.rows = rows;
           }
-          // A poll that read the same places nothing and draws nothing; a
-          // placement that finds other drafts redraws.
+          // An unchanged poll draws nothing. A placement that finds other drafts redraws.
           view.place_drafts(cx);
           false
         }
@@ -618,8 +616,7 @@ impl ChangesView {
     let id = thread.id.clone();
     if !reply.is_some_and(|r| r.open) {
       return Some(
-        // Short label (['button label']): 11px is fine.
-        // ast-grep-ignore: gpui-text-xs-short-label-only
+        // Short label (button label). ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .id(SharedString::from(format!("reply-{id}")))
           .role(gpui::Role::Button)
@@ -674,8 +671,7 @@ impl ChangesView {
             .justify_end()
             .gap_2()
             .child(
-              // Short label (['button label']): 11px is fine.
-              // ast-grep-ignore: gpui-text-xs-short-label-only
+              // Short label (button label). ast-grep-ignore: gpui-text-xs-short-label-only
               ui::text(div(), TextSize::Xs)
                 .id(SharedString::from(format!("reply-cancel-{id}")))
                 .role(gpui::Role::Button)
@@ -687,8 +683,7 @@ impl ChangesView {
                 .on_click(cx.listener(move |view, _, _, cx| view.open_reply(&cancel, false, cx))),
             )
             .child({
-              // Short label (['button label']): 11px is fine.
-              // ast-grep-ignore: gpui-text-xs-short-label-only
+              // Short label (button label). ast-grep-ignore: gpui-text-xs-short-label-only
               ui::text(div(), TextSize::Xs)
                 .id(SharedString::from(format!("reply-send-{id}")))
                 .role(gpui::Role::Button)

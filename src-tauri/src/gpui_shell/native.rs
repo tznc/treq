@@ -377,8 +377,7 @@ impl Transport for Backend {
   ) -> Result<serde_json::Value, String> {
     self.with_db(|db| feature_preview::require_remote_for_source(db, &endpoint.source))?;
     let pool = self.exec_pool();
-    // A relay drop or dead network leaves a pooled connection that fails the
-    // first read; `execute_remote_read` sends it once more on a fresh one.
+    // A relay drop leaves a dead pooled connection, so `execute_remote_read` retries on a new one.
     crate::gpui_shell::block_on(remote_command::execute_remote_read::<serde_json::Value>(
       &pool,
       endpoint,

@@ -2438,8 +2438,7 @@ mod tests {
 
   #[test]
   fn the_wip_app_check_run_matches_by_whichever_app_link_github_reports() {
-    // The app sets no details URL, so GitHub reports the app's homepage, or
-    // nothing; a real CI job named WIP links to its run.
+    // No details URL: GitHub links the app homepage or nothing. A real WIP CI job links its run.
     for link in [
       "",
       "https://github.com/apps/wip",

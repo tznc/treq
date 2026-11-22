@@ -156,8 +156,7 @@ struct Key {
 impl Default for DiffRows {
   fn default() -> Self {
     Self {
-      // Draws a screen's worth above and below, so a scroll or the next
-      // arrow key rarely meets an unmeasured row.
+      // Draws a screen's worth either side, so scrolls and arrow keys rarely hit unmeasured rows.
       list: ListState::new(0, ListAlignment::Top, px(800.)),
       rows: Vec::new(),
       cards: Vec::new(),
@@ -330,8 +329,7 @@ impl ChangesView {
     for (h, hunk) in hunks.iter().enumerate() {
       let before = read(h, Dir::Before);
       let (above, below) = self.context_ranges(path, hunks, h);
-      // Once the lines above meet the previous hunk's, or the file's start,
-      // the header no longer separates anything.
+      // Lines above reaching the previous hunk or the file's start leave nothing to separate.
       let joined = above.is_none()
         && (before > 0
           || h
@@ -595,8 +593,7 @@ impl ChangesView {
             )
             .when(expandable, |this| {
               this.child(
-                // Short label (['expander button label']): 11px is fine.
-                // ast-grep-ignore: gpui-text-xs-short-label-only
+                // Expander button label. ast-grep-ignore: gpui-text-xs-short-label-only
                 ui::text(div(), TextSize::Xs)
                   .ml_2()
                   .flex_none()
@@ -691,8 +688,7 @@ impl ChangesView {
             })),
         )
         .child(
-          // Short label (['expander button label']): 11px is fine.
-          // ast-grep-ignore: gpui-text-xs-short-label-only
+          // Short label (expander button label). ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .flex_1()
             .flex()
@@ -733,8 +729,7 @@ impl ChangesView {
     };
     let file = path.to_string();
     let hover = p.foreground;
-    // Short label (['expander button label']): 11px is fine.
-    // ast-grep-ignore: gpui-text-xs-short-label-only
+    // Short label (expander button label). ast-grep-ignore: gpui-text-xs-short-label-only
     ui::text(div(), TextSize::Xs)
       .id(SharedString::from(id.clone()))
       .role(gpui::Role::Button)

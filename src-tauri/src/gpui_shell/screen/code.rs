@@ -441,13 +441,11 @@ impl CodeView {
     if current == &parent {
       return;
     }
-    // The conflicted files or the workspace's record changing alone (the
-    // header's read landing after the window's listing) don't read again.
+    // Conflicted files or the workspace record changing alone (a late header read) don't reread.
     let reread = current.key() != parent.key()
       || current.revision != parent.revision
       || current.default_branch != parent.default_branch;
-    // A new title or description (an edit, or the PR's text synced in)
-    // can start or stop following the pull request.
+    // A new title or description, edited or synced from the PR, can start or stop following it.
     let text = |p: &Parent| {
       p.workspace
         .as_ref()
@@ -455,9 +453,7 @@ impl CodeView {
     };
     let resync = !reread && text(current) != text(&parent);
     if parent.key() != self.parent.key() {
-      // Another workspace: keep drawing this one until the new one is read,
-      // then swap them in one frame (`apply`), so the tab never draws empty.
-      // Read ahead, it swaps now, and reads again behind.
+      // Another workspace swaps in one frame once read (`apply`), so the tab never draws empty.
       let now = cx.background_executor().now();
       let ahead = self
         .prefetched
@@ -563,8 +559,7 @@ impl CodeView {
       None if self.parent.key() == parent.key() => false,
       _ => return,
     };
-    // A read again that found what shows already (a revalidation) draws
-    // nothing new.
+    // A revalidation that finds what already shows draws nothing new.
     let unchanged = !moved
       && !(self.history_loading && self.history_limit > HISTORY_PAGE)
       && self.overview.as_ref() == Some(&read.overview)
@@ -1143,11 +1138,9 @@ pub(super) fn scrolling_markdown(
 
 fn markdown_text_size(size: f32) -> TextSize {
   match size {
-    // Short label (["maps the user's font-size setting onto the scale"]): 11px is fine.
-    // ast-grep-ignore: gpui-text-xs-short-label-only
+    // Maps the user's font size onto the scale. ast-grep-ignore: gpui-text-xs-short-label-only
     s if s <= 11. => TextSize::Xs,
-    // Maps the user's font-size setting onto the scale.
-    // ast-grep-ignore: gpui-sans-text-min-size
+    // Maps the user's font size onto the scale. ast-grep-ignore: gpui-sans-text-min-size
     s if s <= 12. => TextSize::Code,
     s if s <= 14. => TextSize::Sm,
     s if s <= 17. => TextSize::Lg,
@@ -1805,8 +1798,7 @@ impl CodeView {
             .flex()
             .flex_col()
             .gap_2()
-            // ⌘/Ctrl+Enter is unbound in inputs (`treq_ui::theme`), so
-            // read the key itself.
+            // ⌘/Ctrl+Enter is unbound in inputs (`treq_ui::theme`), so the key is read directly.
             .capture_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
               let k = &e.keystroke;
               if k.key == "enter" && k.modifiers.secondary() {
@@ -1902,8 +1894,7 @@ impl CodeView {
       .child(help)
       .children(self.stack_button(p, cx))
       .child(
-        // Short label (['position count']): 11px is fine.
-        // ast-grep-ignore: gpui-text-xs-short-label-only
+        // Short label (position count). ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .ml_auto()
           .font_weight(FontWeight::NORMAL)
@@ -2095,8 +2086,7 @@ impl CodeView {
       format!("stack-time-{}", row.workspace.id),
       Side::Top,
       Some(TooltipContent::Text(time::full(&created).into())),
-      // Short label (['timestamp']): 11px is fine.
-      // ast-grep-ignore: gpui-text-xs-short-label-only
+      // Short label (timestamp). ast-grep-ignore: gpui-text-xs-short-label-only
       ui::text(div(), TextSize::Xs)
         .text_color(p.muted_foreground)
         .child(time::relative(&created)),
@@ -2241,9 +2231,7 @@ impl CodeView {
       .overview
       .as_ref()
       .map_or(&[][..], |o| o.entries.as_slice());
-    // Untouched entries fold behind a toggle, below the changed ones;
-    // submodule rows carry their own controls, and an entry without a status
-    // may have changed, so both stay up top.
+    // Untouched entries fold behind a toggle, but submodules and status-less entries stay on top.
     let untouched =
       |e: &WorkspaceEntry| e.submodule_pin.is_none() && e.status.as_deref() == Some("untouched");
     let (rest, mut entries): (Vec<&WorkspaceEntry>, Vec<&WorkspaceEntry>) =
@@ -2382,8 +2370,7 @@ impl CodeView {
             this.child(
               ui::text(
                 ui::Checkbox::new(format!("submodule-sync-{path}"), p),
-                // Short label (['checkbox label']): 11px is fine.
-                // ast-grep-ignore: gpui-text-xs-short-label-only
+                // Short label (checkbox label). ast-grep-ignore: gpui-text-xs-short-label-only
                 TextSize::Xs,
               )
               .checked(synced)
@@ -2404,8 +2391,7 @@ impl CodeView {
           .test_support(),
       );
     }
-    // The toggle closes the list when nothing drawn follows it; one scrolled
-    // above the drawn rows stays undrawn with them.
+    // The toggle ends the list only when no drawn row follows. Scrolled above, it stays undrawn.
     if changed >= shown.end {
       list = list.children(toggle);
     }
@@ -2450,8 +2436,7 @@ impl CodeView {
     } else {
       format!("Show {count} unchanged files")
     };
-    // Short label (['toggle label']): 11px is fine.
-    // ast-grep-ignore: gpui-text-xs-short-label-only
+    // Short label (toggle label). ast-grep-ignore: gpui-text-xs-short-label-only
     ui::text(div(), TextSize::Xs)
       .id("code-unchanged-toggle")
       .debug_selector(|| "code-unchanged-toggle".into())
@@ -2726,8 +2711,7 @@ impl CodeView {
     }
     let mut first = true;
     for (label, commits) in group_by_day(own.iter().copied()) {
-      // `first:mt-0` never applies (the track line is the first child);
-      // block layout collapses the margin as Chromium does.
+      // `first:mt-0` never applies, as the track line is first. Block layout collapses the margin.
       let mut group = div().mt_5();
       group = group.child(day_label(&label, p));
       for commit in &commits {
@@ -2838,8 +2822,7 @@ impl CodeView {
       format!("commit-time-{}", commit.commit_id),
       Side::Top,
       Some(TooltipContent::Text(time::full(&ts).into())),
-      // Short label (['timestamp']): 11px is fine.
-      // ast-grep-ignore: gpui-text-xs-short-label-only
+      // Short label (timestamp). ast-grep-ignore: gpui-text-xs-short-label-only
       ui::text(div(), TextSize::Xs)
         .text_color(p.muted_foreground)
         .child(time::relative(&ts)),
@@ -2902,8 +2885,7 @@ impl CodeView {
           .child(time)
           .when(commit.insertions > 0 || commit.deletions > 0, |this| {
             this.child(
-              // Short label (['timestamp and diff counts']): 11px is fine.
-              // ast-grep-ignore: gpui-text-xs-short-label-only
+              // Timestamp and diff counts. ast-grep-ignore: gpui-text-xs-short-label-only
               ui::text(div(), TextSize::Xs)
                 .ml_auto()
                 .flex()
@@ -2965,8 +2947,7 @@ enum Kind {
 }
 
 fn day_label(label: &str, p: &Palette) -> impl IntoElement {
-  // Short label (['section heading']): 11px is fine.
-  // ast-grep-ignore: gpui-text-xs-short-label-only
+  // Short label (section heading). ast-grep-ignore: gpui-text-xs-short-label-only
   ui::text(div(), TextSize::Xs)
     .mb_1()
     .pl_7()
@@ -2993,8 +2974,7 @@ fn separator(label: Div, p: &Palette) -> impl IntoElement {
       .gap_2()
       .child(dashes())
       .child(
-        // Short label (['divider label']): 11px is fine.
-        // ast-grep-ignore: gpui-text-xs-short-label-only
+        // Short label (divider label). ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(label, TextSize::Xs)
           .whitespace_nowrap()
           .px_2()
@@ -3042,8 +3022,7 @@ fn loc_indicator(
   let (added, removed) = (ui::Tone::DiffAdded, ui::Tone::DiffRemoved);
   let (green, red) = (added.color(p), removed.color(p));
   let count = |text: String, color: Hsla, ch: usize| {
-    // Short label (['diff count']): 11px is fine.
-    // ast-grep-ignore: gpui-text-xs-short-label-only
+    // Short label (diff count). ast-grep-ignore: gpui-text-xs-short-label-only
     ui::text(div(), TextSize::Xs)
       .flex_none()
       .whitespace_nowrap()

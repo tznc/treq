@@ -978,8 +978,7 @@ impl Overlay {
   fn item(&mut self, ix: usize, cx: &mut Context<Self>) -> gpui::AnyElement {
     let p = theme::palette(self.dark);
     match self.items.get(ix).copied() {
-      // Short label (['group heading']): 11px is fine.
-      // ast-grep-ignore: gpui-text-xs-short-label-only
+      // Short label (group heading). ast-grep-ignore: gpui-text-xs-short-label-only
       Some(Item::Heading(g)) => ui::text(div(), TextSize::Xs)
         .px_3()
         .py_2()
@@ -1089,8 +1088,7 @@ impl Render for Overlay {
                     .px_0()
                     .flex_1(),
                 )
-                // The shortcut that opens it, now that the sidebar button
-                // is an icon.
+                // The shortcut that opens it, now that the sidebar button is an icon.
                 .when(palette, |this| {
                   this.child(div().ml_2().child(ui::Kbd::new("secondary-k", &p)))
                 }),

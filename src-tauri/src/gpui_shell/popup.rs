@@ -802,8 +802,7 @@ impl PopupView {
   fn render_tooltip(&self, content: &TooltipContent, cx: &App) -> gpui::AnyElement {
     let palette = &self.palette;
     match content {
-      // Text that `tooltip_size` fits on one line stays on one line, so a
-      // shaped width a hair over the measured one doesn't wrap it.
+      // Text `tooltip_size` fits on one line stays there, even if its shaped width is a hair over.
       TooltipContent::Text(text) => div()
         .when(
           wrapped_text(cx, text, TOOLTIP_MAX_WIDTH - 24. - 2.).1 == 1,
@@ -817,8 +816,7 @@ impl PopupView {
         .gap(zpx(KBD_GAP))
         .child(text.clone())
         .child(
-          // Short label (['kbd hint']): 11px is fine.
-          // ast-grep-ignore: gpui-text-xs-short-label-only
+          // Short label (kbd hint). ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .selector("tooltip-kbd")
             .h(zpx(KBD_HEIGHT))
@@ -1019,8 +1017,7 @@ impl PopupView {
           .debug_selector(move || format!("menu-submenu-{index}"))
           .when_some(detail.clone(), |row, detail| {
             row.child(
-              // Short label (['shortcut detail']): 11px is fine.
-              // ast-grep-ignore: gpui-text-xs-short-label-only
+              // Short label (shortcut detail). ast-grep-ignore: gpui-text-xs-short-label-only
               ui::text(div(), TextSize::Xs)
                 .ml(zpx(DETAIL_GAP))
                 .text_color(palette.muted_foreground)
@@ -1307,8 +1304,7 @@ fn popup_window(
     .ok()?;
   // On Linux every window gets the app's menu bar.
   window.remove_menu().ignore_closed();
-  // Mark it a tooltip or menu so X11 window managers neither place nor
-  // decorate it.
+  // A tooltip or menu type keeps X11 window managers from placing or decorating it.
   #[cfg(target_os = "linux")]
   if let Ok(gtk_window) = window.gtk_window() {
     use gtk::prelude::GtkWindowExt;
@@ -1341,10 +1337,7 @@ fn popup_window(
     return None;
   }
   let view = view.borrow_mut().take()?;
-  // An X11 compositor (xcompmgr, picom) decides at a window's first map
-  // whether it is translucent, before GPUI has drawn into it, and shadows it
-  // as opaque: a dark box around the first menu shown. Mapping it once while
-  // it is still 1x1 settles that, so the first real show draws like the rest.
+  // X11 compositors judge translucency at first map, so a 1x1 map first avoids a dark box.
   #[cfg(target_os = "linux")]
   {
     window.show().ignore_closed();
