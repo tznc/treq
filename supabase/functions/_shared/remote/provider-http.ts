@@ -9,6 +9,7 @@ import type {
   ServiceSpec,
 } from "./provider.ts";
 import { ProviderError } from "./provider.ts";
+import { errorMessage } from "../error-message.ts";
 
 /** fetch with a timeout; a transport failure becomes `timeout` or `unavailable`. */
 export async function providerFetch(
@@ -23,7 +24,7 @@ export async function providerFetch(
   } catch (err) {
     throw new ProviderError(
       err instanceof DOMException && err.name === "TimeoutError" ? "timeout" : "unavailable",
-      `could not reach ${vendor}: ${(err as Error).message}`,
+      `could not reach ${vendor}: ${errorMessage(err)}`,
     );
   }
 }

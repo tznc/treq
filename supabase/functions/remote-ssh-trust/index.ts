@@ -66,6 +66,7 @@ import { relayUrlForEndpoint } from "../_shared/remote/ssh-relay.ts";
 import { recordEndpointHostKey } from "../_shared/remote/instance-store.ts";
 import { must } from "../_shared/remote/db.ts";
 import { corsHeaders, json } from "../_shared/http/json.ts";
+import { errorMessage } from "../_shared/error-message.ts";
 
 
 // Certificates are deliberately short-lived (PRD "Certificate lifetime
@@ -174,7 +175,7 @@ Deno.serve(async (req) => {
       return json({ error: providerClientMessage(err), provider_error: err.kind }, 502, correlationId);
     }
     if (err instanceof KeyscanError) return json({ error: err.message, keyscan_error: err.kind }, 502, correlationId);
-    logWithCorrelation(correlationId, "error", `remote-ssh-trust action=${action} failed: ${(err as Error).message}`);
+    logWithCorrelation(correlationId, "error", `remote-ssh-trust action=${action} failed: ${errorMessage(err)}`);
     return json({ error: "Internal error" }, 500, correlationId);
   }
 });
@@ -387,7 +388,7 @@ async function handleIssueCertificate(
       instanceId: instance.id,
       endpointId: endpointRow.id,
       eventType: isRenewal ? "certificate_renewal_failed" : "certificate_issue_failed",
-      detail: { error: (err as Error).message },
+      detail: { error: errorMessage(err) },
       correlationId,
       durationMs: elapsed(),
     });
@@ -502,7 +503,7 @@ async function handleAuthorizedKeyChange(
     });
     return json({ operation_id: op.id, status: "succeeded" }, 200, correlationId);
   } catch (err) {
-    await completeOperation(supabase, op.id, { status: "failed", errorMessage: (err as Error).message });
+    await completeOperation(supabase, op.id, { status: "failed", errorMessage: errorMessage(err) });
     throw err;
   }
 }
@@ -558,7 +559,7 @@ async function handleKeyscanEndpoint(
       instanceId: instance.id,
       endpointId: endpointRow.id,
       eventType: "host_keyscan_failed",
-      detail: { error: (err as Error).message },
+      detail: { error: errorMessage(err) },
       correlationId,
     });
     throw err;

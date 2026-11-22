@@ -1,0 +1,10 @@
+id: no-narrating-comments-js
+snapshots:
+  ? |
+    // Build the sidebar from the docs folder
+    module.exports = sidebar;
+  : labels:
+    - source: // Build the sidebar from the docs folder
+      style: primary
+      start: 0
+      end: 41

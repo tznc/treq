@@ -295,7 +295,7 @@ mod tests {
         assert!(rest.ends_with(".rs"), "{name}: not a .rs file");
         stamp
           .parse()
-          .unwrap_or_else(|_| panic!("{name}: prefix is not a unix timestamp"))
+          .unwrap_or_else(|e| panic!("{name}: prefix is not a unix timestamp: {e}"))
       })
       .collect();
     stamps.sort_unstable();

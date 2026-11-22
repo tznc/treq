@@ -42,8 +42,8 @@ export type WorkflowNodeData = {
   name: string;
   prompt: string;
   skills: string[];
-  agent?: string;
-  model?: string;
+  agent?: string | undefined;
+  model?: string | undefined;
 };
 
 export type GroupNodeData = {
@@ -750,9 +750,9 @@ function DagCanvas() {
           .filter((n) => n.id !== id)
           .map((n) => {
             if (n.parentId !== id) return n;
+            const { parentId, ...rest } = n;
             return {
-              ...n,
-              parentId: undefined,
+              ...rest,
               position: {
                 x: n.position.x + target.position.x,
                 y: n.position.y + target.position.y,

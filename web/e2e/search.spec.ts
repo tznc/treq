@@ -1,7 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 
 const QUERY = 'cli workspace status';
-const QUERY_ENCODED = encodeURIComponent(QUERY);
 
 // Known result for QUERY: the CLI reference page whose excerpt contains "workspace status"
 const EXPECTED_RESULT_URL = '/docs/reference/cli/';

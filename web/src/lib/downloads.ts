@@ -41,7 +41,7 @@ function asset(
 export function pickDownloads(
   assets: ReleaseAsset[],
   userAgent: string,
-): {primary: DownloadLink; secondary?: DownloadLink} {
+): {primary: DownloadLink; secondary?: DownloadLink | undefined} {
   // iOS user agents also contain "Mac OS X", and Android's contain "Linux".
   if (/Android|iPhone|iPad|iPod/.test(userAgent)) {
     return {primary: RELEASE_PAGE_LINK};
