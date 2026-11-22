@@ -1073,7 +1073,7 @@ impl TerminalView {
   /// `treq agent msg`'s banner: messages wait for this agent. treq types
   /// the wake line itself once the agent is idle and the user stops typing;
   /// "Deliver" types it at once.
-  fn msg_banner(&self, p: &Palette) -> Option<Div> {
+  fn msg_banner(&self, p: &Palette) -> Option<impl IntoElement> {
     if self.status != Status::Ready || self._msg_watch.is_none() {
       return None;
     }
@@ -1102,6 +1102,10 @@ impl TerminalView {
     .on_click(move |_, _, _| deliver_host.agent_msg_deliver_now(&deliver_pty));
     Some(
       div()
+        .id("terminal-msg-banner")
+        .role(gpui::Role::Status)
+        .aria_label(summary.clone())
+        .test_support()
         .debug_selector(|| "terminal-msg-banner".into())
         .absolute()
         .top_0()
@@ -3308,6 +3312,10 @@ impl TerminalPane {
       let shown = hovered.as_deref() == Some(id.as_str());
       let (open_column, open_id) = (column_id.clone(), id.clone());
       let (hover_asset, dismiss_id) = (asset.clone(), id.clone());
+      let (open_name, remove_name) = (
+        format!("Open {}", asset.title),
+        format!("Remove {}", asset.title),
+      );
       let icon = send_asset_icon(&asset);
       let media = if asset.is_image() {
         div().size_full().child(
@@ -3336,6 +3344,10 @@ impl TerminalPane {
                 Side::Bottom,
                 Some(TooltipContent::Text(asset.title.clone().into())),
                 div()
+                  .id(SharedString::from(format!("terminal-send-name-{id}")))
+                  .role(gpui::Role::Label)
+                  .aria_label(asset.title.clone())
+                  .test_support()
                   .debug_selector({
                     let id = id.clone();
                     move || format!("terminal-send-title-{id}")
@@ -3356,7 +3368,8 @@ impl TerminalPane {
       div()
         .id(SharedString::from(format!("terminal-send-preview-{id}")))
         .role(gpui::Role::Button)
-        .aria_label("Open preview")
+        .aria_label(open_name)
+        .test_support()
         .debug_selector({
           let id = id.clone();
           move || format!("terminal-send-preview-{id}")
@@ -3391,7 +3404,8 @@ impl TerminalPane {
             div()
               .id(SharedString::from(format!("terminal-send-dismiss-{id}")))
               .role(gpui::Role::Button)
-              .aria_label("Remove")
+              .aria_label(remove_name)
+              .test_support()
               .debug_selector({
                 let id = id.clone();
                 move || format!("terminal-send-dismiss-{id}")
@@ -3426,6 +3440,10 @@ impl TerminalPane {
     });
     Some(
       div()
+        .id("terminal-send-previews")
+        .role(gpui::Role::Group)
+        .aria_label("Attachments")
+        .test_support()
         .debug_selector(|| "terminal-send-previews".into())
         .absolute()
         .top_0()
@@ -3796,6 +3814,8 @@ impl TerminalPane {
         .test_support()
         .debug_selector(|| "terminal-workspace-label".into())
         .max_w(zpx(360.))
+        .min_w_0()
+        .overflow_hidden()
         .flex()
         .items_center()
         .gap_2()
@@ -3873,6 +3893,7 @@ impl TerminalPane {
             )))
             .role(gpui::Role::Link)
             .aria_label(url.clone())
+            .test_support()
             .debug_selector(|| "terminal-link-label".into())
             .flex()
             .flex_none()
@@ -3959,30 +3980,49 @@ impl TerminalPane {
               .flex()
               .items_center()
               .gap_1p5()
+              .flex_1()
               .min_w_0()
+              .overflow_hidden()
               .child(ui::icon(agent_icon(agent), 16., d.foreground))
               .child(self.title(&column.id, name.clone(), d.foreground, cx))
-              .child(self.tooltips.wrap(
-                format!("terminal-workspace-label-tip-{}", column.id),
-                Side::Top,
-                Some(TooltipContent::Text(label_name.clone().into())),
-                label(
-                  label_name,
-                  workspace_path.is_none(),
-                  key,
-                  self.react.clone(),
-                ),
-                cx,
-              ))
+              .child(
+                self
+                  .tooltips
+                  .wrap(
+                    format!("terminal-workspace-label-tip-{}", column.id),
+                    Side::Top,
+                    Some(TooltipContent::Text(label_name.clone().into())),
+                    label(
+                      label_name,
+                      workspace_path.is_none(),
+                      key,
+                      self.react.clone(),
+                    ),
+                    cx,
+                  )
+                  .min_w_0()
+                  .flex()
+                  .overflow_hidden(),
+              )
               .children(link),
           )
           .child(
             div()
               .flex()
+              .flex_shrink_0()
               .items_center()
               .gap_1()
               .children(waiting.map(|waiting| {
+                let count = waiting.count;
                 div()
+                  .id("terminal-msg-badge")
+                  .role(gpui::Role::Status)
+                  .aria_label(if count == 1 {
+                    "1 message waiting".to_string()
+                  } else {
+                    format!("{count} messages waiting")
+                  })
+                  .test_support()
                   .debug_selector(|| "terminal-msg-badge".into())
                   .child(ui::Count::new(waiting.count, &d))
               }))

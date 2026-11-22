@@ -320,6 +320,28 @@ pub fn suggestion_diff(original: Option<&str>, suggested: &str) -> Option<Vec<Ro
   (!rows.is_empty()).then_some(rows)
 }
 
+/// How many lines a review thread's comment covers: `startLine..=line`.
+pub fn suggestion_span(thread: &GhReviewThread) -> usize {
+  match (thread.start_line, thread.line) {
+    (Some(start), Some(end)) if end >= start => usize::try_from(end - start + 1).unwrap_or(1),
+    _ => 1,
+  }
+}
+
+/// The `lines` a GitHub suggestion replaces: the last lines of the
+/// comment's `diffHunk`, which GitHub ends on the commented line.
+pub fn github_suggestion_original(diff_hunk: &str, lines: usize) -> Option<String> {
+  let body: Vec<&str> = diff_hunk.lines().filter(|l| !l.starts_with("@@")).collect();
+  let start = body.len().checked_sub(lines.max(1))?;
+  Some(
+    body[start..]
+      .iter()
+      .map(|l| l.get(1..).unwrap_or(""))
+      .collect::<Vec<_>>()
+      .join("\n"),
+  )
+}
+
 /// `formatGithubCommentDate`: "Mar 4", with the year when not this one.
 pub fn comment_date(iso: &str, this_year: i32) -> String {
   use chrono::Datelike;
@@ -358,6 +380,7 @@ mod tests {
       is_outdated: false,
       path: path.into(),
       line,
+      start_line: None,
       diff_side: side.into(),
       comments: vec![GhReviewComment {
         id: "c".into(),
@@ -509,6 +532,39 @@ mod tests {
     );
     assert_eq!(suggestion_diff(None, "x"), None);
     assert_eq!(suggestion_diff(Some("x"), "x"), None);
+  }
+
+  #[test]
+  fn github_suggestion_original_is_the_hunks_last_line() {
+    let hunk = "@@ -1,2 +1,3 @@\n context\n+No scrape endpoint.";
+    assert_eq!(
+      github_suggestion_original(hunk, 1).as_deref(),
+      Some("No scrape endpoint.")
+    );
+    assert_eq!(github_suggestion_original("", 1), None);
+  }
+
+  #[test]
+  fn github_suggestion_original_spans_a_multi_line_comment() {
+    let hunk = "@@ -1,3 +1,3 @@\n a\n+b\n+c";
+    assert_eq!(github_suggestion_original(hunk, 2).as_deref(), Some("b\nc"));
+    assert_eq!(github_suggestion_original(hunk, 4), None);
+  }
+
+  #[test]
+  fn suggestion_span_counts_start_line_to_line() {
+    let mut t = thread("a.rs", Some(4), "RIGHT");
+    assert_eq!(suggestion_span(&t), 1);
+    t.start_line = Some(2);
+    assert_eq!(suggestion_span(&t), 3);
+    t.start_line = Some(9);
+    assert_eq!(suggestion_span(&t), 1);
+  }
+
+  #[test]
+  fn an_empty_suggestion_removes_the_line() {
+    let rows = suggestion_diff(Some("No scrape endpoint."), "").expect("rows");
+    assert_eq!(rows, vec![plain(RowKind::Removed, "No scrape endpoint.")]);
   }
 
   #[test]

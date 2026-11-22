@@ -23,7 +23,7 @@
 }
 
 .breadcrumb a {
-  color: var(--ifm-color-primary);
+  color: var(--treq-link);
   text-decoration: none;
 }
 
@@ -33,7 +33,7 @@
 
 .pageTitle {
   font-size: 2rem;
-  font-weight: 700;
+  font-weight: 500;
   margin: 0 0 0.4rem;
 }
 
@@ -69,14 +69,14 @@
 
 .scenarioTab:hover {
   border-color: var(--ifm-color-primary);
-  color: var(--ifm-color-primary);
+  color: var(--treq-link);
 }
 
 .scenarioTabActive {
   background: var(--ifm-color-primary);
   border-color: var(--ifm-color-primary);
-  color: #fff;
-  font-weight: 600;
+  color: var(--treq-on-brand);
+  font-weight: 500;
 }
 
 .scenarioTabActive:hover {
@@ -148,8 +148,8 @@
 
 .stepsPanelTitle {
   font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
+  font-weight: 500;
+  text-transform: none;
   letter-spacing: 0.06em;
   color: var(--ifm-color-emphasis-700);
 }
@@ -209,8 +209,8 @@
 .stepStatusActive {
   border: 2px solid var(--ifm-color-primary);
   background: var(--ifm-color-primary);
-  color: #fff;
-  font-weight: 700;
+  color: var(--treq-on-brand);
+  font-weight: 500;
 }
 
 .stepStatusDone {
@@ -241,8 +241,8 @@
   font-size: 0.62rem;
   padding: 1px 5px;
   border-radius: 3px;
-  font-weight: 600;
-  text-transform: uppercase;
+  font-weight: 500;
+  text-transform: none;
   letter-spacing: 0.04em;
 }
 
@@ -268,7 +268,7 @@
   border-radius: 3px;
   background: rgba(16, 185, 129, 0.12);
   color: #10b981;
-  font-weight: 600;
+  font-weight: 500;
   white-space: nowrap;
 }
 
@@ -303,7 +303,7 @@
 .navBtn:hover:not(:disabled) {
   background: var(--ifm-color-primary);
   border-color: var(--ifm-color-primary);
-  color: #fff;
+  color: var(--treq-on-brand);
 }
 
 .navBtn:disabled {
@@ -314,8 +314,8 @@
 .navBtnPrimary {
   background: var(--ifm-color-primary);
   border-color: var(--ifm-color-primary);
-  color: #fff;
-  font-weight: 600;
+  color: var(--treq-on-brand);
+  font-weight: 500;
 }
 
 .navBtnPrimary:hover:not(:disabled) {
@@ -367,7 +367,7 @@
 
 .graphTitle {
   font-size: 0.85rem;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--ifm-font-color-base);
 }
 
@@ -440,8 +440,8 @@
   border-radius: 99px;
   background: #10b981;
   color: #fff;
-  font-weight: 700;
-  text-transform: uppercase;
+  font-weight: 500;
+  text-transform: none;
   letter-spacing: 0.05em;
   margin-left: 0.25rem;
 }
