@@ -5,13 +5,14 @@
 
 use crate::gpui_shell::ui::{self, zpx, A11yDisabledExt as _, TextSize, Tone};
 use crate::result_ext::ResultExt;
+use gpui_kit::base::ObservedElement;
 use std::{
   cell::{Cell, RefCell},
   rc::Rc,
   time::Duration,
 };
+use treq_ui::SelectorExt as _;
 
-use gpui_kit::base::TestSupportExt as _;
 use serde::{Deserialize, Serialize};
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, px, svg, Animation, AnimationExt as _, AnyElement, App, ClickEvent,
@@ -789,8 +790,7 @@ impl Render for Sidebar {
       ));
 
     let mut sidebar = ui::text(div(), TextSize::Sm)
-      .id("sidebar")
-      .debug_selector(|| "sidebar".into())
+      .selector("sidebar")
       .relative()
       .flex()
       .flex_col()
@@ -849,8 +849,7 @@ impl Render for Sidebar {
     let grouped = snapshot.repos.iter().any(|repo| repo.label.is_some());
     let any_rows = self.items.iter().any(|item| matches!(item, Item::Row(..)));
     let list = div()
-      .id("workspaces")
-      .debug_selector(|| "workspaces".into())
+      .selector("workspaces")
       .flex_1()
       .min_h_0()
       // A click on the empty list clears the selection; it is not a control.
@@ -934,10 +933,9 @@ impl Render for Sidebar {
 
 /// The webview modal's backdrop, continued over the sidebar in the same
 /// translucent black. It takes every click and hover.
-fn modal_backdrop(palette: &Palette, opacity: f32) -> gpui::Stateful<gpui::Div> {
+fn modal_backdrop(palette: &Palette, opacity: f32) -> ObservedElement<gpui::Stateful<gpui::Div>> {
   div()
-    .id("modal-backdrop")
-    .debug_selector(|| "modal-backdrop".into())
+    .selector("modal-backdrop")
     .absolute()
     .inset_0()
     .bg(palette.scrim().alpha(opacity.clamp(0., 1.)))
@@ -1054,14 +1052,11 @@ impl Sidebar {
     let disabled = disabled_reason.is_some();
     let tip = disabled_reason.unwrap_or(tooltip).to_string();
     let key = id.clone();
-    let selector = id.to_string();
     div()
-      .id(id.clone())
-      .debug_selector(move || selector)
+      .a11y_disabled(disabled)
+      .selector(id.clone())
       .role(Role::Button)
       .aria_label(tooltip)
-      .a11y_disabled(disabled)
-      .test_support()
       .relative()
       .flex()
       .flex_none()
@@ -1292,11 +1287,9 @@ impl Sidebar {
       .min_w_0()
       .child(
         div()
-          .id("project-button")
-          .debug_selector(|| "project-button".into())
+          .selector("project-button")
           .role(Role::Button)
           .aria_label(SharedString::from(format!("Project: {name}")))
-          .test_support()
           .flex()
           .items_center()
           .gap_1p5()
@@ -1435,8 +1428,7 @@ impl Sidebar {
     let primary = palette.primary;
     let sink = self.sink.clone();
     div()
-      .id("resize-handle")
-      .debug_selector(|| "resize-handle".into())
+      .selector("resize-handle")
       .absolute()
       .top_0()
       .bottom_0()
@@ -1541,10 +1533,7 @@ impl Sidebar {
     } else {
       // The React sidebar flips the branch icon vertically.
       div()
-        .debug_selector({
-          let selector = format!("{prefix}workspace-{id}-icon");
-          move || selector
-        })
+        .selector(format!("{prefix}workspace-{id}-icon"))
         .flex_none()
         .child(
           icon(theme::ICON_PR, 12., branch_color)
@@ -1570,11 +1559,11 @@ impl Sidebar {
             .as_ref()
             .is_some_and(|s| s.color == StatusColor::Red),
         |this| {
-          this.child(
-            div()
-              .debug_selector(move || format!("conflict-{id}"))
-              .child(ui::Dot::new(Tone::Danger, "Conflict", palette)),
-          )
+          this.child(div().selector(format!("conflict-{id}")).child(ui::Dot::new(
+            Tone::Danger,
+            "Conflict",
+            palette,
+          )))
         },
       )
       .when_some(row.status.as_ref(), |this, status| {
@@ -1584,19 +1573,17 @@ impl Sidebar {
         } else {
           this.child(
             div()
-              .id(("status-dot", id as u64))
+              .selector(format!("status-{id}"))
               .role(Role::Image)
               .aria_label(match status.color {
                 StatusColor::Red => "Conflict",
                 StatusColor::Yellow => "Uncommitted changes",
                 StatusColor::Neutral => "Idle",
               })
-              .debug_selector(move || format!("status-{id}"))
               .flex_none()
               .size(zpx(8.))
               .rounded_full()
-              .bg(color)
-              .test_support(),
+              .bg(color),
           )
         }
       });
@@ -1632,10 +1619,7 @@ impl Sidebar {
         // An elbow into the row, not a bar that reads as a selection marker.
         this.overlay(
           div()
-            .debug_selector({
-              let selector = format!("{prefix}workspace-{id}-elbow");
-              move || selector
-            })
+            .selector(format!("{prefix}workspace-{id}-elbow"))
             .absolute()
             .top(zpx(-ELBOW_REACH))
             .left(zpx(guide_left(row.depth) + group_indent))
@@ -1649,10 +1633,7 @@ impl Sidebar {
       .leading(leading)
       .child(
         div()
-          .debug_selector({
-            let selector = format!("{prefix}workspace-{id}-title");
-            move || selector
-          })
+          .selector(format!("{prefix}workspace-{id}-title"))
           .flex_1()
           .min_w_0()
           .truncate()
@@ -1769,7 +1750,7 @@ fn skeleton_row(index: usize, palette: &Palette) -> impl IntoElement {
   // Varying widths, like the React sidebar's skeleton.
   let width = [70., 55., 80., 60., 75., 50.][index % 6];
   div()
-    .debug_selector(move || format!("skeleton-{index}"))
+    .selector(format!("skeleton-{index}"))
     .flex()
     .items_center()
     .gap_2()

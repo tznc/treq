@@ -19,22 +19,6 @@ ignores:
   - "crates/treq-ui/**/*_tests.rs"
   # Baseline: files with bare debug selectors. Do not add to it;
   # name each element with `.selector(..)` and drop the file from this list.
-  - "crates/treq-ui/src/alert.rs"
-  - "crates/treq-ui/src/card.rs"
-  - "crates/treq-ui/src/dialog.rs"
-  - "crates/treq-ui/src/empty_state.rs"
-  - "crates/treq-ui/src/fold_toggle.rs"
-  - "crates/treq-ui/src/form.rs"
-  - "crates/treq-ui/src/input_group.rs"
-  - "crates/treq-ui/src/path_field.rs"
-  - "crates/treq-ui/src/section_header.rs"
-  - "crates/treq-ui/src/tabs.rs"
-  - "src-tauri/src/gpui_shell/form.rs"
-  - "src-tauri/src/gpui_shell/overlay/mod.rs"
-  - "src-tauri/src/gpui_shell/popover/checks.rs"
-  - "src-tauri/src/gpui_shell/popover/details.rs"
-  - "src-tauri/src/gpui_shell/popover/mod.rs"
-  - "src-tauri/src/gpui_shell/popup.rs"
   - "src-tauri/src/gpui_shell/screen/agent_card.rs"
   - "src-tauri/src/gpui_shell/screen/changes.rs"
   - "src-tauri/src/gpui_shell/screen/changes/pr.rs"
@@ -78,8 +62,6 @@ ignores:
   - "src-tauri/src/gpui_shell/screen/workspace_deletion.rs"
   - "src-tauri/src/gpui_shell/screen/workspace_dialog.rs"
   - "src-tauri/src/gpui_shell/screen/workspace_title.rs"
-  - "src-tauri/src/gpui_shell/sidebar/mod.rs"
-  - "src-tauri/src/gpui_shell/toast_layer.rs"
 utils:
   in-chain:
     any:
