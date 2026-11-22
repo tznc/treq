@@ -144,3 +144,16 @@ export async function dismissPopover(page: Page): Promise<void> {
   await page.waitForTimeout(500);
 }
 
+
+/**
+ * A .catch handler for a chaos action that may miss: random input moves the
+ * screen, so its target can close, move or be covered before Playwright
+ * reaches it. The miss goes to the run's notes and stands in as null; the
+ * run's liveness checks catch real breakage.
+ */
+export function noteMiss(note: (what: string) => void, action: string): (err: unknown) => null {
+  return (err) => {
+    note(`${action} missed: ${err instanceof Error ? err.message.split("\n")[0] : "non-Error rejection"}`);
+    return null;
+  };
+}

@@ -42,11 +42,14 @@ export async function launchMobile(): Promise<MobileApp> {
     env: { ...appEnv(fixture), GPUI_PLAYWRIGHT: String(mobilePort) },
   });
   const deadline = Date.now() + 120_000;
+  let lastError: unknown;
   for (;;) {
     try {
       if ((await fetch(`http://127.0.0.1:${mobilePort}/`)).ok) break;
-    } catch {}
-    if (Date.now() > deadline) throw new Error("the mobile app did not start");
+    } catch (err) {
+      lastError = err;
+    }
+    if (Date.now() > deadline) throw new Error("the mobile app did not start", { cause: lastError });
     await new Promise((r) => setTimeout(r, 500));
   }
   let browser: Browser | undefined;
@@ -58,7 +61,7 @@ export async function launchMobile(): Promise<MobileApp> {
       await page.setViewportSize({ width: 420, height: 860 });
       return { app, browser, page, home: fixture.home };
     } catch (error) {
-      await browser?.close().catch(() => {});
+      await browser?.close();
       if (attempt >= 10) throw error;
       await new Promise((r) => setTimeout(r, 1000));
     }

@@ -19,13 +19,7 @@ function fixtureRoot(): string {
   const root = readdirSync(tmpdir())
     .filter((d) => d.startsWith("treq-qa-"))
     .map((d) => join(tmpdir(), d))
-    .filter((d) => {
-      try {
-        return statSync(join(d, "qa-extra.json")).isFile();
-      } catch {
-        return false;
-      }
-    })
+    .filter((d) => statSync(join(d, "qa-extra.json"), { throwIfNoEntry: false })?.isFile() ?? false)
     .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
   if (!root) throw new Error("no QA fixture");
   return root;
@@ -61,6 +55,7 @@ test("agent start: a long prompt reaches the agent without an Enter", async ({ p
             });
             return true;
           } catch {
+            // The CLI exits non-zero until the app has registered its window.
             return false;
           }
         },

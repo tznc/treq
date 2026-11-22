@@ -18,12 +18,15 @@ const fixture = makeFixture("treq-qa-onboarding-", "hello-repo");
 
 async function waitForServer(): Promise<void> {
   const deadline = Date.now() + 120_000;
+  let lastError: unknown;
   for (;;) {
     try {
       const res = await fetch(`http://127.0.0.1:${onboardingPort}/`);
       if (res.ok) return;
-    } catch {}
-    if (Date.now() > deadline) throw new Error("onboarding app did not start");
+    } catch (err) {
+      lastError = err;
+    }
+    if (Date.now() > deadline) throw new Error("onboarding app did not start", { cause: lastError });
     await new Promise((r) => setTimeout(r, 500));
   }
 }
@@ -64,7 +67,7 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  await browser?.close().catch(() => {});
+  await browser?.close();
   app?.kill("SIGTERM");
 });
 
