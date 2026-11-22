@@ -30,7 +30,8 @@ export default function NavbarAuthLinks({
 
   return (
     <>
-      <Wrapper className={wrapperClass}>
+      {/* The account link stays in the collapsed top bar (custom.css). */}
+      <Wrapper className={clsx(wrapperClass, { "navbar-account": !mobile })}>
         <a
           href={accountHref}
           className="button button--secondary button--outline button--sm"

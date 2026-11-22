@@ -710,6 +710,13 @@ const GROUP_INDENT: f32 = 4.;
 
 /// Indentation of a row's content: one 12px icon per level, so a child's
 /// icon starts past its parent's.
+/// The space between two workspace rows.
+const ROW_GAP: f32 = 0.;
+
+/// How far a nested row's elbow reaches above the row: across the gap and
+/// the parent row's space under its 12px icon, stopping 1px short of it.
+const ELBOW_REACH: f32 = ROW_GAP + (theme::ROW_HEIGHT_COMPACT - 12.) / 2. - 1.;
+
 fn row_indent(depth: u32) -> f32 {
   10. + depth as f32 * 12.
 }
@@ -806,7 +813,7 @@ impl Render for Sidebar {
     // row; a single repository keeps its home row up here.
     if !snapshot.repos.iter().any(|repo| repo.label.is_some()) {
       for repo in &snapshot.repos {
-        sidebar = sidebar.child(self.home_row(repo, &palette, cx));
+        sidebar = sidebar.child(self.home_row(repo, &palette, None, cx));
       }
     }
     if let Some(active) = snapshot.project_home {
@@ -1148,10 +1155,12 @@ impl Sidebar {
     &self,
     repo: &RepoSection,
     palette: &Palette,
+    fold: Option<ui::FoldToggle>,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
     let label = repo.home_ref.clone().unwrap_or_else(|| "…".into());
     let key = SharedString::from(format!("home:{}", repo.path));
+    let group_header = fold.is_some();
     let title: gpui::AnyElement = match &repo.label {
       // Several repositories: the name over the checked-out branch.
       Some(name) => div()
@@ -1161,10 +1170,13 @@ impl Sidebar {
         .min_w_0()
         .child(
           div()
+            .flex()
+            .items_center()
+            .gap_1()
             .min_w_0()
-            .truncate()
             .font_weight(gpui::FontWeight::MEDIUM)
-            .child(name.clone()),
+            .child(div().min_w_0().truncate().child(name.clone()))
+            .children(fold),
         )
         .when_some(
           repo.home_ref.clone().filter(|_| !repo.missing),
@@ -1211,6 +1223,9 @@ impl Sidebar {
       .relative()
       .gap_1p5()
       .mx_2()
+      // A group header spans its rows' width, so its fold chevron ends
+      // where their status dots do; the padding keeps its name in place.
+      .when(group_header, |this| this.mx_0().pl_4())
       .rounded_md()
       .text_color(palette.sidebar_foreground)
       .when(repo.missing, |this| this.opacity(0.5))
@@ -1360,8 +1375,9 @@ impl Sidebar {
       })
   }
 
-  /// A repository's group header in a window with several: a fold chevron,
-  /// then the repository's home row (its clone and checked-out branch).
+  /// A repository's group header in a window with several: the
+  /// repository's home row (its clone and checked-out branch), with a fold
+  /// chevron after the name.
   fn group_header(
     &self,
     repo: &RepoSection,
@@ -1369,39 +1385,16 @@ impl Sidebar {
     palette: &Palette,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
-    let chevron = if repo.collapsed {
-      theme::ICON_CHEVRON_RIGHT
-    } else {
-      theme::ICON_CHEVRON_DOWN
-    };
-    div()
-      .flex()
-      .items_center()
-      .child(
-        div()
-          .selector(format!("group-{name}"))
-          .role(Role::Button)
-          .aria_label(SharedString::from(format!("Fold {name}")))
-          .flex()
-          .flex_none()
-          .items_center()
-          .justify_center()
-          .size(zpx(20.))
-          .rounded_md()
-          .cursor_pointer()
-          .hover(|style| style.bg(palette.hover()))
-          .child(icon(chevron, 14., palette.sidebar_foreground.opacity(0.7)))
-          .on_click(self.on_action(SidebarAction::ToggleRepo {
-            repo_path: repo.path.clone(),
-          })),
-      )
-      .child(
-        div()
-          .flex_1()
-          .min_w_0()
-          .ml_neg_1p5()
-          .child(self.home_row(repo, palette, cx)),
-      )
+    let fold = ui::FoldToggle::new(
+      format!("group-{name}"),
+      name.to_string(),
+      repo.collapsed,
+      palette,
+    )
+    .on_toggle(self.on_action(SidebarAction::ToggleRepo {
+      repo_path: repo.path.clone(),
+    }));
+    self.home_row(repo, palette, Some(fold), cx)
   }
 
   /// A row above the workspace list: GitHub or Linear.
@@ -1469,7 +1462,7 @@ impl Sidebar {
     let gap = match item {
       _ if ix == 0 => 0.,
       _ if first_of_repo => 2.,
-      _ => 4.,
+      _ => ROW_GAP,
     };
     let content = match item {
       Item::Label(_) => {
@@ -1539,8 +1532,13 @@ impl Sidebar {
       ui::spinner(("archiving", id as u64), 12., palette.muted_foreground).into_any_element()
     } else {
       // The React sidebar flips the branch icon vertically.
-      icon(theme::ICON_PR, 12., branch_color)
-        .with_transformation(Transformation::scale(gpui::size(1., -1.)))
+      div()
+        .selector(format!("{prefix}workspace-{id}-icon"))
+        .flex_none()
+        .child(
+          icon(theme::ICON_PR, 12., branch_color)
+            .with_transformation(Transformation::scale(gpui::size(1., -1.))),
+        )
         .into_any_element()
     };
 
@@ -1599,7 +1597,7 @@ impl Sidebar {
     let row_el = ui::Row::new(selector, palette)
       .role(Role::Button)
       .label(label.clone())
-      .density(ui::RowDensity::Default)
+      .density(ui::RowDensity::Compact)
       .selected(row.selected)
       .interactive(!row.archiving)
       .group(group.clone())
@@ -1621,15 +1619,15 @@ impl Sidebar {
         // An elbow into the row, not a bar that reads as a selection marker.
         this.overlay(
           div()
+            .selector(format!("{prefix}workspace-{id}-elbow"))
             .absolute()
-            .top_0()
+            .top(zpx(-ELBOW_REACH))
             .left(zpx(guide_left(row.depth) + group_indent))
-            .h(zpx(16.))
+            .h(zpx(theme::ROW_HEIGHT_COMPACT / 2. + ELBOW_REACH))
             .w(zpx(6.))
             .border_l_1()
             .border_b_1()
-            .border_color(palette.stack_connector())
-            .rounded_bl(ui::radius::SM),
+            .border_color(palette.stack_connector()),
         )
       })
       .leading(leading)

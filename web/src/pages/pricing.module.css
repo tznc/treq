@@ -14,7 +14,7 @@
 
 .title {
   font-size: 2.5rem;
-  font-weight: 700;
+  font-weight: 500;
   margin: 0 0 0.75rem;
   letter-spacing: -0.02em;
 }
@@ -49,14 +49,14 @@
 
 .planName {
   font-size: 1.35rem;
-  font-weight: 700;
+  font-weight: 500;
   margin: 0 0 0.25rem;
 }
 
 .planSeats {
   margin: 0 0 0.75rem;
   font-size: 0.88rem;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--ifm-color-emphasis-600);
 }
 
@@ -69,7 +69,7 @@
 
 .priceAmount {
   font-size: 2.5rem;
-  font-weight: 700;
+  font-weight: 500;
   letter-spacing: -0.03em;
   line-height: 1;
 }
@@ -109,7 +109,7 @@
   flex-shrink: 0;
   width: 1.1rem;
   text-align: center;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .featureIncluded {
@@ -117,7 +117,7 @@
 }
 
 .featureIncluded .featureMark {
-  color: var(--ifm-color-primary);
+  color: var(--treq-link);
 }
 
 .featureExcluded {
@@ -130,34 +130,31 @@
   justify-content: center;
   width: 100%;
   padding: 0.7rem 1rem;
-  border-radius: 8px;
-  font-weight: 600;
+  border-radius: 6px;
+  font-weight: 500;
   text-decoration: none !important;
+  transition: transform 0.15s ease;
 }
 
 .planButtonPrimary {
-  background: linear-gradient(
-    135deg,
-    var(--ifm-color-primary) 0%,
-    var(--ifm-color-primary-dark) 100%
-  );
-  color: #fff !important;
+  background: var(--treq-brand);
+  color: var(--treq-on-brand) !important;
   border: none;
 }
 
 .planButtonPrimary:hover {
-  color: #fff !important;
-  opacity: 0.92;
+  color: var(--treq-on-brand) !important;
+  transform: translateY(-1px);
 }
 
 .planButtonSecondary {
-  background: transparent;
-  color: var(--ifm-color-primary) !important;
-  border: 1px solid var(--ifm-color-primary);
+  background: var(--treq-tint);
+  color: var(--treq-fg) !important;
+  border: none;
 }
 
 .planButtonSecondary:hover {
-  background: rgba(59, 156, 255, 0.08);
+  transform: translateY(-1px);
 }
 
 
@@ -169,7 +166,7 @@
 
 .sectionHeading {
   font-size: 1.5rem;
-  font-weight: 700;
+  font-weight: 500;
   margin: 0 0 1.25rem;
   letter-spacing: -0.01em;
 }
@@ -182,9 +179,9 @@
   overflow-x: auto;
   overflow-y: hidden;
   border: 1px solid var(--ifm-color-emphasis-200);
-  border-radius: 14px;
+  border-radius: 12px;
   background: var(--ifm-background-surface-color, var(--ifm-background-color));
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.05);
+  box-shadow: none;
 }
 
 .comparisonTable {
@@ -218,9 +215,9 @@
 .comparisonPlanHeader {
   border-bottom: 1px solid var(--ifm-color-emphasis-200);
   font-size: 0.8rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--ifm-color-emphasis-600);
 }
 
@@ -229,7 +226,7 @@
 }
 
 .comparisonPlanHeaderPro {
-  color: var(--ifm-color-primary-dark);
+  color: var(--treq-link);
   background: rgba(59, 156, 255, 0.1);
 }
 
@@ -239,7 +236,7 @@
 }
 
 .comparisonFeatureCell {
-  font-weight: 600;
+  font-weight: 500;
   color: var(--ifm-font-color-base);
 }
 
@@ -278,12 +275,12 @@
 
 .comparisonIcon {
   font-size: 1.15rem;
-  font-weight: 700;
+  font-weight: 500;
   line-height: 1;
 }
 
 .comparisonIconYes {
-  color: var(--ifm-color-primary);
+  color: var(--treq-link);
 }
 
 .comparisonIconNo {
@@ -329,7 +326,7 @@
   gap: 1rem;
   padding: 1rem 1.15rem;
   font-size: 1rem;
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.4;
   cursor: pointer;
   user-select: none;
@@ -356,7 +353,7 @@
 }
 
 .faqQuestion:hover {
-  color: var(--ifm-color-primary-dark);
+  color: var(--treq-link);
 }
 
 .faqAnswer {

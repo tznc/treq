@@ -23,7 +23,7 @@
 }
 
 .breadcrumb a {
-  color: var(--ifm-color-primary);
+  color: var(--treq-link);
   text-decoration: none;
 }
 
@@ -33,7 +33,7 @@
 
 .pageTitle {
   font-size: 2rem;
-  font-weight: 700;
+  font-weight: 500;
   margin: 0 0 0.4rem;
 }
 
@@ -73,7 +73,7 @@
   border-radius: 999px;
   padding: 0.7rem 2rem;
   font-size: 1rem;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   transition: opacity 0.2s, transform 0.1s;
   white-space: nowrap;
@@ -117,7 +117,7 @@
 
 .ideasTitle {
   font-size: 1.2rem;
-  font-weight: 600;
+  font-weight: 500;
   margin: 0 0 1rem;
   color: var(--ifm-heading-color);
 }
@@ -185,7 +185,7 @@
 .copyBtn:hover {
   background: var(--ifm-color-primary);
   border-color: var(--ifm-color-primary);
-  color: #fff;
+  color: var(--treq-on-brand);
 }
 
 @media (max-width: 600px) {
