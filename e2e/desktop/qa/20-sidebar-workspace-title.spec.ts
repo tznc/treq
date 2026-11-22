@@ -66,7 +66,7 @@ test("sidebar-workspace-title: a titled row shows its title", async ({ page }) =
   await settle(page, 800);
   await picker.keyboard.press("Enter");
   await page.getByTestId("confirm-confirm").click();
-  await page.waitForTimeout(2500);
+  await expect(row(page, TITLE)).toHaveCount(0);
   await ready(page);
   await expect(row(page, TITLE)).toHaveCount(0);
 });

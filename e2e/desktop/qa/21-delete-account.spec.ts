@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { chromium, expect, test, type Browser, type Page } from "@playwright/test";
 import { appBinary, port } from "../env.ts";
-import { appEnv, gitIn, makeFixture, writeFakeAgent } from "../harness.ts";
+import { appEnv, gitIn, makeFixture, serverUp, stopApp, writeFakeAgent } from "../harness.ts";
 import { capture, theme } from "./capture.ts";
 import { settle } from "./helpers.ts";
 
@@ -55,20 +55,6 @@ async function organizations(session: Session, body: unknown): Promise<Record<st
   return json;
 }
 
-async function waitForServer(): Promise<void> {
-  const deadline = Date.now() + 120_000;
-  let lastError: unknown;
-  for (;;) {
-    try {
-      if ((await fetch(`http://127.0.0.1:${appPort}/`)).ok) return;
-    } catch (err) {
-      lastError = err;
-    }
-    if (Date.now() > deadline) throw new Error("delete-account app did not start", { cause: lastError });
-    await new Promise((r) => setTimeout(r, 500));
-  }
-}
-
 /** Starts the app on a new repository, signed in with `session`. */
 async function launch(session: Session): Promise<App> {
   const fixture = makeFixture("treq-qa-delete-account-");
@@ -101,7 +87,7 @@ async function launch(session: Session): Promise<App> {
       GDK_SCALE: process.env.GDK_SCALE ?? "2",
     },
   });
-  await waitForServer();
+  await serverUp(app, appPort);
   const browser = await chromium.connect(`ws://127.0.0.1:${appPort}/`);
   const page = await (await browser.newContext()).newPage();
   await page.setViewportSize({ width: 1400, height: 900 });
@@ -110,10 +96,7 @@ async function launch(session: Session): Promise<App> {
 
 async function stop({ app, browser }: App): Promise<void> {
   await browser.close();
-  const exited = new Promise((r) => app.once("exit", r));
-  app.kill("SIGTERM");
-  await Promise.race([exited, new Promise((r) => setTimeout(r, 10_000))]);
-  if (app.exitCode === null && app.signalCode === null) app.kill("SIGKILL");
+  await stopApp(app);
 }
 
 test("account: delete refused while last owner, then deleted and signed out", async () => {

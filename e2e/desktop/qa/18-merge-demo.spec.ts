@@ -10,29 +10,38 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
 
-/** With DEMO_FRAMES=<dir>, screenshot the window continuously so the run
+/** With DEMO_FRAMES=<dir>, screenshot the window every 150ms so the run
  * can be stitched into a video (x11grab sees nothing of GPUI's surface). */
 function recordFrames(page: Page): () => Promise<void> {
   const dir = process.env.DEMO_FRAMES;
   if (!dir) return async () => {};
   mkdirSync(dir, { recursive: true });
   let n = 0;
-  let stop = false;
-  const loop = (async () => {
-    while (!stop) {
-      const path = join(dir, `${String(n).padStart(5, "0")}.png`);
-      try {
-        await page.screenshot({ path });
-        n++;
-      } catch {
-        // The window may be mid-redraw; take the next frame.
-      }
-      await new Promise((r) => setTimeout(r, 150));
-    }
-  })();
+  let skipped = 0;
+  let frame: Promise<void> | null = null;
+  const timer = setInterval(() => {
+    // A tick that lands while the last frame is still being taken waits for the next.
+    if (frame) return;
+    const path = join(dir, `${String(n).padStart(5, "0")}.png`);
+    frame = page
+      .screenshot({ path })
+      .then(
+        () => {
+          n++;
+        },
+        // The window may be mid-redraw; the next tick takes another frame.
+        () => {
+          skipped++;
+        },
+      )
+      .finally(() => {
+        frame = null;
+      });
+  }, 150);
   return async () => {
-    stop = true;
-    await loop;
+    clearInterval(timer);
+    await frame;
+    console.log(`[merge-demo] ${n} frames in ${dir}, ${skipped} skipped`);
   };
 }
 

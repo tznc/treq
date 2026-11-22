@@ -49,11 +49,13 @@ test("changes-many-files: a long file list scrolls and picks a file", async ({ p
     // Scroll the sidebar list to its end.
     await page.mouse.move(330, 500);
     // The virtual list moves as far as the rows measured so far reach per
-    // wheel step, so it takes a few dozen steps to get to the end.
-    for (let i = 0; i < 80; i++) {
+    // wheel step, so it takes a few dozen steps to get to the end. Each
+    // wheel resolves once the window has drawn it.
+    const last = page.getByRole("button", { name: `src/many/${name(FILES - 1)}`, exact: true });
+    await expect(async () => {
       await page.mouse.wheel(0, 100_000);
-      await page.waitForTimeout(60);
-    }
+      await expect(last).toBeInViewport({ timeout: 1 });
+    }, "the list reaches its last file").toPass({ intervals: [0], timeout: 60_000 });
     await settle(page, 800);
     await capture(page, {
       name: "22-changes-many-files-02-end",

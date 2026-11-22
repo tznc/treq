@@ -2,34 +2,20 @@
 // repository, on its own port, so the first-run screen shows. It opens the
 // demo-free fixture repository through the native folder picker (GTK),
 // which `xdotool` types a path into.
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, expect, test, type Browser, type Page } from "@playwright/test";
 import { appBinary, port } from "../env.ts";
-import { appEnv, gitIn, makeFixture, writeFakeAgent } from "../harness.ts";
+import { appEnv, gitIn, makeFixture, serverUp, writeFakeAgent } from "../harness.ts";
 import { capture, screenShot, outDir, theme } from "./capture.ts";
+import { loaded } from "./helpers.ts";
 
 const onboardingPort = port + 1;
 let app: ChildProcess;
 let browser: Browser;
 let page: Page;
 const fixture = makeFixture("treq-qa-onboarding-", "hello-repo");
-
-async function waitForServer(): Promise<void> {
-  const deadline = Date.now() + 120_000;
-  let lastError: unknown;
-  for (;;) {
-    try {
-      const res = await fetch(`http://127.0.0.1:${onboardingPort}/`);
-      if (res.ok) return;
-    } catch (err) {
-      lastError = err;
-    }
-    if (Date.now() > deadline) throw new Error("onboarding app did not start", { cause: lastError });
-    await new Promise((r) => setTimeout(r, 500));
-  }
-}
 
 test.describe.configure({ mode: "serial" });
 
@@ -60,7 +46,7 @@ test.beforeAll(async () => {
       GDK_SCALE: process.env.GDK_SCALE ?? "2",
     },
   });
-  await waitForServer();
+  await serverUp(app, onboardingPort);
   browser = await chromium.connect(`ws://127.0.0.1:${onboardingPort}/`);
   page = await (await browser.newContext()).newPage();
   await page.setViewportSize({ width: 1400, height: 900 });
@@ -74,7 +60,8 @@ test.afterAll(async () => {
 test("onboarding: first run and open repository", async () => {
   const open = page.getByRole("button", { name: "Open repository…" });
   await expect(open).toBeVisible({ timeout: 60_000 });
-  await page.waitForTimeout(1500);
+  await expect(page.getByRole("heading", { name: "Open a repository" })).toBeVisible();
+  await loaded(page);
   await capture(page, {
     name: "01-onboarding-first-run",
     title: "Onboarding: first run, no repository",
@@ -87,7 +74,7 @@ test("onboarding: first run and open repository", async () => {
 
   // The native folder picker: GTK draws it, so the X screen is grabbed.
   await open.click();
-  await page.waitForTimeout(2500);
+  await expect.poll(pickerOpen, { message: "the folder picker opens" }).toBe(true);
   screenShot(join(outDir, `01-onboarding-folder-picker-${theme}.png`));
   writeFileSync(
     join(outDir, `01-onboarding-folder-picker-${theme}.json`),
@@ -104,7 +91,8 @@ test("onboarding: first run and open repository", async () => {
   // but never lists a folder or enables Open, so the run cancels it; the
   // main app (TREQ_E2E_REPO) covers an opened repository.
   closePicker();
-  await page.waitForTimeout(1000);
+  await expect.poll(pickerOpen, { message: "the folder picker closes" }).toBe(false);
+  await expect(open).toBeVisible();
   await capture(page, {
     name: "01-onboarding-picker-cancelled",
     title: "Onboarding after cancelling the folder picker",
@@ -119,7 +107,9 @@ test("onboarding: first run and open repository", async () => {
   // Other machines' + offers Add SSH host, which opens the own-VM form.
   await page.getByRole("button", { name: "Add another machine" }).click();
   await page.getByRole("button", { name: "Add SSH host" }).click();
-  await page.waitForTimeout(1500);
+  const close = page.getByRole("button", { name: "Close" });
+  await expect(page.getByRole("button", { name: "Continue" })).toBeVisible();
+  await expect(close).toBeVisible();
   await capture(page, {
     name: "01-onboarding-ssh-own-vm",
     title: "Open a repository: Add SSH host (your own VM) form",
@@ -131,10 +121,7 @@ test("onboarding: first run and open repository", async () => {
     ],
   });
   // The dialog closes with its X or Escape, as every other dialog does.
-  const close = page.getByRole("button", { name: "Close" });
-  await expect(close).toBeVisible();
   await page.keyboard.press("Escape");
-  await page.waitForTimeout(1000);
   await expect(close).toHaveCount(0);
   await capture(page, {
     name: "01-onboarding-ssh-after-escape",
@@ -144,15 +131,13 @@ test("onboarding: first run and open repository", async () => {
   });
   await page.getByRole("button", { name: "Add another machine" }).click();
   await page.getByRole("button", { name: "Add SSH host" }).click();
-  await page.waitForTimeout(1000);
   await close.click();
-  await page.waitForTimeout(1000);
   await expect(close).toHaveCount(0);
   await page.getByRole("button", { name: "Add another machine" }).click();
   await page.getByRole("button", { name: "Add SSH host" }).click();
-  await page.waitForTimeout(1000);
+  await expect(close).toBeVisible();
   await page.mouse.click(80, 80);
-  await page.waitForTimeout(1000);
+  await expect(close).toHaveCount(0);
   await capture(page, {
     name: "01-onboarding-ssh-after-backdrop-click",
     title: "Remote dialog after a click on the backdrop",
@@ -160,6 +145,11 @@ test("onboarding: first run and open repository", async () => {
     expectations: ["A click outside the dialog closes it"],
   });
 });
+
+/** GTK's folder picker is mapped: a window of its own, not a page. */
+function pickerOpen(): boolean {
+  return spawnSync("xdotool", ["search", "--onlyvisible", "--name", "Select folder"]).status === 0;
+}
 
 function closePicker(): void {
   try {

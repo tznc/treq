@@ -3,14 +3,22 @@
 // Settings, and when its window closes, the next window on the repository
 // shows it again, scrollback and all. Recorded as
 // `19-terminal-reattach-<theme>.mp4` (and a GIF of it) in `QA_OUT`.
-import { type ChildProcess, execFileSync, spawn } from "node:child_process";
+import { type ChildProcess, execFileSync, spawn, spawnSync } from "node:child_process";
 import { mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { windowPage } from "../fixture.ts";
 import { capture, outDir, theme } from "./capture.ts";
-import { mod, openTab, openWorkspace, row, settle } from "./helpers.ts";
+import {
+  mod,
+  openTab,
+  openWorkspace,
+  row,
+  screenChanged,
+  screenPixels,
+  settle,
+} from "./helpers.ts";
 
 const BRANCH = "feat/keyvalues-cache";
 const scale = Number(process.env.GDK_SCALE ?? "2");
@@ -86,21 +94,21 @@ x.XFlush(d)
   execFileSync("python3", ["-c", script, id]);
 }
 
-/** Picks `folder` in the GTK Select Folder dialog. */
+/** The GTK Select Folder dialog's X id, or "" while none shows. */
+function pickerWindow(): string {
+  const found = spawnSync("xdotool", ["search", "--onlyvisible", "--name", "Select folder"], {
+    encoding: "utf8",
+  });
+  return found.status === 0 ? found.stdout.trim().split("\n")[0] : "";
+}
+
+/**
+ * Picks `folder` in the GTK Select Folder dialog. GTK is not a page, so each
+ * step waits until the dialog has redrawn in answer to its keys.
+ */
 async function pickFolder(folder: string): Promise<void> {
-  const deadline = Date.now() + 15_000;
-  let dialog = "";
-  while (!dialog) {
-    try {
-      dialog = execFileSync("xdotool", ["search", "--onlyvisible", "--name", "Select folder"])
-        .toString()
-        .trim()
-        .split("\n")[0] ?? "";
-    } catch {
-      if (Date.now() > deadline) throw new Error("no folder picker");
-      await new Promise((r) => setTimeout(r, 300));
-    }
-  }
+  await expect.poll(pickerWindow, { message: "the folder picker opens", timeout: 15_000 }).not.toBe("");
+  const dialog = pickerWindow();
   execFileSync("xdotool", ["windowfocus", "--sync", dialog]);
   const geo = Object.fromEntries(
     execFileSync("xdotool", ["getwindowgeometry", "--shell", dialog], { encoding: "utf8" })
@@ -108,23 +116,28 @@ async function pickFolder(folder: string): Promise<void> {
       .filter(Boolean)
       .map((l) => l.split("=")),
   );
+  const box = {
+    x: Number(geo.X) / scale,
+    y: Number(geo.Y) / scale,
+    w: Number(geo.WIDTH) / scale,
+    h: Number(geo.HEIGHT) / scale,
+  };
+  const keys = async (...args: string[]) => {
+    const before = screenPixels(box);
+    execFileSync("xdotool", [args[0], "--window", dialog, ...args.slice(1)]);
+    await screenChanged(box, before);
+  };
   // It opens on Recent, where a typed path only searches: Home first.
-  execFileSync("xdotool", ["key", "--window", dialog, "alt+Home"]);
-  await new Promise((r) => setTimeout(r, 800));
-  execFileSync("xdotool", ["key", "--window", dialog, "ctrl+l"]);
-  await new Promise((r) => setTimeout(r, 500));
+  await keys("key", "alt+Home");
+  await keys("key", "ctrl+l");
   // The path, then Return to take the completion and Return to go in.
-  execFileSync("xdotool", ["type", "--window", dialog, "--delay", "20", `${folder}/`]);
-  await new Promise((r) => setTimeout(r, 800));
-  for (let i = 0; i < 2; i++) {
-    execFileSync("xdotool", ["key", "--window", dialog, "Return"]);
-    await new Promise((r) => setTimeout(r, 800));
-  }
+  await keys("type", "--delay", "20", `${folder}/`);
+  for (let i = 0; i < 2; i++) await keys("key", "Return");
   // Open, at the dialog's bottom right (GDK_SCALE=2).
   const x = Number(geo.X) + Number(geo.WIDTH) - 98;
   const y = Number(geo.Y) + Number(geo.HEIGHT) - 48;
   execFileSync("xdotool", ["mousemove", String(x), String(y), "click", "1"]);
-  await new Promise((r) => setTimeout(r, 1500));
+  await expect.poll(pickerWindow, { message: "the folder picker closes" }).toBe("");
 }
 
 test("terminal-reattach: a closed window's terminals open again", async ({ page, context }) => {
