@@ -856,8 +856,7 @@ impl TerminalScreen {
       },
     )
     .detach();
-    // Leaving the page detaches; the list then shows what's still running
-    // and keeps the unsent message for the next visit.
+    // On leave, the list shows what's still running and keeps the unsent draft for next time.
     let list = sessions.clone();
     cx.on_release(move |this: &mut Self, cx| {
       let draft = this.message.read(cx).value().to_string();
