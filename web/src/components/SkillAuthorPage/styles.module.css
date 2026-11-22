@@ -41,5 +41,7 @@
 }
 
 .writeup {
-  margin-bottom: 3rem;
+  margin-bottom: 2.5rem;
+  padding-bottom: 2rem;
+  border-bottom: 1px solid var(--ifm-color-emphasis-300);
 }
