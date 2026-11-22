@@ -90,14 +90,18 @@ describe("githubUserToken", () => {
       body: { token: "ghu_new", expires_at: iso(8 * HOUR) },
     });
 
-    const [url, init] = fetch.mock.calls[0];
+    const call = fetch.mock.calls[0];
+    if (!call) throw new Error("githubUserToken did not call fetch");
+    const [url, init] = call;
     expect(url).toBe("https://github.com/login/oauth/access_token");
-    expect(Object.fromEntries(new URLSearchParams(String(init?.body)))).toEqual({
-      client_id: "Iv1.client",
-      client_secret: "s",
-      grant_type: "refresh_token",
-      refresh_token: "ghr_current",
-    });
+    expect(Object.fromEntries(new URLSearchParams(String(init?.body)))).toEqual(
+      {
+        client_id: "Iv1.client",
+        client_secret: "s",
+        grant_type: "refresh_token",
+        refresh_token: "ghr_current",
+      },
+    );
     expect(deps.store.save).toHaveBeenCalledWith({
       accessToken: "ghu_new",
       refreshToken: "ghr_new",

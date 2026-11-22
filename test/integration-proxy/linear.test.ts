@@ -36,18 +36,16 @@ function setup(opts: {
   oauth?: Route;
   pro?: boolean;
 }) {
-  const fetch = vi.fn<typeof globalThis.fetch>(
-    async (url, init) => {
-      const target = String(url);
-      if (target === "https://api.linear.app/graphql" && opts.graphql) {
-        return opts.graphql(init ?? {});
-      }
-      if (target === "https://api.linear.app/oauth/token" && opts.oauth) {
-        return opts.oauth(init ?? {});
-      }
-      throw new Error(`unexpected fetch ${target}`);
-    },
-  );
+  const fetch = vi.fn<typeof globalThis.fetch>(async (url, init) => {
+    const target = String(url);
+    if (target === "https://api.linear.app/graphql" && opts.graphql) {
+      return opts.graphql(init ?? {});
+    }
+    if (target === "https://api.linear.app/oauth/token" && opts.oauth) {
+      return opts.oauth(init ?? {});
+    }
+    throw new Error(`unexpected fetch ${target}`);
+  });
   const save = vi.fn(async () => {});
   const load = vi.fn(async () =>
     typeof opts.stored === "function" ? opts.stored() : opts.stored,
