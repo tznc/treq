@@ -250,9 +250,7 @@ pub fn create_workspace(
     .join("workspaces")
     .join(&sanitized_name);
 
-  // Never tear down a registered workspace. A retry may arrive after the JJ
-  // transaction committed but before the caller persisted its database row.
-  // Treat JJ's workspace registry as authoritative in that window.
+  // Never tear down a registered workspace: a retry can come after jj's commit, before the db row.
   if list_jj_workspaces(repo_path)?
     .iter()
     .any(|name| name == &sanitized_name)
@@ -267,8 +265,7 @@ pub fn create_workspace(
     forget_workspace(repo_path, &workspace_dir.to_string_lossy())?;
   }
 
-  // A .jj directory which is not present in JJ's registry is demonstrably a
-  // partial initialization and is safe to clean up before retrying.
+  // A .jj directory jj never registered is a partial init, safe to remove before the retry.
   if workspace_dir.join(".jj").exists() {
     let workspace_dir_str = workspace_dir.to_string_lossy();
     remove_workspace_directory_only(&workspace_dir_str).map_err(|e| {
@@ -408,9 +405,7 @@ pub fn create_workspace(
             JjError::GitWorkspaceError(format!("Remote bookmark '{}' not found", jj_ref))
           })?
       } else {
-        // On the bookmark, not the parent workspace's working copy: a child
-        // there would pick up the parent's uncommitted changes on every
-        // snapshot of the parent.
+        // On the bookmark: on the parent's working copy it would inherit uncommitted changes.
         parent_repo
           .view()
           .get_local_bookmark(RefName::new(&jj_ref))
@@ -511,8 +506,7 @@ pub fn create_workspace(
   block_on(tx.repo_mut().edit(new_ws_name.clone(), &new_wc))
     .map_err(|e| JjError::GitWorkspaceError(format!("Failed to set wc: {}", e)))?;
 
-  // The bookmark stays on the source commit, below the working copy: only a
-  // commit moves it, so uncommitted edits never reach workspaces stacked on it.
+  // The bookmark stays below the working copy, so only commits reach workspaces stacked on it.
   tx.repo_mut().set_local_bookmark_target(
     RefName::new(branch_name),
     RefTarget::normal(source_commit.id().clone()),
@@ -1341,10 +1335,7 @@ pub(super) fn branch_name_for_workspace_commit(
     return (name.to_string(), false);
   }
 
-  // A conflicted bookmark does not appear as an exact bookmark because it is
-  // not a normal RefTarget. Still retain its canonical (possibly slash-
-  // containing) name when the registered working-copy commit is one of the
-  // conflict's targets, and surface the ambiguity to callers.
+  // A conflicted bookmark is never exact: keep its canonical name when `@` is one of its targets.
   if let Some((name, _)) = bookmarks
     .matching(workspace_name)
     .iter()
@@ -1361,11 +1352,7 @@ pub(super) fn branch_name_for_workspace_commit(
     return (name.to_string(), false);
   }
 
-  // After a commit the WC tip is an empty commit above the bookmark. A later
-  // divergent fetch conflicted-bookmarks the parent tip — not the WC — so the
-  // lookups above miss. Prefer any matching bookmark (including conflicted)
-  // over inventing a dashed workspace-name fallback that breaks PR / tip
-  // revsets (`Revision 'feat-…' doesn't exist`).
+  // A fetch can conflict the tip below `@`: any match beats a dashed name that breaks PR revsets.
   if let Some((name, target)) = bookmarks.matching(workspace_name).first() {
     return (name.to_string(), target.has_conflict());
   }
@@ -1509,9 +1496,7 @@ pub fn forget_workspace_by_name(repo_path: &str, workspace_name: &str) -> Result
       block_on(tx.commit("forget workspace"))
         .map_err(|e| JjError::IoError(format!("Failed to forget workspace: {}", e)))?;
 
-      // Reconcile remaining workspaces — WC commits may have been rewritten by rebase_descendants; skip the workspace being removed.
-      // With nothing rebased no WC commit moved, so every other working copy is current; reconciling
-      // would only load each workspace to find that out.
+      // Only a rebase moves other working copies, so reconcile the rest only when one happened.
       if rebased > 0 {
         reconcile_all_workspaces_after_rewrite(repo_path, Some(workspace_name))
           .warn_on_err("reconcile all workspaces after rewrite");

@@ -1012,8 +1012,7 @@ fn long_lists_draw(cx: &mut TestAppContext) {
   })
   .unwrap();
   redraw(cx, window);
-  // The viewport is the phone's screen, the first rows are in it and the
-  // last of 300 is not built.
+  // The viewport is the phone's screen, the first rows are in it and the last of 300 is not built.
   let (viewport, first, last) = cx
     .update_window(window, |_, _, cx| {
       let screen = screen.read(cx);

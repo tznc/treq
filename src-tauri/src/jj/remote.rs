@@ -490,9 +490,7 @@ fn fetch_remote(repo_path: &str, remote_name: &str) -> Result<String, JjError> {
   block_on(fetch.import_refs())
     .map_err(|e| JjError::IoError(format!("Fetch failed to import refs: {}", e)))?;
   reset_conflicted_bookmarks_origin_contains(tx.repo_mut());
-  // The fetch can move tracked local bookmarks such as `main`. Without an
-  // export, git's `refs/heads/main` stays on the old commit, and the next git
-  // command that moves it splits jj's `main` into a conflict.
+  // The fetch can move `main`: without an export, the next git move of it conflicts jj's `main`.
   git::export_refs(tx.repo_mut()).warn_on_err("export refs after fetch");
   if tx.repo().has_changes() {
     block_on(tx.repo_mut().rebase_descendants())
