@@ -1,0 +1,41 @@
+id: gpui-debug-selector-needs-test-node
+valid:
+  - |
+    fn v() -> impl IntoElement {
+      div().id("send").role(Role::Button).aria_label("Send").test_support().debug_selector(|| "send".into())
+    }
+  - |
+    fn v() -> impl IntoElement {
+      div().id("count").debug_selector(|| "count".into()).aria_label("3 alerts").test_support()
+    }
+  - |
+    fn v() -> impl IntoElement {
+      ui::text(div().id("title").debug_selector(|| "title".into()), TextSize::Sm).test_support()
+    }
+  - |
+    fn v(p: &Palette) -> impl IntoElement {
+      Button::new("merge", p).label("Merge").debug_selector(|| "merge".into())
+    }
+  - |
+    mod tests {
+      fn v() -> impl IntoElement {
+        div().h(px(20.)).debug_selector(|| "padded-content".into())
+      }
+    }
+  - |
+    fn new(id: &'static str) -> Checkbox {
+      Checkbox { base: div().id(id).debug_selector(move || id.into()), on: false }
+    }
+invalid:
+  - |
+    fn v() -> impl IntoElement {
+      div().id("commit-message").debug_selector(|| "commit-message".into())
+    }
+  - |
+    fn v() -> impl IntoElement {
+      ui::text(div().debug_selector(|| "title".into()), TextSize::Sm)
+    }
+  - |
+    fn v(on: bool) -> impl IntoElement {
+      div().when(on, |d| d.debug_selector(|| "on".into()))
+    }
