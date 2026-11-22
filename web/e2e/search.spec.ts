@@ -83,8 +83,11 @@ test.describe('Search bar (navbar)', () => {
   });
 
   test('unmatched query shows no dropdown', async ({ page }) => {
+    // Open the dropdown first: it closes only once the debounced search for
+    // the unmatched query has run and found nothing.
+    await searchInput(page).fill(QUERY);
+    await expect(searchDropdown(page)).toBeVisible({ timeout: 10_000 });
     await searchInput(page).fill('zzzznotarealterm');
-    await page.waitForTimeout(1000);
     await expect(searchDropdown(page)).not.toBeVisible();
   });
 });

@@ -14,6 +14,7 @@ import { getAnonClient, getAnonKey, getFunctionsBaseUrl, getServiceClient } from
 import { FEATURES } from "../features";
 import { createTestUser, deleteTestUser, type TestUser } from "../seed";
 import { clearBilling, grantPro } from "../billing";
+import { pollUntil } from "../poll";
 import { recordOutcome } from "../record";
 
 const usersToDelete: string[] = [];
@@ -155,19 +156,18 @@ it(
       "waking",
       "reprovisioning",
     ];
-    const deadline = Date.now() + 30_000;
-    let lastStatus = "";
-    let statusJson: Record<string, unknown> = {};
-    while (Date.now() < deadline) {
-      const poll = await invoke("remote-instance", accessToken, "status");
-      expect(poll.status).toBe(200);
-      statusJson = poll.json;
-      const instance = poll.json.instance as { status?: string } | null;
-      lastStatus = String(instance?.status ?? "");
-      if (!transientStates.includes(lastStatus)) break;
-      await new Promise((resolve) => setTimeout(resolve, 500));
-    }
-    expect(lastStatus).toBe("ready");
+    const statusOf = (json: Record<string, unknown>) =>
+      String((json.instance as { status?: string } | null)?.status ?? "");
+    const statusJson = await pollUntil(
+      "the instance to leave its transient states",
+      async () => {
+        const poll = await invoke("remote-instance", accessToken, "status");
+        expect(poll.status).toBe(200);
+        return transientStates.includes(statusOf(poll.json)) ? undefined : poll.json;
+      },
+      { timeout: 30_000, interval: 500 },
+    );
+    expect(statusOf(statusJson)).toBe("ready");
 
     // registerClientKey: the app's own `ensure_mobile_device_key` Tauri
     // command produces a real ed25519 keypair via platform keystore; this

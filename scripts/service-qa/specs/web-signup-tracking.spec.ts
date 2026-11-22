@@ -13,7 +13,8 @@
 import type { User } from "@supabase/supabase-js";
 import { afterEach, expect, it } from "@jest/globals";
 import { isFirstSignIn } from "../../../web/src/lib/analytics";
-import { getServiceClient } from "../clients";
+import { getAnonKey, getServiceClient, resolveLocalKeys } from "../clients";
+import { pollUntil } from "../poll";
 import { recordOutcome } from "../record";
 import {
   createTestUser,
@@ -34,8 +35,27 @@ const timestamps = (u: User) => ({
   provider: u.app_metadata.provider,
 });
 
-// Past the 60 second window isFirstSignIn allows for a first session.
-const pastWindow = () => new Promise((resolve) => setTimeout(resolve, 61_000));
+/**
+ * Waits until Auth's own clock (its Date header, whole seconds) is past the
+ * 60 second window isFirstSignIn allows after each of `since`. Auth stamps
+ * the times itself and nothing here can backdate them, so this takes a
+ * minute of real time.
+ */
+async function pastWindow(...since: (string | undefined)[]): Promise<void> {
+  const start = Math.max(...since.map((at) => Date.parse(at ?? "")));
+  expect(Number.isNaN(start)).toBe(false);
+  await pollUntil(
+    "Auth's clock to pass the first sign-in window",
+    async () => {
+      const res = await fetch(`${resolveLocalKeys().url}/auth/v1/health`, {
+        headers: { apikey: getAnonKey() },
+      });
+      const now = Date.parse(res.headers.get("date") ?? "");
+      return now > start + 60_000 ? now : undefined;
+    },
+    { timeout: 90_000, interval: 1_000 },
+  );
+}
 
 it("counts a first sign-in once, ignores a later one, and measures from email confirmation", async () => {
   const admin = getServiceClient();
@@ -57,7 +77,7 @@ it("counts a first sign-in once, ignores a later one, and measures from email co
   expect(lateErr).toBeNull();
   created.push(lateCreate.user!.id);
 
-  await pastWindow();
+  await pastWindow(first.user.email_confirmed_at, lateCreate.user?.created_at);
 
   const again = await signInWithEmailPassword(fresh.email, fresh.password);
 

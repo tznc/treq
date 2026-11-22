@@ -35,11 +35,6 @@ ignores:
   - "e2e/desktop/qa/22-ssh-chaos.spec.ts"
   - "e2e/desktop/qa/23-team-projects.spec.ts"
   - "e2e/desktop/qa/27-tooltip-flicker.spec.ts"
-  - "scripts/service-qa/specs/mobile-control-plane.spec.ts"
-  - "scripts/service-qa/specs/mobile-pkce-sign-in.spec.ts"
-  - "scripts/service-qa/specs/remote-instance-chaos.spec.ts"
-  - "scripts/service-qa/specs/web-signup-tracking.spec.ts"
-  - "web/e2e/search.spec.ts"
 rule:
   any:
     # page.waitForTimeout(ms), page?.waitForTimeout(ms), page.waitForTimeout.bind(page)
