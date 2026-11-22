@@ -7,31 +7,28 @@ import {
   provisionGateway,
   reensureServicesAfterWake,
 } from "../_shared/remote/machine-setup.ts";
-import type {
-  ProviderCapabilities,
-  SandboxProvider,
-  ServiceSpec,
-} from "../_shared/remote/provider.ts";
+import type { ProviderCapabilities, ServiceSpec } from "../_shared/remote/provider.ts";
 import { BOAT_CAPABILITIES } from "../_shared/remote/boat-adapter.ts";
 import { gatewayServiceSpec, installGatewaySecretCommand } from "../_shared/remote/ssh-vm-config.ts";
+import { fakeProvider } from "./helpers/remote_fakes.ts";
 
 function recorder(caps: Partial<ProviderCapabilities>) {
   const execs: string[] = [];
   const envs: Array<Record<string, string>> = [];
   const services: Array<[string, ServiceSpec]> = [];
-  const provider = {
+  const provider = fakeProvider({
     kind: "boat",
     capabilities: () => ({ ...BOAT_CAPABILITIES, ...caps }),
-    execOnMachine: (_id: string, cmd: string[], _t?: number, env: Record<string, string> = {}) => {
+    execOnMachine: (_id, cmd, _t, env = {}) => {
       execs.push(cmd.join(" "));
       envs.push(env);
       return Promise.resolve({ exitCode: 0, stdout: "", stderr: "" });
     },
-    ensureService: (_id: string, name: string, spec: ServiceSpec) => {
+    ensureService: (_id, name, spec) => {
       services.push([name, spec]);
       return Promise.resolve();
     },
-  } as unknown as SandboxProvider;
+  });
   return { provider, execs, envs, services };
 }
 

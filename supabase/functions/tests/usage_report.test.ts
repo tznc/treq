@@ -67,21 +67,22 @@ type Call = { method: string; path: string; params?: StripeParams; idempotencyKe
 function fakeStripe(failTimes = 0, failWith: () => Error = () => new Error("stripe down")) {
   const calls: Call[] = [];
   let failures = failTimes;
-  const stripe = {
-    request: async (
+  const stripe: StripeClient = {
+    request: async <T>(
       method: string,
       path: string,
       params?: StripeParams,
       options?: { idempotencyKey?: string },
-    ) => {
+    ): Promise<T> => {
       calls.push({ method, path, params, idempotencyKey: options?.idempotencyKey });
       if (failures > 0) {
         failures--;
         throw failWith();
       }
-      return { object: "billing.meter_event" };
+      // A meter event; the code under test reads nothing back.
+      return { object: "billing.meter_event" } as T;
     },
-  } as unknown as StripeClient;
+  };
   return { stripe, calls };
 }
 

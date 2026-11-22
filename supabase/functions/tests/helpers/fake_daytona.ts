@@ -18,6 +18,7 @@ export interface FakeDaytonaSandbox {
   autoArchiveInterval: number;
   autoDeleteInterval: number;
   toolboxProxyUrl: string;
+  updatedAt?: string;
 }
 
 export interface RecordedRequest {

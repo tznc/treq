@@ -26,7 +26,6 @@ import {
   denoUpstreamSocket,
   pipeSockets,
   RelayError,
-  type RelaySocket,
   type RelayStore,
   type UpstreamConnection,
   UpstreamError,
@@ -183,7 +182,7 @@ Deno.serve(async (req) => {
     "log",
     `relay open endpoint_id=${target.endpointId} instance_id=${target.instanceId}`,
   );
-  const done = pipeSockets(socket as unknown as RelaySocket, upstream).then(
+  const done = pipeSockets(socket, upstream).then(
     (stats) => {
       // Counts only. Payload bytes are SSH ciphertext and are never logged.
       logWithCorrelation(

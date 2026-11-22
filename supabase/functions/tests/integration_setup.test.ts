@@ -10,18 +10,18 @@ import {
   type IntegrationSecretStore,
   provisionIntegrationCredential,
 } from "../_shared/remote/integration-credential.ts";
-import type { SandboxProvider } from "../_shared/remote/provider.ts";
+import { fakeProvider } from "./helpers/remote_fakes.ts";
 
 function recorder() {
   const execs: string[] = [];
   const envs: Array<Record<string, string>> = [];
-  const provider = {
-    execOnMachine: (_id: string, cmd: string[], _t?: number, env: Record<string, string> = {}) => {
+  const provider = fakeProvider({
+    execOnMachine: (_id, cmd, _t, env = {}) => {
       execs.push(cmd.join(" "));
       envs.push(env);
       return Promise.resolve({ exitCode: 0, stdout: "", stderr: "" });
     },
-  } as unknown as SandboxProvider;
+  });
   return { provider, execs, envs };
 }
 

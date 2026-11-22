@@ -22,16 +22,20 @@ test('missing timestamps are not a first sign-in', () => {
   expect(isFirstSignIn(user('2026-11-10T10:00:00Z', null, null))).toBe(false);
 });
 
+// The node test environment has no window; trackEvent reads gtag from it.
+function setWindow(value: {gtag?: (...args: unknown[]) => void}): void {
+  Object.defineProperty(globalThis, 'window', {value, configurable: true, writable: true});
+}
+
 test('trackEvent forwards to gtag and is a no-op without it', () => {
   const calls: unknown[][] = [];
-  const g = globalThis as unknown as {window: {gtag?: (...args: unknown[]) => void}};
-  g.window = {
+  setWindow({
     gtag: (...args) => {
       calls.push(args);
     },
-  };
+  });
   trackEvent('sign_up', {method: 'github'});
   expect(calls).toEqual([['event', 'sign_up', {method: 'github'}]]);
-  g.window = {};
+  setWindow({});
   expect(() => trackEvent('sign_up', {method: 'github'})).not.toThrow();
 });

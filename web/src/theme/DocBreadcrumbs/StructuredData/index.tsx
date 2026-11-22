@@ -9,9 +9,11 @@ import {withTrailingSlash} from '@site/src/lib/trailingSlash';
 export default function DocBreadcrumbsStructuredData(props: Props): React.ReactElement {
   const data = useBreadcrumbsStructuredData({breadcrumbs: props.breadcrumbs});
   // The theme builds a plain array of ListItems; schema-dts types it loosely.
-  const items = (data.itemListElement ?? []) as unknown as ReadonlyArray<Record<string, unknown>>;
+  const items: readonly unknown[] = Array.isArray(data.itemListElement) ? data.itemListElement : [];
   const itemListElement = items.map((entry) =>
-    typeof entry.item === 'string' ? {...entry, item: withTrailingSlash(entry.item)} : entry,
+    typeof entry === 'object' && entry !== null && 'item' in entry && typeof entry.item === 'string'
+      ? {...entry, item: withTrailingSlash(entry.item)}
+      : entry,
   );
   return (
     <Head>

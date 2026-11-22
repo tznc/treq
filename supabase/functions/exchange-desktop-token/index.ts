@@ -1,5 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2.95.3";
-import { consumeDesktopToken, exchangeDesktopToken, type TokenTable } from "./lib.ts";
+import { consumeDesktopToken, exchangeDesktopToken } from "./lib.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -24,11 +24,7 @@ Deno.serve(async (req) => {
   const { status, body: payload } = await exchangeDesktopToken(
     {
       consumeToken: (token, now) =>
-        consumeDesktopToken(
-          supabaseAdmin.from("desktop_auth_tokens") as unknown as TokenTable,
-          token,
-          now,
-        ),
+        consumeDesktopToken(supabaseAdmin.from("desktop_auth_tokens"), token, now),
       createSession: async (userId) => {
         const { data: { user } } = await supabaseAdmin.auth.admin.getUserById(userId);
         if (!user?.email) return null;

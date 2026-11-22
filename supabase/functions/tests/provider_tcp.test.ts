@@ -2,7 +2,7 @@
 // gateway proxy handshake, and one wake-and-retry.
 // No network.
 
-import { defined } from "./helpers/remote_fakes.ts";
+import { defined, fakeProvider } from "./helpers/remote_fakes.ts";
 import { assert, assertEquals, assertRejects } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { GATEWAY_TOKEN_HEADER, verifyGatewayToken } from "../_shared/remote/gateway-token.ts";
 import { openTcp } from "../_shared/remote/provider-tcp.ts";
@@ -40,14 +40,14 @@ class HandshakeSocket implements RelaySocket {
 }
 
 function gatewayProvider(endpointCalls: string[]): SandboxProvider {
-  return {
+  return fakeProvider({
     kind: "boat",
     capabilities: () => ({ ...BOAT_CAPABILITIES }),
-    gatewayEndpoint: (id: string) => {
+    gatewayEndpoint: (id) => {
       endpointCalls.push(id);
       return Promise.resolve({ url: "wss://gw.example.invalid/?_token=t", headers: { "x-vendor": "v" } });
     },
-  } as unknown as SandboxProvider;
+  });
 }
 
 const CRED = { placementId: "11111111-2222-3333-4444-555555555555", secret: "s3cret" };

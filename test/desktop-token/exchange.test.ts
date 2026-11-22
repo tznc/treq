@@ -23,22 +23,31 @@ function deps(overrides: Partial<ExchangeDeps> = {}): ExchangeDeps {
   };
 }
 
+// A builder whose every step returns itself, so it satisfies TokenTable's chain.
+type FakeBuilder = {
+  update(patch: { used: boolean }): FakeBuilder;
+  eq(column: string, value: unknown): FakeBuilder;
+  gt(column: string, value: unknown): FakeBuilder;
+  select(columns: string): FakeBuilder;
+  maybeSingle(): Promise<{ data: { user_id: string } | null; error: null }>;
+};
+
 /** In-memory table that applies the filters the way one UPDATE … RETURNING would. */
 function fakeTable(
   rows: { token: string; used: boolean; expires_at: string; user_id: string }[],
 ) {
   const filters: [string, string, unknown][] = [];
   let patch: Record<string, unknown> = {};
-  const builder = {
-    update(p: Record<string, unknown>) {
+  const builder: FakeBuilder = {
+    update(p) {
       patch = p;
       return builder;
     },
-    eq(col: string, val: unknown) {
+    eq(col, val) {
       filters.push(["eq", col, val]);
       return builder;
     },
-    gt(col: string, val: unknown) {
+    gt(col, val) {
       filters.push(["gt", col, val]);
       return builder;
     },
@@ -57,7 +66,8 @@ function fakeTable(
       return { data: row ? { user_id: row.user_id } : null, error: null };
     },
   };
-  return { table: builder as unknown as TokenTable, rows };
+  const table: TokenTable = builder;
+  return { table, rows };
 }
 
 describe("consumeDesktopToken", () => {
