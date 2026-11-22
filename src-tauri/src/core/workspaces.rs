@@ -2170,8 +2170,7 @@ mod tests {
       .to_string();
     let status_repo = repo_path.clone();
     let statuses = std::thread::spawn(move || super::list_workspace_statuses(&status_repo));
-    // Discovery takes the lock before it looks: it holds a handle to it
-    // while it waits for create to finish.
+    // Discovery holds a handle to the lock while it waits for create to finish.
     let waits = crate::test_repo::wait_until(std::time::Duration::from_secs(5), || {
       std::sync::Arc::strong_count(&lock) > 2
     });

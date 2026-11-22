@@ -568,8 +568,7 @@ mod tests {
         match claim {
           None => {
             execution_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            // Works until every request is made, so the others find it in
-            // progress.
+            // Works until every request is made, so the others find it in progress.
             crate::test_repo::wait_until(Duration::from_secs(5), || {
               asked.load(std::sync::atomic::Ordering::SeqCst) == 5
             });

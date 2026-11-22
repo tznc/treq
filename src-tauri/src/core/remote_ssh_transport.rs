@@ -1827,8 +1827,7 @@ mod tests {
       session.channel_success(channel)?;
       match self.mode.load(Ordering::SeqCst) {
         1 => {
-          // Slow path: never reply, so the client's deadline runs out, to
-          // exercise deadline enforcement.
+          // Slow path: never reply, to exercise the client's deadline enforcement.
           std::future::pending::<()>().await;
         }
         2 => {
@@ -3268,8 +3267,7 @@ mod tests {
     .await
     .unwrap();
 
-    // The path goes silent and recovers before the first attempt gives up:
-    // once it has swallowed that attempt's request.
+    // The path goes silent, then recovers once it has swallowed the first attempt's request.
     blackhole.store(true, Ordering::SeqCst);
     let lift = blackhole.clone();
     tokio::spawn(async move {
