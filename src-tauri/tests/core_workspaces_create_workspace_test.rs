@@ -1076,7 +1076,7 @@ fn test_create_workspace_parents_on_target_branch_tip_after_external_commit() {
     &["branch", "-f", default_branch, &initial_sha],
   )
   .expect("Failed to reset main");
-  // Create a temp branch to land the new commit, then move main there.
+  // commit_file commits on HEAD, so land the commit on a temp branch and move main there afterwards.
   TestRepo::run_git(&repo.repo_path, &["checkout", "-b", "tmp-advance"])
     .expect("Failed to create tmp branch");
   repo

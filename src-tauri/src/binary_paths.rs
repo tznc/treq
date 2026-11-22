@@ -136,7 +136,7 @@ fn build_extended_path() -> (String, bool) {
     .map(String::from)
     .collect();
 
-  // Add the running treq binary directory so `treq` is available in PTY sessions.
+  // PTY sessions need `treq` on PATH, so include the running binary's directory.
   if let Ok(exe_path) = std::env::current_exe() {
     if let Some(exe_dir) = exe_path.parent() {
       let exe_dir_str = exe_dir.to_string_lossy().to_string();

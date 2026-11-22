@@ -346,7 +346,6 @@ pub fn rebase_single_workspace(
   force: bool,
   conflict_marker_style: &str,
 ) -> Result<Option<AutoRebaseResult>, String> {
-  // Get the specific workspace from DB
   let workspace = local_db::get_workspace_by_id(repo_path, workspace_id)?
     .ok_or_else(|| format!("Workspace {} not found", workspace_id))?;
 

@@ -3131,7 +3131,7 @@ pub fn jj_split(
   // No old tree: the snapshot already moved tree_state, so a check would hit ConcurrentCheckout.
   update_workspace_after_history_edit(&mut loaded, &new_repo, None, CheckoutMode::Immediate)?;
 
-  // Set the bookmark to point at @- (critical - same as jj_commit)
+  // Like jj_commit: the committed half is now @-, so the branch bookmark must move there.
   jj_set_bookmark(workspace_path, &branch, "@-")
     .map_err(|e| JjError::IoError(format!("Failed to advance bookmark '{}': {}", branch, e)))?;
 
