@@ -67,7 +67,7 @@ jobs:
       - name: cargo test
         run: cargo test --locked -p treq --lib --features mobile-ui "mobile::"
 
-  # The APK build and emulator smoke run on manual dispatch only; nightly.yml
+  # The APK build and emulator smoke run on manual dispatch only; release.yml
   # builds the mobile apps every day. Push and PR runs keep the unit tests.
   android-apk:
     name: Android debug APK

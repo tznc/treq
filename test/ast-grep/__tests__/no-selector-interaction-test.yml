@@ -1,0 +1,57 @@
+id: no-selector-interaction
+valid:
+  - |
+    fn t(h: &mut Harness) {
+      let screen = h.rendered();
+      let user = screen.user();
+      let send = screen.get_by_role(by::role(Role::Button).name("Send"));
+      user.click(&send);
+      user.right_click(&send);
+      user.hover(&send);
+      user.dbl_click(&send);
+      user.type_text(&send, "hi");
+    }
+  - |
+    fn t(h: &mut Harness) {
+      let b = h.cx.debug_bounds("card").unwrap();
+      assert!(b.size.width > px(0.));
+    }
+invalid:
+  - |
+    fn t(h: &mut Harness) {
+      h.click("merge-confirm");
+    }
+  - |
+    fn t(h: &mut Harness) {
+      h.right_click("workspace-row");
+    }
+  - |
+    fn t(h: &mut Harness) {
+      h.hover("tab-1");
+    }
+  - |
+    fn t(h: &mut Harness, path: &str) {
+      h.click(leak(format!("file-row-{path}")));
+    }
+  - |
+    impl Ctx {
+      fn t(&mut self) {
+        self.h.click("x");
+      }
+    }
+  - |
+    fn t(h: &mut Harness) {
+      type_into(h, "commit-message", "fix");
+    }
+  - |
+    fn t(mut h: Harness) {
+      double_click(&mut h, "terminal-body");
+    }
+  - |
+    fn t(h: &mut Harness) {
+      hover(h, "tab-1", Duration::ZERO);
+    }
+  - |
+    fn t(h: &mut Harness) {
+      right_click(h, "row");
+    }

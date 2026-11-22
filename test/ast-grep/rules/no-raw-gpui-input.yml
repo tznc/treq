@@ -1,0 +1,67 @@
+id: no-raw-gpui-input
+language: rust
+severity: error
+message: >
+  Do not send raw GPUI input in tests. Act as the user with
+  gpui-testing-library's `screen.user()`: `click`, `right_click`, `dbl_click`,
+  `hover`, `pointer`, `drag_and_drop`, `keyboard`, `type_text`.
+note: >
+  Raw input at a coordinate skips finding the element by role and name, so the
+  test passes for controls a user or screen reader cannot find.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+  - "crates/treq-ui/**/*.rs"
+# Baseline: files that already send raw input. Do not add to it;
+# migrate a file and drop it from this list instead.
+ignores:
+  - "crates/treq-ui/src/copy_feedback.rs"
+  - "crates/treq-ui/src/dialog.rs"
+  - "crates/treq-ui/src/fold_toggle.rs"
+  - "crates/treq-ui/src/keyboard_tests.rs"
+  - "crates/treq-ui/src/row.rs"
+  - "crates/treq-ui/src/touch.rs"
+  - "src-tauri/src/gpui_shell/overlay/tests.rs"
+  - "src-tauri/src/gpui_shell/popover/tests.rs"
+  - "src-tauri/src/gpui_shell/screen/tests.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/account_screen.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/changes_large.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/changes_screen.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/code_files_large.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/code_screen.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/commit_diffs.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/commits_large.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/commits_screen.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/dialogs.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/diff_extremes.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/file_browser.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/fuzz.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/github.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/gutter_drag.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/home_screen.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/input_latency.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/kept_tabs.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/linear_view.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/logs_explorer.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/machines_chaos.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/open_workspaces.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/pr_review.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/prefetch.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/review_comments.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/settings_screen.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/skills_screen.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/terminal_perf.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/terminal_screen.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/testing_library.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/virtual_chaos.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/virtual_lists.rs"
+  - "src-tauri/src/gpui_shell/screen/tests/workspace_dialogs.rs"
+  - "src-tauri/src/gpui_shell/sidebar/tests.rs"
+  - "src-tauri/src/gpui_shell/toast_layer.rs"
+rule:
+  kind: call_expression
+  has:
+    field: function
+    kind: field_expression
+    has:
+      field: field
+      regex: ^simulate_(click|mouse_down|mouse_up|mouse_move|event|keystrokes|input)$
