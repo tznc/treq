@@ -1,0 +1,24 @@
+id: no-narrating-comments-ts
+valid:
+  - |
+    // Read the token once: the desktop app polls this endpoint every second.
+    const token = await readToken();
+  - |
+    /** Create a one-time token for the desktop handoff. */
+    function createToken() {}
+  - |
+    /* Create a one-time token. */
+    createToken();
+  - |
+    // Return early: an empty diff has nothing to annotate.
+    // Settings the user never saved fall back to defaults.
+invalid:
+  - |
+    // Create a one-time token for desktop auth handoff
+    const token = createToken();
+  - |
+    const url = base; // Set the production url of your site here
+  - |
+    // Check if the user exists
+    // Loop over the rows
+    // Parse the body

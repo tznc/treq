@@ -14,6 +14,7 @@ import {
   revokeLinearToken,
 } from "./lib.ts";
 import { corsHeaders, json } from "../_shared/http/json.ts";
+import { errorMessage } from "../_shared/error-message.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -53,7 +54,7 @@ Deno.serve(async (req) => {
   } catch (err) {
     console.error(
       "[delete-account] failed:",
-      err instanceof Error ? err.message : String(err),
+      errorMessage(err),
     );
     return json(
       {

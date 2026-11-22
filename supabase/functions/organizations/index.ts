@@ -14,6 +14,7 @@ import {
   teamSeatsStoreFor,
 } from "../_shared/billing/team-seats.ts";
 import { handleOrganizationsRequest } from "./lib.ts";
+import { errorMessage } from "../_shared/error-message.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -85,7 +86,7 @@ Deno.serve(async (req) => {
   } catch (err) {
     console.error(
       "[organizations] failed:",
-      err instanceof Error ? err.message : String(err),
+      errorMessage(err),
     );
     return json({ error: "Organization request failed" }, 500);
   }

@@ -30,9 +30,7 @@ impl TreqCommandTransport for LocalTransport {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Idempotency
-// ---------------------------------------------------------------------------
 //
 // Mutations that could duplicate work on retry (create, movement, git push,
 // agent start) accept an idempotency key. A repeated call with the same key

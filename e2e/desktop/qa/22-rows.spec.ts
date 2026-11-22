@@ -101,7 +101,7 @@ test("rows: open workspaces picker", async ({ page }) => {
   await page.keyboard.press("Escape");
 });
 
-test("rows: palette", async ({ page, context }) => {
+test("rows: palette", async ({ page }) => {
   await openWorkspace(page, "feat/empty-event-message");
   await page.keyboard.press(`${mod}+k`);
   const palette = page;

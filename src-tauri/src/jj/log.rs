@@ -659,8 +659,10 @@ pub fn jj_get_home_repo_diverged_log(
         .map(|c| c.id().hex()[..12].to_string())
     });
 
-  let workspace_branch =
-    get_workspace_branch(repo_path).unwrap_or_else(|_| current_branch.to_string());
+  let workspace_branch = get_workspace_branch(repo_path).unwrap_or_else(|error| {
+    tracing::debug!(%error, repo_path, "no workspace branch; using the current branch");
+    current_branch.to_string()
+  });
 
   let mut commits = branch_commits;
   let existing_ids: std::collections::HashSet<String> =

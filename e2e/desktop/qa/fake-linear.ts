@@ -41,15 +41,16 @@ function issue(
   };
 }
 
+const retry = issue(142, "Retry webhook deliveries", ["In Progress", "started"], viewer, [2, "High"], "Ingest", ["Bug"]);
 const issues = [
-  issue(142, "Retry webhook deliveries", ["In Progress", "started"], viewer, [2, "High"], "Ingest", ["Bug"]),
+  retry,
   issue(139, "Cache key-value lookups", ["Todo", "unstarted"], viewer, [3, "Medium"], null, ["Feature"]),
   issue(131, "Document the ingest runbook", ["Backlog", "backlog"], viewer, [0, "No priority"], "Docs"),
   issue(128, "Drop the v1 events table", ["Done", "completed"], viewer, [4, "Low"], null),
   issue(125, "Rate-limit the public API", ["Todo", "unstarted"], teammate, [1, "Urgent"], "API", ["Feature"]),
   issue(143, "Back off on 429 responses", ["Todo", "unstarted"], viewer, [2, "High"], "Ingest", ["Bug"], 142),
 ];
-issues[0].children.nodes.push({ id: "issue-143" });
+retry.children.nodes.push({ id: "issue-143" });
 
 const projects = [
   {

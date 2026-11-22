@@ -173,11 +173,11 @@ fn rebase_uses_last_fetched_target_and_warns_when_fetch_fails() {
   jj::jj_git_fetch(&repo.repo_path).unwrap();
   let remote = repo.remote_path();
   let moved = remote.with_extension("gone");
-  std::fs::rename(&remote, &moved).unwrap();
+  TestRepo::rename_path(&remote, &moved).unwrap();
 
   let result =
     treq_lib::auto_rebase::rebase_single_workspace(&repo.repo_path, ws.id, "main", true, "diff");
-  std::fs::rename(&moved, &remote).unwrap();
+  TestRepo::rename_path(&moved, &remote).unwrap();
 
   assert!(result.unwrap().is_some());
   assert!(has_file(&path, "feat/offline", "advance.txt"));

@@ -13,7 +13,7 @@ function Container({
   href,
   children,
 }: {
-  className?: string;
+  className?: string | undefined;
   href: string;
   children: ReactNode;
 }): ReactNode {

@@ -626,7 +626,10 @@ pub fn setup_status_text(status: &AppSetupScriptStatus) -> String {
         .format("%-m/%-d/%Y, %-I:%M:%S %p")
         .to_string()
     })
-    .unwrap_or_else(|_| ran_at.clone());
+    .unwrap_or_else(|e| {
+      log::debug!("Showing setup run time {ran_at:?} as stored: {e}");
+      ran_at.clone()
+    });
   format!(
     "Last run {ran_at} · {}",
     status.last_status.as_deref().unwrap_or("unknown")

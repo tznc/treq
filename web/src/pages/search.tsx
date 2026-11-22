@@ -38,7 +38,7 @@ function SearchResults({ query }: { query: string }) {
         <li key={i} className={styles.result}>
           <Link
             to={r.url}
-            className={styles.resultTitle}
+            className={styles.resultTitle ?? ''}
             dangerouslySetInnerHTML={{ __html: r.title || r.url }}
           />
           <div className={styles.resultUrl}>{r.url}</div>

@@ -718,10 +718,8 @@ pub enum FileRevision {
   Parent,
 }
 
-// ---------------------------------------------------------------------------
 // Retrying after network loss (PRD "Structured command protocol" >
 // "Retrying after network loss")
-// ---------------------------------------------------------------------------
 //
 // A network failure while a mutating command is in flight does not tell the
 // client whether the command reached the VM, ran, or completed. This section

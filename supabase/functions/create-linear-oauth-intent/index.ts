@@ -6,6 +6,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2.95.3";
 import { userHasPro } from "../_shared/billing/entitlement.ts";
 import { createLinearOAuthIntent, linearIntentStore } from "./lib.ts";
+import { errorMessage } from "../_shared/error-message.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -61,7 +62,7 @@ Deno.serve(async (req) => {
   } catch (err) {
     console.error(
       "[create-linear-oauth-intent] failed:",
-      err instanceof Error ? err.message : String(err),
+      errorMessage(err),
     );
     return json({ error: "Failed to create OAuth intent" }, 500);
   }

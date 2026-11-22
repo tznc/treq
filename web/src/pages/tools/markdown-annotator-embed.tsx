@@ -76,7 +76,7 @@ function EmbedLoader({ onLoad, onError }: { onLoad: (f: LoadedFile) => void; onE
           const filename = rawUrl.split('/').pop() ?? filenameParam;
           onLoad({ content: text, filename, sourceUrl: displayUrl });
         })
-        .catch((e) => onError(`Failed to fetch file: ${e instanceof Error ? e.message : String(e)}`));
+        .catch((e) => onError(e instanceof Error ? `Failed to fetch file: ${e.message}` : 'Failed to fetch file'));
 
       return;
     }

@@ -83,7 +83,7 @@ function CallbackContent() {
           return;
         }
 
-        // Create a one-time token for desktop auth handoff
+        // The desktop app exchanges this single-use token for its own session.
         const { data: token, error: tokenError } = await supabase.rpc("create_desktop_token");
         if (tokenError || !token) {
           throw new Error("Failed to create desktop token");
