@@ -1121,9 +1121,10 @@ mod tests {
   #[cfg(unix)]
   fn start_in_pty(shell: &str, prompt: &str) -> Option<String> {
     use portable_pty::{native_pty_system, CommandBuilder, PtySize};
-    use std::io::Write;
+    use std::io::{Read, Write};
     use std::os::unix::fs::PermissionsExt;
-    use std::time::{Duration, Instant};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
 
     let dir = tempfile::tempdir().unwrap();
     let bin = dir.path().join("bin");
@@ -1132,7 +1133,8 @@ mod tests {
     let agent = bin.join("claude");
     std::fs::write(
       &agent,
-      "#!/bin/sh\nwhile [ \"$1\" != -- ]; do shift; done\nprintf %s \"$2\" > \"$TREQ_TEST_OUT\"\n",
+      // Renamed into place, so the file is whole once it exists.
+      "#!/bin/sh\nwhile [ \"$1\" != -- ]; do shift; done\nprintf %s \"$2\" > \"$TREQ_TEST_OUT.part\"\nmv \"$TREQ_TEST_OUT.part\" \"$TREQ_TEST_OUT\"\n",
     )
     .unwrap();
     std::fs::set_permissions(&agent, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -1156,18 +1158,25 @@ mod tests {
     let mut child = pair.slave.spawn_command(cmd).unwrap();
     drop(pair.slave);
     let mut reader = pair.master.try_clone_reader().unwrap();
-    std::thread::spawn(move || std::io::copy(&mut reader, &mut std::io::sink()));
+    let printed = std::sync::Arc::new(AtomicBool::new(false));
+    let shell_printed = printed.clone();
+    std::thread::spawn(move || {
+      let mut buf = [0u8; 4096];
+      while reader.read(&mut buf).is_ok_and(|n| n > 0) {
+        shell_printed.store(true, Ordering::SeqCst);
+      }
+    });
     let mut writer = pair.master.take_writer().unwrap();
-    std::thread::sleep(Duration::from_millis(100));
+    // The prompt is the shell's first output: it reads input from then on.
+    assert!(
+      crate::test_repo::wait_until(Duration::from_secs(10), || printed.load(Ordering::SeqCst)),
+      "{shell} printed no prompt"
+    );
     writer
       .write_all(normalize_command(&prepared.command).as_bytes())
       .unwrap();
 
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while !out.exists() && Instant::now() < deadline {
-      std::thread::sleep(Duration::from_millis(20));
-    }
-    std::thread::sleep(Duration::from_millis(50));
+    crate::test_repo::wait_until(Duration::from_secs(10), || out.exists());
     child.kill().ok();
     std::fs::read(&out)
       .ok()
