@@ -198,11 +198,11 @@ fn test_describe_commit_invalid_change_id() {
   // Try with a change_id starting with '-' (injection attempt)
   let result =
     treq_lib::core::describe_commit(&repo.repo_path, workspace.id, "-r malicious", "New message");
-  assert!(result.is_err(), "Should reject change_id starting with '-'");
+  result.expect_err("Should reject change_id starting with '-'");
 
   // Try with empty change_id
   let result = treq_lib::core::get_commit_description(&repo.repo_path, workspace.id, "");
-  assert!(result.is_err(), "Should reject empty change_id");
+  result.expect_err("Should reject empty change_id");
 }
 
 #[test]
@@ -236,12 +236,9 @@ fn refuses_home_rewrite_of_pushed_commit() {
     .expect("pushed change id");
 
   let describe = treq_lib::core::describe_commit(&repo.repo_path, None, &pushed, "rewritten");
-  assert!(
-    describe.is_err(),
-    "describe should be refused: {describe:?}"
-  );
+  describe.expect_err("describe should be refused");
   let abandon = treq_lib::core::abandon_commit(&repo.repo_path, None, &pushed);
-  assert!(abandon.is_err(), "abandon should be refused: {abandon:?}");
+  abandon.expect_err("abandon should be refused");
 
   // An unpushed commit on top stays editable.
   TestRepo::write_workspace_file(&repo.repo_path, "local.txt", "local\n").expect("write file");

@@ -89,7 +89,7 @@ fn chaos_missing_workspace_dir_does_not_block_others() {
   std::fs::remove_dir_all(&gone).unwrap();
   repo.remote_commit_file("adv.txt", "x", "advance").unwrap();
   let r = treq_lib::core::check_and_rebase_workspaces(&repo.repo_path, None, None, None, "diff");
-  assert!(r.is_ok(), "{r:?}");
+  r.unwrap();
   assert!(has(&ok, "feat/ok", "adv.txt"));
 }
 
@@ -136,9 +136,12 @@ fn chaos_renamed_target_returns_error_not_panic() {
       "diff",
     )
   });
-  assert!(single.is_ok());
+  // It may return Ok or Err; a panic fails the test with its own message.
+  if let Err(payload) = single {
+    std::panic::resume_unwind(payload);
+  }
   let all = treq_lib::core::check_and_rebase_workspaces(&repo.repo_path, None, None, None, "diff");
-  assert!(all.is_ok(), "{all:?}");
+  all.unwrap();
 }
 
 #[test]

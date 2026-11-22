@@ -113,21 +113,21 @@ async fn relays_bytes_to_and_from_tcp() {
 #[tokio::test]
 async fn rejects_upgrade_without_token() {
   let gw = gateway(1).await;
-  assert!(connect(gw, None).await.is_err());
+  connect(gw, None).await.unwrap_err();
 }
 
 #[tokio::test]
 async fn rejects_upgrade_with_expired_token() {
   let gw = gateway(1).await;
   let expired = token::mint(SECRET, PLACEMENT, now() - 1);
-  assert!(connect(gw, Some(expired)).await.is_err());
+  connect(gw, Some(expired)).await.unwrap_err();
 }
 
 #[tokio::test]
 async fn rejects_upgrade_with_forged_token() {
   let gw = gateway(1).await;
   let forged = token::mint(b"not-the-secret", PLACEMENT, now() + 60);
-  assert!(connect(gw, Some(forged)).await.is_err());
+  connect(gw, Some(forged)).await.unwrap_err();
 }
 
 #[tokio::test]

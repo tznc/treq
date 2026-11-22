@@ -1133,7 +1133,7 @@ fn applying_an_agent_suggestion_refuses_when_its_lines_moved() {
 
   let result = treq_lib::core::agent_review::apply_agent_review_suggestion(repo.repo_path, id);
 
-  assert!(result.is_err(), "applied onto moved lines");
+  result.expect_err("applied onto moved lines");
   let now = std::fs::read_to_string(std::path::Path::new(&path).join("README.md")).unwrap();
   assert_eq!(now, "a\ninserted\ntarget\n");
 }

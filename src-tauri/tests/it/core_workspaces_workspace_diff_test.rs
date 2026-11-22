@@ -662,7 +662,7 @@ fn test_diff_of_workspace_stacked_after_a_home_repo_commit() {
 
   init_test_app_db(&repo, Some("git"));
   let diff = treq_lib::core::workspace_diff(&repo.repo_path, ws.id);
-  assert!(diff.is_ok(), "workspace diff failed: {:?}", diff.err());
+  diff.expect("workspace diff failed");
 }
 
 #[test]

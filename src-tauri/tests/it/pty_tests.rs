@@ -87,7 +87,7 @@ fn test_create_session_with_initial_command() {
     make_callback(&output),
   );
 
-  assert!(result.is_ok());
+  result.unwrap();
 
   // Wait for the initial command output
   let found = wait_for_output(&output, "HELLO_FROM_INIT", 5000);
@@ -105,7 +105,6 @@ fn test_write_to_nonexistent_session() {
   let manager = PtyManager::new();
 
   let result = manager.write_to_session("does-not-exist", "hello\n");
-  assert!(result.is_err());
   assert_eq!(result.unwrap_err(), "Session not found");
 }
 
@@ -114,7 +113,6 @@ fn test_resize_nonexistent_session() {
   let manager = PtyManager::new();
 
   let result = manager.resize_session("does-not-exist", 24, 80);
-  assert!(result.is_err());
   assert_eq!(result.unwrap_err(), "Session not found");
 }
 
@@ -142,11 +140,7 @@ fn test_session_lifecycle_and_io() {
     None,
     make_callback(&output),
   );
-  assert!(
-    result.is_ok(),
-    "create_session should succeed: {:?}",
-    result
-  );
+  result.expect("create_session should succeed");
   assert!(manager.session_exists(session_id));
 
   let pid = manager
@@ -170,14 +164,12 @@ fn test_session_lifecycle_and_io() {
   );
 
   // --- resize_session ---
-  assert!(
-    manager.resize_session(session_id, 48, 120).is_ok(),
-    "resize_session should succeed"
-  );
-  assert!(
-    manager.resize_session(session_id, 24, 80).is_ok(),
-    "resize_session to different dimensions should also succeed"
-  );
+  manager
+    .resize_session(session_id, 48, 120)
+    .expect("resize_session should succeed");
+  manager
+    .resize_session(session_id, 24, 80)
+    .expect("resize_session to different dimensions should also succeed");
 
   // --- utf8 output ---
   manager
@@ -209,20 +201,16 @@ fn test_session_lifecycle_and_io() {
 
   // --- set_auto_command (API surface only; filtering behavior is covered
   // by test_echo_suppression_filtering) ---
-  assert!(
-    manager
-      .set_auto_command(session_id, "some long test command string here")
-      .is_ok(),
-    "set_auto_command should succeed on an existing session"
-  );
+  manager
+    .set_auto_command(session_id, "some long test command string here")
+    .expect("set_auto_command should succeed on an existing session");
 
   // --- close_session, idempotency, and process termination ---
-  assert!(manager.close_session(session_id).is_ok());
+  manager.close_session(session_id).unwrap();
   assert!(!manager.session_exists(session_id));
-  assert!(
-    manager.close_session(session_id).is_ok(),
-    "closing again should still succeed (idempotent)"
-  );
+  manager
+    .close_session(session_id)
+    .expect("closing again should still succeed (idempotent)");
 
   assert!(
     wait_until(Duration::from_secs(3), || !is_process_alive(pid)),
@@ -463,7 +451,6 @@ fn test_line_matches_auto_command_normal_output() {
 fn test_set_auto_command_nonexistent_session() {
   let manager = PtyManager::new();
   let result = manager.set_auto_command("nonexistent", "some command");
-  assert!(result.is_err());
   assert_eq!(result.unwrap_err(), "Session not found");
 }
 

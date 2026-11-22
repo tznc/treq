@@ -239,7 +239,7 @@ fn rejects_immutable_and_invalid_change_ids() {
     0,
     None,
   );
-  assert!(err.is_err(), "should reject change_id starting with '-'");
+  err.expect_err("should reject change_id starting with '-'");
 
   let home = treq_lib::core::list_commits(&repo.repo_path, None, false, None, None).expect("home");
   // A default-branch commit: immutable to a workspace, whatever the home log
@@ -261,7 +261,7 @@ fn rejects_immutable_and_invalid_change_ids() {
     0,
     None,
   );
-  assert!(err.is_err(), "should reject immutable commit, got {err:?}");
+  err.expect_err("should reject immutable commit");
 }
 
 #[test]

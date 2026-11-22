@@ -11,22 +11,6 @@ message: >
 files:
   - "src-tauri/**/*.rs"
   - "crates/**/*.rs"
-ignores:
-  # Not fixed yet. The fix PRs stacked on this one remove these entries.
-  - "crates/treq-gateway/tests/gateway.rs"
-  - "src-tauri/tests/it/auto_rebase_chaos_test.rs"
-  - "src-tauri/tests/it/core_app_test.rs"
-  - "src-tauri/tests/it/core_changes_test.rs"
-  - "src-tauri/tests/it/core_commits_list_test.rs"
-  - "src-tauri/tests/it/core_commits_move_test.rs"
-  - "src-tauri/tests/it/core_commits_test.rs"
-  - "src-tauri/tests/it/core_commits_test_edit.rs"
-  - "src-tauri/tests/it/core_commits_timestamp_test.rs"
-  - "src-tauri/tests/it/core_repo_test.rs"
-  - "src-tauri/tests/it/core_workspaces_test.rs"
-  - "src-tauri/tests/it/core_workspaces_workspace_diff_test.rs"
-  - "src-tauri/tests/it/jj_lib_vs_cli_test.rs"
-  - "src-tauri/tests/it/pty_tests.rs"
 rule:
   kind: macro_invocation
   all:
