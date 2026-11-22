@@ -400,8 +400,19 @@ mod tests {
     // Stands in for another Treq process that is mid-run on the same DB.
     let claim = FileLock::lock(claim_path(&db)).unwrap();
 
-    let waiting = std::thread::spawn(move || run_if_needed(&db, Trigger::Manual));
-    std::thread::sleep(Duration::from_millis(300));
+    // jj's lock logs each attempt, just before it waits for the claim.
+    let trace = dir.path().join("trace.log");
+    let log = Arc::new(std::fs::File::create(&trace).unwrap());
+    let waiting = std::thread::spawn(move || {
+      let _trace =
+        tracing::subscriber::set_default(tracing_subscriber::fmt().with_writer(log).finish());
+      run_if_needed(&db, Trigger::Manual)
+    });
+    let asked = crate::test_repo::wait_until(Duration::from_secs(5), || {
+      std::fs::read_to_string(&trace)
+        .is_ok_and(|t| t.contains("Attempting to lock") && t.contains("setup-script.lock"))
+    });
+    assert!(asked, "the run never asked for the claim");
     assert_eq!(run_count(&dir), 0);
 
     drop(claim);
@@ -419,7 +430,10 @@ mod tests {
     let claim = FileLock::lock(claim_path(&db)).unwrap();
 
     let startup = spawn_run(db.clone(), Trigger::Startup);
-    std::thread::sleep(Duration::from_millis(300));
+    // It skips without waiting for the claim, so it ends while that is held.
+    assert!(crate::test_repo::wait_until(Duration::from_secs(5), || {
+      startup.is_finished()
+    }));
     assert!(!get_status(&open(&db)).unwrap().running);
 
     drop(claim);

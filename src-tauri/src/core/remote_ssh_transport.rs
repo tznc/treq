@@ -1827,11 +1827,9 @@ mod tests {
       session.channel_success(channel)?;
       match self.mode.load(Ordering::SeqCst) {
         1 => {
-          // Slow path: sleep past the client's deadline before ever
-          // replying, to exercise deadline enforcement.
-          tokio::time::sleep(Duration::from_secs(5)).await;
-          session.data(channel, bytes::Bytes::from_static(b"{}"))?;
-          session.exit_status_request(channel, 0)?;
+          // Slow path: never reply, so the client's deadline runs out, to
+          // exercise deadline enforcement.
+          std::future::pending::<()>().await;
         }
         2 => {
           // Oversized path: exceed the client's output limit.
@@ -1851,8 +1849,8 @@ mod tests {
         }
         4 | 5 => {
           // Verify-before-retry path: the *first* exec against this server
-          // (the mutation itself, e.g. `workspace create`) sleeps past the
-          // client's deadline so the client observes a genuine
+          // (the mutation itself, e.g. `workspace create`) never replies, so
+          // the client's deadline runs out and it observes a genuine
           // transport-layer failure - never able to tell whether the
           // mutation reached the VM. `exec_command` treats a deadline the
           // same as a channel I/O error and marks the pooled connection
@@ -1870,9 +1868,7 @@ mod tests {
           // succeeds normally.
           let call_index = self.call_count.fetch_add(1, Ordering::SeqCst);
           if call_index == 0 {
-            tokio::time::sleep(Duration::from_secs(5)).await;
-            session.data(channel, bytes::Bytes::from_static(b"{}"))?;
-            session.exit_status_request(channel, 0)?;
+            std::future::pending::<()>().await;
           } else if command.contains("workspace") && command.contains("list") {
             let body = if self.mode.load(Ordering::SeqCst) == 4 {
               // AlreadyApplied: the branch this test's mutation asked to
@@ -2832,17 +2828,28 @@ mod tests {
     assert_eq!(pool.metrics_snapshot().reconnect_attempts, 1);
   }
 
+  /// Waits, off the runtime that ends it, until the session behind
+  /// `handle` has closed.
+  async fn wait_until_closed(handle: Arc<Handle<TreqSshClientHandler>>) {
+    let closed = tokio::task::spawn_blocking(move || {
+      crate::test_repo::wait_until(Duration::from_secs(5), || handle.is_closed())
+    });
+    assert!(closed.await.unwrap(), "the session never closed");
+  }
+
   /// TCP proxy that delays every chunk by `one_way` in each direction.
   async fn delay_proxy(target: std::net::SocketAddr, one_way: Duration) -> std::net::SocketAddr {
-    delay_proxy_with(target, one_way, Arc::new(AtomicBool::new(false))).await
+    delay_proxy_with(target, one_way, Arc::default(), Arc::default()).await
   }
 
   /// [`delay_proxy`] that silently drops everything while `blackhole` is set
-  /// (a NAT mapping that expired: no FIN, no RST).
+  /// (a NAT mapping that expired: no FIN, no RST), signalling `dropped` each
+  /// time it does.
   async fn delay_proxy_with(
     target: std::net::SocketAddr,
     one_way: Duration,
     blackhole: Arc<AtomicBool>,
+    dropped: Arc<tokio::sync::Notify>,
   ) -> std::net::SocketAddr {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -2858,12 +2865,14 @@ mod tests {
         let (mut cr, mut cw) = client.into_split();
         let (mut sr, mut sw) = server.into_split();
         let (blackhole_a, blackhole_b) = (blackhole.clone(), blackhole.clone());
+        let (dropped_a, dropped_b) = (dropped.clone(), dropped.clone());
         let (a_tx, mut a_rx) = tokio::sync::mpsc::unbounded_channel::<(Instant, Vec<u8>)>();
         let (b_tx, mut b_rx) = tokio::sync::mpsc::unbounded_channel::<(Instant, Vec<u8>)>();
         tokio::spawn(async move {
           let mut buf = vec![0u8; 16384];
           while let Ok(n) = cr.read(&mut buf).await {
             if blackhole_a.load(Ordering::SeqCst) {
+              dropped_a.notify_one();
               continue;
             }
             if n == 0 || a_tx.send((Instant::now(), buf[..n].to_vec())).is_err() {
@@ -2883,6 +2892,7 @@ mod tests {
           let mut buf = vec![0u8; 16384];
           while let Ok(n) = sr.read(&mut buf).await {
             if blackhole_b.load(Ordering::SeqCst) {
+              dropped_b.notify_one();
               continue;
             }
             if n == 0 || b_tx.send((Instant::now(), buf[..n].to_vec())).is_err() {
@@ -2992,7 +3002,13 @@ mod tests {
   async fn r6_first_command_on_a_silent_connection() {
     let (addr, host_key) = start_mock_server(0).await;
     let blackhole = Arc::new(AtomicBool::new(false));
-    let proxy = delay_proxy_with(addr, Duration::from_millis(5), blackhole.clone()).await;
+    let proxy = delay_proxy_with(
+      addr,
+      Duration::from_millis(5),
+      blackhole.clone(),
+      Arc::default(),
+    )
+    .await;
     let client_key = test_host_key();
     let temp_dir = tempfile::tempdir().unwrap();
     let key_reference = write_client_key(temp_dir.path(), &client_key);
@@ -3057,8 +3073,8 @@ mod tests {
       let _ = handle
         .disconnect(Disconnect::ByApplication, "test", "en")
         .await;
+      wait_until_closed(handle).await;
     }
-    tokio::time::sleep(Duration::from_millis(200)).await;
     for attempt in 1..=3 {
       let started = Instant::now();
       let result = exec_command(
@@ -3083,7 +3099,13 @@ mod tests {
   async fn an_unanswered_channel_open_fails_fast_and_the_next_command_reconnects() {
     let (addr, host_key) = start_mock_server(0).await;
     let blackhole = Arc::new(AtomicBool::new(false));
-    let proxy = delay_proxy_with(addr, Duration::from_millis(1), blackhole.clone()).await;
+    let proxy = delay_proxy_with(
+      addr,
+      Duration::from_millis(1),
+      blackhole.clone(),
+      Arc::default(),
+    )
+    .await;
     let client_key = test_host_key();
     let temp_dir = tempfile::tempdir().unwrap();
     let key_reference = write_client_key(temp_dir.path(), &client_key);
@@ -3154,9 +3176,7 @@ mod tests {
     let _ = handle
       .disconnect(Disconnect::ByApplication, "test", "en")
       .await;
-    while !handle.is_closed() {
-      tokio::time::sleep(Duration::from_millis(5)).await;
-    }
+    wait_until_closed(handle).await;
 
     // The next command succeeds without first failing on the dead session.
     exec_command(
@@ -3175,7 +3195,13 @@ mod tests {
   async fn probe_marks_a_silent_connection_dead_and_keeps_a_healthy_one() {
     let (addr, host_key) = start_mock_server(0).await;
     let blackhole = Arc::new(AtomicBool::new(false));
-    let proxy = delay_proxy_with(addr, Duration::from_millis(1), blackhole.clone()).await;
+    let proxy = delay_proxy_with(
+      addr,
+      Duration::from_millis(1),
+      blackhole.clone(),
+      Arc::default(),
+    )
+    .await;
     let client_key = test_host_key();
     let temp_dir = tempfile::tempdir().unwrap();
     let key_reference = write_client_key(temp_dir.path(), &client_key);
@@ -3216,7 +3242,14 @@ mod tests {
     use crate::core::remote::{execute_remote_read, TreqCommandRequest};
     let (addr, host_key) = start_mock_server(0).await;
     let blackhole = Arc::new(AtomicBool::new(false));
-    let proxy = delay_proxy_with(addr, Duration::from_millis(1), blackhole.clone()).await;
+    let dropped = Arc::new(tokio::sync::Notify::new());
+    let proxy = delay_proxy_with(
+      addr,
+      Duration::from_millis(1),
+      blackhole.clone(),
+      dropped.clone(),
+    )
+    .await;
     let client_key = test_host_key();
     let temp_dir = tempfile::tempdir().unwrap();
     let key_reference = write_client_key(temp_dir.path(), &client_key);
@@ -3235,11 +3268,12 @@ mod tests {
     .await
     .unwrap();
 
-    // The path goes silent and recovers before the first attempt gives up.
+    // The path goes silent and recovers before the first attempt gives up:
+    // once it has swallowed that attempt's request.
     blackhole.store(true, Ordering::SeqCst);
     let lift = blackhole.clone();
     tokio::spawn(async move {
-      tokio::time::sleep(Duration::from_millis(200)).await;
+      dropped.notified().await;
       lift.store(false, Ordering::SeqCst);
     });
     let started = Instant::now();

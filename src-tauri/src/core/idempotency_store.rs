@@ -551,12 +551,15 @@ mod tests {
     let db_path = temp_db_path(&dir);
     let store = std::sync::Arc::new(IdempotencyStore::open_at(&db_path).unwrap());
     let execution_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let asked = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
     let mut handles = vec![];
     for _ in 0..5 {
       let store = store.clone();
       let execution_count = execution_count.clone();
+      let asked = asked.clone();
       handles.push(std::thread::spawn(move || {
+        asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let claim = store
           .claim_or_replay("git.push", "key-1", "fp-1", DEFAULT_STALE_AFTER, || {
             panic!("should not need recovery while the claim is fresh")
@@ -565,8 +568,11 @@ mod tests {
         match claim {
           None => {
             execution_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            // Simulate real work so the other threads observe `InProgress`.
-            std::thread::sleep(Duration::from_millis(60));
+            // Works until every request is made, so the others find it in
+            // progress.
+            crate::test_repo::wait_until(Duration::from_secs(5), || {
+              asked.load(std::sync::atomic::Ordering::SeqCst) == 5
+            });
             store
               .complete("git.push", "key-1", &serde_json::json!({"pushed": true}))
               .unwrap();
