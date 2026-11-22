@@ -9,7 +9,9 @@ use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
+use gpui_kit::base::ObservedElement;
 use std::{collections::HashSet, rc::Rc, sync::Arc, time::Duration};
+use treq_ui::SelectorExt as _;
 
 use gpui_kit::base::TestSupportExt as _;
 use serde::Deserialize;
@@ -1359,13 +1361,13 @@ impl SettingsView {
     p: &Palette,
   ) -> impl IntoElement {
     div()
-      .debug_selector(|| "settings-prompt-edits".into())
+      .selector("settings-prompt-edits")
       .flex()
       .flex_col()
       .gap_3()
       .child(
         div()
-          .debug_selector(|| "prompt-edits-header".into())
+          .selector("prompt-edits-header")
           .flex()
           .items_center()
           .justify_between()
@@ -1968,8 +1970,7 @@ impl Mark {
     self.saved.then(|| {
       let id = format!("settings-saved-{}", self.key);
       ui::text(div(), TextSize::Sm)
-        .id(SharedString::from(id.clone()))
-        .debug_selector(move || id)
+        .selector(SharedString::from(id.clone()))
         .role(gpui::Role::Status)
         .aria_label("Saved")
         .flex()
@@ -1988,8 +1989,7 @@ impl Mark {
     self.error.clone().map(|text| {
       let id = format!("settings-error-{}", self.key);
       ui::text(div().mt_1(), TextSize::Sm)
-        .id(SharedString::from(id.clone()))
-        .debug_selector(move || id)
+        .selector(SharedString::from(id.clone()))
         .role(gpui::Role::Alert)
         .aria_label(text.clone())
         .text_color(ui::Tone::Danger.text(p))
@@ -2209,8 +2209,7 @@ impl Render for SettingsView {
       .child(header)
       .child(
         div()
-          .id("settings-scroll")
-          .debug_selector(|| "settings-scroll".into())
+          .selector("settings-scroll")
           .flex_1()
           .min_h_0()
           .overflow_y_scroll()
@@ -2652,7 +2651,7 @@ impl SettingsView {
         .child(
           // The repository's own choices over the Application tab's.
           div()
-            .debug_selector(|| "settings-repo-overrides".into())
+            .selector("settings-repo-overrides")
             .flex()
             .flex_col()
             .gap_4()
@@ -2784,7 +2783,7 @@ impl SettingsView {
 
     // Which repository these settings belong to.
     let title = div()
-      .debug_selector(|| "settings-repo-name".into())
+      .selector("settings-repo-name")
       .child(
         ui::text(div(), TextSize::Xl)
           .id("settings-repo-name")
@@ -2928,7 +2927,7 @@ impl SettingsView {
       .flex()
       .flex_col()
       .gap_4()
-      .debug_selector(|| "skill-library-settings".into())
+      .selector("skill-library-settings")
       .child(
         div()
           .child(
@@ -2963,7 +2962,7 @@ impl SettingsView {
       )
       .child(
         div()
-          .debug_selector(|| "skill-filters".into())
+          .selector("skill-filters")
           .flex()
           .flex_wrap()
           .gap_2()
@@ -3005,7 +3004,7 @@ impl SettingsView {
     row: &SkillRow,
     level: Option<gpui::Entity<form::SelectStateOf>>,
     p: &Palette,
-  ) -> gpui::Div {
+  ) -> ObservedElement<gpui::Stateful<gpui::Div>> {
     let id = &row.id;
     let selector = format!("skill-row-{id}");
     div()
@@ -3017,7 +3016,7 @@ impl SettingsView {
       .border_color(p.border)
       .rounded(radius::MD)
       .p_3()
-      .debug_selector(move || selector)
+      .selector(selector)
       .child(
         div().flex().items_start().justify_between().gap_3().child(
           div()

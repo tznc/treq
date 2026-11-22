@@ -2,6 +2,7 @@
 //! dialogs, in its bottom-left corner. `toasts` keeps each window's list.
 
 use std::rc::Rc;
+use treq_ui::SelectorExt as _;
 
 use tauri_plugin_gpui::gpui::{self, div, prelude::*, svg, AnyElement, App, SharedString};
 
@@ -62,12 +63,10 @@ fn item(toast: &Toast, palette: Palette, on_click: ToastClick) -> AnyElement {
   };
   let compact = is_compact(toast);
   let selector = format!("toast-{}", toast.id);
-  let close_selector = format!("toast-close-{}", toast.id);
   let (action_id, close_id) = (toast.id.clone(), toast.id.clone());
   let on_action = on_click.clone();
   div()
-    .id(SharedString::from(selector.clone()))
-    .debug_selector(move || selector)
+    .selector(SharedString::from(selector.clone()))
     .flex()
     .items_start()
     .gap_3()
@@ -138,8 +137,7 @@ fn item(toast: &Toast, palette: Palette, on_click: ToastClick) -> AnyElement {
       // hover:text-foreground`
       this.child(
         div()
-          .id("close")
-          .debug_selector(move || close_selector)
+          .selector(format!("toast-close-{}", toast.id))
           .role(gpui::Role::Button)
           .aria_label("Dismiss")
           .group("close")

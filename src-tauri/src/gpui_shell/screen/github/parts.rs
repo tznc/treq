@@ -3,10 +3,10 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
-use gpui_kit::base::TestSupportExt as _;
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, App, Div, FontWeight, Hsla, SharedString, Stateful, Window,
 };
+use treq_ui::SelectorExt as _;
 
 use super::super::github_data::{self as data, CiState};
 use crate::{
@@ -53,12 +53,10 @@ pub fn review_chip(pr: &crate::github::GhPullRequest, p: &Palette) -> Option<imp
   };
   Some(
     div()
-      .id("github-review-state")
-      .debug_selector(|| "github-review-state".into())
+      .selector("github-review-state")
       .role(gpui::Role::Status)
       .aria_label(format!("Review: {}", state.label()))
-      .child(ui::Badge::new(state.label(), p).tone(tone))
-      .test_support(),
+      .child(ui::Badge::new(state.label(), p).tone(tone)),
   )
 }
 
@@ -246,8 +244,7 @@ pub fn review_event(
   };
   let name = format!("{login} {}", review.verdict().unwrap_or_default());
   ui::text(div(), TextSize::Sm)
-    .id(SharedString::from(format!("github-review-event-{login}")))
-    .debug_selector(move || format!("github-review-event-{login}"))
+    .selector(SharedString::from(format!("github-review-event-{login}")))
     .role(gpui::Role::Label)
     .aria_label(name)
     .flex()
@@ -267,7 +264,6 @@ pub fn review_event(
     .child(review.verdict().unwrap_or_default())
     .child("·")
     .child(date.to_string())
-    .test_support()
 }
 
 /// A dropdown menu's panel: `rounded-md border bg-popover p-1 shadow-md`.

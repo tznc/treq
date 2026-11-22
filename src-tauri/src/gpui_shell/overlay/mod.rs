@@ -12,6 +12,7 @@ use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
 use std::{rc::Rc, sync::Arc};
+use treq_ui::SelectorExt as _;
 
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::input::{
@@ -833,7 +834,6 @@ impl Overlay {
           ),
         };
         let tag_id = format!("overlay-branch-workspace-{index}");
-        let in_workspace = row.group == 1;
         base
           .py_2()
           .rounded_none()
@@ -843,13 +843,11 @@ impl Overlay {
           .child(two_lines(&row.branch.name, None, row.group == 0))
           .children(tag.map(|tag| {
             ui::text(div(), TextSize::Sm)
-              .id(SharedString::from(tag_id.clone()))
+              .selector(tag_id)
               .role(gpui::Role::Label)
               .aria_label(tag.clone())
               .text_color(p.muted_foreground)
-              .when(in_workspace, |this| this.debug_selector(move || tag_id))
               .child(tag)
-              .test_support()
           }))
       }
       _ => base,
@@ -1060,8 +1058,7 @@ impl Render for Overlay {
         .occlude()
         .child(
           div()
-            .id("overlay-dialog")
-            .debug_selector(|| "overlay-dialog".into())
+            .selector("overlay-dialog")
             .role(gpui::Role::Dialog)
             .test_support()
             .w(viewport.width * 0.4)
@@ -1125,10 +1122,9 @@ impl Render for Overlay {
         .into_any_element()
     };
     div()
-      .id("overlay-backdrop")
+      .selector("overlay-backdrop")
       // A dismiss target, not a control.
       .cursor_default()
-      .debug_selector(|| "overlay-backdrop".into())
       .key_context(KEY_CONTEXT)
       .track_focus(&self.focus)
       .absolute()

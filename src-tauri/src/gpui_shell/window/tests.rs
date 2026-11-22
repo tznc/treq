@@ -592,7 +592,10 @@ impl Window {
     let handle = vcx.update(|window, _| window.window_handle());
     let screen = gpui_testing_library::Screen::new(vcx, handle);
     screen.redraw();
-    assert!(vcx.debug_bounds("confirm").is_some(), "the dialog is drawn");
+    assert!(
+      vcx.debug_bounds("confirm-panel").is_some(),
+      "the dialog is drawn"
+    );
     screen
       .user()
       .click(&screen.get_by_role(by::role(Role::Button).name(button)));

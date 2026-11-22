@@ -1,7 +1,7 @@
 //! Inline alerts: a fact and what to do about it, where it applies.
 
+use crate::SelectorExt as _;
 use gpui::{div, prelude::*, AnyElement, App, SharedString, Window};
-use gpui_kit::base::TestSupportExt as _;
 
 use crate::{icon, text, theme, theme::Palette, zpx, TextSize};
 
@@ -83,10 +83,8 @@ impl RenderOnce for Alert {
       Severity::Danger => (p.destructive, theme::ICON_CIRCLE_ALERT),
     };
     let tint = if p.dark { 0.14 } else { 0.08 };
-    let selector = self.id.to_string();
     div()
-      .id(self.id)
-      .debug_selector(move || selector)
+      .selector(self.id)
       .role(gpui::Role::Alert)
       // Named by its title, so tests and assistive tech can tell alerts apart.
       .aria_label(self.title.clone())
@@ -131,7 +129,6 @@ impl RenderOnce for Alert {
             )
           }),
       )
-      .test_support()
   }
 }
 

@@ -14,6 +14,7 @@ use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use crate::result_ext::ResultExt;
+use gpui_kit::base::ObservedElement;
 use std::{
   cell::{Cell, RefCell},
   collections::HashMap,
@@ -22,6 +23,7 @@ use std::{
   sync::{Arc, LazyLock},
   time::Duration,
 };
+use treq_ui::SelectorExt as _;
 
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::{
@@ -824,8 +826,7 @@ impl CodeView {
     let sync = self.pr_sync()?;
     let note = |id: &'static str, text: String| {
       ui::text(div(), TextSize::Sm)
-        .id(id)
-        .debug_selector(move || id.into())
+        .selector(id)
         .role(Role::Label)
         .aria_label(SharedString::from(text.clone()))
         .test_support()
@@ -1061,7 +1062,11 @@ impl CodeView {
     );
   }
 
-  fn close_menu_on_outside(&self, panel: Stateful<Div>, cx: &mut Context<Self>) -> Stateful<Div> {
+  fn close_menu_on_outside(
+    &self,
+    panel: ObservedElement<Stateful<Div>>,
+    cx: &mut Context<Self>,
+  ) -> ObservedElement<Stateful<Div>> {
     panel.dismiss_with("code-menu", cx, |view, cx| {
       let open = view.menu.take().is_some();
       if open {
@@ -1098,10 +1103,9 @@ fn section(p: &Palette) -> Div {
 }
 
 /// A dropdown's panel (`DropdownMenuContent`), drawn over the tab.
-pub(super) fn menu_panel(id: &'static str, p: &Palette) -> Stateful<Div> {
+pub(super) fn menu_panel(id: &'static str, p: &Palette) -> ObservedElement<Stateful<Div>> {
   div()
-    .id(id)
-    .debug_selector(move || id.into())
+    .selector(id)
     .absolute()
     .p_1()
     .rounded(radius::MD)
@@ -1263,8 +1267,7 @@ impl Render for CodeView {
           .children(self.readme(&p)),
       );
     div()
-      .id("workspace-code")
-      .debug_selector(|| "workspace-code".into())
+      .selector("workspace-code")
       .role(gpui::Role::Group)
       .aria_label("Code")
       .size_full()
@@ -1327,7 +1330,7 @@ fn rebase_alert(hold: &RebaseHold, p: &Palette) -> ui::Alert {
 fn skeleton(p: &Palette) -> impl IntoElement {
   let bar = |h: f32| div().h(zpx(h)).rounded(radius::SM).bg(p.muted.opacity(0.4));
   div()
-    .debug_selector(|| "workspace-overview-skeleton".into())
+    .selector("workspace-overview-skeleton")
     .flex()
     .flex_col()
     .gap_4()
@@ -1395,8 +1398,7 @@ impl CodeView {
   /// and Go to file on the right.
   fn action_row(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     div()
-      .id("code-action-row")
-      .debug_selector(|| "code-action-row".into())
+      .selector("code-action-row")
       .role(gpui::Role::Toolbar)
       .aria_label("Code actions")
       .flex()
@@ -1701,8 +1703,7 @@ impl CodeView {
   /// The pull request's title and body as GitHub has them, read-only.
   fn github_text(&self, p: &Palette) -> impl IntoElement {
     let panel = div()
-      .id("workspace-about-github")
-      .debug_selector(|| "workspace-about-github".into())
+      .selector("workspace-about-github")
       .role(gpui::Role::Group)
       .aria_label("Pull request on GitHub")
       .flex()
@@ -1748,8 +1749,7 @@ impl CodeView {
   ) -> Option<impl IntoElement> {
     let text = self.parent.workspace.as_ref().and_then(description)?;
     let card = div()
-      .id("workspace-description")
-      .debug_selector(|| "workspace-description".into())
+      .selector("workspace-description")
       .role(gpui::Role::Group)
       .aria_label("Description")
       .relative();
@@ -1821,7 +1821,7 @@ impl CodeView {
             }))
             .child(
               ui::text(div(), TextSize::Sm)
-                .debug_selector(|| "workspace-description-input".into())
+                .selector("workspace-description-input")
                 .child(Textarea::new(&draft).aria_label("Workspace description")),
             )
             .child(
@@ -1989,7 +1989,7 @@ impl CodeView {
           .min_w_0()
           .max_w(zpx(220.))
           .truncate()
-          .debug_selector(|| "workspace-branch".into())
+          .selector("workspace-branch")
           .child(card.branch.clone()),
       );
     if let Some(target) = &card.target {
@@ -2299,11 +2299,6 @@ impl CodeView {
       // A row has something above it: an earlier row, or the toggle.
       let divided = i > 0 || (i >= changed && untouched_count > 0);
       let id = SharedString::from(format!("code-entry-{}", entry.name));
-      let selector = if submodule {
-        format!("submodule-row-{}", entry.name)
-      } else {
-        id.to_string()
-      };
       let open = (*entry).clone();
       let synced = entry.submodule_synced.unwrap_or(false);
       let path = entry.name.clone();
@@ -2311,8 +2306,11 @@ impl CodeView {
       let row_label = format!("Submodule {}", entry.name);
       list = list.child(
         div()
-          .id(SharedString::from(format!("code-entry-row-{}", entry.name)))
-          .debug_selector(move || selector)
+          .selector(if submodule {
+            format!("submodule-row-{}", entry.name)
+          } else {
+            format!("code-entry-{}", entry.name)
+          })
           .when(submodule, |row| {
             row.role(gpui::Role::Group).aria_label(row_label)
           })
@@ -2453,8 +2451,7 @@ impl CodeView {
     // Short label (['toggle label']): 11px is fine.
     // ast-grep-ignore: gpui-text-xs-short-label-only
     ui::text(div(), TextSize::Xs)
-      .id("code-unchanged-toggle")
-      .debug_selector(|| "code-unchanged-toggle".into())
+      .selector("code-unchanged-toggle")
       .role(Role::Button)
       .aria_label(label.clone())
       .aria_expanded(show)
@@ -2619,8 +2616,7 @@ impl CodeView {
     deferred(
       anchored().snap_to_window_with_margin(px(8.)).child(
         div()
-          .id(id)
-          .debug_selector(move || id.into())
+          .selector(id)
           .mt_1()
           .w(zpx(360.))
           .p_2()
@@ -2848,13 +2844,11 @@ impl CodeView {
     let (green, red) = (ui::Tone::DiffAdded.text(p), ui::Tone::DiffRemoved.text(p));
     let change = commit.change_id.clone();
     let id = SharedString::from(format!("commit-item-{}", commit.commit_id));
-    let selector = id.to_string();
     let column = p.background.blend(p.muted.opacity(0.2));
     let body = div()
-      .id(id)
+      .selector(id)
       .role(gpui::Role::Button)
       .aria_label(title.clone())
-      .debug_selector(move || selector)
       .flex_1()
       .min_w_0()
       .pt_0p5()
@@ -3053,7 +3047,7 @@ fn loc_indicator(
       .child(text)
   };
   div()
-    .debug_selector(|| "workspace-loc-indicator".into())
+    .selector("workspace-loc-indicator")
     .flex()
     .items_center()
     .gap_1p5()

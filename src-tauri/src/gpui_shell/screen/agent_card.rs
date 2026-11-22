@@ -4,6 +4,7 @@
 use tauri_plugin_gpui::gpui::{
   self as gpui, div, prelude::*, App, ClickEvent, FontWeight, SharedString, Window,
 };
+use treq_ui::SelectorExt as _;
 
 use super::changes::threads::suggestion_box;
 use crate::{
@@ -13,7 +14,6 @@ use crate::{
   },
   local_db::AgentReviewComment,
 };
-use gpui_kit::base::TestSupportExt as _;
 
 /// What a card's buttons do.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -74,8 +74,7 @@ pub fn agent_comment_card(
   let (card, header) = (format!("{prefix}-card"), format!("{prefix}-header"));
   let heading = format!("Local {}", spec.location);
   div()
-    .id(SharedString::from(format!("{card}-{id}")))
-    .debug_selector(move || card)
+    .selector(SharedString::from(format!("{card}-{id}")))
     .role(gpui::Role::Article)
     .aria_label(comment.comment_text.clone())
     .rounded(radius::MD)
@@ -88,8 +87,7 @@ pub fn agent_comment_card(
     .gap_1p5()
     .child(
       div()
-        .id(SharedString::from(format!("{header}-{id}")))
-        .debug_selector(move || header)
+        .selector(SharedString::from(format!("{header}-{id}")))
         .role(gpui::Role::Heading)
         .aria_label(heading)
         .flex()
@@ -108,8 +106,7 @@ pub fn agent_comment_card(
           ui::text(div(), TextSize::Sm)
             .text_color(p.muted_foreground)
             .child(spec.location),
-        )
-        .test_support(),
+        ),
     )
     .child(
       ui::text(div(), TextSize::Sm)
@@ -124,6 +121,5 @@ pub fn agent_comment_card(
       ))
     })
     .child(actions)
-    .test_support()
     .into_any_element()
 }

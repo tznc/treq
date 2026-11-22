@@ -5,10 +5,10 @@
 use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
-use gpui_kit::base::TestSupportExt as _;
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, ClipboardItem, Context, Div, FontWeight, SharedString,
+  self, div, prelude::*, ClipboardItem, Context, FontWeight, SharedString,
 };
+use treq_ui::SelectorExt as _;
 
 use super::{data::StartingPrompt, Popover};
 use crate::gpui_shell::{
@@ -101,13 +101,9 @@ impl Popover {
     self.field("workspace.viewFullPrompt", id.into(), cx);
   }
 
-  pub(super) fn render_details(
-    &mut self,
-    p: &Palette,
-    cx: &mut Context<Self>,
-  ) -> gpui::Stateful<Div> {
+  pub(super) fn render_details(&mut self, p: &Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
     let super::Content::Details(state) = &self.content else {
-      return div().id("workspace-details-popover");
+      return div().id("workspace-details-popover").into_any_element();
     };
     let p = *p;
     let spec = state.spec.clone();
@@ -172,32 +168,28 @@ impl Popover {
       Some(prompt) => div()
         .child(
           ui::text(div(), TextSize::Sm)
-            .id("details-prompt")
-            .debug_selector(|| "details-prompt".into())
+            .selector("details-prompt")
             .role(gpui::Role::Paragraph)
             .aria_label(prompt.text.clone())
             .mt_1()
             .max_h(zpx(160.))
             .overflow_y_scroll()
             .text_color(p.muted_foreground)
-            .child(SharedString::from(prompt.text.clone()))
-            .test_support(),
+            .child(SharedString::from(prompt.text.clone())),
         )
         .child(
           // Short label (['link label']): 11px is fine.
           // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
-            .id("details-view-full")
+            .selector("details-view-full")
             .role(gpui::Role::Button)
             .aria_label("View full prompt")
-            .debug_selector(|| "details-view-full".into())
             .mt_1()
             .cursor_pointer()
             .text_color(theme::palette(self.dark).primary)
             .hover(|s| s.underline())
             .child("View full prompt")
-            .on_click(cx.listener(|this, _, _, cx| this.view_full_prompt(cx)))
-            .test_support(),
+            .on_click(cx.listener(|this, _, _, cx| this.view_full_prompt(cx))),
         ),
       None => div().child(
         ui::EmptyState::new("details-no-prompt", "No prompt recorded", &p)
@@ -226,5 +218,6 @@ impl Popover {
       .gap_3()
       .child(details)
       .child(starting)
+      .into_any_element()
   }
 }

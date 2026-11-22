@@ -9,8 +9,9 @@
 
 use crate::gpui_shell::ui::zpx;
 use std::collections::HashMap;
+use treq_ui::SelectorExt as _;
 
-use gpui_kit::base::{ObservedElement, TestSupportExt as _};
+use gpui_kit::base::ObservedElement;
 use gpui_kit::component::{
   input::{InputEvent, InputState, Textarea, TextareaState},
   searchable_list::SearchableListItem,
@@ -301,16 +302,11 @@ pub fn input_field(
   disabled: bool,
 ) -> impl IntoElement {
   let id: SharedString = id.into();
-  let selector = id.to_string();
-  div()
-    .id(id)
-    .debug_selector(move || selector)
-    .w_full()
-    .child(
-      // `Input::h` sets a multi-line height; a single line takes its own.
-      Styled::h(ui::input(state).disabled(disabled), zpx(FIELD_HEIGHT))
-        .when(mono, |this| this.font_family(theme::MONO_FONT)),
-    )
+  div().selector(id).w_full().child(
+    // `Input::h` sets a multi-line height; a single line takes its own.
+    Styled::h(ui::input(state).disabled(disabled), zpx(FIELD_HEIGHT))
+      .when(mono, |this| this.font_family(theme::MONO_FONT)),
+  )
 }
 
 /// A multi-line field drawn like `ui/textarea.tsx`.
@@ -332,18 +328,13 @@ pub fn select_field(
   disabled: bool,
 ) -> impl IntoElement {
   let id: SharedString = id.into();
-  let selector = id.to_string();
-  div()
-    .id(id.clone())
-    .debug_selector(move || selector)
-    .w_full()
-    .child(
-      Select::new(state)
-        .id(id)
-        .accessibility_label(name)
-        .disabled(disabled)
-        .h(zpx(FIELD_HEIGHT)),
-    )
+  div().selector(id.clone()).w_full().child(
+    Select::new(state)
+      .id(id)
+      .accessibility_label(name)
+      .disabled(disabled)
+      .h(zpx(FIELD_HEIGHT)),
+  )
 }
 
 const SMALL_FIELD_HEIGHT: f32 = 32.;
@@ -356,19 +347,14 @@ pub fn small_select_field(
   disabled: bool,
 ) -> impl IntoElement {
   let id: SharedString = id.into();
-  let selector = id.to_string();
-  div()
-    .id(id.clone())
-    .debug_selector(move || selector)
-    .w_full()
-    .child(
-      Select::new(state)
-        .id(id)
-        .accessibility_label(name)
-        .disabled(disabled)
-        .small()
-        .h(zpx(SMALL_FIELD_HEIGHT)),
-    )
+  div().selector(id.clone()).w_full().child(
+    Select::new(state)
+      .id(id)
+      .accessibility_label(name)
+      .disabled(disabled)
+      .small()
+      .h(zpx(SMALL_FIELD_HEIGHT)),
+  )
 }
 
 /// A slider: `h-2` track in `--secondary`, `--primary` fill.
@@ -411,10 +397,8 @@ pub fn switch_sized(
   on_change: impl Fn(&bool, &mut Window, &mut App) + 'static,
 ) -> Switch {
   let id: SharedString = id.into();
-  let selector = id.to_string();
   div()
-    .id(id)
-    .debug_selector(move || selector)
+    .selector(id)
     .role(Role::Switch)
     .aria_label(name)
     .aria_toggled(if checked {
@@ -450,5 +434,4 @@ pub fn switch_sized(
         .cursor_pointer()
         .on_click(move |_, window, cx| on_change(&!checked, window, cx))
     })
-    .test_support()
 }

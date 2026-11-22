@@ -15,6 +15,7 @@ use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
+use gpui_kit::base::ObservedElement;
 use std::{
   cell::RefCell,
   collections::{HashMap, HashSet},
@@ -22,8 +23,8 @@ use std::{
   sync::Arc,
   time::{Duration, Instant},
 };
+use treq_ui::SelectorExt as _;
 
-use gpui_kit::base::TestSupportExt as _;
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, px, AnyElement, App, Bounds, ClickEvent, Context, Div, FocusHandle,
@@ -1195,14 +1196,13 @@ impl LinearView {
     url: &str,
     color: Hsla,
     cx: &mut Context<Self>,
-  ) -> Stateful<Div> {
-    let (url, selector) = (url.to_string(), id.clone());
+  ) -> ObservedElement<Stateful<Div>> {
+    let url = url.to_string();
     let text: SharedString = text.into();
     div()
-      .id(SharedString::from(id))
+      .selector(SharedString::from(id))
       .role(gpui::Role::Link)
       .aria_label(text.clone())
-      .debug_selector(move || selector)
       .text_color(color)
       .cursor_pointer()
       .hover(|s| s.underline())
@@ -1314,12 +1314,10 @@ impl LinearView {
       .map(|group| {
         let key = group.key;
         let clear = format!("linear-filter-clear-{key}");
-        let chip = format!("linear-filter-chip-{key}");
         // Short label (['chip']): 11px is fine.
         // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
-          .debug_selector(move || chip)
-          .id(SharedString::from(format!("linear-filter-chip-{key}")))
+          .selector(SharedString::from(format!("linear-filter-chip-{key}")))
           .role(gpui::Role::Group)
           .aria_label(format!(
             "{}: {}",
@@ -1341,13 +1339,11 @@ impl LinearView {
           )
           .child(group.value_label().unwrap_or_default())
           .child({
-            let selector = clear.clone();
             let destructive = p.destructive;
             div()
-              .id(SharedString::from(clear))
+              .selector(SharedString::from(clear))
               .role(gpui::Role::Button)
               .aria_label("Clear filter")
-              .debug_selector(move || selector)
               .cursor_pointer()
               .text_color(p.foreground)
               .hover(move |s| s.text_color(destructive))
@@ -1360,7 +1356,6 @@ impl LinearView {
                 }
               }))
           })
-          .test_support()
       })
       .collect::<Vec<_>>();
     div()
@@ -1581,8 +1576,7 @@ impl Render for LinearView {
     // what to fix.
     if let Some(error) = connection {
       return div()
-        .debug_selector(|| "linear-panel".into())
-        .id("linear-panel")
+        .selector("linear-panel")
         .role(tauri_plugin_gpui::gpui::Role::Group)
         .aria_label("Linear")
         .size_full()
@@ -1592,7 +1586,6 @@ impl Render for LinearView {
         .text_color(p.foreground)
         .child(header)
         .child(self.connection_state(error, &p, cx))
-        .test_support()
         .into_any_element();
     }
     let sections = div()
@@ -1618,8 +1611,7 @@ impl Render for LinearView {
       .delete_dialog(&p, window, cx)
       .or_else(|| self.document_dialog(&p, window, cx));
     div()
-      .debug_selector(|| "linear-panel".into())
-      .id("linear-panel")
+      .selector("linear-panel")
       .role(tauri_plugin_gpui::gpui::Role::Group)
       .aria_label("Linear")
       .size_full()
@@ -1631,7 +1623,6 @@ impl Render for LinearView {
       .child(sections)
       .child(body)
       .children(dialog)
-      .test_support()
       .into_any_element()
   }
 }
@@ -2012,7 +2003,7 @@ impl LinearView {
     };
     let selector = format!("linear-issue-page-{}", issue.id);
     div()
-      .debug_selector(move || selector)
+      .selector(selector)
       .id(SharedString::from(format!(
         "linear-issue-page-{}",
         issue.id
@@ -2062,7 +2053,6 @@ impl LinearView {
               }),
           ),
       )
-      .test_support()
   }
 
   /// The New issue page: a back button over the form.
@@ -2121,8 +2111,7 @@ impl LinearView {
     );
     let saving = self.saving;
     div()
-      .debug_selector(|| "linear-issue-edit-form".into())
-      .id("linear-issue-edit-form")
+      .selector("linear-issue-edit-form")
       .role(tauri_plugin_gpui::gpui::Role::Form)
       .aria_label("Edit issue")
       .flex()
@@ -2167,7 +2156,6 @@ impl LinearView {
               })),
           ),
       )
-      .test_support()
   }
 
   /// "New issue": a team, a title and a description.
@@ -2206,8 +2194,7 @@ impl LinearView {
     );
     let pending = form.pending;
     div()
-      .debug_selector(|| "linear-new-issue-form".into())
-      .id("linear-new-issue-form")
+      .selector("linear-new-issue-form")
       .role(tauri_plugin_gpui::gpui::Role::Form)
       .aria_label("New issue")
       .p_4()
@@ -2286,7 +2273,6 @@ impl LinearView {
           .whitespace_normal()
           .child(err)
       }))
-      .test_support()
   }
 
   /// The delete confirmation for the open issue.
@@ -2389,12 +2375,10 @@ impl LinearView {
       .overflow_x_scroll()
       .p_4()
       .children(names.into_iter().map(|name| {
-        let selector = format!("linear-kanban-column-{name}");
         let list = self.column_rows[&name].list.clone();
         let column = name.clone();
         div()
-          .debug_selector(move || selector)
-          .id(SharedString::from(format!("linear-kanban-column-{name}")))
+          .selector(SharedString::from(format!("linear-kanban-column-{name}")))
           .role(tauri_plugin_gpui::gpui::Role::Group)
           .aria_label(name.clone())
           .flex_none()
@@ -2426,7 +2410,6 @@ impl LinearView {
                 .size_full(),
               ),
           )
-          .test_support()
       }))
   }
 
@@ -2484,11 +2467,9 @@ impl LinearView {
     });
     let selector = format!("linear-kanban-card-{id}");
     ui::text(div(), TextSize::Sm)
-      .id(SharedString::from(selector.clone()))
-      .debug_selector(move || selector)
+      .selector(SharedString::from(selector.clone()))
       .role(Role::ListItem)
       .aria_label(SharedString::from(issue.title.clone()))
-      .test_support()
       .bg(p.background)
       .border_1()
       .border_color(p.border)
@@ -2646,10 +2627,9 @@ impl LinearView {
             let id = project.id.clone();
             let selector = format!("linear-project-item-{id}");
             div()
-              .id(SharedString::from(selector.clone()))
+              .selector(SharedString::from(selector.clone()))
               .role(gpui::Role::Button)
               .aria_label(project.name.clone())
-              .debug_selector(move || selector)
               .w_full()
               .px_4()
               .py_3()
@@ -2692,7 +2672,6 @@ impl LinearView {
                       .child(format!("{}%", data::percent(project.progress))),
                   ),
               )
-              .test_support()
           })),
       );
     let left = div()
@@ -2723,8 +2702,7 @@ impl LinearView {
           .into_any_element(),
       });
     div()
-      .debug_selector(|| "linear-projects-section".into())
-      .id("linear-projects-section")
+      .selector("linear-projects-section")
       .role(tauri_plugin_gpui::gpui::Role::Group)
       .aria_label("Projects")
       .flex_1()
@@ -2732,7 +2710,6 @@ impl LinearView {
       .min_h_0()
       .child(left)
       .child(right)
-      .test_support()
   }
 
   fn project_detail(
@@ -2798,10 +2775,9 @@ impl LinearView {
             let selector = format!("linear-document-item-{}", doc.id);
             let doc = doc.clone();
             ui::text(div(), TextSize::Sm)
-              .id(SharedString::from(selector.clone()))
+              .selector(SharedString::from(selector.clone()))
               .role(gpui::Role::Link)
               .aria_label(doc.title.clone())
-              .debug_selector(move || selector)
               .px_3()
               .py_1()
               .rounded_full()
@@ -2827,8 +2803,7 @@ impl LinearView {
         .unwrap_or_else(|| "_No description._".into()),
     };
     div()
-      .debug_selector(|| "linear-project-detail".into())
-      .id("linear-project-detail")
+      .selector("linear-project-detail")
       .role(tauri_plugin_gpui::gpui::Role::Article)
       .aria_label(project.name.clone())
       .p_4()
@@ -2864,7 +2839,6 @@ impl LinearView {
           .border_color(p.border)
           .child(self.commented(target, CommentPlacement::Inline, p, cx)),
       )
-      .test_support()
   }
 
   /// `DocumentDialog`: the document and its comments, over the window.
@@ -3056,8 +3030,7 @@ impl LinearView {
     let show_comments = !inline || fetch.is_loading() || fetch.failed() || !unanchored.is_empty();
     let below = (show_comments || !body_comments.is_empty()).then(|| {
       div()
-        .debug_selector(|| "linear-comments-column".into())
-        .id("linear-comments-column")
+        .selector("linear-comments-column")
         .role(tauri_plugin_gpui::gpui::Role::Group)
         .aria_label("Comments")
         .w_full()
@@ -3070,8 +3043,7 @@ impl LinearView {
         .when(!body_comments.is_empty(), |this| {
           this.child(
             div()
-              .debug_selector(|| "linear-agent-review-body".into())
-              .id("linear-agent-review-body")
+              .selector("linear-agent-review-body")
               .role(tauri_plugin_gpui::gpui::Role::Group)
               .aria_label("Agent review")
               .flex()
@@ -3082,8 +3054,7 @@ impl LinearView {
                 body_comments
                   .iter()
                   .map(|c| self.agent_card(&of, c, "Description".into(), p, cx)),
-              )
-              .test_support(),
+              ),
           )
         })
         .when(show_comments, |this| {
@@ -3145,10 +3116,9 @@ impl LinearView {
                 }),
             )
         })
-        .test_support()
     });
     div()
-      .debug_selector(|| "linear-commented-content".into())
+      .selector("linear-commented-content")
       .flex()
       .flex_col()
       .gap_4()
@@ -3172,12 +3142,10 @@ impl LinearView {
       .user
       .as_ref()
       .map_or_else(|| "Unknown".to_string(), |u| u.name.clone());
-    let selector = format!("linear-comment-{}", comment.id);
     let file = comment_file(&comment.id);
     let quote_border = ui::Tone::Warning.border(p);
     div()
-      .debug_selector(move || selector)
-      .id(SharedString::from(format!("linear-comment-{}", comment.id)))
+      .selector(SharedString::from(format!("linear-comment-{}", comment.id)))
       .role(tauri_plugin_gpui::gpui::Role::Article)
       .aria_label(format!("{author}: {}", comment.body))
       .flex()
@@ -3228,7 +3196,6 @@ impl LinearView {
           .filter(|c| c.file_path == file)
           .map(|c| self.agent_card(of, c, format!("Comment by {author}"), p, cx)),
       )
-      .test_support()
   }
 
   /// The shared agent card, with Resolve and no "Send to agent".

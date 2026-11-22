@@ -9,10 +9,12 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use gpui_kit::base::ObservedElement;
 use gpui_kit::base::TestSupportExt as _;
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, AnyElement, Context, Div, FontWeight, Hsla, SharedString,
 };
+use treq_ui::SelectorExt as _;
 
 use super::{data::ChecksData, Popover};
 use crate::{
@@ -172,10 +174,9 @@ impl Popover {
         // Short label (['link label']): 11px is fine.
         // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
-          .id("checks-view-logs")
+          .selector("checks-view-logs")
           .role(gpui::Role::Button)
           .aria_label("View logs")
-          .debug_selector(|| "checks-view-logs".into())
           .px_2()
           .pb_1()
           .cursor_pointer()
@@ -213,8 +214,7 @@ impl Popover {
           let filename = wf.filename.clone();
           let id = SharedString::from(format!("checks-run-{i}"));
           ui::text(div(), TextSize::Sm)
-            .id(SharedString::from(format!("checks-workflow-{i}")))
-            .debug_selector(move || format!("checks-workflow-{i}"))
+            .selector(SharedString::from(format!("checks-workflow-{i}")))
             .flex()
             .items_center()
             .gap_2()
@@ -326,7 +326,7 @@ impl Popover {
     after_treq: bool,
     p: &Palette,
     cx: &mut Context<Self>,
-  ) -> Div {
+  ) -> ObservedElement<gpui::Stateful<Div>> {
     let p = *p;
     let mut checks: Vec<&PrCheckEntry> = ci.checks.iter().collect();
     checks.sort_by_key(|c| severity(c));
@@ -352,13 +352,11 @@ impl Popover {
       };
       let link = (!check.link.is_empty()).then(|| check.link.clone());
       let id = SharedString::from(format!("ci-check-{i}"));
-      let selector = id.to_string();
       ui::text(div(), TextSize::Sm)
-        .id(id)
+        .selector(id)
         .when(link.is_some(), |el| {
           el.role(gpui::Role::Link).aria_label(check.name.clone())
         })
-        .debug_selector(move || selector)
         .w_full()
         .flex()
         .items_center()
@@ -379,8 +377,7 @@ impl Popover {
           let selector = format!("ci-inactive-{i}");
           row.child(
             div()
-              .id(SharedString::from(selector.clone()))
-              .debug_selector(move || selector)
+              .selector(SharedString::from(selector.clone()))
               .role(gpui::Role::Label)
               .aria_label(format!("{} inactive", check.name))
               .flex_none()
@@ -403,7 +400,7 @@ impl Popover {
         })
     });
     div()
-      .debug_selector(|| "checks-github".into())
+      .selector("checks-github")
       .when(after_treq, |this| {
         this.mt_2().border_t_1().border_color(p.border).pt_2()
       })

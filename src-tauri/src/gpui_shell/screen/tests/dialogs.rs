@@ -685,7 +685,7 @@ fn setup_dialog_closes_from_its_backdrop_only(cx: &mut TestAppContext) {
   );
   assert!(h.shows(gpui::Role::Dialog, "Connect a remote repository"));
   // A click in the panel stays in the dialog.
-  h.click("remote-setup-dialog");
+  h.click("remote-setup-dialog-panel");
   assert!(h.sent().is_empty());
   h.cx
     .simulate_click(gpui::point(gpui::px(5.), gpui::px(5.)), Modifiers::none());
@@ -890,7 +890,7 @@ fn terminal_dialog_lists_again_for_another_workspace(cx: &mut TestAppContext) {
       "sessions devbox.example:/srv/project:feature"
     ]
   );
-  h.click("remote-terminal-dialog");
+  h.click("remote-terminal-dialog-panel");
   assert!(h.sent().is_empty());
   h.cx
     .simulate_click(gpui::point(gpui::px(5.), gpui::px(5.)), Modifiers::none());

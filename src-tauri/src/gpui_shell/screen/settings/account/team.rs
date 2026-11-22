@@ -265,8 +265,7 @@ impl SettingsView {
     let included =
       format!("{TEAM_INCLUDED_SEATS} members included, US${TEAM_EXTRA_SEAT_USD} per extra member");
     ui::text(div(), TextSize::Sm)
-      .id("team-upsell")
-      .debug_selector(|| "team-upsell".into())
+      .selector("team-upsell")
       .role(gpui::Role::Group)
       .aria_label("Team plan")
       .flex()
@@ -702,8 +701,7 @@ impl SettingsView {
       });
       let selector = format!("team-org-{id}");
       ui::text(div(), TextSize::Sm)
-        .id(SharedString::from(selector.clone()))
-        .debug_selector(move || selector)
+        .selector(SharedString::from(selector.clone()))
         .role(gpui::Role::Group)
         .aria_label(org.name.clone())
         .border_1()

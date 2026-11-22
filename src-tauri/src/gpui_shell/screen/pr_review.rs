@@ -22,6 +22,7 @@ use std::{
   sync::Arc,
   time::{Duration, Instant},
 };
+use treq_ui::SelectorExt as _;
 
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use serde::Deserialize;
@@ -409,8 +410,7 @@ impl Render for PrReviewView {
     self.ensure_summary_input(window, cx);
     let p = theme::palette(self.dark);
     let page = div()
-      .id("pr-review-page")
-      .debug_selector(|| "pr-review-page".into())
+      .selector("pr-review-page")
       .role(gpui::Role::Main)
       .aria_label("Pull request review")
       .test_support()
@@ -454,8 +454,7 @@ impl PrReviewView {
     let mono = |text: String| div().font_family(theme::MONO_FONT).child(text);
     let subtitle = self.pr.as_ref().map(|pr| {
       ui::text(div(), TextSize::Sm)
-        .id("pr-review-subtitle")
-        .debug_selector(|| "pr-review-subtitle".into())
+        .selector("pr-review-subtitle")
         .role(gpui::Role::Label)
         .aria_label(format!(
           "{} wants to merge {} into {} · {}",
@@ -538,8 +537,7 @@ impl PrReviewView {
           .flex_1()
           .child(
             ui::text(div(), TextSize::Sm)
-              .id("pr-review-title")
-              .debug_selector(|| "pr-review-title".into())
+              .selector("pr-review-title")
               .role(gpui::Role::Heading)
               .aria_label(format!("{title} #{number}"))
               .test_support()
@@ -607,8 +605,7 @@ impl PrReviewView {
   fn nav(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     let count = self.file_count(cx);
     div()
-      .id("pr-review-files")
-      .debug_selector(|| "pr-review-files".into())
+      .selector("pr-review-files")
       .w_64()
       .flex_none()
       .border_r_1()
@@ -695,8 +692,7 @@ impl PrReviewView {
                   // Short label (comment count): 11px is fine.
                   // ast-grep-ignore: gpui-text-xs-short-label-only
                   ui::text(div(), TextSize::Xs)
-                    .id(SharedString::from(comments.clone()))
-                    .debug_selector(move || comments)
+                    .selector(SharedString::from(comments.clone()))
                     .role(gpui::Role::Label)
                     .aria_label(count_label(count, "review comment"))
                     .test_support()
@@ -742,11 +738,7 @@ impl PrReviewView {
     let at = point(anchor.right() - px(width), anchor.bottom() + px(4.));
     let (postable, outdated) = self.drafts(cx);
     let own = self.own_pr();
-    let mut radios = div()
-      .debug_selector(|| "pr-review-events".into())
-      .flex()
-      .flex_col()
-      .gap_2();
+    let mut radios = div().selector("pr-review-events").flex().flex_col().gap_2();
     for event in Event::ALL {
       let checked = self.event == event;
       let disabled = own && event != Event::Comment;
@@ -769,14 +761,10 @@ impl PrReviewView {
         });
       radios = radios.child(
         ui::text(div(), TextSize::Sm)
-          .id(SharedString::from(format!(
+          .selector(SharedString::from(format!(
             "pr-review-event-{}",
             event.value()
           )))
-          .debug_selector({
-            let id = format!("pr-review-event-{}", event.value());
-            move || id
-          })
           .role(gpui::Role::RadioButton)
           .aria_label(event.label())
           .aria_toggled(if checked {
@@ -813,8 +801,7 @@ impl PrReviewView {
     }
     let enabled = !self.submitting && can_submit(self.event, &self.summary, postable.len());
     let panel = div()
-      .id("pr-review-popover")
-      .debug_selector(|| "pr-review-popover".into())
+      .selector("pr-review-popover")
       .w(zpx(width))
       .p_4()
       .rounded(radius::MD)
@@ -850,7 +837,7 @@ impl PrReviewView {
           )
           .child(
             ui::text(div(), TextSize::Sm)
-              .debug_selector(|| "pr-review-pending".into())
+              .selector("pr-review-pending")
               .text_color(p.muted_foreground)
               .child(finish_text(postable.len(), outdated)),
           ),
