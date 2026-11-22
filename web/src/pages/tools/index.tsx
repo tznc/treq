@@ -91,7 +91,7 @@ export default function ToolsPage() {
         </div>
         <div className={styles.grid}>
           {tools.map((tool) => (
-            <Link key={tool.slug} to={`/tools/${tool.slug}`} className={styles.card}>
+            <Link key={tool.slug} to={`/tools/${tool.slug}`} className={styles.card ?? ''}>
               <div className={styles.cardIcon}>{tool.icon}</div>
               <div className={styles.cardBody}>
                 <h2 className={styles.cardTitle}>{tool.name}</h2>

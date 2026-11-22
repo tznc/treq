@@ -9,7 +9,7 @@ type AuthCallbackUrlOptions = {
   siteUrl: string;
   browserOrigin: string;
   isProduction: boolean;
-  query?: string;
+  query?: string | undefined;
 };
 
 /** Build an auth callback URL without relying on the deployment server's origin. */

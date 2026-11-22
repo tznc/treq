@@ -106,6 +106,7 @@ function renderMarkdownBlocks(md: string): MdBlock[] {
   // since splitting mid-fence would break the syntax.
   while (i < rawLines.length) {
     const raw = rawLines[i];
+    if (raw === undefined) break;
     const lineNum = i + 1;
 
     if (!raw.trim()) { i++; continue; }
@@ -115,9 +116,10 @@ function renderMarkdownBlocks(md: string): MdBlock[] {
       const lang = raw.replace(/^\s*```/, '').trim();
       i++;
       const codeLines: string[] = [];
-      while (i < rawLines.length && !rawLines[i].trimStart().startsWith('```')) {
-        codeLines.push(esc(rawLines[i]));
-        i++;
+      let line = rawLines[i];
+      while (line !== undefined && !line.trimStart().startsWith('```')) {
+        codeLines.push(esc(line));
+        line = rawLines[++i];
       }
       i++;
       blocks.push({
@@ -128,10 +130,10 @@ function renderMarkdownBlocks(md: string): MdBlock[] {
       continue;
     }
 
-    const hMatch = raw.match(/^(#{1,6})\s+(.*)/);
-    if (hMatch) {
-      const level = hMatch[1].length;
-      blocks.push({ lineStart: lineNum, lineEnd: lineNum, html: `<h${level}>${inlineFmt(esc(hMatch[2]))}</h${level}>` });
+    const [, hashes, heading] = raw.match(/^(#{1,6})\s+(.*)/) ?? [];
+    if (hashes !== undefined && heading !== undefined) {
+      const level = hashes.length;
+      blocks.push({ lineStart: lineNum, lineEnd: lineNum, html: `<h${level}>${inlineFmt(esc(heading))}</h${level}>` });
       i++;
       continue;
     }
@@ -149,17 +151,16 @@ function renderMarkdownBlocks(md: string): MdBlock[] {
       continue;
     }
 
-    const ulMatch = raw.match(/^[-*+]\s(.*)/);
-    if (ulMatch) {
-      const text = inlineFmt(esc(ulMatch[1]));
+    const [, item] = raw.match(/^[-*+]\s(.*)/) ?? [];
+    if (item !== undefined) {
+      const text = inlineFmt(esc(item));
       blocks.push({ lineStart: lineNum, lineEnd: lineNum, html: `<ul><li>${text}</li></ul>` });
       i++;
       continue;
     }
 
-    const olMatch = raw.match(/^(\d+)\.\s(.*)/);
-    if (olMatch) {
-      const [, num, rest] = olMatch;
+    const [, num, rest] = raw.match(/^(\d+)\.\s(.*)/) ?? [];
+    if (num !== undefined && rest !== undefined) {
       const text = inlineFmt(esc(rest));
       blocks.push({ lineStart: lineNum, lineEnd: lineNum, html: `<ol start="${num}"><li>${text}</li></ol>` });
       i++;
