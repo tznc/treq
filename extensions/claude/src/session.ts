@@ -7,7 +7,9 @@ export function sessionId(pathname: string): string | null {
 
 /** The session's title, from its link in the sidebar; null while it is not listed. */
 export function sessionTitle(doc: Document, id: string): string | null {
-  for (const link of doc.querySelectorAll<HTMLAnchorElement>(`a[href$="/code/${id}"]`)) {
+  for (const link of doc.querySelectorAll<HTMLAnchorElement>(
+    `a[href$="/code/${id}"]`,
+  )) {
     const title = link.textContent?.replace(/\s+/g, " ").trim();
     if (title) return title;
   }

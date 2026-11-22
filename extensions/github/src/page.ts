@@ -26,6 +26,8 @@ export function parsePage(pathname: string): Page | null {
  */
 export function currentPage(doc: Document, pathname: string): Page | null {
   const page = parsePage(pathname);
-  const nwo = doc.querySelector<HTMLMetaElement>('meta[name="octolytics-dimension-repository_nwo"]')?.content;
+  const nwo = doc.querySelector<HTMLMetaElement>(
+    'meta[name="octolytics-dimension-repository_nwo"]',
+  )?.content;
   return page && nwo?.toLowerCase() === page.repo.toLowerCase() ? page : null;
 }

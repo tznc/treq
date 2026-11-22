@@ -5,7 +5,10 @@ const ID = "treq-open-in";
 
 function linksFor(page: Page): [string, string][] | null {
   if (page.kind === "other") return null;
-  const treq = page.kind === "pr" ? treqPrUrl(page.repo, page.number) : treqRepoUrl(page.repo);
+  const treq =
+    page.kind === "pr"
+      ? treqPrUrl(page.repo, page.number)
+      : treqRepoUrl(page.repo);
   return [
     ["Open in Claude", claudeUrl(page.repo)],
     ["Open in Codex", CODEX_WEB_URL],
@@ -14,12 +17,16 @@ function linksFor(page: Page): [string, string][] | null {
 }
 
 /** Where the links go: the end of the page's sidebar, if it has one. */
-function sidebar(doc: Document, page: Page): { parent: Element; className: string } | null {
+function sidebar(
+  doc: Document,
+  page: Page,
+): { parent: Element; className: string } | null {
   if (page.kind === "pr") {
     const parent = doc.querySelector("#partial-discussion-sidebar");
     return parent && { parent, className: "discussion-sidebar-item" };
   }
-  const grid = doc.querySelector('[data-component="SplitPageLayout.Pane"] h2')?.parentElement?.parentElement;
+  const grid = doc.querySelector('[data-component="SplitPageLayout.Pane"] h2')
+    ?.parentElement?.parentElement;
   return grid ? { parent: grid, className: "" } : null;
 }
 
@@ -39,7 +46,9 @@ export function renderOpenIn(doc: Document, page: Page): void {
   section.id = ID;
   section.dataset.key = key;
   const target = sidebar(doc, page);
-  section.className = target ? `treq-open-in ${target.className}`.trim() : "treq-open-in treq-open-in--floating";
+  section.className = target
+    ? `treq-open-in ${target.className}`.trim()
+    : "treq-open-in treq-open-in--floating";
   for (const [label, href] of links) {
     const a = doc.createElement("a");
     a.className = "treq-open-in__link";

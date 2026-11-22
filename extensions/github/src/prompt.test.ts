@@ -10,7 +10,9 @@ const at = (lines: number[]) => ({
 
 describe("codePrompt", () => {
   it("leads with the file, line and code", () => {
-    expect(codePrompt(at([4]), "why?")).toBe("src/a.rs:4 (tznc/treq@main)\n```\n4  code 4\n```\n\nwhy?");
+    expect(codePrompt(at([4]), "why?")).toBe(
+      "src/a.rs:4 (tznc/treq@main)\n```\n4  code 4\n```\n\nwhy?",
+    );
   });
 
   it("numbers each line of a range", () => {

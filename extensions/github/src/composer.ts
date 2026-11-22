@@ -4,10 +4,19 @@ import { type CodeAt, codePrompt } from "./prompt";
 
 export type Provider = "claude" | "codex" | "treq";
 
-const AGENTS: Record<Provider, { label: string; url: (at: CodeAt, prompt: string) => string }> = {
-  claude: { label: "Claude", url: (at, prompt) => claudePromptUrl(at.repo, prompt) },
+const AGENTS: Record<
+  Provider,
+  { label: string; url: (at: CodeAt, prompt: string) => string }
+> = {
+  claude: {
+    label: "Claude",
+    url: (at, prompt) => claudePromptUrl(at.repo, prompt),
+  },
   codex: { label: "Codex", url: (_, prompt) => codexAppUrl(prompt) },
-  treq: { label: "Treq", url: (at, prompt) => treqKickoffUrl(at.repo, at.ref, prompt) },
+  treq: {
+    label: "Treq",
+    url: (at, prompt) => treqKickoffUrl(at.repo, at.ref, prompt),
+  },
 };
 
 /** Opens a web link in a new tab and an app link (`treq://`, `codex://`) in place. */
@@ -16,7 +25,9 @@ export function openUrl(url: string): void {
   else location.href = url;
 }
 
-const SEND_HINT = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘ + Enter" : "Ctrl + Enter";
+const SEND_HINT = /Mac|iPhone|iPad/.test(navigator.platform)
+  ? "⌘ + Enter"
+  : "Ctrl + Enter";
 
 const where = (at: CodeAt) => {
   const [first, last] = [at.lines[0].line, at.lines[at.lines.length - 1].line];
@@ -46,7 +57,11 @@ export class LineComposer {
     if (this.composing) return;
     this.root.replaceChildren();
     if (!at || !box) return;
-    const bar = this.place(this.el("div", "treq-line__icons"), box.top, box.right);
+    const bar = this.place(
+      this.el("div", "treq-line__icons"),
+      box.top,
+      box.right,
+    );
     for (const provider of this.providers) {
       const { label } = AGENTS[provider];
       const button = this.el("button", "treq-line__icon");
@@ -64,7 +79,11 @@ export class LineComposer {
     const { label, url } = AGENTS[provider];
     this.root.replaceChildren();
     this.composing = true;
-    const panel = this.place(this.el("div", "treq-composer"), box.bottom, box.right);
+    const panel = this.place(
+      this.el("div", "treq-composer"),
+      box.bottom,
+      box.right,
+    );
     const input = this.el("textarea");
     input.placeholder = `Ask ${label} about these lines`;
     input.setAttribute("aria-label", `Prompt for ${label}`);
@@ -113,7 +132,10 @@ export class LineComposer {
     this.root.replaceChildren();
   }
 
-  private el<K extends keyof HTMLElementTagNameMap>(tag: K, className = ""): HTMLElementTagNameMap[K] {
+  private el<K extends keyof HTMLElementTagNameMap>(
+    tag: K,
+    className = "",
+  ): HTMLElementTagNameMap[K] {
     const el = this.doc.createElement(tag);
     el.className = className;
     return el;

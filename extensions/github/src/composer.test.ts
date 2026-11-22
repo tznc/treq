@@ -19,18 +19,29 @@ describe("LineComposer", () => {
     open = vi.fn();
   });
 
-  const icons = () => [...document.querySelectorAll<HTMLButtonElement>(".treq-line__icons button")];
-  const input = () => document.querySelector<HTMLTextAreaElement>(".treq-composer textarea")!;
-  const send = () => document.querySelector<HTMLButtonElement>(".treq-composer__send")!;
+  const icons = () => [
+    ...document.querySelectorAll<HTMLButtonElement>(".treq-line__icons button"),
+  ];
+  const input = () =>
+    document.querySelector<HTMLTextAreaElement>(".treq-composer textarea")!;
+  const send = () =>
+    document.querySelector<HTMLButtonElement>(".treq-composer__send")!;
   const type = (text: string) => {
     input().value = text;
     input().dispatchEvent(new Event("input"));
   };
-  const key = (init: KeyboardEventInit) => input().dispatchEvent(new KeyboardEvent("keydown", init));
+  const key = (init: KeyboardEventInit) =>
+    input().dispatchEvent(new KeyboardEvent("keydown", init));
 
   it("shows an icon button with a tooltip per provider on a hovered line", () => {
     new LineComposer(document, open, ["claude", "treq"]).hover(at, box);
-    expect(icons().map((b) => [b.getAttribute("aria-label"), b.dataset.tip, !!b.querySelector("svg")])).toEqual([
+    expect(
+      icons().map((b) => [
+        b.getAttribute("aria-label"),
+        b.dataset.tip,
+        !!b.querySelector("svg"),
+      ]),
+    ).toEqual([
       ["Prompt Claude about src/a.rs:10-11", "Prompt Claude", true],
       ["Prompt Treq about src/a.rs:10-11", "Prompt Treq", true],
     ]);
@@ -46,8 +57,12 @@ describe("LineComposer", () => {
     icons()[0].click();
     expect(document.querySelector(".treq-line__icons")).toBeNull();
     expect(input().getAttribute("aria-label")).toBe("Prompt for Treq");
-    expect(document.querySelector(".treq-composer__context")?.textContent).toBe("src/a.rs:10-11");
-    expect(document.querySelector(".treq-composer__agent")?.textContent).toBe("Treq");
+    expect(document.querySelector(".treq-composer__context")?.textContent).toBe(
+      "src/a.rs:10-11",
+    );
+    expect(document.querySelector(".treq-composer__agent")?.textContent).toBe(
+      "Treq",
+    );
     expect(send().getAttribute("aria-label")).toBe("Send");
     expect(send().disabled).toBe(true);
     type("why?");
@@ -70,7 +85,9 @@ describe("LineComposer", () => {
     icons()[0].click();
     type("go");
     key({ key: "Enter", ctrlKey: true });
-    expect(open).toHaveBeenLastCalledWith(expect.stringMatching(/^codex:\/\/new\?prompt=/));
+    expect(open).toHaveBeenLastCalledWith(
+      expect.stringMatching(/^codex:\/\/new\?prompt=/),
+    );
   });
 
   it("sends with the send button, never an empty prompt", () => {

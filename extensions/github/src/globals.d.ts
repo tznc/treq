@@ -7,6 +7,8 @@ declare module "*.svg" {
 declare const chrome: {
   storage: {
     sync: unknown;
-    onChanged: { addListener(listener: (changes: object, area: string) => void): void };
+    onChanged: {
+      addListener(listener: (changes: object, area: string) => void): void;
+    };
   };
 };

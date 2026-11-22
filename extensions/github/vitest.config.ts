@@ -7,7 +7,10 @@ export default defineConfig({
     {
       name: "svg-text",
       enforce: "pre",
-      load: (id) => (id.endsWith(".svg") ? `export default ${JSON.stringify(readFileSync(id, "utf8"))}` : null),
+      load: (id) =>
+        id.endsWith(".svg")
+          ? `export default ${JSON.stringify(readFileSync(id, "utf8"))}`
+          : null,
     },
   ],
   test: { environment: "happy-dom", include: ["src/**/*.test.ts"] },

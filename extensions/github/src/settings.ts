@@ -18,7 +18,8 @@ export const providers = (s: Settings): Provider[] => [
   "treq",
 ];
 
-export const loadSettings = (store: Store): Promise<Settings> => store.get(DEFAULTS);
+export const loadSettings = (store: Store): Promise<Settings> =>
+  store.get(DEFAULTS);
 
 /** Checks the options page's boxes as saved, and saves each change. */
 export async function bindOptions(doc: Document, store: Store): Promise<void> {

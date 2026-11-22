@@ -21,7 +21,9 @@ describe("sessionTitle", () => {
       <a href="/code/session_other">Other</a>
       <a href="/code/session_1"><span>  OIDC and JWT
         authentication </span><svg></svg></a></nav>`;
-    expect(sessionTitle(document, "session_1")).toBe("OIDC and JWT authentication");
+    expect(sessionTitle(document, "session_1")).toBe(
+      "OIDC and JWT authentication",
+    );
   });
 
   it("has none while the sidebar does not list the session", () => {
@@ -46,7 +48,11 @@ describe("applySessionTitle", () => {
     document.body.innerHTML = `<a href="/code/session_1">Fix login</a>`;
     applySessionTitle(document, "/code/session_1");
     let writes = 0;
-    new MutationObserver(() => writes++).observe(document.head, { subtree: true, childList: true, characterData: true });
+    new MutationObserver(() => writes++).observe(document.head, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+    });
     applySessionTitle(document, "/code/session_1");
     return Promise.resolve().then(() => expect(writes).toBe(0));
   });
