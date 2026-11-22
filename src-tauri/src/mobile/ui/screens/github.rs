@@ -49,7 +49,9 @@ pub fn open(repo: String, cx: &mut App) {
       on_title: None,
       more: Some(Rc::new(move |_, cx| {
         if let Some(screen) = menu_screen.borrow().as_ref() {
-          screen.update(cx, |screen, cx| screen.menu(cx)).ok();
+          if let Err(e) = screen.update(cx, |screen, cx| screen.menu(cx)) {
+            log::debug!("Ignored the GitHub menu: the GitHub screen closed: {e}");
+          }
         }
       })),
     },
@@ -105,7 +107,9 @@ impl GithubScreen {
             "menu-refresh",
             "Refresh",
             move |_, cx| {
-              prs.update(cx, |screen, cx| screen.reload(cx)).ok();
+              if let Err(e) = prs.update(cx, |screen, cx| screen.reload(cx)) {
+                log::debug!("Skipped a pull requests refresh: the screen closed: {e}");
+              }
             },
           )],
           cx,
@@ -132,9 +136,9 @@ impl Render for GithubScreen {
           .tabs(Tab::ALL.map(|tab| treq_ui::Tab::new(tab.id(), tab.label())))
           .selected(Tab::ALL.iter().position(|t| *t == self.tab).unwrap_or(0))
           .on_select(move |ix, window, cx| {
-            view
-              .update(cx, |this, cx| this.select(Tab::ALL[ix], window, cx))
-              .ok();
+            if let Err(e) = view.update(cx, |this, cx| this.select(Tab::ALL[ix], window, cx)) {
+              log::debug!("Ignored a GitHub tab switch: the GitHub screen closed: {e}");
+            }
           }),
       );
     let body: AnyView = match (self.tab, &self.prs) {

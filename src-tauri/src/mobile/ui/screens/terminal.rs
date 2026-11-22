@@ -682,12 +682,11 @@ impl AgentSheet {
       vec![message]
     };
     sheet::close(cx);
-    self
-      .sessions
-      .update(cx, |sessions, cx| {
-        sessions.start(Program::Agent(agent), args, cx)
-      })
-      .ok();
+    if let Err(e) = self.sessions.update(cx, |sessions, cx| {
+      sessions.start(Program::Agent(agent), args, cx)
+    }) {
+      log::debug!("Ignored starting an agent: the session list is gone: {e}");
+    }
   }
 }
 
@@ -781,7 +780,9 @@ impl TerminalScreen {
     let header = nav::Header {
       on_title: Some(Rc::new(move |_, cx| {
         if let Some(screen) = title_screen.borrow().clone() {
-          screen.update(cx, |screen, cx| screen.switcher(cx)).ok();
+          if let Err(e) = screen.update(cx, |screen, cx| screen.switcher(cx)) {
+            log::debug!("Ignored the session switcher: the terminal screen closed: {e}");
+          }
         }
       })),
       more: Some(Rc::new(move |_, cx| {
@@ -793,10 +794,14 @@ impl TerminalScreen {
           program.name(),
           vec![
             sheet::MenuEntry::new("rename", "Rename…", move |_, cx| {
-              rename.update(cx, |screen, cx| screen.rename_sheet(cx)).ok();
+              if let Err(e) = rename.update(cx, |screen, cx| screen.rename_sheet(cx)) {
+                log::debug!("Ignored a session rename: the terminal screen closed: {e}");
+              }
             }),
             sheet::MenuEntry::new("stop", "Stop session…", move |_, cx| {
-              screen.update(cx, |screen, cx| screen.confirm_stop(cx)).ok();
+              if let Err(e) = screen.update(cx, |screen, cx| screen.confirm_stop(cx)) {
+                log::debug!("Ignored stopping the session: the terminal screen closed: {e}");
+              }
             })
             .danger(),
           ],
@@ -863,14 +868,14 @@ impl TerminalScreen {
       let label = this.label.clone();
       let list = list;
       cx.defer(move |cx| {
-        list
-          .update(cx, |list, cx| {
-            if !draft.trim().is_empty() {
-              list.drafts.insert(label, draft);
-            }
-            list.reload(cx)
-          })
-          .ok();
+        if let Err(e) = list.update(cx, |list, cx| {
+          if !draft.trim().is_empty() {
+            list.drafts.insert(label, draft);
+          }
+          list.reload(cx)
+        }) {
+          log::debug!("Dropped an unsent message and reload: the session list is gone: {e}");
+        }
       });
     })
     .detach();
@@ -979,9 +984,9 @@ impl TerminalScreen {
               (cols, rows),
               rx,
               move |status, window, cx| {
-                screen
-                  .update(cx, |this, cx| this.ended(status, window, cx))
-                  .ok();
+                if let Err(e) = screen.update(cx, |this, cx| this.ended(status, window, cx)) {
+                  log::debug!("Dropped a session end: the terminal screen closed: {e}");
+                }
               },
               window,
               cx,
@@ -992,13 +997,13 @@ impl TerminalScreen {
           }
           cx.spawn(async move |this, cx| {
             cx.background_executor().timer(AUTO_REATTACH_RESET).await;
-            this
-              .update(cx, |this, _| {
-                if this.attaches == attach_id && this.ended.is_none() {
-                  this.auto_spent = false;
-                }
-              })
-              .ok();
+            if let Err(e) = this.update(cx, |this, _| {
+              if this.attaches == attach_id && this.ended.is_none() {
+                this.auto_spent = false;
+              }
+            }) {
+              log::debug!("Skipped re-arming auto attach: the terminal screen closed: {e}");
+            }
           })
           .detach();
           Load::Ready(view)
@@ -1088,10 +1093,12 @@ impl TerminalScreen {
             cx,
           );
           let label = this.label.clone();
-          this
+          if let Err(e) = this
             .sessions
             .update(cx, |list, cx| list.set_title(&label, title.clone(), cx))
-            .ok();
+          {
+            log::debug!("Dropped a session title: the session list is gone: {e}");
+          }
           this.title = title;
           done(Ok(()), cx);
         }
@@ -1115,7 +1122,9 @@ impl TerminalScreen {
   fn switcher(&mut self, cx: &mut Context<Self>) {
     let sessions = self.sessions.clone();
     let current = self.label.clone();
-    sessions.update(cx, |list, cx| list.reload(cx)).ok();
+    if let Err(e) = sessions.update(cx, |list, cx| list.reload(cx)) {
+      log::debug!("Skipped a session list reload: the session list is gone: {e}");
+    }
     sheet::open(Some("Terminals".into()), cx, move |_, cx| {
       cx.new(|cx| {
         if let Some(list) = sessions.upgrade() {
@@ -1134,7 +1143,9 @@ impl TerminalScreen {
       "Stop session",
       true,
       move |_, cx| {
-        this.update(cx, |screen, cx| screen.stop(cx)).ok();
+        if let Err(e) = this.update(cx, |screen, cx| screen.stop(cx)) {
+          log::debug!("Ignored stopping the session: the terminal screen closed: {e}");
+        }
       },
       cx,
     );
@@ -1156,13 +1167,12 @@ impl TerminalScreen {
           Ok(_) => format!("{name} stopped."),
           Err(error) => errors::describe(&error).message,
         };
-        this
-          .sessions
-          .update(cx, |list, cx| {
-            list.notice = Some(notice);
-            cx.notify();
-          })
-          .ok();
+        if let Err(e) = this.sessions.update(cx, |list, cx| {
+          list.notice = Some(notice);
+          cx.notify();
+        }) {
+          log::debug!("Dropped a stop notice: the session list is gone: {e}");
+        }
         nav::pop(cx);
       },
     );
@@ -1245,27 +1255,26 @@ impl RenameSheet {
     self.error = None;
     let title = self.input.read(cx).value().trim().to_string();
     let sheet = cx.weak_entity();
-    self
-      .screen
-      .update(cx, |screen, cx| {
-        screen.rename(
-          title,
-          move |result, cx| match result {
-            Ok(()) => sheet::close(cx),
-            Err(error) => {
-              sheet
-                .update(cx, |this, cx| {
-                  this.saving = false;
-                  this.error = Some(error);
-                  cx.notify();
-                })
-                .ok();
+    if let Err(e) = self.screen.update(cx, |screen, cx| {
+      screen.rename(
+        title,
+        move |result, cx| match result {
+          Ok(()) => sheet::close(cx),
+          Err(error) => {
+            if let Err(e) = sheet.update(cx, |this, cx| {
+              this.saving = false;
+              this.error = Some(error);
+              cx.notify();
+            }) {
+              log::debug!("Dropped a rename error: the rename sheet closed: {e}");
             }
-          },
-          cx,
-        )
-      })
-      .ok();
+          }
+        },
+        cx,
+      )
+    }) {
+      log::warn!("Dropped a session rename: the terminal screen closed: {e}");
+    }
     cx.notify();
   }
 }
@@ -1329,9 +1338,9 @@ impl Render for Switcher {
           move |_, _, cx| {
             sheet::close(cx);
             if !current {
-              sessions
-                .update(cx, |list, cx| list.open_listed(&label, true, cx))
-                .ok();
+              if let Err(e) = sessions.update(cx, |list, cx| list.open_listed(&label, true, cx)) {
+                log::debug!("Ignored opening a session: the session list is gone: {e}");
+              }
             }
           },
         )

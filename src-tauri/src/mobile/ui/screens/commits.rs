@@ -159,13 +159,13 @@ impl CommitsScreen {
         let (this, commit) = (this.clone(), commit.clone());
         let run = move |window: &mut Window, cx: &mut App| {
           let commit = commit.clone();
-          this
-            .update(cx, |screen, cx| match action {
-              Action::EditDescription => screen.edit_description(commit, window, cx),
-              Action::Undo => screen.confirm_undo(commit, cx),
-              Action::Delete => screen.confirm_delete(commit, cx),
-            })
-            .ok();
+          if let Err(e) = this.update(cx, |screen, cx| match action {
+            Action::EditDescription => screen.edit_description(commit, window, cx),
+            Action::Undo => screen.confirm_undo(commit, cx),
+            Action::Delete => screen.confirm_delete(commit, cx),
+          }) {
+            log::debug!("Ignored a commit menu action: the commits screen closed: {e}");
+          }
         };
         match action {
           Action::EditDescription => {
@@ -249,7 +249,9 @@ impl CommitsScreen {
       false,
       move |_, cx| {
         let commit = commit.clone();
-        this.update(cx, |screen, cx| screen.undo(commit, cx)).ok();
+        if let Err(e) = this.update(cx, |screen, cx| screen.undo(commit, cx)) {
+          log::debug!("Ignored undo: the commits screen closed: {e}");
+        }
       },
       cx,
     );
@@ -285,7 +287,9 @@ impl CommitsScreen {
       true,
       move |_, cx| {
         let commit = commit.clone();
-        this.update(cx, |screen, cx| screen.delete(commit, cx)).ok();
+        if let Err(e) = this.update(cx, |screen, cx| screen.delete(commit, cx)) {
+          log::debug!("Ignored deleting a commit: the commits screen closed: {e}");
+        }
       },
       cx,
     );
@@ -535,12 +539,11 @@ impl DescribeSheet {
     let description = self.text.read(cx).value().to_string();
     let commit = self.commit.clone();
     sheet::close(cx);
-    self
-      .screen
-      .update(cx, |screen, cx| {
-        screen.save_description(&commit, description, cx)
-      })
-      .ok();
+    if let Err(e) = self.screen.update(cx, |screen, cx| {
+      screen.save_description(&commit, description, cx)
+    }) {
+      log::warn!("Dropped a commit description edit: the commits screen closed: {e}");
+    }
   }
 }
 

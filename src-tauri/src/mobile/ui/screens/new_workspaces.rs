@@ -189,7 +189,9 @@ impl NewWorkspacesSheet {
     }
     self._plan = cx.spawn(async move |this, cx| {
       cx.background_executor().timer(PLAN_DELAY).await;
-      this.update(cx, |this, cx| this.replan(cx)).ok();
+      if let Err(e) = this.update(cx, |this, cx| this.replan(cx)) {
+        log::debug!("Skipped replanning: the new workspaces screen closed: {e}");
+      }
     });
     cx.notify();
   }

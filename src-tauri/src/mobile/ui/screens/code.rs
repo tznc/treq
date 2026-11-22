@@ -188,13 +188,13 @@ impl CodeView {
     let seq = self.search_seq;
     cx.spawn(async move |this, cx| {
       cx.background_executor().timer(SEARCH_DELAY).await;
-      this
-        .update(cx, |this, cx| {
-          if this.search_seq == seq {
-            this.search(cx);
-          }
-        })
-        .ok();
+      if let Err(e) = this.update(cx, |this, cx| {
+        if this.search_seq == seq {
+          this.search(cx);
+        }
+      }) {
+        log::debug!("Skipped a code search: the code screen closed: {e}");
+      }
     })
     .detach();
   }

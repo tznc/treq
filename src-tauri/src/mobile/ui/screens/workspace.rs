@@ -90,7 +90,9 @@ fn place(replace: bool, repo: String, workspace_id: String, name: String, cx: &m
     })),
     more: Some(Rc::new(move |_, cx| {
       if let Some(screen) = menu_screen.borrow().as_ref() {
-        screen.update(cx, |screen, cx| screen.menu(cx)).ok();
+        if let Err(e) = screen.update(cx, |screen, cx| screen.menu(cx)) {
+          log::debug!("Ignored the workspace menu: the workspace screen closed: {e}");
+        }
       }
     })),
   };
@@ -438,9 +440,9 @@ impl WorkspaceScreen {
       // From the file viewer, above this page: back here, on Changes.
       let show_changes: review::Handler = Rc::new(move |window, cx| {
         nav::pop(cx);
-        screen
-          .update(cx, |screen, cx| screen.select(View::Changes, window, cx))
-          .ok();
+        if let Err(e) = screen.update(cx, |screen, cx| screen.select(View::Changes, window, cx)) {
+          log::debug!("Ignored switching to Changes: the workspace screen closed: {e}");
+        }
       });
       self.code = Some(cx.new(|cx| CodeView::new(target, sessions, show_changes, window, cx)));
     }
@@ -470,7 +472,9 @@ impl WorkspaceScreen {
     let on = |f: fn(&mut Self, &mut Context<Self>)| {
       let this = this.clone();
       move |_: &mut Window, cx: &mut App| {
-        this.update(cx, f).ok();
+        if let Err(e) = this.update(cx, f) {
+          log::debug!("Ignored a workspace menu action: the workspace screen closed: {e}");
+        }
       }
     };
     let (stack_repo, stack_branch) = (repo.clone(), branch.clone());
@@ -502,12 +506,12 @@ impl WorkspaceScreen {
           rename_repo.clone(),
           rename_ws.clone(),
           Rc::new(move |cx| {
-            reload
-              .update(cx, |screen, cx| {
-                screen.changed = true;
-                screen.reload(cx)
-              })
-              .ok();
+            if let Err(e) = reload.update(cx, |screen, cx| {
+              screen.changed = true;
+              screen.reload(cx)
+            }) {
+              log::debug!("Skipped the reload after a rename: the workspace screen closed: {e}");
+            }
           }),
           cx,
         )
@@ -572,9 +576,9 @@ impl WorkspaceScreen {
     let into = self.target_branch();
     let this = cx.weak_entity();
     let on_create: pull_request::OnCreate = Box::new(move |title, body, draft, cx| {
-      this
-        .update(cx, |screen, cx| screen.create_pr(title, body, draft, cx))
-        .ok();
+      if let Err(e) = this.update(cx, |screen, cx| screen.create_pr(title, body, draft, cx)) {
+        log::warn!("Dropped a new pull request: the workspace screen closed: {e}");
+      }
     });
     sheet::open(Some("New pull request".into()), cx, move |window, cx| {
       cx.new(|cx| CreateSheet::new(title, body, into, on_create, window, cx))
@@ -827,7 +831,7 @@ impl WorkspaceScreen {
       "Archive workspace",
       true,
       move |_, cx| {
-        this.update(cx, |screen, cx| screen.archive(cx)).ok();
+        if let Err(e) = this.update(cx, |screen, cx| screen.archive(cx)) { log::debug!("Ignored archiving the workspace: the workspace screen closed: {e}"); }
       },
       cx,
     );
@@ -865,14 +869,14 @@ impl WorkspaceScreen {
       body,
       label,
       move |cx| {
-        this
-          .update(cx, |screen, cx| match op {
-            Op::Push => screen.push(cx),
-            Op::Rebase => screen.rebase(cx),
-            Op::DeleteWorkspace => screen.delete(cx),
-            _ => {}
-          })
-          .ok();
+        if let Err(e) = this.update(cx, |screen, cx| match op {
+          Op::Push => screen.push(cx),
+          Op::Rebase => screen.rebase(cx),
+          Op::DeleteWorkspace => screen.delete(cx),
+          _ => {}
+        }) {
+          log::debug!("Ignored a workspace operation: the workspace screen closed: {e}");
+        }
       },
       cx,
     );
@@ -1035,9 +1039,9 @@ impl WorkspaceScreen {
         .tab(Tab::new("tab-code", "Code").icon(theme::ICON_CODE))
         .selected(VIEWS.iter().position(|v| *v == view).unwrap_or(0))
         .on_select(move |ix, window, cx| {
-          this
-            .update(cx, |screen, cx| screen.select(VIEWS[ix], window, cx))
-            .ok();
+          if let Err(e) = this.update(cx, |screen, cx| screen.select(VIEWS[ix], window, cx)) {
+            log::debug!("Ignored a workspace tab switch: the workspace screen closed: {e}");
+          }
         }),
     )
   }
@@ -1337,9 +1341,9 @@ impl Render for TargetSheet {
                 sheet::close(cx);
                 if !current {
                   let name = name.clone();
-                  screen
-                    .update(cx, |screen, cx| screen.set_target(name, cx))
-                    .ok();
+                  if let Err(e) = screen.update(cx, |screen, cx| screen.set_target(name, cx)) {
+                    log::debug!("Ignored a target branch change: the workspace screen closed: {e}");
+                  }
                 }
               },
             )

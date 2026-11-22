@@ -646,12 +646,12 @@ mod tests {
     /// Stands in for the network probe: the host presents `PROBED`.
     fn probe_ok(cx: &mut Context<AddHostScreen>, endpoint: UserManagedEndpoint) {
       cx.spawn(async move |this, cx| {
-        this
-          .update(cx, |view, cx| {
-            view.probe_finished(endpoint, Ok(PROBED.into()));
-            cx.notify();
-          })
-          .ok();
+        if let Err(e) = this.update(cx, |view, cx| {
+          view.probe_finished(endpoint, Ok(PROBED.into()));
+          cx.notify();
+        }) {
+          log::debug!("Dropped a host probe result: the add host view closed: {e}");
+        }
       })
       .detach();
     }
