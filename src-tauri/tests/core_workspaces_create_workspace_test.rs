@@ -1161,7 +1161,7 @@ fn test_create_workspace_sets_target_branch_in_db() {
 fn test_create_workspace_materializes_installed_library_skills() {
   let repo = TestRepo::new().expect("Failed to create test repo");
   let app_dir = repo.temp_dir.path().join("app-data");
-  fs::create_dir_all(&app_dir).expect("app data");
+  TestRepo::ensure_dir(&app_dir).expect("app data");
   let previous = std::env::var("TREQ_APP_DATA_DIR").ok();
   std::env::set_var("TREQ_APP_DATA_DIR", app_dir.to_str().unwrap());
 
