@@ -1,16 +1,15 @@
-id: gpui-debug-selector-needs-test-node
+id: gpui-use-selector-helper
 language: rust
 severity: error
 message: >
-  An element with a `debug_selector` needs a gpui-testing-library node, or
-  tests can only reach it by its painted bounds. Call `.test_support()` in
-  the same builder chain, with a role and `.aria_label(..)` when it is a
-  control, or build it from a `ui::` component that does.
+  Name an element for tests with `.selector("name")` from `treq_ui`, not a bare
+  `.debug_selector(..)`. It sets the element id and debug selector to the same
+  name and adds the gpui-testing-library node, so tests find the element by
+  role, name or id instead of by its painted bounds.
 note: >
   Checked: a `div()` chain that takes `.debug_selector(..)`. A chain that
   starts from a helper's result, or that sets a struct field (a component's
-  `base`), is not checked, so the helper or the component's render calls
-  `.test_support()` itself.
+  `base`), is not checked: the helper or the component's render names it.
 files:
   - "src-tauri/src/gpui_shell/**/*.rs"
   - "crates/treq-ui/**/*.rs"
@@ -18,10 +17,12 @@ ignores:
   - "src-tauri/src/gpui_shell/**/tests.rs"
   - "src-tauri/src/gpui_shell/**/tests/**"
   - "crates/treq-ui/**/*_tests.rs"
-  # Baseline: files with selectors that have no test node. Do not add to it;
-  # give each selector a node and drop the file from this list instead.
+  # Baseline: files with bare debug selectors. Do not add to it;
+  # name each element with `.selector(..)` and drop the file from this list.
+  - "crates/treq-ui/src/alert.rs"
   - "crates/treq-ui/src/card.rs"
   - "crates/treq-ui/src/dialog.rs"
+  - "crates/treq-ui/src/empty_state.rs"
   - "crates/treq-ui/src/form.rs"
   - "crates/treq-ui/src/input_group.rs"
   - "crates/treq-ui/src/path_field.rs"
@@ -30,8 +31,10 @@ ignores:
   - "src-tauri/src/gpui_shell/form.rs"
   - "src-tauri/src/gpui_shell/overlay/mod.rs"
   - "src-tauri/src/gpui_shell/popover/checks.rs"
+  - "src-tauri/src/gpui_shell/popover/details.rs"
   - "src-tauri/src/gpui_shell/popover/mod.rs"
   - "src-tauri/src/gpui_shell/popup.rs"
+  - "src-tauri/src/gpui_shell/screen/agent_card.rs"
   - "src-tauri/src/gpui_shell/screen/changes.rs"
   - "src-tauri/src/gpui_shell/screen/changes/pr.rs"
   - "src-tauri/src/gpui_shell/screen/changes/review.rs"
@@ -47,6 +50,7 @@ ignores:
   - "src-tauri/src/gpui_shell/screen/github.rs"
   - "src-tauri/src/gpui_shell/screen/github/detail.rs"
   - "src-tauri/src/gpui_shell/screen/github/mention.rs"
+  - "src-tauri/src/gpui_shell/screen/github/parts.rs"
   - "src-tauri/src/gpui_shell/screen/linear.rs"
   - "src-tauri/src/gpui_shell/screen/logs.rs"
   - "src-tauri/src/gpui_shell/screen/merge.rs"
@@ -61,10 +65,12 @@ ignores:
   - "src-tauri/src/gpui_shell/screen/project_home.rs"
   - "src-tauri/src/gpui_shell/screen/reactions.rs"
   - "src-tauri/src/gpui_shell/screen/remote.rs"
+  - "src-tauri/src/gpui_shell/screen/remote_chrome.rs"
   - "src-tauri/src/gpui_shell/screen/rename_dialog.rs"
   - "src-tauri/src/gpui_shell/screen/save_project_dialog.rs"
   - "src-tauri/src/gpui_shell/screen/settings.rs"
   - "src-tauri/src/gpui_shell/screen/settings/account.rs"
+  - "src-tauri/src/gpui_shell/screen/settings/account/team.rs"
   - "src-tauri/src/gpui_shell/screen/terminal.rs"
   - "src-tauri/src/gpui_shell/screen/terminal_lightbox.rs"
   - "src-tauri/src/gpui_shell/screen/workspace.rs"
@@ -94,14 +100,6 @@ utils:
                 has:
                   field: field
                   regex: ^(when|when_some|when_none|map)$
-  test-support:
-    kind: call_expression
-    has:
-      field: function
-      kind: field_expression
-      has:
-        field: field
-        regex: ^test_support$
   div-chain:
     inside:
       stopBy:
@@ -123,20 +121,6 @@ rule:
       regex: ^debug_selector$
   not:
     any:
-      - inside:
-          stopBy:
-            not:
-              matches: in-chain
-          has:
-            stopBy:
-              not:
-                matches: in-chain
-            matches: test-support
-      - has:
-          stopBy:
-            not:
-              matches: in-chain
-          matches: test-support
       # A component's `base` field: checked where the component renders it.
       - inside:
           stopBy:
