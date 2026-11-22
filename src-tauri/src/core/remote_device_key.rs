@@ -103,12 +103,7 @@ mod mobile_storage {
   }
 
   fn require_biometrics(app: &tauri::AppHandle) -> Result<(), String> {
-    // A failure *calling* `status()` is a plugin/transport error (e.g. the
-    // native side didn't respond), not evidence that biometrics/secure
-    // storage are unavailable - that case is reported via `is_available`
-    // below, once the call actually succeeds. Don't prefix it as
-    // `SECURE_STORAGE_UNAVAILABLE_PREFIX`, or transient errors unrelated to
-    // biometric enrollment would show the "set up biometrics" UI.
+    // A failed `status()` call is a plugin error, so it must not show the "set up biometrics" UI.
     let status = app
       .biometric()
       .status()
@@ -201,10 +196,7 @@ pub async fn ensure_device_key(_app: &tauri::AppHandle) -> Result<DeviceKeyInfo,
 
 #[cfg(test)]
 mod tests {
-  // Exercising `ensure_device_key` end to end requires a running mobile
-  // keystore/biometric plugin, which is not available in a unit test
-  // process - a device build covers that instead. This module keeps the platform-independent key-material
-  // helpers covered.
+  // End-to-end `ensure_device_key` needs the mobile keystore plugin, so device builds cover it.
   use super::*;
 
   #[test]

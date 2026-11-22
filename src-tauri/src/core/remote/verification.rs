@@ -107,8 +107,7 @@ pub fn verification_for(request: &TreqCommandRequest) -> Option<MutationVerifica
           repo: repo.clone(),
           workspace,
         },
-        // Renaming changes the workspace's branch; `InspectWorkspace`
-        // returns it under `current`.
+        // Renaming changes the branch, and `InspectWorkspace` returns the new one under `current`.
         check: Box::new(move |value| {
           match value
             .get("current")
@@ -134,10 +133,7 @@ pub fn verification_for(request: &TreqCommandRequest) -> Option<MutationVerifica
         }),
       })
     }
-    // Matching on the message alone is not enough: repeated messages such as
-    // "wip" would make an older commit look like this one. Without the
-    // pre-commit working-copy change id there is no precise check, so the
-    // caller reports ambiguity rather than guessing.
+    // Only the pre-commit change id identifies this commit, since messages like "wip" repeat.
     TreqCommandRequest::CreateCommit {
       repo,
       workspace,
@@ -199,10 +195,7 @@ pub fn verification_for(request: &TreqCommandRequest) -> Option<MutationVerifica
         check: Box::new(move |value| check_resolve_conflict(value, &revision)),
       })
     }
-    // Discarding everything leaves no changed files to list. A nonempty
-    // working copy does not prove the discard never ran: an agent or another
-    // client may have written new edits after it landed, and RestoreAll has
-    // no idempotency key, so rerunning it would discard those edits.
+    // Nonempty is Ambiguous, not NotApplied: later edits may exist, and a rerun would discard them.
     TreqCommandRequest::RestoreAll { repo, workspace } => Some(MutationVerification {
       read_request: TreqCommandRequest::ListChanges {
         repo: repo.clone(),
@@ -263,12 +256,7 @@ pub fn verification_for(request: &TreqCommandRequest) -> Option<MutationVerifica
         },
       ),
     }),
-    // No reliable, cheap state check exists yet for these mutations over the
-    // typed read surface (e.g. a file restore's "effect" is the absence of a
-    // diff, which needs the same file/workspace context the mutation itself
-    // used and is easy to get subtly wrong). Rather than guess and risk a
-    // false "already applied"/"not applied" call, these fall back to
-    // `MutationVerificationOutcome::Ambiguous` in `retry_after_reconnect`.
+    // No reliable state check yet, so `retry_after_reconnect` reports Ambiguous.
     _ => None,
   }
 }
@@ -411,9 +399,7 @@ where
     "retry_after_reconnect is only meaningful for mutations; reads are always safe to retry directly"
   );
 
-  // Record the pre-mutation marker the verification check needs before the
-  // mutation can change it. A failed read leaves it unset, which only makes a
-  // later verification report ambiguity; it never blocks the mutation.
+  // The marker must be read pre-mutation. A failed read only makes verification ambiguous.
   let request = match baseline_request(&request) {
     Some(read) => {
       match execute_remote_command::<WorkspaceChangeMarker>(
@@ -442,19 +428,12 @@ where
   .await
   {
     Ok(value) => Ok(MutationRetryOutcome::Applied(value)),
-    // The CLI reached the VM and returned a structured application-level
-    // error (e.g. `workspace_not_found`). That is not the "did it land?"
-    // uncertainty this function exists for — the CLI told us plainly it did
-    // not run — so it is surfaced as-is rather than triggering verification.
+    // A structured CLI error means the command plainly did not run, so it needs no verification.
     Err(error @ RemoteCommandError::Command { .. }) => Err(error),
     Err(error @ RemoteCommandError::InvalidJson(_)) => Err(error),
-    // The command was refused locally before ever reaching the network
-    // (PRD "Hard cutoff on revocation or expiry"): there is no "did it
-    // land?" uncertainty to verify, since it certainly did not run.
+    // Refused locally (PRD "Hard cutoff on revocation or expiry"), so it certainly did not run.
     Err(error @ RemoteCommandError::CredentialCutOff { .. }) => Err(error),
-    // A transport-layer failure: the client cannot tell whether the command
-    // reached the VM, ran, or completed. Verify observable state before
-    // deciding anything.
+    // Transport failure: the command may or may not have landed, so verify observable state.
     Err(RemoteCommandError::Transport(transport_message)) => {
       let Some(verification) = verification_for(&request) else {
         on_verification(PostReconnectVerification::Ambiguous);
@@ -476,9 +455,7 @@ where
 
       let observed = match read_result {
         Ok(value) => (verification.check)(&value),
-        // The verification read itself could not be completed (e.g. still
-        // reconnecting) — this is exactly the "state is ambiguous" case, not
-        // a reason to guess.
+        // A verification read that fails (e.g. still reconnecting) leaves the state ambiguous.
         Err(_) => MutationVerificationOutcome::Ambiguous,
       };
 
@@ -489,10 +466,7 @@ where
         }
         MutationVerificationOutcome::NotApplied => {
           on_verification(PostReconnectVerification::Retried);
-          // Retried with the exact same request, including its idempotency
-          // key field (if any) — so a command that actually did land exactly
-          // once on the VM side is not reapplied a second time by this retry
-          // racing the original.
+          // Same request and idempotency key, so a racing original that landed isn't applied twice.
           let retried =
             execute_remote_command::<T>(pool, endpoint, request, limits, cancellation).await?;
           Ok(MutationRetryOutcome::Applied(retried))

@@ -365,11 +365,7 @@ impl RemotePtyManager {
       let exit_status = loop {
         match channel.read_event().await {
           Ok(PtyReadEvent::Data(chunk)) => {
-            // Bounded buffering: track how much this session has produced so
-            // an operator/diagnostic path could cap it; the callback is
-            // still handed every chunk immediately (streamed), never logged
-            // here (PRD: "never log raw terminal data or prompts by
-            // default").
+            // Size is tracked for a cap. Chunks stream unlogged (PRD: never log raw terminal data).
             buffered = buffered
               .saturating_add(chunk.len())
               .min(MAX_BUFFERED_OUTPUT_BYTES);
@@ -669,8 +665,7 @@ mod tests {
     ) -> Result<(), Self::Error> {
       *self.last_exec_command.lock().unwrap() = Some(String::from_utf8_lossy(data).to_string());
       session.channel_success(channel)?;
-      // Announce readiness so the client's first write is not racing pty
-      // setup, then behave like an interactive echo shell.
+      // "ready" stops the client's first write racing pty setup. Then this acts as an echo shell.
       session.data(channel, bytes::Bytes::from_static(b"ready\n"))?;
       Ok(())
     }
@@ -681,9 +676,7 @@ mod tests {
       data: &[u8],
       session: &mut ServerSession,
     ) -> Result<(), Self::Error> {
-      // Echo stdin straight back, and exit(with code 7) on a magic string so
-      // exit-observation can be tested without tearing down the whole
-      // connection.
+      // Echo stdin back, and exit with code 7 on a magic string to test exit without a disconnect.
       if data == b"__exit__" {
         session.exit_status_request(channel, 7)?;
         session.close(channel)?;
@@ -748,9 +741,7 @@ mod tests {
   fn build_launch_command_quotes_a_malicious_working_directory() {
     let spec = PtyLaunchSpec::Shell;
     let command = build_launch_command("/tmp/x'; rm -rf / #", &spec);
-    // The hostile segment must appear only inside a single-quoted literal,
-    // never as an unescaped shell metacharacter sequence that could break
-    // out of the `cd` argument.
+    // The hostile segment must stay inside a single-quoted literal so it can't escape the `cd` arg.
     assert!(command.contains("'/tmp/x'\\''; rm -rf / #'"));
     assert!(!command.contains("x'; rm -rf / #'\n"));
   }
@@ -814,10 +805,6 @@ mod tests {
     );
     assert!(!home.path().join("pwned").exists());
   }
-
-  // -- Failing-before-manager-exists coverage is structural: RemotePtyManager
-  // did not exist before this module; every test below only compiles and
-  // passes once it does, satisfying requirement 1 of the task's TDD list.
 
   #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
   async fn create_starts_in_the_requested_remote_working_directory() {
@@ -924,8 +911,7 @@ mod tests {
     let status = exit_rx.recv_timeout(Duration::from_secs(2)).unwrap();
     assert_eq!(status, Some(7));
 
-    // The reader loop removes the session once the channel closes, so
-    // closing again is a no-op (idempotent), not an error.
+    // The reader loop drops the session once the channel closes, so a second close is a no-op.
     manager.close("sess-exit").await.unwrap();
   }
 
@@ -958,8 +944,7 @@ mod tests {
     let _ready = rx.recv_timeout(Duration::from_secs(2)).unwrap();
 
     manager.close("sess-3").await.unwrap();
-    // Closing again must not error — mirrors `PtyManager::close_session`'s
-    // "nothing to close is success" convention.
+    // A second close must not error, like `PtyManager::close_session`.
     manager.close("sess-3").await.unwrap();
   }
 
@@ -1338,9 +1323,7 @@ mod tests {
     let manager = RemotePtyManager::new(pool);
     let (tx, rx) = mpsc::channel::<Vec<u8>>();
 
-    // Mirrors what `pty-remote attach-command` would return: a fully
-    // pre-built literal command line, not a `PtyLaunchSpec` this manager
-    // assembles itself.
+    // Like `pty-remote attach-command` output: a prebuilt command line, not a `PtyLaunchSpec`.
     let command = "cd /srv/project && exec tmux new-session -A -s treq-pty-1-term";
 
     manager

@@ -81,8 +81,7 @@ where
           self.eof = true;
         }
         Poll::Ready(Some(Ok(Message::Binary(data)))) => self.pending = data,
-        // Pings are answered by tungstenite itself; nothing else carries
-        // SSH bytes.
+        // tungstenite answers pings itself, and only binary frames carry SSH bytes.
         Poll::Ready(Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_)))) => {}
         Poll::Ready(Some(Ok(Message::Text(_)))) => {
           return Poll::Ready(Err(io::Error::new(
@@ -106,8 +105,7 @@ where
     cx: &mut Context<'_>,
     buf: &[u8],
   ) -> Poll<io::Result<usize>> {
-    // `poll_ready` waits while tungstenite's write buffer is full, which is
-    // what gives the SSH side backpressure against a slow relay.
+    // `poll_ready` waits while tungstenite's write buffer is full, giving SSH backpressure.
     match Pin::new(&mut self.inner).poll_ready(cx) {
       Poll::Pending => return Poll::Pending,
       Poll::Ready(Err(error)) => return Poll::Ready(Err(to_io_error(error))),
@@ -135,8 +133,7 @@ where
 
 #[expect(clippy::expect_used, reason = "ring supports the default TLS versions")]
 fn tls_connector() -> Connector {
-  // Built explicitly with ring so this does not depend on which rustls
-  // crypto provider happens to be installed process-wide.
+  // Built with ring explicitly so it doesn't depend on the process-wide rustls crypto provider.
   let roots = rustls::RootCertStore {
     roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
   };
