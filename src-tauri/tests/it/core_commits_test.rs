@@ -1374,7 +1374,7 @@ fn test_commit_diff_of_over_five_thousand_paths_skips_rename_tracking() {
   let renamed = diff_of("Rename");
   assert_eq!(status_of(&renamed, "new.txt").as_deref(), Some("R"));
 
-  std::fs::rename(
+  TestRepo::rename_path(
     std::path::Path::new(dir).join("new.txt"),
     std::path::Path::new(dir).join("newer.txt"),
   )
