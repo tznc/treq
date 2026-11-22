@@ -6,7 +6,7 @@ Payload maintains `payloadcms/skills`, two skills for agents working on Payload,
 
 ## History
 
-Elliot DeNolf created the repo in January 2026, and his second commit ported the `payload` skill from the main `payloadcms/payload` repository. January produced eight of the repo's 15 commits, including a rename from "Payload CMS" to "Payload" and a pull request that added proper logger usage. Jarrod Flesch wrote `cms-migration` in March 2026, and it merged in April after he trimmed scripted phrases and a redundant section.
+Elliot DeNolf created the repo in January 2026, and the second commit ported the `payload` skill from the main `payloadcms/payload` repository. January produced eight of the repo's 15 commits, including a rename from "Payload CMS" to "Payload" and a pull request that added proper logger usage. Jarrod Flesch wrote `cms-migration` in March 2026, and it merged in April after the author trimmed scripted phrases and a redundant section.
 
 The last change is a July 2026 commit that synced the `payload` skill "with latest", touching seven files with 230 insertions and 93 deletions. Most of that went into `SKILL.md`, which gained modeling defaults, a gotchas list, and best-practice sections. There are no tags, releases, or changelog, and no commits in the last 90 days.
 
