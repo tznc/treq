@@ -71,8 +71,7 @@ fn typing(h: &mut Harness, n: usize) -> Vec<Sample> {
   (0..n)
     .map(|i| {
       let ch = ["a", "b", "c", "d", "e", "f"][i % 6];
-      // One keystroke: `simulate_input` dispatches an empty keystroke
-      // before and after each character, which triples the dispatch work.
+      // `simulate_input` wraps each character in empty keystrokes, tripling the dispatch work.
       sample(h, |h| h.cx.simulate_keystrokes(ch))
     })
     .collect()
@@ -140,8 +139,7 @@ fn input_latency_find_bar(cx: &mut TestAppContext) {
     "find bar: debounce lands (index+marks)",
     vec![sample(&mut h, |_| {})],
   );
-  // Typing on with a query applied: each key reuses the old index until the
-  // debounce, then rebuilds it.
+  // Typing with a query applied: each key reuses the old index until the debounce rebuilds it.
   let mut landed = Vec::new();
   for ch in ["v", "a", "l", "u", "e", "_", "1"] {
     sample(&mut h, |h| h.cx.simulate_keystrokes(ch));

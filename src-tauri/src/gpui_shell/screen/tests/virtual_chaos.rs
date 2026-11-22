@@ -127,8 +127,7 @@ fn act(h: &mut Harness, list: Bounds<Pixels>, step: &Chaos) {
     }),
   }
   h.cx.run_until_parked();
-  // A step can open a dialog or move focus elsewhere; the next frame is
-  // what the user sees.
+  // A step can open a dialog or move focus, so the next frame is what the user sees.
   h.cx.update(|window, cx| window.draw(cx).clear(cx));
 }
 
@@ -143,14 +142,12 @@ fn drawn(h: &mut Harness, rows: &[&'static str]) -> Vec<(&'static str, Bounds<Pi
 /// Checks the list after a step.
 fn check(h: &mut Harness, scenario: &Scenario, log: &[String]) {
   let Some(list) = h.cx.debug_bounds(scenario.list) else {
-    // A step closed the list's screen (Escape on a dialog, say): nothing
-    // to check.
+    // A step closed the list's screen (Escape on a dialog, say): nothing to check.
     return;
   };
   let rows = drawn(h, &scenario.rows);
   let eps = gpui::px(0.5);
-  // Rows of one file keep their order; a commit's lines can sit under
-  // either commit, so overlap is checked in screen order.
+  // A commit's lines can sit under either commit, so overlap is checked in screen order.
   let file = |row: &str| row.rsplit_once('-').map(|(file, _)| file.to_string());
   for pair in rows.windows(2) {
     let ((a, ab), (b, bb)) = (pair[0], pair[1]);
@@ -170,8 +167,7 @@ fn check(h: &mut Harness, scenario: &Scenario, log: &[String]) {
       "{b} {bb:?} overlaps {a} {ab:?} after {log:#?}"
     );
   }
-  // A window too narrow for the zoom leaves the list narrower than a
-  // line's gutter; only a list that fits its rows is checked.
+  // At a high zoom the list can be narrower than a line's gutter, so only one that fits is checked.
   if list.size.width >= gpui::px(400.) {
     for (row, bounds) in &rows {
       assert!(

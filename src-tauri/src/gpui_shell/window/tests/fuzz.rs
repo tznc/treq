@@ -345,8 +345,7 @@ fn check(window: &Window, host: &FakeHost, decline: bool, cx: &mut TestAppContex
     }
   }
 
-  // Nothing destructive without a yes. (Force rebase is the Developer
-  // menu's own command and asks nothing, as in React.)
+  // Nothing destructive without a yes. Force rebase asks nothing, as in React's Developer menu.
   let calls = host.calls();
   for (i, call) in calls.iter().enumerate() {
     let destructive = call == "factory reset" || call.starts_with("remove ");

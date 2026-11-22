@@ -856,8 +856,7 @@ impl WorkspaceDialog {
           }
         }),
       );
-      // `autoFocus` on the description for a plain create; otherwise the
-      // dialog itself takes the keys.
+      // `autoFocus` on the description for a plain create, else the dialog itself takes the keys.
       if self.has_source() {
         self.focus.focus(window, cx);
       } else {
@@ -957,8 +956,7 @@ fn text_button(
   p: &Palette,
 ) -> ObservedElement<Stateful<Div>> {
   let fg = p.foreground;
-  // Short label (['button label']): 11px is fine.
-  // ast-grep-ignore: gpui-text-xs-short-label-only
+  // Short label: button label. ast-grep-ignore: gpui-text-xs-short-label-only
   ui::text(div(), TextSize::Xs)
     .selector(id)
     .flex()
@@ -981,8 +979,7 @@ pub(super) fn disclosure(
 ) -> impl IntoElement {
   let fg = p.foreground;
   let label: SharedString = label.into();
-  // Short label (['disclosure label']): 11px is fine.
-  // ast-grep-ignore: gpui-text-xs-short-label-only
+  // Short label: disclosure label. ast-grep-ignore: gpui-text-xs-short-label-only
   ui::text(div(), TextSize::Xs)
     .selector(id)
     .role(gpui::Role::Button)
@@ -1089,8 +1086,7 @@ impl WorkspaceDialog {
       let segment = |id: &'static str, label: &'static str, pos: Position, current: Position| {
         let active = pos == current;
         let fg = p.foreground;
-        // Short label (['segment label']): 11px is fine.
-        // ast-grep-ignore: gpui-text-xs-short-label-only
+        // Short label: segment label. ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .selector(id)
           .px_2p5()
@@ -1473,8 +1469,7 @@ impl WorkspaceDialog {
         .px_2()
         .mx_neg_2()
         .rounded(radius::MD)
-        // Opaque: GPUI draws the shadow under the whole box, where a
-        // browser leaves it out, so a see-through tint would darken.
+        // Opaque: GPUI shadows the whole box, unlike a browser, so a see-through tint would darken.
         .bg(p.popover.blend(p.primary.opacity(0.1)))
         .border_1()
         .border_color(p.primary.opacity(0.4))
@@ -1708,8 +1703,7 @@ impl WorkspaceDialog {
                 .disabled(is_locked),
             )
             .child(
-              // Short label (['short commit hash']): 11px is fine.
-              // ast-grep-ignore: gpui-text-xs-short-label-only
+              // Short label: short commit hash. ast-grep-ignore: gpui-text-xs-short-label-only
               ui::text(div(), TextSize::Xs)
                 .flex_none()
                 .font_family(theme::MONO_FONT)
@@ -1844,8 +1838,7 @@ impl WorkspaceDialog {
                 })),
             )
             .child(
-              // Short label (['status letter']): 11px is fine.
-              // ast-grep-ignore: gpui-text-xs-short-label-only
+              // Short label: status letter. ast-grep-ignore: gpui-text-xs-short-label-only
               ui::text(div(), TextSize::Xs)
                 .w_4()
                 .flex_none()
@@ -1986,8 +1979,7 @@ impl WorkspaceDialog {
                 }))
                 .when(hunk.lines.len() > 3, |this| {
                   this.child(
-                    // Short label (['line count']): 11px is fine.
-                    // ast-grep-ignore: gpui-text-xs-short-label-only
+                    // Short label: line count. ast-grep-ignore: gpui-text-xs-short-label-only
                     ui::text(div(), TextSize::Xs)
                       .font_family(theme::SANS_FONT)
                       .text_color(p.muted_foreground)
@@ -2051,8 +2043,7 @@ impl Render for WorkspaceDialog {
     });
     let loading = self.loading;
     let can_submit = self.can_submit();
-    // A fixed width, so opening Advanced or Move to workspace only makes the
-    // dialog taller; the body scrolls once it reaches the window's height.
+    // Fixed width: extra sections only add height, and the body scrolls at the window's height.
     ui::Dialog::new("workspace-dialog", &p)
       .overlay(viewport)
       .width(640.)

@@ -164,8 +164,7 @@ fn comment_card(comment: &LineComment, palette: &Palette) -> gpui::AnyElement {
     .font_family(theme::SANS_FONT)
     .text_color(palette.foreground)
     .child(
-      // Short label (['line range']): 11px is fine.
-      // ast-grep-ignore: gpui-text-xs-short-label-only
+      // Short label: line range. ast-grep-ignore: gpui-text-xs-short-label-only
       ui::text(div(), TextSize::Xs)
         .text_color(palette.muted_foreground)
         .child(range),
@@ -385,8 +384,7 @@ impl Lightbox {
         14.,
         self.dark,
       ));
-    // In the Preview the box is written in the margin, beside the first
-    // block it covers, so the text never moves.
+    // In the Preview the box sits in the margin beside its first block, so the text never moves.
     let writing_here = self.composer.is_some()
       && self
         .pending
@@ -940,8 +938,7 @@ impl Lightbox {
             .test_support(),
         )
         .child(
-          // Short label (['zoom level']): 11px is fine.
-          // ast-grep-ignore: gpui-text-xs-short-label-only
+          // Short label: zoom level. ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .selector("treq-send-zoom-level")
             .min_w_10()
@@ -1236,8 +1233,7 @@ impl Lightbox {
             cx.listener(move |view, e: &MouseMoveEvent, _, cx| view.line_over(n, e, cx)),
           )
           .child(
-            // Line-number gutter: aligned digits.
-            // ast-grep-ignore: gpui-sans-text-min-size
+            // Line-number gutter: aligned digits. ast-grep-ignore: gpui-sans-text-min-size
             ui::text(div(), TextSize::Code)
               .w_8()
               .flex_none()
@@ -1361,8 +1357,7 @@ impl Lightbox {
     composer: Option<gpui::AnyElement>,
     palette: &Palette,
   ) -> gpui::AnyElement {
-    // The margin shows once the text has a comment, or one is being
-    // written in it; until then the text takes the whole width.
+    // The text takes the whole width until a comment exists or is being written.
     if !self.margin_shown() {
       return content;
     }
@@ -1378,8 +1373,7 @@ impl Lightbox {
       .w_full()
       .child(div().flex_1().min_w_0().child(content))
       .child(
-        // The cards hang from the row without growing it, so the text keeps
-        // its spacing; the margin's empty rows let them show through.
+        // Cards hang from the row without growing it, so the text keeps its spacing.
         div()
           .selector("treq-send-margin")
           .role(gpui::Role::Group)
@@ -1489,8 +1483,7 @@ impl Lightbox {
           .min_h_0()
           .flex_shrink(1.)
           .when(rendered, |this| this.py_4().font_family(theme::SANS_FONT))
-          // Room under the last block for the cards hanging in the margin,
-          // the same while writing and after, so the text never moves.
+          // Room below the last block for overhanging cards, writing or not, so text never moves.
           .when(rendered && self.margin_shown(), |this| {
             this.pb(zpx(MARGIN_OVERHANG))
           })

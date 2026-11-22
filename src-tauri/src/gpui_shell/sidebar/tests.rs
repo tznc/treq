@@ -1171,8 +1171,7 @@ fn sidebar_perf(cx: &mut TestAppContext) {
       })
       .collect();
     report(&format!("{count} rows: select"), &mut select);
-    // Another view beside the sidebar redraws (a terminal's output, a
-    // hover in the screen), as in the shell.
+    // A view beside the sidebar redraws, as terminal output or a screen hover does in the shell.
     for cached in [false, true] {
       let sidebar = h.sidebar.clone();
       let (shell, vcx) = cx.add_window_view(|_, cx| Beside {
@@ -1518,8 +1517,7 @@ fn a_stacked_rows_elbow_reaches_up_to_its_parents_icon(cx: &mut TestAppContext) 
   // Rows are 28px tall and sit flush.
   assert_eq!(parent.size.height, gpui::px(28.));
   assert_eq!(child.top() - parent.bottom(), gpui::px(0.));
-  // The elbow leaves the parent's icon about as close as it meets the
-  // child's, so the two ends of the elbow look alike.
+  // The elbow's gap above matches its gap beside, within 2px, so both ends look alike.
   let above = elbow.top() - parent_icon.bottom();
   let beside = child_icon.left() - elbow.right();
   assert!(

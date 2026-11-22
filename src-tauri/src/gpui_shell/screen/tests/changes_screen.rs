@@ -1572,8 +1572,7 @@ fn changes_tab_finds_text_in_the_diff(cx: &mut TestAppContext) {
   h.click("file-card-a.rs");
   h.cx.simulate_keystrokes("cmd-f");
   assert!(h.shows(gpui::Role::Search, "Find"));
-  // a.rs: " a", "+b", "+c"; b.rs: "+d".
-  // A short diff is searched on every key: no pause is waited for.
+  // a.rs: " a", "+b", "+c", b.rs: "+d". A short diff is searched on every key, without a pause.
   h.cx.simulate_input("b");
   h.cx.run_until_parked();
   let count = |h: &mut Harness| {
@@ -1662,9 +1661,7 @@ fn review_thread_quote_button_sits_in_the_card_bottom_row(cx: &mut TestAppContex
   let button = within(&comment).get_by_role(by::role(gpui::Role::Button).name("Quote"));
   expect(&button).to_be_visible();
   expect(&button).to_have_text_content("Quote");
-  // The library reads a button's text from its accessible name, so an
-  // icon-only button with aria_label "Quote" would pass the above; its
-  // width shows the label is drawn.
+  // Text content is the accessible name here, so only the width proves the label is drawn.
   assert!(quote.size.width > gpui::px(40.), "{quote:?} draws no label");
 }
 

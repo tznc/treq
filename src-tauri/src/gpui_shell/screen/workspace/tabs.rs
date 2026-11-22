@@ -66,8 +66,7 @@ impl<V: TabView> Views<V> {
   ) -> Entity<V> {
     if let Some(index) = self.views.iter().position(|(k, _)| *k == key) {
       if index + 1 < self.views.len() {
-        // Back to a workspace shown before, or made ahead: it draws what it
-        // read, or stands the last one in while its read is still on the way.
+        // A known view draws what it read, or the last view stands in until its read lands.
         let drawn = self.drawn(cx).map(|(view, _)| view);
         let entry = self.views.remove(index);
         let view = entry.1.clone();

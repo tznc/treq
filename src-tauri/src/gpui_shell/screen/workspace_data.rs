@@ -234,9 +234,7 @@ impl WorkspaceHost for Backend {
     }
     let repo = route.repo_path.as_str();
     let warn = |what: &str, err: String| log::warn!("workspace header: {what}: {err}");
-    // The reads are independent but for the counts, which need the
-    // workspace: run them side by side, so the header waits for the
-    // slowest rather than for all of them in turn.
+    // Reads run in parallel so the header waits for the slowest. Counts alone need the workspace.
     std::thread::scope(|scope| {
       let status = scope.spawn(|| {
         core::workspace_status(repo, route.workspace_id)
@@ -618,8 +616,7 @@ pub fn workspace_view(
   let pr_info = pr.pr.clone().flatten();
   let pr_loaded = pr.pr.is_some();
   let has_remote = loaded.remote.is_some();
-  // The badge counts the list the Commits tab draws, so the two can't drift
-  // apart when history is rewritten between two reads.
+  // The badge counts the Commits tab's list, so a rewrite between reads can't make them disagree.
   let commits_ahead = match loaded.commits.as_ref() {
     Some(log) => log
       .commits
@@ -659,8 +656,7 @@ pub fn workspace_view(
   let has_commits = has_workspace_commits || commits_ahead > 0;
   const NO_COMMITS: &str =
     "Make a commit before creating a pull request. Uncommitted working-copy changes don't count.";
-  // An open or merged PR already covers the branch; a closed one may be
-  // replaced.
+  // An open or merged PR already covers the branch, but a closed one may be replaced.
   let create_pr = (on_feature
     && has_remote
     && pr_loaded
@@ -963,8 +959,7 @@ mod remote_header_tests {
         "WorkspaceDiff"
       ]
     );
-    // Counts overlapping reads rather than timing them: a loaded CI runner
-    // took 167 ms for reads that do run side by side.
+    // Counts overlap, not time: a loaded CI runner took 167 ms for reads that did run in parallel.
     let most = transport
       .most_reading
       .load(std::sync::atomic::Ordering::SeqCst);

@@ -825,18 +825,15 @@ impl Render for Sidebar {
       .h_full()
       .bg(palette.sidebar)
       .text_color(palette.sidebar_foreground)
-      // Room for the right edge line, drawn as a child below so the modal
-      // backdrop covers it (GPUI paints a border above the children).
+      // Room for the edge line child: a GPUI border would paint over the modal backdrop.
       .pr_px()
-      // The traffic lights sit here; the edge line runs past them to the
-      // window's top edge.
+      // The traffic lights sit here, and the edge line runs past them to the window's top.
       .when(title_bar::SHOWN, |this| {
         this.child(title_bar::drag_area("sidebar-title-bar"))
       })
       .child(header);
 
-    // With several repositories each group header is its repository's home
-    // row; a single repository keeps its home row up here.
+    // A lone repository's home row sits here. With several, each group header is the home row.
     if !snapshot.repos.iter().any(|repo| repo.label.is_some()) {
       for repo in &snapshot.repos {
         sidebar = sidebar.child(self.home_row(repo, &palette, None, cx));
@@ -905,8 +902,7 @@ impl Render for Sidebar {
           .pt_3()
           .pb_1()
           .child(
-            // Short label (['section heading']): 11px is fine.
-            // ast-grep-ignore: gpui-text-xs-short-label-only
+            // Short label: section heading. ast-grep-ignore: gpui-text-xs-short-label-only
             ui::text(div(), TextSize::Xs)
               .font_weight(gpui::FontWeight::MEDIUM)
               .text_color(palette.sidebar_foreground.opacity(0.7))
@@ -1102,8 +1098,7 @@ impl Sidebar {
           this.hover_tooltip(key.clone(), *hovered, cx)
         }),
       )
-      // A click closes the tooltip, as base-ui's does: the dialog or menu
-      // the button opens would otherwise sit under it.
+      // A click closes the tooltip, as base-ui's does, so it never covers what the button opens.
       .on_mouse_down(
         gpui::MouseButton::Left,
         cx.listener(|this, _, _, cx| {
@@ -1249,22 +1244,19 @@ impl Sidebar {
       .relative()
       .gap_1p5()
       .mx_2()
-      // A group header spans its rows' width, so its fold chevron ends
-      // where their status dots do; the padding keeps its name in place.
+      // A group header spans its rows to align its chevron with their status dots.
       .when(group_header, |this| this.mx_0().pl_4())
       .rounded_md()
       .text_color(palette.sidebar_foreground)
       .when(repo.missing, |this| this.opacity(0.5))
-      // A group header names its repository; only a lone home row keeps
-      // the house.
+      // A group header names its repository, so only a lone home row keeps the house.
       .when(repo.label.is_none(), |this| {
         this.leading(icon(theme::ICON_HOUSE, 16., palette.sidebar_foreground))
       })
       .child(title)
       .when(repo.missing, |this| {
         this.child(
-          // Short label (['tag']): 11px is fine.
-          // ast-grep-ignore: gpui-text-xs-short-label-only
+          // Short label: tag. ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .flex_none()
             .text_color(palette.muted_foreground)
@@ -1353,8 +1345,7 @@ impl Sidebar {
                   .border_color(palette.muted_foreground)
                   .text_color(palette.muted_foreground)
               })
-              // Short label (['avatar initial']): 11px is fine.
-              // ast-grep-ignore: gpui-text-xs-short-label-only
+              // Short label: avatar initial. ast-grep-ignore: gpui-text-xs-short-label-only
               .child(ui::text(div(), TextSize::Xs).child(initial)),
           )
           .child(
@@ -1526,8 +1517,7 @@ impl Sidebar {
         None => div().into_any_element(),
       },
     };
-    // Each repository's rows sit in their own element, so workspace ids,
-    // which are per repository, do not collide.
+    // Each repository gets its own element, so per-repository workspace ids do not collide.
     div()
       .id(("repo-section", index))
       .px_2()
@@ -1710,9 +1700,7 @@ impl Sidebar {
           .justify_end()
           .child(indicators)
           .when(interactive, |this| {
-            // Hovering reserves the buttons' width, so the title truncates
-            // before them instead of running under them. Hover styles do not
-            // reach layout, so this follows the hovered row instead.
+            // Hover styles skip layout: `hovered_row` makes the title truncate before the buttons.
             this
               .when(self.hovered_row.as_ref() == Some(&key), |this| {
                 this.min_w(zpx(ROW_ACTIONS_WIDTH))
@@ -1791,8 +1779,7 @@ impl Sidebar {
       );
 
     if row.exiting {
-      // Collapse out of the list, as the React sidebar does before the
-      // archived workspace is dropped from the data.
+      // Collapse out before the archived workspace leaves the data, as in the React sidebar.
       row_el
         .with_animation(
           ("exiting", id as u64),
