@@ -241,7 +241,7 @@ function ScenarioBlock({ scenario, index, isFirst, isLast, onChange, onRemove, o
     const steps = [...scenario.steps];
     const target = idx + dir;
     if (target < 0 || target >= steps.length) return;
-    [steps[idx], steps[target]] = [steps[target], steps[idx]];
+    steps.splice(target, 0, ...steps.splice(idx, 1));
     onChange({ steps });
   };
 
@@ -348,7 +348,7 @@ function FeatureEditor({ feature, onChange, onDelete }: FeatureEditorProps) {
     const scenarios = [...feature.scenarios];
     const target = idx + dir;
     if (target < 0 || target >= scenarios.length) return;
-    [scenarios[idx], scenarios[target]] = [scenarios[target], scenarios[idx]];
+    scenarios.splice(target, 0, ...scenarios.splice(idx, 1));
     onChange({ scenarios });
   };
 

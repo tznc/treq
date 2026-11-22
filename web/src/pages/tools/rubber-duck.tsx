@@ -64,7 +64,9 @@ const DEMO_SCRIPT: { role: 'user' | 'duck'; text: string }[] = [
 ];
 
 function pickRandom<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)];
+  const item = arr[Math.floor(Math.random() * arr.length)];
+  if (item === undefined) throw new Error('pickRandom from an empty list');
+  return item;
 }
 
 function looksLikeSolved(text: string): boolean {
@@ -381,6 +383,7 @@ async function buildDuckScene(canvas: HTMLCanvasElement): Promise<SceneAPI> {
   function jumpToNewAngle() {
     camConfigIdx = (camConfigIdx + 1) % CAM_CONFIGS.length;
     const cfg = CAM_CONFIGS[camConfigIdx];
+    if (!cfg) return;
     targetTheta = cfg.theta;
     targetPhi   = cfg.phi;
     targetR     = cfg.r;

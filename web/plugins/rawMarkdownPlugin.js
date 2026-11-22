@@ -13,14 +13,14 @@ const CONTENT_SOURCES = [
  * @returns {Record<string, string>}
  */
 function parseFrontMatter(raw) {
-  const match = raw.match(/^---\n([\s\S]*?)\n---/);
-  if (!match) return {};
+  const body = raw.match(/^---\n([\s\S]*?)\n---/)?.[1];
+  if (body === undefined) return {};
   return Object.fromEntries(
-    match[1]
+    body
       .split('\n')
       .map((line) => line.match(/^(\w+):\s*(.*)$/))
       .filter((m) => m !== null)
-      .map((m) => [m[1], m[2].replace(/^['"]|['"]$/g, '')]),
+      .map((m) => [m[1], (m[2] ?? '').replace(/^['"]|['"]$/g, '')]),
   );
 }
 
@@ -46,7 +46,7 @@ function normalizeMarkdown(raw) {
  * @param {string} relativePath
  * @returns {string}
  */
-function markdownOutputPath({contentPath, routeBasePath}, relativePath) {
+function markdownOutputPath({routeBasePath}, relativePath) {
   const parsed = path.parse(relativePath);
   const withoutExtension = path.posix.join(parsed.dir, parsed.name);
   const routePath = parsed.name === 'index' ? parsed.dir : withoutExtension;
@@ -117,7 +117,7 @@ function buildLlmsTxt(pages, {title, description, url}) {
         const suffix = page.description ? `: ${page.description}` : '';
         return `- [${page.title}](${url}/${page.outputPath})${suffix}`;
       });
-    const heading = routeBasePath[0].toUpperCase() + routeBasePath.slice(1);
+    const heading = routeBasePath.charAt(0).toUpperCase() + routeBasePath.slice(1);
     return links.length ? `## ${heading}\n\n${links.join('\n')}\n` : '';
   });
   return [`# ${title}\n\n> ${description}\n`, ...sections.filter(Boolean)].join('\n');

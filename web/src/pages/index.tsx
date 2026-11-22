@@ -137,7 +137,7 @@ function ReviewSection(): ReactNode {
               File navigation, the diff and inline comments stay together. Line comments stay local. Send
               them to an agent as Plan or Edit.
             </p>
-            <Link className={styles.textLink} to="/docs/concepts/changes-and-reviews">
+            <Link className={styles.textLink ?? ''} to="/docs/concepts/changes-and-reviews">
               Changes and reviews
             </Link>
           </SectionHead>
@@ -169,7 +169,7 @@ function RebaseSection(): ReactNode {
               Git worktrees cannot restack a chain of branches for you. Treq uses Jujutsu for that rebase.
               You still push and pull with Git, and you never have to learn Jujutsu.
             </p>
-            <Link className={styles.textLink} to="/docs/concepts/workspaces">
+            <Link className={styles.textLink ?? ''} to="/docs/concepts/workspaces">
               How workspaces work
             </Link>
           </SectionHead>
@@ -298,7 +298,7 @@ function IsolationSection(): ReactNode {
         <div className={styles.grid}>
           <SectionHead id="isolation" title="An uncommitted change in one workspace never shows up in another">
             <p>Agents write in parallel without sharing your main checkout. Two workspaces, two different edits, no overlap.</p>
-            <Link className={styles.textLink} to="/docs/concepts/workspaces">
+            <Link className={styles.textLink ?? ''} to="/docs/concepts/workspaces">
               Isolated workspaces
             </Link>
           </SectionHead>
@@ -330,7 +330,7 @@ function MoreSection(): ReactNode {
         <div className={styles.grid}>
           <SectionHead id="more" title="Conflicts, the agent CLI, files and GitHub, next to the workspace">
             <p>The rest of the work stays in the same window as the diff.</p>
-            <Link className={styles.textLink} to="/docs/getting-started/installation">
+            <Link className={styles.textLink ?? ''} to="/docs/getting-started/installation">
               Read the docs
             </Link>
           </SectionHead>
@@ -411,7 +411,7 @@ function ResourcesSection(): ReactNode {
           <SectionHead id="resources" title="Install, then read how the workflow works" />
           <div className={clsx(styles.cards, styles.four)}>
             {RESOURCES.map((r) => (
-              <Link key={r.to} className={styles.res} to={r.to}>
+              <Link key={r.to} className={styles.res ?? ''} to={r.to}>
                 <span className={styles.label}>{r.kind}</span>
                 <Heading as="h3">{r.title}</Heading>
                 <p>{r.body}</p>
@@ -439,7 +439,7 @@ function ClosingCTA(): ReactNode {
           </div>
           <DownloadButton location="closing" className={clsx(styles.btn, styles.primary, styles.big)} />
           <div className={styles.after}>
-            <Link className={styles.textLink} to="/pricing">
+            <Link className={styles.textLink ?? ''} to="/pricing">
               See pricing
             </Link>
             <OtherDownloads location="closing" />
