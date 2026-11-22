@@ -1,5 +1,6 @@
 //! Tests for the header popovers.
 
+use crate::gpui_shell::test_helpers::WindowHarness;
 use std::{
   cell::{Cell, RefCell},
   rc::Rc,
@@ -155,6 +156,12 @@ struct Harness {
   _closed: gpui::Subscription,
 }
 
+impl WindowHarness for Harness {
+  fn cx(&mut self) -> &mut VisualTestContext {
+    &mut self.cx
+  }
+}
+
 impl Harness {
   fn new(cx: &mut TestAppContext, kind: Kind, host: FakeHost) -> Self {
     let sent = Rc::new(RefCell::new(Vec::new()));
@@ -184,25 +191,6 @@ impl Harness {
     }
   }
 
-  /// The window as the user sees it, once everything pending has run.
-  fn rendered(&mut self) -> gpui_testing_library::Screen {
-    self.cx.run_until_parked();
-    let window = self.cx.update(|window, _| window.window_handle());
-    let screen = gpui_testing_library::Screen::new(&self.cx, window);
-    screen.redraw();
-    screen
-  }
-
-  /// Whether the user sees an element of `role` named `name`.
-  fn shows(&mut self, role: gpui::Role, name: &str) -> bool {
-    !self
-      .rendered()
-      .query_all_by_role(
-        gpui_testing_library::by::role(role).name(gpui_testing_library::normalize(name)),
-      )
-      .is_empty()
-  }
-
   /// The names of the branches the user can pick.
   fn branches(&mut self) -> Vec<String> {
     self
@@ -211,14 +199,6 @@ impl Harness {
       .iter()
       .filter_map(|option| option.name())
       .collect()
-  }
-
-  fn click(&mut self, selector: &'static str) {
-    crate::gpui_shell::test_actions::act(
-      &mut self.cx,
-      selector,
-      crate::gpui_shell::test_actions::Action::Click,
-    );
   }
 
   fn keys(&mut self, keys: &str) {

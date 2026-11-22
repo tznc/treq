@@ -1,7 +1,48 @@
-//! Test actions on an element named by its debug selector.
+//! Helpers shared by the GPUI test harnesses: the window as
+//! gpui-testing-library sees it, and actions on elements named by their debug
+//! selector.
 
-use gpui::{ElementId, Modifiers, MouseButton, VisualTestContext};
-use gpui_testing_library::{by, prelude::*, Screen};
+use gpui::{ElementId, Modifiers, MouseButton, Role, VisualTestContext};
+use gpui_testing_library::{by, normalize, prelude::*, Screen};
+
+/// A test harness that owns a window. Implement `cx`; the rest is shared.
+pub(crate) trait WindowHarness {
+  fn cx(&mut self) -> &mut VisualTestContext;
+
+  /// The window as the user sees it, once everything pending has run.
+  fn rendered(&mut self) -> Screen {
+    rendered(self.cx())
+  }
+
+  /// Whether the user sees an element of `role` named `name`.
+  fn shows(&mut self, role: Role, name: &str) -> bool {
+    !self
+      .rendered()
+      .query_all_by_role(by::role(role).name(normalize(name)))
+      .is_empty()
+  }
+
+  fn click(&mut self, selector: &'static str) {
+    act(self.cx(), selector, Action::Click);
+  }
+
+  fn right_click(&mut self, selector: &'static str) {
+    act(self.cx(), selector, Action::RightClick);
+  }
+
+  fn hover(&mut self, selector: &'static str) {
+    act(self.cx(), selector, Action::Hover);
+  }
+}
+
+/// The window of `cx` as the user sees it, once everything pending has run.
+pub(crate) fn rendered(cx: &mut VisualTestContext) -> Screen {
+  cx.run_until_parked();
+  let window = cx.update(|window, _| window.window_handle());
+  let screen = Screen::new(cx, window);
+  screen.redraw();
+  screen
+}
 
 /// What to do to the element.
 #[derive(Clone, Copy, Debug)]
@@ -20,10 +61,7 @@ pub(crate) enum Action {
 /// in it. A selector with no node (see the `gpui-debug-selector-needs-test-node`
 /// lint) is acted on at the centre of its painted bounds instead.
 pub(crate) fn act(cx: &mut VisualTestContext, selector: &'static str, action: Action) {
-  cx.run_until_parked();
-  let window = cx.update(|window, _| window.window_handle());
-  let screen = Screen::new(cx, window);
-  screen.redraw();
+  let screen = rendered(cx);
   let bounds = cx
     .debug_bounds(selector)
     .unwrap_or_else(|| panic!("{selector} is not drawn"));

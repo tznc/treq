@@ -42,7 +42,7 @@ mod shortcuts;
 mod sidebar;
 mod sidebar_actions;
 #[cfg(test)]
-mod test_actions;
+mod test_helpers;
 use treq_ui::theme;
 mod time;
 mod title_bar;

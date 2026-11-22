@@ -1,3 +1,4 @@
+use crate::gpui_shell::test_helpers::WindowHarness;
 use std::{
   cell::RefCell,
   collections::HashMap,
@@ -17,6 +18,12 @@ struct Harness {
   screen: Entity<Screen>,
   sent: Rc<RefCell<Vec<ScreenAction>>>,
   popups: Rc<RefCell<Vec<crate::gpui_shell::popup::PopupRequest>>>,
+}
+
+impl WindowHarness for Harness {
+  fn cx(&mut self) -> &mut VisualTestContext {
+    &mut self.cx
+  }
 }
 
 type Sink = Arc<dyn Fn(&[u8]) + Send + Sync>;
@@ -1921,25 +1928,6 @@ impl Harness {
     self.cx.debug_bounds(selector).is_some()
   }
 
-  /// The window as the user sees it, once everything pending has run.
-  fn rendered(&mut self) -> gpui_testing_library::Screen {
-    self.cx.run_until_parked();
-    let window = self.cx.update(|window, _| window.window_handle());
-    let screen = gpui_testing_library::Screen::new(&self.cx, window);
-    screen.redraw();
-    screen
-  }
-
-  /// Whether the user sees an element of `role` named `name`.
-  fn shows(&mut self, role: gpui::Role, name: &str) -> bool {
-    !self
-      .rendered()
-      .query_all_by_role(
-        gpui_testing_library::by::role(role).name(gpui_testing_library::normalize(name)),
-      )
-      .is_empty()
-  }
-
   /// Clicks `button` in the confirmation on screen, found by role and
   /// name, as the user would.
   fn answer(&mut self, button: &str) {
@@ -1961,22 +1949,6 @@ impl Harness {
       .unwrap_or_else(|| panic!("no {button} button in the confirmation"));
     screen.user().click(&target);
     self.cx.run_until_parked();
-  }
-
-  fn click(&mut self, selector: &'static str) {
-    crate::gpui_shell::test_actions::act(
-      &mut self.cx,
-      selector,
-      crate::gpui_shell::test_actions::Action::Click,
-    );
-  }
-
-  fn right_click(&mut self, selector: &'static str) {
-    crate::gpui_shell::test_actions::act(
-      &mut self.cx,
-      selector,
-      crate::gpui_shell::test_actions::Action::RightClick,
-    );
   }
 
   fn sent(&self) -> Vec<ScreenAction> {
