@@ -55,7 +55,10 @@ export function popupBox(): { x: number; y: number; w: number; h: number } | nul
   for (const id of ids) {
     const g = execFileSync("xdotool", ["getwindowgeometry", "--shell", id]).toString();
     const v = Object.fromEntries(g.trim().split("\n").map((l) => l.split("=")));
-    const [x, y, w, h] = ["X", "Y", "WIDTH", "HEIGHT"].map((k) => Number(v[k]) / scale);
+    const x = Number(v.X) / scale;
+    const y = Number(v.Y) / scale;
+    const w = Number(v.WIDTH) / scale;
+    const h = Number(v.HEIGHT) / scale;
     if (w < 20 || h < 20 || (x === 0 && y === 0 && w >= 1400)) continue;
     if (!best || w * h > best.w * best.h) best = { x, y, w, h };
   }

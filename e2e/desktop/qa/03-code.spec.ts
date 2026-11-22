@@ -24,7 +24,7 @@ async function overview(page: Page) {
   }
 }
 
-test("code: workspace Code tab, action row, alerts and Agent", async ({ page, context }) => {
+test("code: workspace Code tab, action row, alerts and Agent", async ({ page }) => {
   await openWorkspace(page, BRANCH);
   await openTab(page, "Code");
   await overview(page);
