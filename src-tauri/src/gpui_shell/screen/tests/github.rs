@@ -36,6 +36,8 @@ pub(super) struct Fake {
   logs_enabled: bool,
   /// Calls that fail, by name.
   pub(super) fail: Vec<&'static str>,
+  /// The repository's collaborators and PR authors.
+  mentionable: Vec<String>,
 }
 
 fn author(login: &str) -> GhAuthor {
@@ -192,6 +194,10 @@ impl GithubHost for FakeHost {
   fn change_pr(&self, repo: &str, number: u64, change: &PrChange) -> Result<(), String> {
     self.record(format!("pr {repo}#{number} {change:?}"));
     self.gh_fails("change_pr")
+  }
+
+  fn mentionable_users(&self, _: &str) -> Result<Vec<String>, String> {
+    Ok(self.github.mentionable.clone())
   }
 
   fn react(&self, comment_id: &str, content: &str, on: bool) -> Result<(), String> {
@@ -691,6 +697,19 @@ fn github_comment_suggests_participants_to_mention(cx: &mut TestAppContext) {
   h.cx.simulate_input("@");
   h.cx.simulate_keystrokes("escape");
   assert!(!suggests(&mut h, "ada"));
+}
+
+#[gpui::test]
+fn github_comment_suggests_collaborators_after_participants(cx: &mut TestAppContext) {
+  let fake = Fake {
+    mentionable: vec!["carol".into(), "ada".into()],
+    ..issues()
+  };
+  let (mut h, _) = harness(cx, fake, route("issues", Some(1), false));
+  h.click("github-comment-box");
+  h.cx.simulate_input("@");
+  h.cx.simulate_keystrokes("down down enter");
+  assert_eq!(view(&mut h, |v| v.comment.clone()), "@carol ");
 }
 
 #[gpui::test]

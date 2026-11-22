@@ -7,4 +7,4 @@ One image with the setup every treq machine needs: base packages, the treq CLI, 
 - A local build without `bin/treq` downloads the treq release, which needs real CLI digests in `boot-manifest.ts`.
 - The gateway is started per placement by the control plane, not by the image.
 
-`.github/workflows/sandbox-image.yml` publishes it to `ghcr.io/tznc/treq-sandbox` from `release.yml` (`v<version>`) and `nightly.yml` (`nightly`): a multi-arch tag on `ubuntu:24.04` and an amd64 `<tag>-cloudflare` tag on Cloudflare's base. Those builds bake in the treq CLI built from the same commit (`bin/treq`), so they need no pinned digests.
+`.github/workflows/sandbox-image.yml` publishes it to `ghcr.io/tznc/treq-sandbox` from `release.yml` (`v<version>`), or by hand (`nightly`): a multi-arch tag on `ubuntu:24.04` and an amd64 `<tag>-cloudflare` tag on Cloudflare's base. Those builds bake in the treq CLI built from the same commit (`bin/treq`), so they need no pinned digests.

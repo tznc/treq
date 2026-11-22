@@ -89,8 +89,8 @@ function CallbackContent() {
 
       {state === "error" && (
         <>
-          <div style={{ ...styles.icon, color: "#ef4444" }}>✕</div>
-          <p style={{ ...styles.text, color: "#ef4444" }}>
+          <div style={{ ...styles.icon, color: "var(--treq-danger)" }}>✕</div>
+          <p style={{ ...styles.text, color: "var(--treq-danger)" }}>
             Connection failed: {message}
           </p>
           <a href="/dashboard?tab=integrations" style={styles.link}>
@@ -133,8 +133,8 @@ const styles: Record<string, React.CSSProperties> = {
   },
   icon: {
     fontSize: "3rem",
-    color: "#10b981",
-    fontWeight: 700,
+    color: "var(--treq-ok)",
+    fontWeight: 500,
   },
   text: {
     fontSize: "1rem",
@@ -142,7 +142,7 @@ const styles: Record<string, React.CSSProperties> = {
     maxWidth: "480px",
   },
   link: {
-    color: "var(--ifm-color-primary)",
+    color: "var(--treq-link)",
     textDecoration: "underline",
     cursor: "pointer",
   },

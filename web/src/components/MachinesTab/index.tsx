@@ -31,17 +31,17 @@ const PENDING_LABEL: Record<MachineAction, string> = {
 };
 
 const TONE_STYLE: Record<StatusTone, React.CSSProperties> = {
-  ok: { backgroundColor: "rgba(16,185,129,0.1)", color: "#10b981" },
+  ok: { backgroundColor: "rgba(16,185,129,0.1)", color: "var(--treq-ok)" },
   busy: { backgroundColor: "rgba(59,130,246,0.1)", color: "#3b82f6" },
   idle: { backgroundColor: "var(--ifm-color-emphasis-100)", color: "var(--dashboard-text-subtle)" },
-  error: { backgroundColor: "rgba(239,68,68,0.1)", color: "#ef4444" },
+  error: { backgroundColor: "rgba(239,68,68,0.1)", color: "var(--treq-danger)" },
 };
 
 const badge: React.CSSProperties = {
   padding: "0.2rem 0.6rem",
   borderRadius: "12px",
   fontSize: "0.8rem",
-  fontWeight: 600,
+  fontWeight: 500,
 };
 
 const failureBox: React.CSSProperties = {
@@ -49,7 +49,7 @@ const failureBox: React.CSSProperties = {
   padding: "0.6rem 0.75rem",
   borderRadius: "6px",
   backgroundColor: "rgba(239,68,68,0.08)",
-  color: "#ef4444",
+  color: "var(--treq-danger)",
   fontSize: "0.85rem",
 };
 
@@ -135,7 +135,7 @@ export default function MachinesTab({
         {machine && status ? (
           <>
             <div className="dashboard-row" style={styles.sectionHeader}>
-              <span style={{ fontWeight: 600 }}>Treq Cloud machine</span>
+              <span style={{ fontWeight: 500 }}>Treq Cloud machine</span>
               <span style={{ ...badge, ...TONE_STYLE[status.tone] }}>{status.label}</span>
             </div>
             <Field label="Size" styles={styles}>{sizeLabel(machine)}</Field>
@@ -221,7 +221,7 @@ export default function MachinesTab({
           <div style={{ fontSize: "0.85rem", marginTop: "1rem" }}>
             <div>
               {upsell}
-              <span style={styles.featureProBadge}>PRO</span>
+              <span style={styles.featureProBadge}>Pro</span>
             </div>
             <button type="button" onClick={onUpgrade} style={{ ...styles.primaryButton, marginTop: "0.5rem" }}>
               Upgrade to Pro

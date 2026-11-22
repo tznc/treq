@@ -7,7 +7,6 @@ use tauri_plugin_gpui::gpui::{self, div, prelude::*, Context, Div, SharedString,
 use super::GithubView;
 use crate::{
   core::pr_view,
-  github::GhAuthor,
   gpui_shell::{
     screen::code_data::{mention_at, replace_range},
     theme::Palette,
@@ -22,8 +21,9 @@ pub(super) struct CommentMention {
 }
 
 impl GithubView {
-  /// Everyone on the open thread, most recent first.
-  fn participants(&self) -> Vec<&GhAuthor> {
+  /// Everyone on the open thread, most recent first, then the repository's
+  /// collaborators and PR authors.
+  fn participants(&self) -> Vec<&str> {
     let (author, comments, reviews) = match (&self.detail.issue, &self.detail.pr) {
       (Some(issue), _) => (&issue.author, &issue.comments, &[][..]),
       (None, Some(pr)) => (&pr.author, &pr.comments, &pr.reviews[..]),
@@ -36,6 +36,8 @@ impl GithubView {
       .map(|c| &c.author)
       .chain(reviews.iter().rev().map(|r| &r.author))
       .chain(std::iter::once(author))
+      .map(|a| a.login.as_str())
+      .chain(self.mentionable.1.iter().map(String::as_str))
       .collect()
   }
 
