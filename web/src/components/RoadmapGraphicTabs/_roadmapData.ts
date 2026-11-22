@@ -87,7 +87,8 @@ export function firstPlannedIndex(year: YearRoadmap): number {
 export function nextPlannedIndex(year: YearRoadmap, from: number): number {
   for (let step = 1; step <= 4; step++) {
     const idx = (from + step) % 4;
-    if (isQuarterPlanned(year.quarters[idx])) return idx;
+    const slot = year.quarters[idx];
+    if (slot && isQuarterPlanned(slot)) return idx;
   }
   return from;
 }

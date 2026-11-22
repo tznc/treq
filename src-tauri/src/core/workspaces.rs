@@ -326,7 +326,10 @@ pub fn workspace_overview(
 impl WorkspaceMetadata {
   /// Serialize metadata to JSON string for storage
   pub fn to_json(&self) -> String {
-    serde_json::to_string(self).unwrap_or_else(|_| "{}".to_string())
+    serde_json::to_string(self).unwrap_or_else(|error| {
+      tracing::error!(%error, "workspace metadata did not serialize; storing {{}}");
+      "{}".to_string()
+    })
   }
 }
 
@@ -911,7 +914,7 @@ pub fn create_workspace_with_symlinked_dirs(
   let effective_target_branch: String = if let Some(source_ws) = &stacked_source_workspace {
     source_ws.branch_name.clone()
   } else {
-    jj::get_default_branch(repo_path).unwrap_or_else(|_| "main".to_string())
+    default_branch_or_main(repo_path)
   };
 
   let new_branch: bool = !branch_exists || resolved_source_branch.as_deref() == Some(&remote_ref);
@@ -1247,7 +1250,7 @@ fn forget_workspace_record(
           Some(target) if !target.is_empty() && target != workspace.branch_name => {
             target.to_string()
           }
-          _ => jj::get_default_branch(repo_path).unwrap_or_else(|_| "main".to_string()),
+          _ => default_branch_or_main(repo_path),
         };
         for child in &children {
           local_db::update_workspace_target_branch(repo_path, child.id, &new_target)
@@ -1278,8 +1281,11 @@ fn forget_workspace_record(
       // Rebase spliced children now so a merged parent's commits drop out of
       // their PRs immediately. Best effort: the next auto-rebase retries.
       if !children.is_empty() {
-        let style = resolve_workspace_diff_conflict_marker_style(repo_path)
-          .unwrap_or_else(|_| crate::core::DEFAULT_CONFLICT_MARKER_STYLE.to_string());
+        let style =
+          resolve_workspace_diff_conflict_marker_style(repo_path).unwrap_or_else(|error| {
+            tracing::warn!(%error, repo_path, "using the default conflict marker style");
+            crate::core::DEFAULT_CONFLICT_MARKER_STYLE.to_string()
+          });
         for child in &children {
           if let Err(e) = check_and_rebase_workspaces(repo_path, Some(child.id), None, None, &style)
           {
@@ -1369,7 +1375,7 @@ pub fn push_workspace_to_remote(
     // For home repo, use repo_path directly
     let branch_name = jj::resolve_home_repo_branch(repo_path)
       .map_err(|e| format!("Failed to resolve home repo branch: {}", e))?;
-    let target_branch = jj::get_default_branch(repo_path).unwrap_or_else(|_| "main".to_string());
+    let target_branch = default_branch_or_main(repo_path);
     (repo_path.to_string(), branch_name, target_branch, false)
   };
 
@@ -3578,7 +3584,10 @@ pub fn plan_merge_landing(
 }
 
 fn default_branch_or_main(repo_path: &str) -> String {
-  jj::get_default_branch(repo_path).unwrap_or_else(|_| "main".to_string())
+  jj::get_default_branch(repo_path).unwrap_or_else(|error| {
+    tracing::warn!(%error, repo_path, "default branch lookup failed; using main");
+    "main".to_string()
+  })
 }
 
 fn load_merge_landing_plan(
@@ -3762,7 +3771,6 @@ fn merge_workspace_landing(
   // Deferring the cleanup also defers moving the home checkout.
   let defer_home_edit = defer_removal;
 
-  // Get the workspace from the database
   let workspace = local_db::get_workspace_by_id(repo_path, workspace_id)
     .map_err(|e| format!("Failed to get workspace from db: {}", e))?
     .ok_or("Workspace not found in database")?;
@@ -3951,9 +3959,10 @@ fn sync_home_on_branch_and_workspace(
   let checkout_tip = jj::jj_resolve_bookmark_tip(source_path)
     .map_err(|e| format!("Failed to resolve source tip: {}", e))?;
   // The bookmark is the branch; a checkout's working copy, dirty or not, is never moved onto it.
-  let source_tip = jj::jj_get_commit_id(source_path, branch)
-    .ok()
-    .unwrap_or(checkout_tip);
+  let source_tip = jj::jj_get_commit_id(source_path, branch).unwrap_or_else(|error| {
+    tracing::debug!(%error, branch, "branch has no commit in the checkout; using its tip");
+    checkout_tip
+  });
 
   let destination_path = match source {
     SyncSource::HomeToWorkspace => workspace_path_str,
@@ -4256,7 +4265,7 @@ pub fn update_workspace_with_title(
     .ok_or("Workspace not found in database")?;
 
   if !matches!(target_branch, MaybeEmptyParam::Omitted) {
-    let default_branch = jj::get_default_branch(repo_path).unwrap_or_else(|_| "main".to_string());
+    let default_branch = default_branch_or_main(repo_path);
     // An empty target means "back onto the repo's default branch".
     let new_target = match target_branch {
       MaybeEmptyParam::Some(branch) => branch,
@@ -5517,7 +5526,7 @@ fn commit_workspace_locked(
   } else {
     let branch = jj::resolve_home_repo_branch(repo_path)
       .map_err(|e| format!("Failed to resolve home repo branch: {}", e))?;
-    let target_branch = jj::get_default_branch(repo_path).unwrap_or_else(|_| "main".to_string());
+    let target_branch = default_branch_or_main(repo_path);
     (branch, target_branch)
   };
 

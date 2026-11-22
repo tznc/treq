@@ -4,6 +4,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2.95.3";
 import { fetchWithTimeout } from "../_shared/http/fetch-with-timeout.ts";
+import { errorMessage } from "../_shared/error-message.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -157,7 +158,7 @@ Deno.serve(async (req) => {
   } catch (err) {
     console.error(
       "[complete-linear-oauth] token fetch error:",
-      err instanceof Error ? err.message : String(err),
+      errorMessage(err),
     );
     return json({ error: "Failed to communicate with Linear" }, 502);
   }
@@ -176,7 +177,7 @@ Deno.serve(async (req) => {
   } catch (err) {
     console.error(
       "[complete-linear-oauth] workspace query failed:",
-      err instanceof Error ? err.message : String(err),
+      errorMessage(err),
     );
     return json({ error: "Failed to fetch workspace information" }, 502);
   }

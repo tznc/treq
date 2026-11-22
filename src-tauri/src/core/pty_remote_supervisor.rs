@@ -149,7 +149,8 @@ pub fn repo_scope(repo: &str) -> String {
   let trimmed = repo.trim();
   let canonical = std::fs::canonicalize(trimmed)
     .map(|path| path.to_string_lossy().into_owned())
-    .unwrap_or_else(|_| {
+    .unwrap_or_else(|error| {
+      tracing::debug!(%error, repo = trimmed, "scoping sessions by the path as written");
       let without_slash = trimmed.trim_end_matches('/');
       if without_slash.is_empty() {
         trimmed.to_string()

@@ -89,12 +89,14 @@ function releasesJsonPlugin(context) {
         // (DOCUSAURUS_ENABLE_GTAG=true) fails rather than ship a stale or
         // missing release list; any other build deletes the old file and
         // carries on without it.
-        const reason = err instanceof Error ? err.message : String(err);
         if (process.env.DOCUSAURUS_ENABLE_GTAG === 'true') {
-          throw new Error(`[releases-json] cannot fetch releases: ${reason}`);
+          throw new Error('[releases-json] cannot fetch releases', {cause: err});
         }
         fs.rmSync(dest, {force: true});
-        console.warn(`[releases-json] cannot fetch releases (${reason}); building without /releases.json.`);
+        console.warn(
+          '[releases-json] cannot fetch releases; building without /releases.json:',
+          err instanceof Error ? err.message : err,
+        );
       }
     },
   };

@@ -17,6 +17,7 @@ import {
   newIntentState,
   sha256Hex,
 } from "../_shared/intent-state.ts";
+import { errorMessage } from "../_shared/error-message.ts";
 
 export interface InstallIntentStore {
   insertIntent(row: IntentRow): Promise<void>;
@@ -47,7 +48,7 @@ export async function createInstallIntent(
   } catch (err) {
     console.error(
       "[create-github-install-intent] insert failed:",
-      err instanceof Error ? err.message : String(err),
+      errorMessage(err),
     );
     return { status: 500, body: { error: "Failed to create install intent" } };
   }

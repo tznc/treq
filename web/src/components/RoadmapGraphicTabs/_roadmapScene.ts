@@ -296,10 +296,12 @@ export async function buildRoadmapScene(
   const nodes: Mesh[] = [];
   const plannedFlags = quarters.map(isQuarterPlanned);
 
-  for (let i = 0; i < 4; i++) {
-    const planned = plannedFlags[i];
+  for (const [i, x] of NODE_X.entries()) {
+    const quarter = quarters[i];
+    if (!quarter) continue;
+    const planned = isQuarterPlanned(quarter);
     const pedestal = new Group();
-    pedestal.position.set(NODE_X[i], 0, 0);
+    pedestal.position.set(x, 0, 0);
     pedestal.userData.planned = planned;
 
     const node = new Mesh(
@@ -316,7 +318,7 @@ export async function buildRoadmapScene(
     pedestal.add(node);
     nodes.push(node);
 
-    const icon = buildIcon(THREE, quarters[i].icon, options.dark);
+    const icon = buildIcon(THREE, quarter.icon, options.dark);
     icon.position.y = 0.48;
     icon.scale.setScalar(planned ? 0.72 : 0.65);
     pedestal.add(icon);
@@ -341,7 +343,7 @@ export async function buildRoadmapScene(
 
   const setActive = (index: number) => {
     active = ((index % 4) + 4) % 4;
-    pedestals.forEach((m, i) => setGroupDim(m, i === active, plannedFlags[i]));
+    pedestals.forEach((m, i) => setGroupDim(m, i === active, plannedFlags[i] ?? false));
     options.onActiveChange(active);
   };
 

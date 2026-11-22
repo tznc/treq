@@ -1,0 +1,32 @@
+id: no-raw-gpui-input
+valid:
+  - |
+    fn t(screen: &Screen) {
+      let user = screen.user();
+      user.click(&screen.get_by_role(by::role(Role::Button).name("Send")));
+      user.keyboard("{Escape}");
+      user.pointer([PointerAction::Press(MouseButton::Left)]);
+    }
+invalid:
+  - |
+    fn t(cx: &mut VisualTestContext) {
+      cx.simulate_click(point(px(1.), px(1.)), Modifiers::none());
+    }
+  - |
+    fn t(h: &mut Harness) {
+      h.cx.simulate_keystrokes("cmd-k");
+    }
+  - |
+    fn t(h: &mut Harness) {
+      h.cx.simulate_input("hello");
+    }
+  - |
+    fn t(cx: &mut VisualTestContext, at: Point<Pixels>) {
+      cx.simulate_mouse_move(at, None, Modifiers::none());
+      cx.simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
+      cx.simulate_mouse_up(at, MouseButton::Left, Modifiers::none());
+    }
+  - |
+    fn t(cx: &mut VisualTestContext, e: ScrollWheelEvent) {
+      cx.simulate_event(e);
+    }

@@ -1,0 +1,9 @@
+id: no-narrating-comments-js
+valid:
+  - |
+    // Docusaurus reads this at build time, so it cannot depend on env vars.
+    module.exports = config;
+invalid:
+  - |
+    // Build the sidebar from the docs folder
+    module.exports = sidebar;

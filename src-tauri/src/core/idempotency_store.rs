@@ -1,6 +1,4 @@
-// ---------------------------------------------------------------------------
 // Durable remote-mutation idempotency store
-// ---------------------------------------------------------------------------
 //
 // Replaces the process-local `OnceLock<HashMap>` idempotency cache that used
 // to live in `core::remote`. Remote SSH starts a fresh `treq` CLI process per

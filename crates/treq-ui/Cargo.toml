@@ -22,6 +22,7 @@ gpui = { package = "gpui-pre", version = "=0.3.9", features = ["test-support"] }
 # Native: the styleguide window and headless snapshot rendering
 # (`cargo run -p treq-ui --example styleguide -- render|check`).
 [target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
+gpui-testing-library = { version = "=0.1.0", features = ["gpui-kit"] }
 gpui-kit = { git = "https://github.com/Ziinc/gpui-kit", branch = "main", default-features = false, features = ["component", "test-support"] }
 gpui-styleguidist = { git = "https://github.com/Ziinc/gpui-styleguidist", rev = "7af7f20d75ae7e2cf576873d42fbcc505c10eabe", features = ["gallery", "render"] }
 

@@ -5,8 +5,8 @@
  * redirect". File URLs (with an extension) are served as-is.
  */
 export function withTrailingSlash(url: string): string {
-  const match = url.match(/^((?:https?:\/\/[^/?#]+)?)([^?#]*)(.*)$/) as RegExpMatchArray;
-  const [, origin, path, rest] = match;
+  const match = url.match(/^((?:https?:\/\/[^/?#]+)?)([^?#]*)(.*)$/);
+  const [, origin = '', path = '', rest = ''] = match ?? [];
   if (path.endsWith('/') || /\.[a-z0-9]+$/i.test(path.split('/').pop() ?? '')) {
     return url;
   }

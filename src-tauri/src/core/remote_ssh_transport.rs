@@ -40,9 +40,7 @@ use crate::core::remote_control_plane::{
   SshAuthentication, SshEndpoint, SshTransport, TrustedHostKey,
 };
 
-// ---------------------------------------------------------------------------
 // Errors
-// ---------------------------------------------------------------------------
 
 /// Errors surfaced by the native transport. Kept distinct from
 /// [`crate::core::remote::TransportError`] (the older, subprocess-based
@@ -163,9 +161,7 @@ impl From<russh::Error> for SshTransportError {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Metrics (Phase 7: "Client and transport telemetry")
-// ---------------------------------------------------------------------------
 //
 // This repo has no existing metrics backend (no `metrics`/`prometheus`
 // crate, no telemetry-export pipeline) - `tracing` is used for structured
@@ -370,9 +366,7 @@ pub struct SshTransportMetricsSnapshot {
   pub post_reconnect_ambiguous_count: u64,
 }
 
-// ---------------------------------------------------------------------------
 // Host-key verification
-// ---------------------------------------------------------------------------
 
 /// Computes the SHA256 fingerprint string (`SHA256:<base64>`) for a server
 /// host key or certificate, in the same shape as [`TrustedHostKey`]'s
@@ -437,9 +431,7 @@ impl HostKeyVerifier {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Client handler
-// ---------------------------------------------------------------------------
 
 /// `russh::client::Handler` implementation. Holds only what is needed to
 /// verify the server's host key; it performs no logging of key material and
@@ -482,9 +474,7 @@ impl ClientHandlerTrait for TreqSshClientHandler {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Authentication
-// ---------------------------------------------------------------------------
 
 /// Reserved [`SshAuthentication`] key reference for the mobile device key
 /// that `core::remote_device_key` keeps in the OS keystore. It resolves only
@@ -658,12 +648,13 @@ impl ClientAuthenticator {
 fn dirs_home() -> PathBuf {
   std::env::var("HOME")
     .map(PathBuf::from)
-    .unwrap_or_else(|_| PathBuf::from("."))
+    .unwrap_or_else(|error| {
+      tracing::warn!(%error, "HOME is unusable; resolving ~ against the current directory");
+      PathBuf::from(".")
+    })
 }
 
-// ---------------------------------------------------------------------------
 // Connection pooling
-// ---------------------------------------------------------------------------
 
 /// Pool key derivation. Per the PRD: "Repository identity references the
 /// endpoint ID ... generation", so the pool is keyed on more than a hostname
@@ -1176,9 +1167,7 @@ impl SshConnectionPool {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Exec channels
-// ---------------------------------------------------------------------------
 
 /// Result of a completed exec channel invocation. stdout and stderr are kept
 /// separate per the PRD's structured command protocol ("stdout contains only
@@ -1396,9 +1385,7 @@ fn build_remote_command_line(args: &[String]) -> String {
   parts.join(" ")
 }
 
-// ---------------------------------------------------------------------------
 // PTY channels
-// ---------------------------------------------------------------------------
 
 /// An open interactive PTY channel (shell or agent process) on the pooled
 /// connection for one endpoint. Read/write/resize/close mirror the shape of
@@ -1577,9 +1564,7 @@ pub enum PtyReadEvent {
   Closed,
 }
 
-// ---------------------------------------------------------------------------
 // Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -1979,7 +1964,8 @@ mod tests {
       source: SshEndpointSource::UserManaged,
       hostname: addr.ip().to_string(),
       port: addr.port(),
-      username: std::env::var("USER").unwrap_or_else(|_| "user".to_string()),
+      // The test server accepts any user.
+      username: "user".to_string(),
       host_keys: vec![TrustedHostKey {
         algorithm: "ssh-ed25519".to_string(),
         fingerprint_sha256: fingerprint,

@@ -116,7 +116,7 @@ test("pr-description-sync: synced, local draft, Sync, save to PR", async ({ page
   await expect(page.getByText("Sent to GitHub.")).toBeVisible({ timeout: 20_000 });
   await expect(synced).toBeVisible();
   await expect.poll(() => prEdits().length).toBe(1);
-  expect(prEdits()[0].slice(0, 5)).toEqual(["pr", "edit", "415", "--repo", "lorem-ipsum/event-bus"]);
+  expect(prEdits()[0]?.slice(0, 5)).toEqual(["pr", "edit", "415", "--repo", "lorem-ipsum/event-bus"]);
   // The next poll reads the PR's new body back: still synced, text kept.
   await settle(page, 3000);
   await expect(page.getByText("Sent to GitHub.")).toBeVisible();

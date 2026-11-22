@@ -23,6 +23,7 @@
 import { parseOpenSshPublicKey, type ParsedPublicKey } from "./ssh-keys.ts";
 import { SshReader, SshWriter } from "./ssh-wire.ts";
 import { base64Encode } from "./ssh-wire.ts";
+import { errorMessage } from "../error-message.ts";
 
 const SSH_MSG_KEXINIT = 20;
 const SSH_MSG_KEX_ECDH_INIT = 30;
@@ -141,7 +142,7 @@ export async function scanHostKey(
   try {
     conn = await Deno.connect({ hostname, port, transport: "tcp" });
   } catch (err) {
-    throw new KeyscanError(`could not connect to ${hostname}:${port}: ${(err as Error).message}`, "connect_failed");
+    throw new KeyscanError(`could not connect to ${hostname}:${port}: ${errorMessage(err)}`, "connect_failed");
   }
 
   try {

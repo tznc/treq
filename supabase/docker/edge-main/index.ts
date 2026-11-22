@@ -101,7 +101,7 @@ Deno.serve(async (req: Request) => {
       }
     } catch (e) {
       console.error(e);
-      return new Response(JSON.stringify({ msg: String(e) }), {
+      return new Response(JSON.stringify({ msg: e instanceof Error ? e.message : "JWT check failed" }), {
         status: 401,
         headers: { "Content-Type": "application/json" },
       });
@@ -125,7 +125,7 @@ Deno.serve(async (req: Request) => {
     });
     return await worker.fetch(req);
   } catch (e) {
-    return new Response(JSON.stringify({ msg: String(e) }), {
+    return new Response(JSON.stringify({ msg: e instanceof Error ? e.message : "worker failed" }), {
       status: 500,
       headers: { "Content-Type": "application/json" },
     });

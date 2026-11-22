@@ -16,7 +16,7 @@ export default function SearchNavbarItem({
   }
 
   return (
-    <NavbarSearch className={className}>
+    <NavbarSearch className={className ?? ''}>
       <SearchBar />
     </NavbarSearch>
   );

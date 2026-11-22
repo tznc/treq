@@ -132,7 +132,10 @@ impl RunLog {
 /// Runs the script from the home directory. Returns whether it exited
 /// successfully within `timeout`.
 fn execute(script: &str, timeout: Duration, log: RunLog) -> bool {
-  let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+  let home = std::env::var("HOME").unwrap_or_else(|e| {
+    log::warn!("HOME is unusable ({e}); running the app setup script from the current directory");
+    ".".to_string()
+  });
   let log = Arc::new(log);
   let sink: shell_step::LineSink = {
     let log = log.clone();

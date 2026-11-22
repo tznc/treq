@@ -6,7 +6,6 @@ import { goHome, mod } from "../fixture.ts";
 
 test("Cmd+K opens the palette with Go to Home and Go to Settings", async ({
   page,
-  context,
 }) => {
   await goHome(page);
   await page.keyboard.press(`${mod}+k`);
@@ -33,7 +32,6 @@ test("Cmd+K opens the palette with Go to Home and Go to Settings", async ({
 
 test("the palette filters its commands as you type", async ({
   page,
-  context,
 }) => {
   await goHome(page);
   await page.getByRole("button", { name: "Command palette" }).click();
@@ -50,7 +48,7 @@ test("the palette filters its commands as you type", async ({
   await palette.keyboard.press("Escape");
 });
 
-test("Search Files opens the file picker", async ({ page, context }) => {
+test("Search Files opens the file picker", async ({ page }) => {
   await goHome(page);
   await page.keyboard.press(`${mod}+k`);
   const palette = page;
@@ -65,7 +63,6 @@ test("Search Files opens the file picker", async ({ page, context }) => {
 
 test("? opens the keyboard shortcuts, but not while typing", async ({
   page,
-  context,
 }) => {
   await goHome(page);
   await page.getByRole("button", { name: "Start an agent", exact: true }).click();
