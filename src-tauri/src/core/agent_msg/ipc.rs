@@ -96,6 +96,6 @@ mod tests {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let endpoint = listener.local_addr().unwrap().to_string();
     drop(listener);
-    assert!(call(&endpoint, &request(), Duration::from_secs(1)).is_err());
+    call(&endpoint, &request(), Duration::from_secs(1)).unwrap_err();
   }
 }

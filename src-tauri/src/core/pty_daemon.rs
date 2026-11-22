@@ -1388,7 +1388,7 @@ mod tests {
       Ok(false)
     );
     // The first still answers.
-    assert!(daemon.call(&Request::Hello).is_ok());
+    daemon.call(&Request::Hello).unwrap();
   }
 
   #[test]

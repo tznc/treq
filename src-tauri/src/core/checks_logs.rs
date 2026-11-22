@@ -1369,12 +1369,12 @@ mod tests {
 
   #[test]
   fn test_validate_sql_rejects_writes_and_multiple_statements() {
-    assert!(validate_sql("SELECT * FROM logs").is_ok());
-    assert!(validate_sql("WITH x AS (SELECT 1) SELECT * FROM x").is_ok());
-    assert!(validate_sql("DROP TABLE logs").is_err());
-    assert!(validate_sql("SELECT 1; DROP TABLE logs").is_err());
-    assert!(validate_sql("ATTACH DATABASE '/tmp/x.db' AS x").is_err());
-    assert!(validate_sql("").is_err());
+    validate_sql("SELECT * FROM logs").unwrap();
+    validate_sql("WITH x AS (SELECT 1) SELECT * FROM x").unwrap();
+    validate_sql("DROP TABLE logs").unwrap_err();
+    validate_sql("SELECT 1; DROP TABLE logs").unwrap_err();
+    validate_sql("ATTACH DATABASE '/tmp/x.db' AS x").unwrap_err();
+    validate_sql("").unwrap_err();
   }
 
   #[test]

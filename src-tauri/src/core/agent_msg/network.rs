@@ -239,6 +239,6 @@ mod tests {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let endpoint = listener.local_addr().unwrap().to_string();
     drop(listener);
-    assert!(network.list(&endpoint).is_err());
+    network.list(&endpoint).unwrap_err();
   }
 }

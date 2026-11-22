@@ -314,7 +314,7 @@ mod list_directory_tests {
   #[test]
   fn returns_error_when_directory_missing() {
     let temp = TempDir::new().unwrap();
-    assert!(list_directory(&temp.path().join("gone").to_string_lossy()).is_err());
+    list_directory(&temp.path().join("gone").to_string_lossy()).unwrap_err();
   }
 
   #[test]

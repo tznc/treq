@@ -82,7 +82,7 @@ mod tests {
   fn a_self_target_on_the_default_branch_is_allowed() {
     let w = [ws("main", Some("main"))];
     assert!(!would_create_stack_cycle(&w, "main", "main", "main"));
-    assert!(ensure_no_stack_cycle(&w, "main", "main", "main").is_ok());
+    ensure_no_stack_cycle(&w, "main", "main", "main").unwrap();
   }
 
   #[test]
@@ -130,7 +130,7 @@ mod tests {
     ];
     assert!(!would_create_stack_cycle(&w, "a", "c", "main"));
     assert!(!would_create_stack_cycle(&w, "a", "main", "main"));
-    assert!(ensure_no_stack_cycle(&w, "a", "c", "main").is_ok());
+    ensure_no_stack_cycle(&w, "a", "c", "main").unwrap();
   }
 
   #[test]

@@ -196,8 +196,8 @@ mod tests {
 
   #[test]
   fn states_never_go_back() {
-    assert!(State::Read.advance(State::Delivered).is_err());
-    assert!(State::Delivered.advance(State::Queued).is_err());
+    State::Read.advance(State::Delivered).unwrap_err();
+    State::Delivered.advance(State::Queued).unwrap_err();
   }
 
   #[test]
@@ -205,7 +205,9 @@ mod tests {
     for done in [State::Acked, State::Replied, State::TimedOut] {
       for next in [State::Read, State::Acked, State::Replied, State::TimedOut] {
         if next != done {
-          assert!(done.advance(next).is_err(), "{done:?} -> {next:?}");
+          done
+            .advance(next)
+            .expect_err(&format!("{done:?} -> {next:?}"));
         }
       }
     }
@@ -239,10 +241,10 @@ mod tests {
 
   #[test]
   fn rejects_timeouts_over_one_minute_zero_or_garbage() {
-    assert!(parse_timeout("61s").is_err());
-    assert!(parse_timeout("2m").is_err());
-    assert!(parse_timeout("0").is_err());
-    assert!(parse_timeout("soon").is_err());
+    parse_timeout("61s").unwrap_err();
+    parse_timeout("2m").unwrap_err();
+    parse_timeout("0").unwrap_err();
+    parse_timeout("soon").unwrap_err();
   }
 
   #[test]

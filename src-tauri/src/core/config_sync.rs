@@ -771,7 +771,7 @@ mod tests {
     std::fs::create_dir_all(dir.path().join(".treq")).unwrap();
     std::os::unix::fs::symlink(&target, dir.path().join(".treq/send")).unwrap();
     let files = files(&[(".treq/send", "pwned")]);
-    assert!(write_files(dir.path(), &files, is_allowed_repo_path).is_err());
+    write_files(dir.path(), &files, is_allowed_repo_path).unwrap_err();
     assert_eq!(std::fs::read_to_string(&target).unwrap(), "original");
   }
 
@@ -782,7 +782,7 @@ mod tests {
     let outside = tempfile::tempdir().unwrap();
     std::os::unix::fs::symlink(outside.path(), dir.path().join(".treq")).unwrap();
     let files = files(&[(".treq/workflows/a.yaml", "pwned")]);
-    assert!(write_files(dir.path(), &files, is_allowed_repo_path).is_err());
+    write_files(dir.path(), &files, is_allowed_repo_path).unwrap_err();
     assert!(!outside.path().join("workflows/a.yaml").exists());
   }
 
@@ -864,7 +864,7 @@ mod tests {
     assert_eq!(value, json!({"a": "aGVsbG8="}));
     assert_eq!(decode(&value), files);
     let big: Files = [("a".to_string(), vec![0; MAX_SNAPSHOT_BYTES + 1])].into();
-    assert!(encode(&big).is_err());
+    encode(&big).unwrap_err();
   }
 
   #[test]

@@ -205,7 +205,7 @@ mod tests {
   #[test]
   fn typing_without_a_writer_is_an_error() {
     let tracker = ScreenTracker::new();
-    assert!(tracker.type_line("msg-track-6", "x").is_err());
+    tracker.type_line("msg-track-6", "x").unwrap_err();
   }
 
   #[test]

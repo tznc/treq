@@ -659,8 +659,8 @@ mod tests {
     assert_eq!(first["endpoint_generation"], 1);
     assert_eq!(first["canonical_remote_path"], "/srv/project");
     assert!(first.get("auth_identity_reference").is_none());
-    assert!(upsert(&db, "ep-1", 1, "/srv/x", Some("my password"), None).is_err());
-    assert!(upsert(&db, "ep-1", 1, "  ", None, None).is_err());
+    upsert(&db, "ep-1", 1, "/srv/x", Some("my password"), None).unwrap_err();
+    upsert(&db, "ep-1", 1, "  ", None, None).unwrap_err();
   }
 
   #[test]

@@ -374,8 +374,8 @@ mod tests {
 
   #[test]
   fn rejects_a_catalog_that_is_not_an_array_of_tiers() {
-    assert!(parse_catalog(json!({"id": "s"})).is_err());
-    assert!(parse_catalog(json!([{"id": "s"}])).is_err());
+    parse_catalog(json!({"id": "s"})).unwrap_err();
+    parse_catalog(json!([{"id": "s"}])).unwrap_err();
   }
 
   #[test]
