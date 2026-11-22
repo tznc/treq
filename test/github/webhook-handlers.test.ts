@@ -1,4 +1,4 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { createClient } from "@supabase/supabase-js";
 import { describe, expect, it } from "vitest";
 import {
   applyInstallationFacts,
@@ -8,44 +8,41 @@ import {
 interface Call {
   table: string;
   op: string;
-  column?: string;
-  value?: unknown;
+  filter?: string;
 }
 
-// Records each query builder chain the handler runs; every call resolves to
-// `result`.
+const OPS: Record<string, string> = {
+  DELETE: "delete",
+  PATCH: "update",
+  POST: "upsert",
+};
+
+// A real client whose requests reach a fake PostgREST: each request is
+// recorded as the call that made it (a filter reads `column=op.value`), and
+// every one answers `result`.
 function fakeSupabase(
   result: { error: { message: string } | null } = { error: null },
 ) {
   const calls: Call[] = [];
-  const client = {
-    from(table: string) {
-      const builder = (op: string) => {
-        const call: Call = { table, op };
-        calls.push(call);
-        const chain = {
-          eq(column: string, value: unknown) {
-            Object.assign(call, { column, value });
-            return Promise.resolve(result);
-          },
-          in(column: string, value: unknown) {
-            Object.assign(call, { column, value });
-            return Promise.resolve(result);
-          },
-        };
-        return chain;
-      };
-      return {
-        delete: () => builder("delete"),
-        update: () => builder("update"),
-        upsert: () => {
-          calls.push({ table, op: "upsert" });
-          return Promise.resolve(result);
-        },
-      };
-    },
+  const fetch: typeof globalThis.fetch = async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : input);
+    const call: Call = {
+      table: url.pathname.split("/").pop() ?? "",
+      op: OPS[init?.method ?? "GET"] ?? "select",
+    };
+    for (const [column, value] of url.searchParams) {
+      if (/^[a-z]+\./.test(value)) call.filter = `${column}=${value}`;
+    }
+    calls.push(call);
+    return result.error
+      ? Response.json({ message: result.error.message }, { status: 400 })
+      : new Response(null, { status: 204 });
   };
-  return { client: client as unknown as SupabaseClient, calls };
+  const client = createClient("http://postgrest.test", "service-key", {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: { fetch },
+  });
+  return { client, calls };
 }
 
 function removed(count: number): GitHubWebhookPayload {
@@ -73,12 +70,12 @@ describe("installation_repositories removed", () => {
       removed(count),
     );
     const deletes = calls.filter((c) => c.op === "delete");
+    const ids = Array.from({ length: count }, (_, i) => 100 + i);
     expect(deletes).toEqual([
       {
         table: "github_repositories",
         op: "delete",
-        column: "id",
-        value: Array.from({ length: count }, (_, i) => 100 + i),
+        filter: `id=in.(${ids.join(",")})`,
       },
     ]);
   });

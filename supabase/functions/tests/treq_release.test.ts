@@ -6,8 +6,8 @@ import { assert, assertEquals, assertRejects, assertStringIncludes } from "https
 import { type BootManifest, bootstrapScript, CURRENT_MANIFEST_VERSION, manifestForVersion } from "../_shared/remote/boot-manifest.ts";
 import { createTreqReleaseResolver } from "../_shared/remote/treq-release.ts";
 import { runBootManifest } from "../_shared/remote/machine-setup.ts";
-import { ProviderError, type SandboxProvider } from "../_shared/remote/provider.ts";
-import { defined } from "./helpers/remote_fakes.ts";
+import { ProviderError } from "../_shared/remote/provider.ts";
+import { defined, fakeProvider } from "./helpers/remote_fakes.ts";
 
 const X86 = "5d01af2aa81372a3e61cfb4b291393e6fb89f990554b162ba7cced241e1a04f3";
 const ARM = "3931e7f99caea1684d40d087369137040be5ab517a73830025195dfd7f11c87a";
@@ -141,12 +141,12 @@ Deno.test("TREQ_RELEASES_URL overrides where releases.json is read from", async 
 
 Deno.test("the bootstrap script carries the resolved version and digests, no placeholder", async () => {
   const execs: string[][] = [];
-  const provider = {
-    execOnMachine: (_id: string, cmd: string[]) => {
+  const provider = fakeProvider({
+    execOnMachine: (_id, cmd) => {
       execs.push(cmd);
       return Promise.resolve({ exitCode: 0, stdout: "", stderr: "" });
     },
-  } as unknown as SandboxProvider;
+  });
   await runBootManifest(provider, "m1", "bootstrap", resolverFor([release("v0.4.0", { prerelease: true }), release("v0.3.0")]));
   const script = defined(execs[0])[2];
   assertStringIncludes(script, 'TREQ_VERSION="0.3.0"');

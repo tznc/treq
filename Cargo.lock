@@ -12736,6 +12736,7 @@ dependencies = [
  "gpui-kit",
  "gpui-pre",
  "gpui-styleguidist",
+ "gpui-testing-library",
  "log",
  "serde_json",
 ]

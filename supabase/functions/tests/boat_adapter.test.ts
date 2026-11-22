@@ -298,6 +298,6 @@ Deno.test("getInstance reports the provider's updatedAt as stateChangedAt", asyn
   fake.sandboxes.set("bx_t", {
     id: "bx_t", name: "t", state: "archived", type: "small", labels: {}, ip: null, sshEndpoint: null,
     updatedAt: "2026-10-28T10:01:00Z",
-  } as unknown as Parameters<typeof fake.sandboxes.set>[1]);
+  });
   assertEquals((await provider.getInstance("bx_t")).stateChangedAt, "2026-10-28T10:01:00Z");
 });

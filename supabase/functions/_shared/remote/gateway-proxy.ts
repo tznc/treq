@@ -42,7 +42,7 @@ export type UpstreamSocketFactory = (
 // constructor, which is how provider auth reaches the ingress without being
 // placed in the URL.
 export const denoUpstreamSocket: UpstreamSocketFactory = (url, headers) =>
-  new WebSocket(url, { headers }) as unknown as RelaySocket;
+  new WebSocket(url, { headers });
 
 /**
  * An open gateway socket plus any bytes that arrived after the handshake but

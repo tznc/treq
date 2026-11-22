@@ -7,6 +7,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2.95.3";
 import { createStripeClient } from "../_shared/billing/stripe-api.ts";
+import { supabaseUsageReportStore } from "../_shared/billing/usage-report.ts";
 import { placementProviders } from "../_shared/remote/byos.ts";
 import {
   deleteAccount,
@@ -41,7 +42,8 @@ Deno.serve(async (req) => {
         const { data, error } = await userClient.auth.getUser();
         return error || !data.user ? null : { id: data.user.id };
       },
-      storeFor: (userId) => deleteAccountStoreFor(service, userId),
+      storeFor: (userId) =>
+        deleteAccountStoreFor(service, userId, (ownerUserId) => supabaseUsageReportStore(service, { ownerUserId })),
       stripe: stripeKey ? createStripeClient(stripeKey) : null,
       provider: placementProviders(service),
       revokeLinearToken: (token) => revokeLinearToken(token),
