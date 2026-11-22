@@ -1202,14 +1202,14 @@ impl OnboardingView {
         .pb_3()
         .child(tabs.selected(selected).on_select(move |ix, _, cx| {
           let owner = ix.checked_sub(1).and_then(|i| teams.get(i).cloned());
-          view
-            .update(cx, |view, cx| {
-              view.project_owner = owner;
-              // Team projects arrive by sync: read them again.
-              view.load(cx);
-              cx.notify();
-            })
-            .ok();
+          if let Err(e) = view.update(cx, |view, cx| {
+            view.project_owner = owner;
+            // Team projects arrive by sync: read them again.
+            view.load(cx);
+            cx.notify();
+          }) {
+            log::debug!("Ignored a project owner switch: onboarding closed: {e}");
+          }
         }))
     });
     let shown: Vec<&super::machines::ProjectSummary> = self

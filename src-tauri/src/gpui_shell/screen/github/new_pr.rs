@@ -313,15 +313,15 @@ impl GithubView {
         NewPrTab::Branch => 1,
       })
       .on_select(move |ix, _, cx| {
-        view
-          .update(cx, |view, cx| {
-            if let Some(new_pr) = &mut view.new_pr {
-              new_pr.tab = [NewPrTab::Workspace, NewPrTab::Branch][ix];
-            }
-            view.popover = None;
-            cx.notify();
-          })
-          .ok();
+        if let Err(e) = view.update(cx, |view, cx| {
+          if let Some(new_pr) = &mut view.new_pr {
+            new_pr.tab = [NewPrTab::Workspace, NewPrTab::Branch][ix];
+          }
+          view.popover = None;
+          cx.notify();
+        }) {
+          log::debug!("Ignored a new PR tab switch: the GitHub screen closed: {e}");
+        }
       });
     let workspace = tab == NewPrTab::Workspace;
     let (content, submit) = match tab {

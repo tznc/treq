@@ -1310,12 +1310,12 @@ impl OpenWorkspacesDialog {
         let view = cx.weak_entity();
         move |ix, _, cx| {
           let tab = integrations[ix];
-          view
-            .update(cx, |view, cx| {
-              view.picked = Some(tab);
-              cx.notify();
-            })
-            .ok();
+          if let Err(e) = view.update(cx, |view, cx| {
+            view.picked = Some(tab);
+            cx.notify();
+          }) {
+            log::debug!("Ignored an integration tab switch: the screen closed: {e}");
+          }
         }
       })
   }

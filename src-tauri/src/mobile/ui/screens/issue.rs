@@ -47,7 +47,9 @@ pub fn open(repo: String, number: u64, title: String, on_changed: OnChanged, cx:
       on_title: None,
       more: Some(Rc::new(move |_, cx| {
         if let Some(screen) = menu_screen.borrow().as_ref() {
-          screen.update(cx, |screen, cx| screen.menu(cx)).ok();
+          if let Err(e) = screen.update(cx, |screen, cx| screen.menu(cx)) {
+            log::debug!("Ignored the issue menu: the issue screen closed: {e}");
+          }
         }
       })),
     },
@@ -228,7 +230,9 @@ impl IssueScreen {
       {
         let this = this.clone();
         move |_, cx| {
-          this.update(cx, |screen, cx| screen.edit_sheet(cx)).ok();
+          if let Err(e) = this.update(cx, |screen, cx| screen.edit_sheet(cx)) {
+            log::debug!("Ignored editing the issue: the issue screen closed: {e}");
+          }
         }
       },
     )];
@@ -239,7 +243,9 @@ impl IssueScreen {
           format!("menu-close-{reason}"),
           label,
           move |_, cx| {
-            this.update(cx, |screen, cx| screen.close(reason, cx)).ok();
+            if let Err(e) = this.update(cx, |screen, cx| screen.close(reason, cx)) {
+              log::debug!("Ignored closing the issue: the issue screen closed: {e}");
+            }
           },
         ));
       }
@@ -249,7 +255,9 @@ impl IssueScreen {
         "menu-reopen",
         "Reopen issue",
         move |_, cx| {
-          this.update(cx, |screen, cx| screen.reopen(cx)).ok();
+          if let Err(e) = this.update(cx, |screen, cx| screen.reopen(cx)) {
+            log::debug!("Ignored reopening the issue: the issue screen closed: {e}");
+          }
         },
       ));
     }
@@ -257,19 +265,21 @@ impl IssueScreen {
       let this = this.clone();
       move |_, cx| {
         let error = pull_request::open_url(&url).err();
-        this
-          .update(cx, |screen, cx| {
-            if let Some(error) = error {
-              screen.message = Some((false, error));
-              cx.notify();
-            }
-          })
-          .ok();
+        if let Err(e) = this.update(cx, |screen, cx| {
+          if let Some(error) = error {
+            screen.message = Some((false, error));
+            cx.notify();
+          }
+        }) {
+          log::debug!("Dropped an Open on GitHub error: the issue screen closed: {e}");
+        }
       }
     }));
     entries.push(
       sheet::MenuEntry::new("menu-delete", "Delete issue", move |_, cx| {
-        this.update(cx, |screen, cx| screen.confirm_delete(cx)).ok();
+        if let Err(e) = this.update(cx, |screen, cx| screen.confirm_delete(cx)) {
+          log::debug!("Ignored deleting the issue: the issue screen closed: {e}");
+        }
       })
       .danger(),
     );
@@ -314,9 +324,9 @@ impl IssueScreen {
       issue.body.clone().unwrap_or_default(),
       "Save",
       Rc::new(move |title, body, cx| {
-        this
-          .update(cx, |screen, cx| screen.edit(title, body, cx))
-          .ok();
+        if let Err(e) = this.update(cx, |screen, cx| screen.edit(title, body, cx)) {
+          log::warn!("Dropped an issue edit: the issue screen closed: {e}");
+        }
       }),
       cx,
     );
@@ -352,7 +362,9 @@ impl IssueScreen {
       "Delete issue",
       true,
       move |_, cx| {
-        this.update(cx, |screen, cx| screen.delete(cx)).ok();
+        if let Err(e) = this.update(cx, |screen, cx| screen.delete(cx)) {
+          log::debug!("Ignored deleting the issue: the issue screen closed: {e}");
+        }
       },
       cx,
     );
@@ -387,11 +399,11 @@ impl IssueScreen {
         let Some(composer) = composer.upgrade() else {
           return;
         };
-        window_handle
-          .update(cx, |_, window, cx| {
-            composer.update(cx, |state, cx| state.set_value("", window, cx));
-          })
-          .ok();
+        if let Err(e) = window_handle.update(cx, |_, window, cx| {
+          composer.update(cx, |state, cx| state.set_value("", window, cx));
+        }) {
+          log::debug!("Skipped clearing the comment box: the window closed: {e}");
+        }
       },
       cx,
     );
@@ -445,11 +457,11 @@ impl IssueScreen {
           format!("reaction-pick-{content}"),
           format!("{emoji}  {}", content.replace('_', " ").to_lowercase()),
           move |_, cx| {
-            this
-              .update(cx, |screen, cx| {
-                screen.react(comment_id.clone(), content.into(), cx)
-              })
-              .ok();
+            if let Err(e) = this.update(cx, |screen, cx| {
+              screen.react(comment_id.clone(), content.into(), cx)
+            }) {
+              log::debug!("Dropped a reaction: the issue screen closed: {e}");
+            }
           },
         )
       })
@@ -561,9 +573,9 @@ impl IssueScreen {
       format!("Comment on #{}", self.number),
       self.composer.clone(),
       std::rc::Rc::new(move |window, cx| {
-        this
-          .update(cx, |screen, cx| screen.comment(window, cx))
-          .ok();
+        if let Err(e) = this.update(cx, |screen, cx| screen.comment(window, cx)) {
+          log::warn!("Dropped a comment: the issue screen closed: {e}");
+        }
       }),
       cx,
     );

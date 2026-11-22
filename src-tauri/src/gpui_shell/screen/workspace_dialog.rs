@@ -1635,12 +1635,12 @@ impl WorkspaceDialog {
           let view = cx.weak_entity();
           move |ix, _, cx| {
             let tab = [Tab::Commits, Tab::Changes][ix];
-            view
-              .update(cx, |view, cx| {
-                view.tab = tab;
-                cx.notify();
-              })
-              .ok();
+            if let Err(e) = view.update(cx, |view, cx| {
+              view.tab = tab;
+              cx.notify();
+            }) {
+              log::debug!("Ignored a workspace dialog tab switch: the dialog closed: {e}");
+            }
           }
         }),
     );

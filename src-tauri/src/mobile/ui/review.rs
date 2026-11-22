@@ -817,13 +817,13 @@ impl SendSheet {
                 sheet::close(cx);
               }
               Err(error) => {
-                this
-                  .update(cx, |this, cx| {
-                    this.sending = false;
-                    this.error = Some(error);
-                    cx.notify();
-                  })
-                  .ok();
+                if let Err(e) = this.update(cx, |this, cx| {
+                  this.sending = false;
+                  this.error = Some(error);
+                  cx.notify();
+                }) {
+                  log::debug!("Dropped a review send error: the review view closed: {e}");
+                }
               }
             },
             cx,

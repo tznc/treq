@@ -256,23 +256,23 @@ pub mod nav {
     let (root, window) = (root.clone(), *window);
     // Deferred: callers are usually inside another entity's update.
     cx.defer(move |cx| {
-      window
-        .update(cx, |_, window, cx| {
-          let view = build(window, cx);
-          root.update(cx, |root, cx| {
-            if (replace || (root.split && root.list_focus)) && root.stack.len() > 1 {
-              root.stack.pop();
-            }
-            root.stack.push(Page {
-              title,
-              header,
-              view: view.into(),
-              location,
-            });
-            root.stack_changed(cx);
-          })
+      if let Err(e) = window.update(cx, |_, window, cx| {
+        let view = build(window, cx);
+        root.update(cx, |root, cx| {
+          if (replace || (root.split && root.list_focus)) && root.stack.len() > 1 {
+            root.stack.pop();
+          }
+          root.stack.push(Page {
+            title,
+            header,
+            view: view.into(),
+            location,
+          });
+          root.stack_changed(cx);
         })
-        .ok();
+      }) {
+        log::debug!("Skipped placing a screen: the window closed: {e}");
+      }
     });
   }
 
@@ -334,7 +334,9 @@ pub mod nav {
     let root = cx.global::<Nav>().root.clone();
     // Deferred: callers are usually inside another entity's update.
     cx.defer(move |cx| {
-      root.update(cx, f).ok();
+      if let Err(e) = root.update(cx, f) {
+        log::debug!("Skipped a deferred root update: the root view is gone: {e}");
+      }
     });
   }
 }
@@ -361,16 +363,16 @@ impl Root {
 
     let weak = cx.weak_entity();
     tauri_plugin_gpui::on_back(move |cx| {
-      weak
-        .update(cx, |root, cx| {
-          if root.sheet.is_some() {
-            sheet::dismiss(root, cx);
-          } else if root.stack.len() > 1 {
-            root.stack.pop();
-            root.stack_changed(cx);
-          }
-        })
-        .ok();
+      if let Err(e) = weak.update(cx, |root, cx| {
+        if root.sheet.is_some() {
+          sheet::dismiss(root, cx);
+        } else if root.stack.len() > 1 {
+          root.stack.pop();
+          root.stack_changed(cx);
+        }
+      }) {
+        log::debug!("Ignored a back gesture: the root view is gone: {e}");
+      }
     });
 
     cx.spawn_in(window, async move |this, cx| {
@@ -618,7 +620,9 @@ impl Render for Root {
       let focus = move |list: bool| {
         let weak = weak.clone();
         move |_: &MouseDownEvent, _: &mut Window, cx: &mut App| {
-          weak.update(cx, |root, _| root.list_focus = list).ok();
+          if let Err(e) = weak.update(cx, |root, _| root.list_focus = list) {
+            log::debug!("Ignored a list focus change: the root view is gone: {e}");
+          }
         }
       };
       let (list_back, detail_back) = split_backs(depth);

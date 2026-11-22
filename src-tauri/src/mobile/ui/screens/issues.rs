@@ -321,10 +321,14 @@ impl IssuesScreen {
       "Issues",
       vec![
         sheet::MenuEntry::new("menu-new-issue", "New issue", move |_, cx| {
-          new.update(cx, |screen, cx| screen.create_sheet(cx)).ok();
+          if let Err(e) = new.update(cx, |screen, cx| screen.create_sheet(cx)) {
+            log::debug!("Ignored a new issue: the issues screen closed: {e}");
+          }
         }),
         sheet::MenuEntry::new("menu-refresh", "Refresh", move |_, cx| {
-          this.update(cx, |screen, cx| screen.reload(cx)).ok();
+          if let Err(e) = this.update(cx, |screen, cx| screen.reload(cx)) {
+            log::debug!("Skipped an issues refresh: the issues screen closed: {e}");
+          }
         }),
       ],
       cx,
@@ -339,9 +343,9 @@ impl IssuesScreen {
       String::new(),
       "Create issue",
       Rc::new(move |title, body, cx| {
-        this
-          .update(cx, |screen, cx| screen.create(title, body, cx))
-          .ok();
+        if let Err(e) = this.update(cx, |screen, cx| screen.create(title, body, cx)) {
+          log::warn!("Dropped a new issue: the issues screen closed: {e}");
+        }
       }),
       cx,
     );
@@ -399,7 +403,9 @@ impl IssuesScreen {
       number,
       title,
       Rc::new(move |cx| {
-        this.update(cx, |screen, cx| screen.reload(cx)).ok();
+        if let Err(e) = this.update(cx, |screen, cx| screen.reload(cx)) {
+          log::debug!("Skipped an issues reload: the issues screen closed: {e}");
+        }
       }),
       cx,
     );
@@ -477,9 +483,9 @@ impl IssuesScreen {
           format!("state-{}", filter.as_str()),
           filter.label(),
           move |_, cx| {
-            this
-              .update(cx, |screen, cx| screen.set_filter(filter, cx))
-              .ok();
+            if let Err(e) = this.update(cx, |screen, cx| screen.set_filter(filter, cx)) {
+              log::debug!("Ignored an issue state filter: the issues screen closed: {e}");
+            }
           },
         )
         .selected(filter == self.filter)
@@ -500,12 +506,12 @@ impl IssuesScreen {
     let set = |apply: fn(&mut IssueFilters, Option<String>)| -> widgets::OnPick {
       let this = this.clone();
       Rc::new(move |value, cx| {
-        this
-          .update(cx, |screen, cx| {
-            apply(&mut screen.filters, value);
-            cx.notify();
-          })
-          .ok();
+        if let Err(e) = this.update(cx, |screen, cx| {
+          apply(&mut screen.filters, value);
+          cx.notify();
+        }) {
+          log::debug!("Ignored an issue filter change: the issues screen closed: {e}");
+        }
       })
     };
     let mut entries = vec![
@@ -529,12 +535,12 @@ impl IssuesScreen {
         "filter-clear",
         "Clear filters",
         move |_, cx| {
-          this
-            .update(cx, |screen, cx| {
-              screen.filters = screen.filters.cleared();
-              cx.notify();
-            })
-            .ok();
+          if let Err(e) = this.update(cx, |screen, cx| {
+            screen.filters = screen.filters.cleared();
+            cx.notify();
+          }) {
+            log::debug!("Ignored clearing the issue filters: the issues screen closed: {e}");
+          }
         },
       ));
     }

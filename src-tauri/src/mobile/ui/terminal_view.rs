@@ -90,9 +90,11 @@ impl TerminalView {
                 if let Some(on_exit) = view.on_exit.take() {
                   let window_handle = window.window_handle();
                   cx.defer(move |cx| {
-                    window_handle
-                      .update(cx, |_, window, cx| on_exit(status, window, cx))
-                      .ok();
+                    if let Err(e) =
+                      window_handle.update(cx, |_, window, cx| on_exit(status, window, cx))
+                    {
+                      log::debug!("Dropped a terminal exit: the window closed: {e}");
+                    }
                   });
                 }
               }
