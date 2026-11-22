@@ -9,6 +9,7 @@ export function parsePrPath(pathname: string): PrRef | null {
   const parts = pathname.replace(/\/$/, '').split('/');
   if (parts.length !== 6 || parts[0] !== '' || parts[1] !== 'open' || parts[2] !== 'pr') return null;
   const [, , , owner, repo, num] = parts;
+  if (owner === undefined || repo === undefined || num === undefined) return null;
   if (!NAME.test(owner) || !NAME.test(repo) || !/^[1-9]\d*$/.test(num)) return null;
   return {owner, repo, number: Number(num)};
 }

@@ -29,7 +29,7 @@ fn test_diverged_log_splits_branch_and_target_commits() {
   let repo = TestRepo::new().expect("create repo");
   let default_branch = repo.default_branch();
 
-  // Add a commit on main so it can be "ahead" later
+  // main needs a commit of its own so it can be "ahead" later
   repo
     .commit_file("main_a.txt", "main A", "main commit A")
     .expect("main commit A");

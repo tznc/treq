@@ -7,9 +7,10 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { fixture } from "../fixture.ts";
 import { appBinary } from "../env.ts";
+import { errorMessage } from "../error-message.ts";
 import { appEnv } from "../harness.ts";
 import { ALERTING, CACHE, MARKETING, STACK_PARENT, workspaceDir } from "../landing/seed.ts";
 import { mod, openWorkspace, ready, settle } from "./helpers.ts";
@@ -28,7 +29,11 @@ function random(): number {
   t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 }
-const pick = <T>(items: T[]): T => items[Math.floor(random() * items.length)];
+const pick = <T>(items: T[]): T => {
+  const item = items[Math.floor(random() * items.length)];
+  if (item === undefined) throw new Error("pick from an empty list");
+  return item;
+};
 const wipFile = (branch: string) => `wip-${branch.replaceAll("/", "-")}.txt`;
 
 test("rebase chaos: uncommitted edits never cross workspaces", async ({ page }) => {
@@ -76,7 +81,8 @@ test("rebase chaos: uncommitted edits never cross workspaces", async ({ page }) 
       try {
         execFileSync(appBinary, ["commit", b, "-m", `chaos ${trail.length}`], { cwd: f.repo, env, stdio: "pipe" });
       } catch (e) {
-        trail.push(`  commit failed: ${String((e as { stderr?: Buffer }).stderr ?? e).trim()}`);
+        const stderr = e instanceof Error && "stderr" in e ? e.stderr : undefined;
+        trail.push(`  commit failed: ${String(stderr ?? errorMessage(e)).trim()}`);
       }
     }
     await settle(page, 250);

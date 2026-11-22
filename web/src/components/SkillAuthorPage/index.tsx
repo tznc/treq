@@ -30,7 +30,7 @@ export default function SkillAuthorPage({source, skills}: {source: Source; skill
                 .filter((s) => (s.category ?? 'Other') === category)
                 .map((skill) => (
                   <li key={skill.id}>
-                    <Link to={skill.route} className={styles.name}>{skill.name}</Link>
+                    <Link to={skill.route} className={styles.name ?? ''}>{skill.name}</Link>
                     {skill.description && <p className={styles.description}>{skill.description}</p>}
                   </li>
                 ))}

@@ -23,6 +23,7 @@ import {
 } from "./placement-store.ts";
 import type { MigrationRow, PlacementRow } from "./migration-engine.ts";
 import type { ProviderKind, SandboxProvider } from "./provider.ts";
+import { errorMessage } from "../error-message.ts";
 
 export const RETIRING_TTL_HOURS = 24;
 const DEFAULT_BATCH = 25;
@@ -453,7 +454,7 @@ export async function destroyRetired(
     } catch (err) {
       // Claimed but not deleted: the orphan sweep retries it.
       failed.push(p.id);
-      await store.audit("placement_destroy_failed", p, { placement_id: p.id, error: (err as Error).message });
+      await store.audit("placement_destroy_failed", p, { placement_id: p.id, error: errorMessage(err) });
     }
   }
   for (const p of await store.listOrphans(opts.limit)) {
@@ -471,7 +472,7 @@ export async function destroyRetired(
       });
     } catch (err) {
       failed.push(p.id);
-      await store.audit("placement_destroy_failed", p, { placement_id: p.id, error: (err as Error).message });
+      await store.audit("placement_destroy_failed", p, { placement_id: p.id, error: errorMessage(err) });
     }
   }
   return { destroyed, failed, orphans_destroyed: orphans };

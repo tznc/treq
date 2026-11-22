@@ -122,7 +122,10 @@ pub fn repo_status(repo_path: &str) -> Result<RepoStatus, String> {
   jj::jj_util_import_git_refs(repo_path).warn_on_err("jj util import git refs");
 
   // Step 2: default branch for conflict/change checks
-  let default_branch = get_repo_default_branch(repo_path).unwrap_or_else(|_| "main".to_string());
+  let default_branch = get_repo_default_branch(repo_path).unwrap_or_else(|error| {
+    tracing::warn!(%error, repo_path, "default branch lookup failed; using main");
+    "main".to_string()
+  });
 
   // Step 3: uncommitted changes
   let has_changes = jj::jj_get_changed_files(repo_path)

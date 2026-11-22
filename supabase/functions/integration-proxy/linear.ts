@@ -8,6 +8,7 @@ import {
   proRequired,
 } from "../_shared/billing/entitlement.ts";
 import type { ServiceClientLike } from "../_shared/billing/store.ts";
+import { errorMessage } from "../_shared/error-message.ts";
 
 export type StoredToken = {
   access_token: string;
@@ -72,10 +73,6 @@ const REFRESH_MARGIN_MS = 60_000;
 
 function json(body: unknown, status: number): ProxyResult {
   return { status, body: JSON.stringify(body) };
-}
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 function needsRefresh(token: StoredToken, now: number): boolean {

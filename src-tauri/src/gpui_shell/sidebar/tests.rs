@@ -1,3 +1,4 @@
+use crate::gpui_shell::test_helpers::WindowHarness;
 use std::{cell::RefCell, rc::Rc};
 
 use gpui::{px, Entity, Modifiers, TestAppContext, VisualTestContext};
@@ -126,6 +127,12 @@ struct Harness {
   popups: Rc<RefCell<Vec<PopupRequest>>>,
 }
 
+impl WindowHarness for Harness {
+  fn cx(&mut self) -> &mut VisualTestContext {
+    &mut self.cx
+  }
+}
+
 impl Harness {
   fn new(cx: &mut TestAppContext, snapshot: SidebarSnapshot) -> Self {
     cx.update(crate::gpui_shell::theme::init);
@@ -153,22 +160,6 @@ impl Harness {
   fn bounds(&mut self, selector: &'static str) -> Option<gpui::Bounds<gpui::Pixels>> {
     self.cx.run_until_parked();
     self.cx.debug_bounds(selector)
-  }
-
-  fn click(&mut self, selector: &'static str) {
-    let bounds = self
-      .bounds(selector)
-      .unwrap_or_else(|| panic!("{selector} is not drawn"));
-    self.cx.simulate_click(bounds.center(), Modifiers::none());
-  }
-
-  fn hover(&mut self, selector: &'static str) {
-    let bounds = self
-      .bounds(selector)
-      .unwrap_or_else(|| panic!("{selector} is not drawn"));
-    self
-      .cx
-      .simulate_mouse_move(bounds.center(), None, Modifiers::none());
   }
 
   /// A mouse down and up at `position`, the `click_count`th in a row.

@@ -24,6 +24,7 @@ function qaFixture(): { root: string; repo: string } {
       }
     })
     .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
+  if (!root) throw new Error("no QA fixture");
   const { repo } = JSON.parse(readFileSync(join(root, "qa-extra.json"), "utf8"));
   return { root, repo };
 }

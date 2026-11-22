@@ -671,7 +671,10 @@ fn local_date(at: &str) -> String {
         .format("%-m/%-d/%Y")
         .to_string()
     })
-    .unwrap_or_else(|_| at.to_string())
+    .unwrap_or_else(|e| {
+      log::debug!("Showing date {at:?} as stored: {e}");
+      at.to_string()
+    })
 }
 
 /// Whether the signed-out Account tab offers the pasted-callback box: in

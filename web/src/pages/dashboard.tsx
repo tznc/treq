@@ -711,8 +711,10 @@ function OrganizationCard({
     });
 
   const copyLink = async (inviteId: string) => {
+    const link = links[inviteId];
+    if (!link) return;
     try {
-      await navigator.clipboard.writeText(links[inviteId]);
+      await navigator.clipboard.writeText(link);
       setCopied(inviteId);
     } catch {
       setError("Could not copy. Select the link and copy it yourself.");
@@ -1679,11 +1681,6 @@ function MoreMenu({ onSignOut }: { onSignOut: () => void }) {
 // ── Dashboard shell ──────────────────────────────────────────────────────────
 
 function DashboardContent() {
-  const { siteConfig } = useDocusaurusContext();
-  const flags = siteConfig.customFields?.featureFlags as
-    | { pro?: boolean }
-    | undefined;
-
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1833,7 +1830,7 @@ function DashboardContent() {
   );
 }
 
-const styles: Record<string, React.CSSProperties> = {
+const styles = {
   centerContainer: {
     display: "flex",
     flexDirection: "column",
@@ -2269,7 +2266,7 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 500,
     cursor: "pointer",
   },
-};
+} satisfies Record<string, React.CSSProperties>;
 
 export default function DashboardPage(): React.ReactNode {
   const { siteConfig } = useDocusaurusContext();

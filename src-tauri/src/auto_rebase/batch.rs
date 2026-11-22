@@ -1,7 +1,7 @@
 use super::{
   convert_to_jj_branch_format, fast_forward_branch_without_commits, get_full_workspace_path,
-  passes_guard, resolve_bookmark_conflict_if_needed, AutoRebaseResult, WorkspaceBookmarkConflict,
-  OTHER_WORKING_COPIES,
+  passes_guard, rebase_base_or_target, resolve_bookmark_conflict_if_needed, AutoRebaseResult,
+  WorkspaceBookmarkConflict, OTHER_WORKING_COPIES,
 };
 use crate::jj::{self, JjRebaseResult};
 use crate::local_db::{self, Workspace};
@@ -130,8 +130,7 @@ pub fn check_and_rebase_all(
       }
 
       // Rebase using roots() from workspace dir and only committed bookmark history.
-      let rebase_base = jj::jj_resolve_workspace_rebase_base(&full_path, &jj_target_branch)
-        .unwrap_or_else(|_| jj_target_branch.clone());
+      let rebase_base = rebase_base_or_target(&full_path, &jj_target_branch);
       let revset = format!(
         "roots(({}..{}) ~ {})",
         rebase_base, workspace.branch_name, OTHER_WORKING_COPIES

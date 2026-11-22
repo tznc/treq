@@ -23,6 +23,7 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.95.3";
 import { StripeApiError, type StripeClient } from "./stripe-api.ts";
 import { must, rpc } from "../remote/db.ts";
+import { errorMessage } from "../error-message.ts";
 
 export const DEFAULT_USAGE_METER_EVENT = "treq_sandbox_usage";
 export const MAX_USAGE_REPORT_ATTEMPTS = 10;
@@ -157,7 +158,7 @@ export async function reportUsage(deps: UsageReportDeps): Promise<UsageReportRes
       await deps.store.markSent(row.identifier, "accepted");
       result.sent++;
     } catch (err) {
-      const message = (err as Error).message;
+      const message = errorMessage(err);
       const attempts = row.attempts + 1;
       if (!retryable(err) || attempts >= MAX_USAGE_REPORT_ATTEMPTS) {
         await deps.store.markTerminal(row.identifier, "dead", message);

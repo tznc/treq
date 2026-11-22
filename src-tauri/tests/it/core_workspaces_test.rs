@@ -1173,10 +1173,9 @@ fn test_ensure_jj_initialized_reinits_when_jj_deleted() {
     .expect("Failed to remove .jj");
   assert!(!repo.is_jj_initialized(), ".jj should be gone");
 
-  // Create a DB for ensure_jj_initialized
   let db = repo.create_db().expect("Failed to create db");
 
-  // Set the flag to true (simulating already-configured state)
+  // A stale flag: the setting says jj is initialized, but .jj is gone.
   db.set_repo_setting(&repo.repo_path, "jj_initialized", "true")
     .expect("Failed to set flag");
 
@@ -1211,7 +1210,6 @@ fn test_empty_commits_excluded_from_commits_ahead() {
   let workspace_path = repo.workspaces_dir().join(&workspace.workspace_path);
   let workspace_path_str = workspace_path.to_str().unwrap();
 
-  // Create a real commit with content
   TestRepo::write_workspace_file(workspace_path_str, "real.txt", "real content")
     .expect("Failed to write file");
   treq_lib::core::commit_workspace(&repo.repo_path, workspace.id, "Add real file")
@@ -1258,7 +1256,6 @@ fn test_merge_abandons_empty_commits() {
   let workspace_path = repo.workspaces_dir().join(&workspace.workspace_path);
   let workspace_path_str = workspace_path.to_str().unwrap();
 
-  // Create a real commit
   TestRepo::write_workspace_file(workspace_path_str, "feature.txt", "feature content")
     .expect("Failed to write file");
   treq_lib::core::commit_workspace(&repo.repo_path, workspace.id, "Add feature")
@@ -1325,7 +1322,6 @@ fn test_squash_merge_with_empty_commits() {
   let workspace_path = repo.workspaces_dir().join(&workspace.workspace_path);
   let workspace_path_str = workspace_path.to_str().unwrap();
 
-  // Create a real commit
   TestRepo::write_workspace_file(workspace_path_str, "squash.txt", "squash content")
     .expect("Failed to write file");
   treq_lib::core::commit_workspace(&repo.repo_path, workspace.id, "Add squash file")
@@ -1373,7 +1369,6 @@ fn test_rebase_merge_with_empty_commits() {
   let workspace_path = repo.workspaces_dir().join(&workspace.workspace_path);
   let workspace_path_str = workspace_path.to_str().unwrap();
 
-  // Create a real commit
   TestRepo::write_workspace_file(workspace_path_str, "rebase.txt", "rebase content")
     .expect("Failed to write file");
   treq_lib::core::commit_workspace(&repo.repo_path, workspace.id, "Add rebase file")
@@ -1613,7 +1608,6 @@ fn test_pull_home_repo_fetches_remote_commits() {
   let branch_before =
     jj::get_workspace_branch(&repo.repo_path).expect("Failed to get git branch before pull");
 
-  // Create a commit in the remote
   repo
     .remote_commit_file(
       "remote-commit.txt",

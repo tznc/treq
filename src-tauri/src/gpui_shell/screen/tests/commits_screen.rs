@@ -164,6 +164,7 @@ fn commits_tab_drag_over_code_copies_the_text(cx: &mut TestAppContext) {
 fn commits_tab_sends_a_line_comment_to_an_agent(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, commits_host(), commits_route());
   h.click("commit-row-a");
+  hover_line(&mut h, "diff-line-0-1");
   h.click("add-comment-0-1");
   assert!(h.shows(gpui::Role::MultilineTextInput, "Add a comment…"));
   h.cx.simulate_input("why?");

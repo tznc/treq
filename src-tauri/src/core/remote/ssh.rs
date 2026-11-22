@@ -7,8 +7,10 @@ pub fn inspect_repository_path(repo_path: &str) -> Result<RepositoryInspection, 
   let root = validate_repository_path(repo_path)?;
   let repository_type = detect_repository_type(&root)?;
   let branch = crate::core::repo::get_repo_current_branch(&root).ok();
-  let default_branch =
-    crate::core::repo::get_repo_default_branch(&root).unwrap_or_else(|_| "main".to_string());
+  let default_branch = crate::core::repo::get_repo_default_branch(&root).unwrap_or_else(|error| {
+    tracing::warn!(%error, root, "default branch lookup failed; using main");
+    "main".to_string()
+  });
   let current_commit_id = jj::jj_get_commit_id(&root, "@").unwrap_or_default();
   let current_change_id = String::new();
   let display_name = repository_display_name(&root);

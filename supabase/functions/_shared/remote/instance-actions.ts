@@ -55,6 +55,7 @@ import {
 import { logWithCorrelation } from "./correlation.ts";
 import { storedError } from "./error-scrub.ts";
 import { MANAGED_SSHD_HOST, MANAGED_SSHD_PORT } from "./ssh-vm-config.ts";
+import { errorMessage } from "../error-message.ts";
 
 const MANAGED_SSH_USERNAME = "treq";
 const DEFAULT_TIER = "s";
@@ -288,7 +289,7 @@ export async function handleStatus(_body: Record<string, unknown>, deps: RemoteI
       });
       instance = (await getInstanceForOwner(supabase, ownerUserId)) ?? instance;
     } catch (err) {
-      logWithCorrelation(deps.correlationId, "warn", `could not refresh machine status: ${(err as Error).message}`);
+      logWithCorrelation(deps.correlationId, "warn", `could not refresh machine status: ${errorMessage(err)}`);
     }
   }
 
