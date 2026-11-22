@@ -39,7 +39,7 @@ The `.system/skill-creator` skill ships `init_skill.py`, `quick_validate.py` and
 
 As of November 2026 the repo is a team effort that has stopped. Thirty-five people have commits, 26 of them with openai.com addresses, and no author holds more than 15 percent. Dominik Kundel and Gav Verma lead with 17 commits each, and Vaibhav Srivastav follows with 15.
 
-Outside work did land while the repo was active. Simon Willison added `gpt-image-2` to the `openai-docs` model list in #374, and an outside author moved the Sentry skill to the Sentry CLI in #336. Issue and pull request numbers reach #507 against 114 commits. With 90 issues open and no commits since June 2026, the stars measure past interest in Codex skills.
+Outside work did land while the repo was active. Simon Willison added a new image model to the `openai-docs` model list in #374, and an outside author moved the Sentry skill to the Sentry CLI in #336. Issue and pull request numbers reach #507 against 114 commits. With 90 issues open and no commits since June 2026, the stars measure past interest in Codex skills.
 
 ## Utility for target workloads
 

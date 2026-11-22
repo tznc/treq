@@ -18,7 +18,7 @@ The four `SKILL.md` files total 1,470 lines, and two `references/migration.md` f
 
 `gemini-live-api-dev` is 408 lines on WebSocket streaming with the Live API, covering voice activity detection, session resumption and ephemeral tokens. `gemini-omni-flash-api` is the only skill with scripts. Its `generate_video.py`, `upload_file.py`, `prep_video.py` and `inspect_video.py` wrap the SDK and ffmpeg for text-to-video, video edits and extensions. `gemini-api-cli` is 144 lines that teach the separate `gemini-api` command-line tool, with a command table and an auth warning about which key wins.
 
-These skills are reference sheets with hard rules, and their value decays fast. The model list in `gemini-api-dev` alone has 17 entries, and 23 commit subjects mention a model. The readme claims the skill raised correct API code to 87% with Gemini 3 Flash and 96% with Gemini 3.1 Pro, citing a Google blog post. The repo ships no eval to reproduce that.
+These skills are reference sheets with hard rules, and their value decays fast. The model list in `gemini-api-dev` alone has 17 entries, and 23 commit subjects mention a model. The readme claims the skill raised correct API code to 87% and 96% on two current Gemini models, citing a Google blog post. The repo ships no eval to reproduce that.
 
 ## Tooling
 
