@@ -113,18 +113,35 @@ test.describe('Navbar navigation', () => {
   test.describe('on mobile', () => {
     test.use({ viewport: { width: 375, height: 667 } });
 
-    test('hides search, Sign in, and GitHub from the top bar', async ({ page }) => {
+    test('hides search and GitHub from the top bar', async ({ page }) => {
       await page.goto('/');
       await expect(page.getByPlaceholder('Search...')).not.toBeVisible();
-      await expect(page.getByRole('link', { name: 'Sign in' })).not.toBeVisible();
       await expect(page.getByRole('link', { name: 'GitHub repository' })).not.toBeVisible();
+    });
+
+    test('keeps Sign in at the right of the collapsed top bar', async ({ page }) => {
+      for (const width of [375, 900]) {
+        await page.setViewportSize({ width, height: 800 });
+        await page.goto('/');
+        const signIn = page.locator('.navbar__items--right').getByRole('link', { name: 'Sign in' });
+        await expect(signIn).toBeVisible();
+        // The navbar re-renders when it hydrates for the mobile layout, so
+        // measure once the link has settled: a 44px target on the right.
+        await expect
+          .poll(async () => {
+            const box = await signIn.boundingBox();
+            return box !== null && box.height >= 44 && box.x > width / 2 && box.x + box.width <= width;
+          })
+          .toBe(true);
+      }
     });
 
     test('shows search, Sign in, and GitHub in the sidebar drawer', async ({ page }) => {
       await page.goto('/');
       await page.getByLabel('Toggle navigation bar').click();
+      const drawer = page.locator('.navbar-sidebar');
       await expect(page.getByPlaceholder('Search...').filter({ visible: true })).toBeVisible();
-      await expect(page.getByRole('link', { name: 'Sign in' }).filter({ visible: true })).toBeVisible();
+      await expect(drawer.getByRole('link', { name: 'Sign in' })).toBeVisible();
       await expect(
         page.getByRole('link', { name: 'GitHub repository' }).filter({ visible: true }),
       ).toBeVisible();
