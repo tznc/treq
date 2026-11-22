@@ -1283,3 +1283,5 @@ pub fn proptest_config(cases: u32) -> proptest::test_runner::Config {
     ..proptest::test_runner::Config::default()
   }
 }
+
+include!("wait.rs");

@@ -1,4 +1,4 @@
-use crate::common::TestRepo;
+use crate::common::{wait_until, TestRepo};
 use serde_json::Value;
 use std::time::Duration;
 use tracing_subscriber::layer::SubscriberExt;
@@ -130,20 +130,21 @@ fn forward_log_record_emits_json_per_level() {
   let is_own_record =
     |line: &&str| serde_json::from_str::<Value>(line).is_ok_and(|v| is_forwarded_record(&v));
 
-  let mut contents = String::new();
-  let mut lines: Vec<&str> = Vec::new();
-  for _ in 0..50 {
-    contents = std::fs::read_to_string(log_file.path()).expect("read log file");
-    lines = contents
+  let read = || std::fs::read_to_string(log_file.path()).expect("read log file");
+  let own_lines = |contents: &str| {
+    contents
       .lines()
       .filter(|l| !l.is_empty())
       .filter(is_own_record)
-      .collect();
-    if lines.len() >= 5 {
-      break;
-    }
-    std::thread::sleep(Duration::from_millis(20));
-  }
+      .count()
+  };
+  wait_until(Duration::from_secs(5), || own_lines(&read()) >= 5);
+  let contents = read();
+  let lines: Vec<&str> = contents
+    .lines()
+    .filter(|l| !l.is_empty())
+    .filter(is_own_record)
+    .collect();
   assert_eq!(
     lines.len(),
     5,
