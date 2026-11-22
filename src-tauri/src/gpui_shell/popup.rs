@@ -15,6 +15,7 @@ use std::{
   collections::HashMap,
   rc::Rc,
 };
+use treq_ui::SelectorExt as _;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, LogicalPosition, LogicalSize, Wry};
@@ -819,7 +820,7 @@ impl PopupView {
           // Short label (['kbd hint']): 11px is fine.
           // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
-            .debug_selector(|| "tooltip-kbd".into())
+            .selector("tooltip-kbd")
             .h(zpx(KBD_HEIGHT))
             .min_w(zpx(KBD_HEIGHT))
             .px(zpx(KBD_PADDING_X))
@@ -1140,7 +1141,7 @@ fn menu_row(
 fn menu_indicator(row: ui::Row, mark: Option<gpui::AnyElement>) -> ui::Row {
   row.pl(zpx(RADIO_INSET)).overlay(
     div()
-      .debug_selector(|| "menu-indicator".into())
+      .selector("menu-indicator")
       .absolute()
       .top_0()
       .bottom_0()

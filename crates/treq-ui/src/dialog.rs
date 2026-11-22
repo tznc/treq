@@ -1,5 +1,6 @@
 //! Modal dialogs and confirmations.
 
+use crate::SelectorExt as _;
 use std::{
   cell::{Cell, RefCell},
   collections::HashMap,
@@ -220,8 +221,6 @@ impl RenderOnce for Dialog {
       return self.render_sheet(inset, window, cx);
     }
     let p = self.palette;
-    let selector = self.id.to_string();
-    let body_selector = format!("{}-body", self.id);
     let close_on_scrim = self.on_close.clone();
     let close_on_key = self.on_close.clone();
     let primary_on_key = self.on_primary.clone().filter(|_| !self.primary_disabled);
@@ -258,8 +257,7 @@ impl RenderOnce for Dialog {
       });
     let has_header = self.header.is_some();
     let panel = text(div(), TextSize::Sm)
-      .id(SharedString::from(format!("{}-panel", self.id)))
-      .debug_selector(move || selector)
+      .selector(SharedString::from(format!("{}-panel", self.id)))
       .role(gpui::Role::Dialog)
       .when_some(self.title.clone(), |el, title| el.aria_label(title))
       .test_support()
@@ -291,8 +289,7 @@ impl RenderOnce for Dialog {
         // Everything but the footer scrolls, so the footer's actions stay
         // on screen in a window shorter than the dialog.
         div()
-          .id(SharedString::from(format!("{}-body", self.id)))
-          .debug_selector(move || body_selector)
+          .selector(SharedString::from(format!("{}-body", self.id)))
           .flex_auto()
           .min_h_0()
           .overflow_y_scroll()
@@ -400,7 +397,6 @@ impl Dialog {
   fn render_sheet(self, inset: Pixels, window: &mut Window, cx: &mut App) -> AnyElement {
     let p = self.palette;
     let id = self.id.clone();
-    let selector = id.to_string();
     let focus = self.focus.clone().unwrap_or_else(|| {
       window
         .use_keyed_state(SharedString::from(format!("{id}-focus")), cx, |_, cx| {
@@ -423,7 +419,6 @@ impl Dialog {
     let close: Handler = self.on_close.clone().unwrap_or_else(|| Rc::new(|_, _| {}));
     let close_on_scrim = close.clone();
     let close_on_key = close.clone();
-    let title_selector = format!("{id}-title");
     let description_selector = format!("{id}-description");
     let handle = div()
       .id(SharedString::from(format!("{id}-handle")))
@@ -446,7 +441,7 @@ impl Dialog {
       .child(
         div().flex().justify_center().pt_2().child(
           div()
-            .debug_selector(|| "sheet-grabber".into())
+            .selector("sheet-grabber")
             .w(px(36.))
             .h(px(4.))
             .rounded_full()
@@ -456,8 +451,7 @@ impl Dialog {
       .when_some(self.title.clone(), |el, title| {
         el.child(
           div()
-            .id(SharedString::from(format!("{id}-title")))
-            .debug_selector(move || title_selector)
+            .selector(SharedString::from(format!("{id}-title")))
             .role(gpui::Role::Heading)
             .aria_label(title.clone())
             .test_support()
@@ -483,7 +477,7 @@ impl Dialog {
       .when_some(self.description, |el, description| {
         el.child(
           div()
-            .debug_selector(move || description_selector)
+            .selector(description_selector)
             .text_size(px(SHEET_BODY_PX))
             .line_height(px(SHEET_BODY_PX + 5.))
             .text_color(p.muted_foreground)
@@ -501,8 +495,7 @@ impl Dialog {
         )
       });
     let panel = div()
-      .id(SharedString::from(format!("{id}-panel")))
-      .debug_selector(move || selector)
+      .selector(SharedString::from(format!("{id}-panel")))
       .role(gpui::Role::Dialog)
       .when_some(self.title, |el, title| el.aria_label(title))
       .test_support()
@@ -1220,7 +1213,7 @@ mod tests {
 
     /// Drags from the grabber down by `dy`, in four moves.
     fn drag(cx: &mut VisualTestContext, dy: f32) {
-      let panel = cx.debug_bounds("sheet").expect("sheet panel");
+      let panel = cx.debug_bounds("sheet-panel").expect("sheet panel");
       let start = Point::new(panel.center().x, panel.origin.y + px(10.));
       cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::none());
       for step in 1..=4 {
@@ -1236,7 +1229,7 @@ mod tests {
     fn a_sheet_is_anchored_to_the_bottom(cx: &mut TestAppContext) {
       let (mut cx, _) = mount(cx);
       let viewport = cx.update(|window, _| window.viewport_size());
-      let panel = cx.debug_bounds("sheet").expect("sheet panel");
+      let panel = cx.debug_bounds("sheet-panel").expect("sheet panel");
       assert_eq!(panel.bottom(), viewport.height);
       assert_eq!(panel.size.width, viewport.width);
       assert!(cx.debug_bounds("sheet-grabber").is_some());
