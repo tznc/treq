@@ -465,7 +465,8 @@ impl PtyManager {
       .map_err(|e| e.to_string())?;
 
     let shell_cmd = shell.unwrap_or_else(|| {
-      std::env::var("SHELL").unwrap_or_else(|_| {
+      std::env::var("SHELL").unwrap_or_else(|error| {
+        tracing::debug!(%error, "SHELL unusable; using the platform shell");
         if cfg!(windows) {
           "powershell.exe".to_string()
         } else {

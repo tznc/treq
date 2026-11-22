@@ -249,7 +249,10 @@ fn linear_http_client() -> &'static reqwest::Client {
     reqwest::Client::builder()
       .connect_timeout(LINEAR_CONNECT_TIMEOUT)
       .build()
-      .unwrap_or_else(|_| reqwest::Client::new())
+      .unwrap_or_else(|e| {
+        log::warn!("Linear HTTP client setup failed ({e}); using one without a connect timeout");
+        reqwest::Client::new()
+      })
   })
 }
 

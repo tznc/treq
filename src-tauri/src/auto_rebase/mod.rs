@@ -94,6 +94,15 @@ pub(crate) fn convert_to_jj_branch_format(branch: &str, repo_path: &str) -> Stri
   jj::convert_git_branch_to_jj_format_public(branch, repo_path)
 }
 
+/// The base to rebase a workspace's commits from, or the target itself when
+/// it cannot be resolved (the rebase then starts at the target).
+fn rebase_base_or_target(full_path: &str, jj_target_branch: &str) -> String {
+  jj::jj_resolve_workspace_rebase_base(full_path, jj_target_branch).unwrap_or_else(|error| {
+    tracing::warn!(%error, full_path, jj_target_branch, "rebasing from the target branch");
+    jj_target_branch.to_string()
+  })
+}
+
 struct BookmarkConflictResolution {
   _was_conflicted: bool,
   _local_commits_rebased: usize,
@@ -271,8 +280,7 @@ pub fn rebase_workspaces_for_target(
     }
 
     // Use roots() from the workspace directory and rebase committed bookmark history only.
-    let rebase_base = jj::jj_resolve_workspace_rebase_base(&full_path, &jj_target_branch)
-      .unwrap_or_else(|_| jj_target_branch.clone());
+    let rebase_base = rebase_base_or_target(&full_path, &jj_target_branch);
     let revset = format!(
       "roots(({}..{}) ~ {})",
       rebase_base, workspace.branch_name, OTHER_WORKING_COPIES
@@ -436,8 +444,7 @@ pub fn rebase_single_workspace(
   }
 
   // Rebase mutable committed history only, excluding @ to keep working copy anchored.
-  let rebase_base = jj::jj_resolve_workspace_rebase_base(&full_path, &jj_target_branch)
-    .unwrap_or_else(|_| jj_target_branch.clone());
+  let rebase_base = rebase_base_or_target(&full_path, &jj_target_branch);
   let revset = format!(
     "roots(mutable() & ({}..{}) ~ @ ~ {})",
     rebase_base, workspace.branch_name, OTHER_WORKING_COPIES

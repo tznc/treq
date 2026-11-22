@@ -56,10 +56,19 @@ pub fn init(log_dir: &Path) -> Result<TelemetryGuards, Box<dyn std::error::Error
 
   let json_layer = JsonLogLayer::new(writer);
 
-  let filter =
-    EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(DEFAULT_LOG_FILTER));
+  // RUST_LOG unset is the usual case; an invalid one is reported once logging is up.
+  let (filter, rust_log_error) = match EnvFilter::try_from_default_env() {
+    Ok(filter) => (filter, None),
+    Err(error) => (
+      EnvFilter::new(DEFAULT_LOG_FILTER),
+      std::env::var_os(EnvFilter::DEFAULT_ENV).map(|_| error),
+    ),
+  };
   let subscriber = Registry::default().with(filter).with(json_layer);
   tracing::subscriber::set_global_default(subscriber)?;
+  if let Some(error) = rust_log_error {
+    tracing::warn!(%error, "ignoring RUST_LOG; using {DEFAULT_LOG_FILTER}");
+  }
 
   Ok(TelemetryGuards {
     _file_guard: file_guard,
