@@ -378,9 +378,9 @@ mod tests {
   fn add_repo_rejects_what_is_not_a_folder_or_url() {
     let env = env();
     env.save("Checkout", &["/r/web"]);
-    assert!(env
+    env
       .run("/r/web", "add-repo", Some("not a repo"), OutputFormat::Json)
-      .is_err());
+      .unwrap_err();
   }
 
   #[test]

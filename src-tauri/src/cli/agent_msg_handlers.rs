@@ -669,27 +669,27 @@ mod tests {
         everywhere: true,
       })
     );
-    assert!(parsed(&["claude-2", "hi", "--everywhere"]).is_err());
-    assert!(parsed(&["--inbox", "--everywhere"]).is_err());
+    parsed(&["claude-2", "hi", "--everywhere"]).unwrap_err();
+    parsed(&["--inbox", "--everywhere"]).unwrap_err();
   }
 
   #[test]
   fn refuses_a_timeout_over_a_minute() {
-    assert!(parsed(&["claude-2", "hi", "--timeout", "2m"]).is_err());
+    parsed(&["claude-2", "hi", "--timeout", "2m"]).unwrap_err();
   }
 
   #[test]
   fn refuses_a_send_without_text_or_target() {
-    assert!(parsed(&["claude-2"]).is_err());
-    assert!(parsed(&[]).is_err());
-    assert!(parsed(&["--all"]).is_err());
-    assert!(parsed(&["claude-2", "  "]).is_err());
-    assert!(parsed(&["--all", "claude-2", "hi"]).is_err());
+    parsed(&["claude-2"]).unwrap_err();
+    parsed(&[]).unwrap_err();
+    parsed(&["--all"]).unwrap_err();
+    parsed(&["claude-2", "  "]).unwrap_err();
+    parsed(&["--all", "claude-2", "hi"]).unwrap_err();
   }
 
   #[test]
   fn refuses_ask_with_all() {
-    assert!(parsed(&["--all", "hi", "--ask"]).is_err());
+    parsed(&["--all", "hi", "--ask"]).unwrap_err();
   }
 
   #[test]
@@ -740,13 +740,13 @@ mod tests {
 
   #[test]
   fn refuses_mixed_modes_and_stray_flags() {
-    assert!(parsed(&["--inbox", "--list"]).is_err());
-    assert!(parsed(&["--reply", "m-1", "x", "--ack", "m-2"]).is_err());
-    assert!(parsed(&["--status", "sleeping"]).is_err());
-    assert!(parsed(&["--inbox", "claude-2"]).is_err());
-    assert!(parsed(&["--peek"]).is_err());
-    assert!(parsed(&["claude-2", "hi", "--note", "x"]).is_err());
-    assert!(parsed(&["--inbox", "--types", "gossip"]).is_err());
+    parsed(&["--inbox", "--list"]).unwrap_err();
+    parsed(&["--reply", "m-1", "x", "--ack", "m-2"]).unwrap_err();
+    parsed(&["--status", "sleeping"]).unwrap_err();
+    parsed(&["--inbox", "claude-2"]).unwrap_err();
+    parsed(&["--peek"]).unwrap_err();
+    parsed(&["claude-2", "hi", "--note", "x"]).unwrap_err();
+    parsed(&["--inbox", "--types", "gossip"]).unwrap_err();
   }
 
   struct FakeClient {

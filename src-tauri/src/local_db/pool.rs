@@ -310,7 +310,10 @@ mod tests {
 
     assert_eq!(pool.idle_count(), 2);
     let oldest = db_in(&temp_dir, "a");
-    assert!(pool.check_out(&oldest, refuse_open).is_err());
+    assert_eq!(
+      pool.check_out(&oldest, refuse_open).err().as_deref(),
+      Some("opened a new connection")
+    );
   }
 
   #[test]
@@ -337,7 +340,10 @@ mod tests {
 
     pool.release_under(&temp_dir.path().join("a"));
 
-    assert!(pool.check_out(&a, refuse_open).is_err());
-    assert!(pool.check_out(&b, refuse_open).is_ok());
+    assert_eq!(
+      pool.check_out(&a, refuse_open).err().as_deref(),
+      Some("opened a new connection")
+    );
+    pool.check_out(&b, refuse_open).unwrap();
   }
 }

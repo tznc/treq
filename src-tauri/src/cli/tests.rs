@@ -433,7 +433,7 @@ fn dispatch_agent_request_selects_matching_instance_and_handles_ack() {
     "codex",
     "req-1",
   );
-  assert!(result.is_ok());
+  result.unwrap();
   handle.join().expect("join");
 }
 
@@ -452,7 +452,6 @@ fn dispatch_agent_request_returns_error_when_no_matching_instance() {
     "codex",
     "req-1",
   );
-  assert!(result.is_err());
   assert!(result.unwrap_err().contains("No running Treq instance"));
 }
 
@@ -504,7 +503,6 @@ fn dispatch_agent_request_surfaces_ack_timeout_error() {
   gave_up
     .send(())
     .expect("the server waits for the client's result");
-  assert!(result.is_err());
   let error = result.unwrap_err();
   assert!(
     error.contains("failed reading dispatch response")
@@ -1819,8 +1817,8 @@ mod notify {
 
   #[test]
   fn rejects_missing_or_blank_message() {
-    assert!(parse_notify_args(&notify_matches(&[])).is_err());
-    assert!(parse_notify_args(&notify_matches(&["   "])).is_err());
+    parse_notify_args(&notify_matches(&[])).unwrap_err();
+    parse_notify_args(&notify_matches(&["   "])).unwrap_err();
   }
 
   #[test]
@@ -2105,12 +2103,12 @@ fn gateway_defaults_secret_file_and_listen() {
 fn gateway_rejects_allow_without_port() {
   let matches =
     super::args::parse(["treq", "gateway", "--placement-id", "p", "--allow", "host"]).unwrap();
-  assert!(super::parse_gateway_args(&matches.subcommand.unwrap().matches).is_err());
+  super::parse_gateway_args(&matches.subcommand.unwrap().matches).unwrap_err();
 }
 
 #[test]
 fn gateway_requires_placement_id() {
-  assert!(super::args::parse(["treq", "gateway"]).is_err());
+  super::args::parse(["treq", "gateway"]).unwrap_err();
 }
 
 #[test]
@@ -2128,7 +2126,7 @@ fn agent_start_refuses_a_harness_treq_does_not_launch() {
 
 #[test]
 fn agent_without_start_no_longer_takes_a_branch() {
-  assert!(super::args::parse(["treq", "agent", "feat/x", "do it"]).is_err());
+  super::args::parse(["treq", "agent", "feat/x", "do it"]).unwrap_err();
 }
 
 #[test]

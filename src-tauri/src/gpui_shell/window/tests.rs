@@ -2323,12 +2323,12 @@ fn only_a_refused_login_fails_the_check() {
     read_error: Some("transport_error: ssh authentication failed: x".into()),
     ..FakeHost::default()
   };
-  assert!(super::remote::check_login(&refused, &endpoint()).is_err());
+  super::remote::check_login(&refused, &endpoint()).unwrap_err();
   let no_treq = FakeHost {
     read_error: Some(
       "transport_error: remote command failed (exit=Some(127)): treq: not found".into(),
     ),
     ..FakeHost::default()
   };
-  assert!(super::remote::check_login(&no_treq, &endpoint()).is_ok());
+  super::remote::check_login(&no_treq, &endpoint()).unwrap();
 }

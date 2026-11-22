@@ -586,6 +586,6 @@ mod tests {
     assert_eq!(*out.get_pixel(20, 25), red);
     assert_eq!(*out.get_pixel(45, 25), image::Rgba([0, 0, 0, 255]));
     assert_eq!(*out.get_pixel(5, 5), image::Rgba([0, 0, 0, 255]));
-    assert!(highlighted_png(&dir.path().join("missing.png"), &[]).is_err());
+    highlighted_png(&dir.path().join("missing.png"), &[]).unwrap_err();
   }
 }

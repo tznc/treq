@@ -804,6 +804,6 @@ mod tests {
       first_diff(&revs, |_| Err("boom".to_string())).map(|_| ()),
       Err("boom".to_string())
     );
-    assert!(first_file_diff(&[], |_| Err("x".to_string())).is_err());
+    first_file_diff(&[], |_| Err("x".to_string())).unwrap_err();
   }
 }

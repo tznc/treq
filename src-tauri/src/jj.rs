@@ -4854,14 +4854,14 @@ mod tests {
   #[test]
   fn validate_commit_message_counts_characters_not_bytes() {
     // 4000 characters, 12000 bytes: under the 10000-character limit.
-    assert!(validate_commit_message(&"漢".repeat(4000)).is_ok());
-    assert!(validate_commit_message(&"漢".repeat(10_001)).is_err());
+    validate_commit_message(&"漢".repeat(4000)).unwrap();
+    validate_commit_message(&"漢".repeat(10_001)).unwrap_err();
   }
 
   #[test]
   fn update_stale_workspace_is_a_no_op_for_a_missing_path() {
     let (_temp, path) = missing_workspace();
-    assert!(update_stale_workspace(&path).is_ok());
+    update_stale_workspace(&path).unwrap();
     assert_eq!(jj_workspace_update_stale(&path).unwrap(), "");
   }
 
@@ -4887,7 +4887,7 @@ mod tests {
   fn deleting_a_stash_in_a_missing_path_is_a_no_op() {
     let (_temp, path) = missing_workspace();
     let name = format!("{STASH_BOOKMARK_PREFIX}x");
-    assert!(jj_delete_stash_bookmark(&path, &name).is_ok());
+    jj_delete_stash_bookmark(&path, &name).unwrap();
   }
 
   #[test]
@@ -5132,7 +5132,7 @@ mod tests {
     let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
       shared.run(|| -> u32 { panic!("read failed") })
     }));
-    assert!(panicked.is_err());
+    panicked.unwrap_err();
     assert_eq!(shared.run(|| 7), 7);
   }
 
@@ -5271,7 +5271,7 @@ mod tests {
     init_jj_repo(&temp);
     let not_a_dir = temp.path().join(".git").join("HEAD");
     let repo = temp.path().to_str().expect("utf8");
-    assert!(is_interrupted_workspace_init(repo, "x", &not_a_dir).is_err());
+    is_interrupted_workspace_init(repo, "x", &not_a_dir).unwrap_err();
   }
 
   fn init_jj_repo(temp: &TempDir) {
@@ -6175,10 +6175,8 @@ mod tests {
     let temp = TempDir::new().expect("tempdir");
     let workspace_path = temp.path().to_str().expect("utf8 path");
 
-    assert!(
-      jj_new_with_parents(workspace_path, &[]).is_err(),
-      "at least one parent revision should be required"
-    );
+    jj_new_with_parents(workspace_path, &[])
+      .expect_err("at least one parent revision should be required");
   }
 
   #[test]
@@ -6222,10 +6220,7 @@ mod tests {
     let result =
       jj_retarget_workspace_bookmark(repo_path, "feat/ws", "feat/target", Some("feat/gone"));
 
-    assert!(
-      result.is_err(),
-      "unresolvable old target must fail: {result:?}"
-    );
+    result.expect_err("unresolvable old target must fail");
   }
 
   #[test]
@@ -6418,10 +6413,7 @@ mod tests {
 
     assert!(temp.path().join(".jj").is_dir(), ".jj should exist");
     assert!(temp.path().join(".git").is_dir(), ".git should exist");
-    assert!(
-      jj_snapshot_working_copy(repo_path).is_ok(),
-      "the resulting repo should be usable"
-    );
+    jj_snapshot_working_copy(repo_path).expect("the resulting repo should be usable");
   }
 
   #[test]
@@ -6436,10 +6428,7 @@ mod tests {
       !temp.path().join(".git").exists(),
       "non-colocated init should not create .git"
     );
-    assert!(
-      jj_snapshot_working_copy(repo_path).is_ok(),
-      "the resulting repo should be usable"
-    );
+    jj_snapshot_working_copy(repo_path).expect("the resulting repo should be usable");
   }
 
   #[test]
@@ -6559,10 +6548,8 @@ mod tests {
 
     // A branch created purely via git, never touched by jj, isn't yet a jj bookmark.
     git(temp.path(), &["branch", "git-only-branch"]);
-    assert!(
-      jj_get_commit_id(repo_path, "git-only-branch").is_err(),
-      "branch should not resolve as a jj revision before import"
-    );
+    jj_get_commit_id(repo_path, "git-only-branch")
+      .expect_err("branch should not resolve as a jj revision before import");
 
     jj_import_remaining_git_refs(repo_path).expect("import remaining git refs");
 
@@ -6591,7 +6578,7 @@ mod tests {
 
     for bad in [escape.as_str(), absolute.as_str(), ".jj", ".git", "", "."] {
       let result = move_paths_between_workspaces(source.path(), target.path(), &[bad.to_string()]);
-      assert!(result.is_err(), "'{bad}' should be rejected");
+      result.expect_err(&format!("'{bad}' should be rejected"));
     }
     assert!(outside.path().join("keep.txt").exists());
     assert!(source.path().join(".jj").is_dir());
@@ -6610,7 +6597,7 @@ mod tests {
       &["a.txt".to_string(), "../escape".to_string()],
     );
 
-    assert!(result.is_err());
+    result.unwrap_err();
     assert!(source.path().join("a.txt").exists());
     assert!(!target.path().join("a.txt").exists());
   }

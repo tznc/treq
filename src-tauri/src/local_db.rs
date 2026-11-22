@@ -2717,9 +2717,9 @@ mod tests {
 
   #[test]
   fn refuses_remote_state_without_app_data_dir() {
-    assert!(RepoStateScope::Remote("ssh:ep:gen0:/srv")
+    RepoStateScope::Remote("ssh:ep:gen0:/srv")
       .db_path(None)
-      .is_err());
+      .unwrap_err();
   }
 
   /// The schema as the app reads it: per table, its columns (sorted by name,
@@ -3016,9 +3016,9 @@ mod tests {
 
     let conn = Connection::open(&db_path).expect("reopen database");
     assert!(table_exists(&conn, "repo_trust"));
-    assert!(conn
+    conn
       .prepare("SELECT refreshed_at, archived FROM workspaces")
-      .is_ok());
+      .unwrap();
     assert!(all_migrations_applied(&db_path));
   }
 
@@ -3248,7 +3248,7 @@ mod tests {
        INSERT INTO pending_reviews VALUES (1, 2, NULL, NULL, 'keep', 'c', 'u');",
     );
 
-    assert!(init_local_db(&repo_path).is_err());
+    init_local_db(&repo_path).unwrap_err();
 
     let conn = Connection::open(&db_path).expect("reopen database");
     assert!(!table_exists(&conn, "pending_reviews_new"));
@@ -3745,8 +3745,8 @@ mod tests {
       "now",
     );
 
-    assert!(added.is_err());
-    assert!(discovered.is_err());
+    added.unwrap_err();
+    discovered.unwrap_err();
     let archived = get_workspace_by_id(repo_path, archived_id)
       .expect("lookup archived")
       .expect("archived row kept");

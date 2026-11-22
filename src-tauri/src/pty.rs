@@ -928,7 +928,7 @@ mod tests {
       Box::new(|_| {}),
     );
 
-    assert!(duplicate.is_err());
+    duplicate.unwrap_err();
     assert!(manager.session_exists("duplicate"));
     manager.close_session("duplicate").unwrap();
   }
@@ -1179,7 +1179,7 @@ mod tests {
     } else {
       Duration::from_secs(2)
     };
-    assert!(rx.recv_timeout(timeout).is_ok());
+    rx.recv_timeout(timeout).unwrap();
     manager.close_session("bounded-filter").unwrap();
   }
 }

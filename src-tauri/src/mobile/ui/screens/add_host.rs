@@ -587,7 +587,7 @@ mod tests {
       "dev@host:ssh",
       "dev@[::1",
     ] {
-      assert!(parse_address(bad).is_err(), "{bad:?}");
+      parse_address(bad).expect_err(bad);
     }
   }
 

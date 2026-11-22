@@ -359,7 +359,7 @@ mod tests {
     insert_agent_message(repo, &message("m-1", 0), &[target("claude-2", "local")]).unwrap();
     update_agent_message_state(repo, "m-1", "claude-2", State::Acked, None, 1).unwrap();
 
-    assert!(update_agent_message_state(repo, "m-1", "claude-2", State::Read, None, 2).is_err());
+    update_agent_message_state(repo, "m-1", "claude-2", State::Read, None, 2).unwrap_err();
     assert_eq!(states(repo, "m-1"), vec![("claude-2".into(), State::Acked)]);
   }
 
@@ -369,8 +369,8 @@ mod tests {
     let repo = dir.path().to_str().unwrap();
     insert_agent_message(repo, &message("m-1", 0), &[target("claude-2", "local")]).unwrap();
 
-    assert!(update_agent_message_state(repo, "m-9", "claude-2", State::Read, None, 1).is_err());
-    assert!(update_agent_message_state(repo, "m-1", "codex-1", State::Read, None, 1).is_err());
+    update_agent_message_state(repo, "m-9", "claude-2", State::Read, None, 1).unwrap_err();
+    update_agent_message_state(repo, "m-1", "codex-1", State::Read, None, 1).unwrap_err();
   }
 
   #[test]

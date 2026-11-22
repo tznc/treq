@@ -298,8 +298,8 @@ fn reads_every_overlay_react_sends() {
     serde_json::json!({"kind": "workspacePicker", "dark": false, "repoPath": "/repo"}),
     serde_json::json!({"kind": "branchSwitcher", "dark": false, "repoPath": "/repo"}),
   ] {
-    let parsed: Result<OverlaySnapshot, _> = serde_json::from_value(json.clone());
-    assert!(parsed.is_ok(), "{json}: {parsed:?}");
+    serde_json::from_value::<OverlaySnapshot>(json.clone())
+      .unwrap_or_else(|e| panic!("{json}: {e}"));
   }
 }
 

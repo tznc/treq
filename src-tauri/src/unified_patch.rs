@@ -371,9 +371,9 @@ mod tests {
   #[test]
   fn refuses_to_create_a_file_that_exists_or_patch_one_that_does_not() {
     let create = "--- /dev/null\n+++ b/new.txt\n@@ -0,0 +1 @@\n+one\n";
-    assert!(apply_one(Some("already here\n"), create).is_err());
+    apply_one(Some("already here\n"), create).unwrap_err();
     let modify = "--- a/f\n+++ b/f\n@@ -1 +1 @@\n-a\n+b\n";
-    assert!(apply_one(None, modify).is_err());
+    apply_one(None, modify).unwrap_err();
   }
 
   #[test]
@@ -400,10 +400,10 @@ mod tests {
 
   #[test]
   fn rejects_malformed_patches() {
-    assert!(parse("").is_err());
-    assert!(parse("not a patch\n").is_err());
+    parse("").unwrap_err();
+    parse("not a patch\n").unwrap_err();
     // Header promises two old lines, body has one.
-    assert!(parse("--- a/f\n+++ b/f\n@@ -1,2 +1 @@\n-a\n").is_err());
+    parse("--- a/f\n+++ b/f\n@@ -1,2 +1 @@\n-a\n").unwrap_err();
   }
 }
 
