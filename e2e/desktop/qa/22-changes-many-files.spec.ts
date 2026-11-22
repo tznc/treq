@@ -5,7 +5,7 @@
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, test } from "@playwright/test";
+import { test } from "@playwright/test";
 import { CACHE, workspaceDir } from "../landing/seed.ts";
 import { capture } from "./capture.ts";
 import { openTab, openWorkspace, settle } from "./helpers.ts";
@@ -25,7 +25,9 @@ function cacheDir(): string {
       }
     })
     .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
-  const { repo } = JSON.parse(readFileSync(join(roots[0], "qa-extra.json"), "utf8"));
+  const root = roots[0];
+  if (!root) throw new Error("no QA fixture");
+  const { repo } = JSON.parse(readFileSync(join(root, "qa-extra.json"), "utf8"));
   return workspaceDir(repo, CACHE);
 }
 

@@ -11,6 +11,7 @@
 // verify_jwt is off in config.toml because sandbox tokens are not Supabase
 // JWTs; lib.ts checks both.
 
+// @ts-types="npm:@types/express@^4.17.25"
 import express from "npm:express@^4.21.2";
 import { createClient } from "npm:@supabase/supabase-js@2.95.3";
 import { fetchWithTimeout } from "../_shared/http/fetch-with-timeout.ts";

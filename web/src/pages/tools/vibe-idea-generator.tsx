@@ -50,7 +50,9 @@ const SUFFIXES = [
 ];
 
 function pick<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)];
+  const item = arr[Math.floor(Math.random() * arr.length)];
+  if (item === undefined) throw new Error('pick from an empty list');
+  return item;
 }
 
 function generateIdea(): string {
@@ -77,7 +79,7 @@ async function buildScene(canvas: HTMLCanvasElement, onReveal: (idea: string) =>
   const {
     WebGLRenderer, PCFSoftShadowMap, Scene, Color, Fog, PerspectiveCamera,
     AmbientLight, DirectionalLight, PointLight,
-    PlaneGeometry, BoxGeometry, SphereGeometry, IcosahedronGeometry, ConeGeometry, CylinderGeometry,
+    PlaneGeometry, BoxGeometry, SphereGeometry, IcosahedronGeometry, CylinderGeometry,
     MeshStandardMaterial, Mesh, Group,
     DoubleSide, MathUtils, Vector3,
   } = await import('three/src/Three.js');
@@ -170,7 +172,7 @@ async function buildScene(canvas: HTMLCanvasElement, onReveal: (idea: string) =>
   // legs
   const legGeo = new BoxGeometry(0.15, 0.35, 0.15);
   const legMat = new MeshStandardMaterial({ color: 0x1e293b });
-  [[-1.4, 0.17, 0.9], [1.4, 0.17, 0.9], [-1.4, 0.17, 2.1], [1.4, 0.17, 2.1]].forEach(([x, y, z]) => {
+  ([[-1.4, 0.17, 0.9], [1.4, 0.17, 0.9], [-1.4, 0.17, 2.1], [1.4, 0.17, 2.1]] as const).forEach(([x, y, z]) => {
     const leg = new Mesh(legGeo, legMat);
     leg.position.set(x, y, z);
     scene.add(leg);
@@ -241,12 +243,10 @@ async function buildScene(canvas: HTMLCanvasElement, onReveal: (idea: string) =>
   // main ball
   const paperGeo = new IcosahedronGeometry(0.18, 1);
   // slightly deform for crumpled look
-  const posArr = paperGeo.attributes.position.array as Float32Array;
-  for (let i = 0; i < posArr.length; i += 3) {
-    posArr[i] += (Math.random() - 0.5) * 0.04;
-    posArr[i + 1] += (Math.random() - 0.5) * 0.04;
-    posArr[i + 2] += (Math.random() - 0.5) * 0.04;
-  }
+  const posArr = paperGeo.getAttribute('position').array as Float32Array;
+  posArr.forEach((v, i) => {
+    posArr[i] = v + (Math.random() - 0.5) * 0.04;
+  });
   paperGeo.computeVertexNormals();
 
   const paperMat = new MeshStandardMaterial({ color: 0xf1f5f9, roughness: 0.95 });

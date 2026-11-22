@@ -64,7 +64,10 @@ pub fn review_chip(pr: &crate::github::GhPullRequest, p: &Palette) -> Option<imp
 fn hex(color: &str) -> Hsla {
   u32::from_str_radix(color.trim_start_matches('#'), 16)
     .map(theme::data_color)
-    .unwrap_or_else(|_| theme::data_color(0))
+    .unwrap_or_else(|e| {
+      log::debug!("Label color {color:?} is not hex ({e}); using the first data color");
+      theme::data_color(0)
+    })
 }
 
 /// `LabelChip`: the label's color at 20% behind, 40% around.

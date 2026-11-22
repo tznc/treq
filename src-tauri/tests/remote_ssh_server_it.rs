@@ -127,15 +127,14 @@ fn it_config() -> Option<ItConfig> {
     return None;
   }
 
-  let hostname = std::env::var("TREQ_SSH_IT_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+  let hostname = env_or("TREQ_SSH_IT_HOST", "127.0.0.1");
   let port: u16 = std::env::var("TREQ_SSH_IT_PORT")
     .ok()
     .and_then(|v| v.parse().ok())
     .unwrap_or(2222);
-  let username = std::env::var("TREQ_SSH_IT_USERNAME").unwrap_or_else(|_| "treq".to_string());
+  let username = env_or("TREQ_SSH_IT_USERNAME", "treq");
   let key_reference = std::env::var("TREQ_SSH_IT_KEY_PATH").ok()?;
-  let algorithm =
-    std::env::var("TREQ_SSH_IT_HOST_KEY_ALGORITHM").unwrap_or_else(|_| "ssh-ed25519".to_string());
+  let algorithm = env_or("TREQ_SSH_IT_HOST_KEY_ALGORITHM", "ssh-ed25519");
   let fingerprint_sha256 = std::env::var("TREQ_SSH_IT_HOST_KEY_FINGERPRINT").ok()?;
   let host_keys: Vec<TrustedHostKey> = fingerprint_sha256
     .split(',')
@@ -173,8 +172,18 @@ fn cert_env() -> Option<(PathBuf, PathBuf, String)> {
   if !ca.is_file() || !key.is_file() {
     return None;
   }
-  let username = std::env::var("TREQ_SSH_IT_USERNAME").unwrap_or_else(|_| "treq".to_string());
+  let username = env_or("TREQ_SSH_IT_USERNAME", "treq");
   Some((ca, key, username))
+}
+
+/// `name`'s value, or `default` when it is unset. A value that is not
+/// UTF-8 is a broken setup, so it fails the run instead of falling back.
+fn env_or(name: &str, default: &str) -> String {
+  match std::env::var(name) {
+    Ok(value) => value,
+    Err(std::env::VarError::NotPresent) => default.to_string(),
+    Err(e) => panic!("{name}: {e}"),
+  }
 }
 
 macro_rules! require_it {
@@ -828,9 +837,7 @@ async fn pty_round_trips_input_output_resize_and_close() {
   );
 }
 
-// ---------------------------------------------------------------------------
 // WebSocket relay transport
-// ---------------------------------------------------------------------------
 
 const RELAY_IT_TOKEN: &str = "relay-it-session-token";
 

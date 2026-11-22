@@ -4,7 +4,7 @@ use crate::common::TestRepo;
 fn test_jj_get_log_diff_stats_with_multiline_output() {
   let repo = TestRepo::new().expect("Failed to create test repo");
 
-  // Create a workspace with a committed change that has insertions and deletions
+  // The committed change needs both insertions and deletions.
   let workspace = treq_lib::core::create_workspace(
     &repo.repo_path,
     "feat/diff-stats",
@@ -436,13 +436,11 @@ fn test_move_commit_to_existing_workspace() {
   let source_path = repo.workspaces_dir().join(&source.workspace_path);
   let source_path_str = source_path.to_str().unwrap();
 
-  // Add a file to the source workspace and commit it
   TestRepo::write_workspace_file(source_path_str, "moved.txt", "moved content")
     .expect("Failed to write file");
   treq_lib::core::commit_workspace(&repo.repo_path, source.id, "Commit to move")
     .expect("Failed to commit");
 
-  // Get the change_id of the committed change
   let commits_ahead = treq_lib::jj::jj_get_commits_ahead(source_path_str, default_branch)
     .expect("Failed to get commits ahead");
   assert!(
@@ -501,13 +499,11 @@ fn test_abandon_commit() {
   let workspace_path = repo.workspaces_dir().join(&workspace.workspace_path);
   let workspace_path_str = workspace_path.to_str().unwrap();
 
-  // Add a file and commit
   TestRepo::write_workspace_file(workspace_path_str, "abandon-me.txt", "content")
     .expect("Failed to write");
   treq_lib::core::commit_workspace(&repo.repo_path, workspace.id, "Commit to abandon")
     .expect("Failed to commit");
 
-  // Get the change_id
   let commits_ahead = treq_lib::jj::jj_get_commits_ahead(workspace_path_str, default_branch)
     .expect("Failed to get commits ahead");
   assert!(
@@ -825,7 +821,6 @@ fn test_commit_diff_added_files() {
   treq_lib::core::commit_workspace(&repo.repo_path, workspace.id, "Add two files")
     .expect("Failed to commit");
 
-  // Get the commit's change_id from the log
   let log = treq_lib::core::list_commits(&repo.repo_path, Some(workspace.id), false, None, None)
     .expect("Failed to list commits");
   let committed = log
@@ -1379,7 +1374,7 @@ fn test_commit_diff_of_over_five_thousand_paths_skips_rename_tracking() {
   let renamed = diff_of("Rename");
   assert_eq!(status_of(&renamed, "new.txt").as_deref(), Some("R"));
 
-  std::fs::rename(
+  TestRepo::rename_path(
     std::path::Path::new(dir).join("new.txt"),
     std::path::Path::new(dir).join("newer.txt"),
   )

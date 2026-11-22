@@ -6,8 +6,9 @@ message: >
   text: body copy, filenames, paths, descriptions, subtext and comment text.
 note: >
   Badges, counts, status letters, kbd hints, timestamps and tiny tags may stay
-  at 11px. Mark each one on the line above with a short reason and
-  `// ast-grep-ignore: gpui-text-xs-short-label-only`.
+  at 11px. Mark each one on the line above with one comment line: a short
+  reason, then the directive, e.g.
+  `// Count badge. ast-grep-ignore: gpui-text-xs-short-label-only`.
 files:
   - "src-tauri/src/gpui_shell/**/*.rs"
   - "src-tauri/src/mobile/**/*.rs"

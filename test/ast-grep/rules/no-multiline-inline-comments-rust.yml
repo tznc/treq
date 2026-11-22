@@ -9,6 +9,6 @@ files:
 rule:
   kind: source_file
   # Disallow:
-  # 1) consecutive indented // lines
-  # 2) indented /* ... */ comments spanning multiple lines
-  regex: (?ms)^\s{2,}//[^\n]*\n\s{2,}//[^\n]*|^\s{2,}/\*.*\n.*\*/
+  # 1) consecutive indented // lines (/// and //! doc comments are allowed)
+  # 2) indented /* comments that do not close on the same line
+  regex: (?m)^[ \t]{2,}//(?:[^/!\n][^\n]*)?\n[ \t]{2,}//(?:[^/!\n]|$)|^[ \t]{2,}/\*(?:[^*!\n](?:[^*\n]|\*[^/\n])*)?$

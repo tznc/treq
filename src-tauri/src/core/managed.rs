@@ -82,7 +82,10 @@ pub fn reason_code(reason: CutoffReason) -> &'static str {
 pub fn parse_time_ms(iso: &str) -> i64 {
   chrono::DateTime::parse_from_rfc3339(iso)
     .map(|t| t.timestamp_millis())
-    .unwrap_or_else(|_| now_ms() + 20 * 60 * 1000)
+    .unwrap_or_else(|e| {
+      log::warn!("Unreadable expiry time {iso:?} ({e}); assuming 20 minutes from now");
+      now_ms() + 20 * 60 * 1000
+    })
 }
 
 /// `composeManagedEndpoint`: the server's endpoint, authenticated with the

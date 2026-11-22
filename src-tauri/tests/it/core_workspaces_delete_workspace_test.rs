@@ -62,7 +62,7 @@ fn delete_removing_directory_later_frees_the_slot_at_once() {
     .create_workspace_simple("feat/delete-later")
     .expect("Failed to create workspace");
   let workspace_path = repo.workspaces_dir().join(&workspace.workspace_path);
-  std::fs::write(workspace_path.join("big.txt"), "x").expect("write file");
+  TestRepo::write_path(workspace_path.join("big.txt"), "x").expect("write file");
 
   treq_lib::core::delete_workspace_removing_directory_later(&repo.repo_path, workspace.id)
     .expect("Failed to delete workspace");

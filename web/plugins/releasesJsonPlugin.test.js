@@ -66,8 +66,8 @@ test('a missing or malformed digest becomes null, and a missing tarball is left 
     'now',
   );
   expect(out.releases.map((r) => r.assets)).toEqual([
-    {'linux-x86_64': {url: x86.browser_download_url, sha256: null}},
-    {'linux-aarch64': {url: arm.browser_download_url, sha256: null}},
+    {'linux-x86_64': {url: x86?.browser_download_url, sha256: null}},
+    {'linux-aarch64': {url: arm?.browser_download_url, sha256: null}},
   ]);
 });
 

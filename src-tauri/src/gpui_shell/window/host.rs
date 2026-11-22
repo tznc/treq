@@ -1088,7 +1088,13 @@ struct GitignoreFilter {
 
 impl GitignoreFilter {
   fn new(root: &Path) -> Self {
-    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let root = root.canonicalize().unwrap_or_else(|e| {
+      log::debug!(
+        "Reading .gitignore files under {} as written: {e}",
+        root.display()
+      );
+      root.to_path_buf()
+    });
     let mut exclude = ignore::gitignore::GitignoreBuilder::new(&root);
     exclude.add(root.join(".git").join("info").join("exclude"));
     let base = [

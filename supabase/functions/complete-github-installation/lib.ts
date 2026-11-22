@@ -29,6 +29,7 @@ import {
 import type { ServiceClientLike } from "../_shared/billing/store.ts";
 import { type HandlerResult, sha256Hex } from "../_shared/intent-state.ts";
 import type { UserGrant } from "../_shared/github/user-token.ts";
+import { errorMessage } from "../_shared/error-message.ts";
 
 export type GitHubInstallation = {
   id: number;
@@ -97,10 +98,6 @@ export const INSTALLATION_NOT_ACCESSIBLE =
 
 export const GITHUB_VERIFICATION_FAILED =
   "Treq could not confirm this installation with GitHub. Start the installation again from the dashboard.";
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 export async function completeInstallation(
   body: unknown,

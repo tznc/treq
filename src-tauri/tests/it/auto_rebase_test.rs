@@ -363,7 +363,7 @@ fn force_rebase_rooted_subtree_holds_children_of_conflicted_local_main() {
   let repo = TestRepo::with_remote().expect("Failed to create test repo with remote");
   let default_branch = repo.default_branch();
 
-  // Create a local workspace on the default branch so rooted-subtree force rebase can include descendants
+  // A local workspace on the default branch lets rooted-subtree force rebase include descendants
   // that target it (the local bookmark we intentionally make conflicted).
   let root_main = treq_lib::core::create_workspace(
     &repo.repo_path,

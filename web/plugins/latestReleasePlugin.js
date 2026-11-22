@@ -57,13 +57,13 @@ function latestReleasePlugin(context) {
         // build (local, PR preview, CI checks) carries on without /version:
         // the old file is deleted so a stale value can't ship, and download
         // links fall back to the release page.
-        const reason = err instanceof Error ? err.message : String(err);
         if (process.env.DOCUSAURUS_ENABLE_GTAG === 'true') {
-          throw new Error(`[latest-release] cannot fetch latest release: ${reason}`);
+          throw new Error('[latest-release] cannot fetch latest release', {cause: err});
         }
         fs.rmSync(dest, {force: true});
         console.warn(
-          `[latest-release] cannot fetch latest release (${reason}); building without /version.`,
+          '[latest-release] cannot fetch latest release; building without /version:',
+          err instanceof Error ? err.message : err,
         );
         return null;
       }

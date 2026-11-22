@@ -70,7 +70,6 @@ test("the agent prompt field takes paste, select all, cut and undo", async ({
 
 test("the file search takes paste, select all, cut and undo", async ({
   page,
-  context,
 }) => {
   await goHome(page);
   await page.getByRole("button", { name: "Command palette" }).click();

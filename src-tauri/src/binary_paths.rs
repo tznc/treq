@@ -136,7 +136,7 @@ fn build_extended_path() -> (String, bool) {
     .map(String::from)
     .collect();
 
-  // Add the running treq binary directory so `treq` is available in PTY sessions.
+  // PTY sessions need `treq` on PATH, so include the running binary's directory.
   if let Ok(exe_path) = std::env::current_exe() {
     if let Some(exe_dir) = exe_path.parent() {
       let exe_dir_str = exe_dir.to_string_lossy().to_string();
@@ -369,7 +369,10 @@ fn executable_with_extensions(
 
 #[cfg(not(unix))]
 fn executable_in(name: &str, search_path: &OsStr) -> Option<String> {
-  let pathext = env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
+  let pathext = env::var("PATHEXT").unwrap_or_else(|error| {
+    tracing::debug!(%error, "PATHEXT unusable; using the Windows default");
+    ".COM;.EXE;.BAT;.CMD".to_string()
+  });
   executable_with_extensions(name, search_path, &pathext, Path::is_file)
 }
 

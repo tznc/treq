@@ -17,6 +17,7 @@ import { createServer as netServer, type Server as NetServer, type Socket } from
 import { join } from "node:path";
 import { chromium, expect, test, type Browser, type Page } from "@playwright/test";
 import { appBinary, port } from "../env.ts";
+import { errorMessage } from "../error-message.ts";
 import { appEnv, makeFixture } from "../harness.ts";
 import { capture, theme } from "./capture.ts";
 
@@ -217,7 +218,7 @@ async function shot(what: string, title: string, expectations: string[]): Promis
 
 /** What the screen says, for the report. */
 async function texts(): Promise<string> {
-  const snap = await page.ariaSnapshot().catch((e) => `aria failed: ${e}`);
+  const snap = await page.ariaSnapshot().catch((e) => `aria failed: ${errorMessage(e)}`);
   return snap.length > 4000 ? `${snap.slice(0, 4000)}…` : snap;
 }
 
@@ -330,7 +331,7 @@ test("machines-chaos: own-VM form names", async () => {
     ]);
   }
   // A 10k hostname, submitted.
-  await page.getByRole("button", { name: "Continue" }).click().catch((e) => note(`continue: ${e}`));
+  await page.getByRole("button", { name: "Continue" }).click().catch((e) => note(`continue: ${errorMessage(e)}`));
   await page.waitForTimeout(4000);
   await alive("continue with 10k hostname");
   note(`after 10k continue: ${(await texts()).slice(0, 600)}`);
@@ -342,7 +343,7 @@ test("machines-chaos: own-VM form names", async () => {
   await fields.nth(1).fill("127.0.0.1");
   await fields.nth(2).fill(String(blackHolePort));
   await fields.nth(3).fill("qa");
-  await page.getByRole("button", { name: "Continue" }).click().catch((e) => note(`continue: ${e}`));
+  await page.getByRole("button", { name: "Continue" }).click().catch((e) => note(`continue: ${errorMessage(e)}`));
   await page.waitForTimeout(3000);
   await alive("probe black hole");
   // Double-submit while probing.
@@ -356,7 +357,7 @@ test("machines-chaos: own-VM form names", async () => {
   await shot("form-blackhole-33s", "33 s into probing a host that never answers", [
     "Either a timeout error or still checking with a way out",
   ]);
-  await page.getByRole("button", { name: "Close" }).first().click().catch((e) => note(`close: ${e}`));
+  await page.getByRole("button", { name: "Close" }).first().click().catch((e) => note(`close: ${errorMessage(e)}`));
   await page.waitForTimeout(1000);
   await closeDialog();
   await alive("cancel probe");
@@ -397,15 +398,15 @@ test("machines-chaos: provision ok, double-click, close and navigate mid-provisi
     "Overview; the cloud row reflects provisioning",
   ]);
   note("navigate to Settings > Account and back mid-provision");
-  await page.getByRole("button", { name: "Settings", exact: true }).click().catch((e) => note(`settings: ${e}`));
+  await page.getByRole("button", { name: "Settings", exact: true }).click().catch((e) => note(`settings: ${errorMessage(e)}`));
   await page.waitForTimeout(1000);
-  await page.getByRole("tab", { name: "Account" }).click().catch((e) => note(`account tab: ${e}`));
+  await page.getByRole("tab", { name: "Account" }).click().catch((e) => note(`account tab: ${errorMessage(e)}`));
   await page.waitForTimeout(1500);
   await alive("settings account mid-provision");
   await shot("settings-account-mid", "Settings > Account while provisioning", [
     "The cloud card shows the same Creating... state as the dialog",
   ]);
-  await page.getByRole("button", { name: "Close", exact: true }).click().catch((e) => note(`close settings: ${e}`));
+  await page.getByRole("button", { name: "Close", exact: true }).click().catch((e) => note(`close settings: ${errorMessage(e)}`));
   await page.waitForTimeout(1000);
   await openCloud();
   await alive("reopen mid-provision");
@@ -490,7 +491,7 @@ test("machines-chaos: sizes and zoom", async () => {
   for (const [w, h] of [
     [400, 300],
     [1900, 1180],
-  ]) {
+  ] as const) {
     await page.setViewportSize({ width: w, height: h });
     await page.waitForTimeout(1000);
     await alive(`resize ${w}x${h}`);
@@ -521,7 +522,11 @@ function random(): number {
   t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 }
-const pick = <T>(items: T[]): T => items[Math.floor(random() * items.length)];
+const pick = <T>(items: T[]): T => {
+  const item = items[Math.floor(random() * items.length)];
+  if (item === undefined) throw new Error("pick from an empty list");
+  return item;
+};
 
 /** Buttons that leave the machines screens or block on a native dialog. */
 const AVOID = /Open repository|Sign in|Upgrade|Settings|Command palette|Delete|Remove host|Reset terminals|Use tmux|Learn|Docs|Open in/i;

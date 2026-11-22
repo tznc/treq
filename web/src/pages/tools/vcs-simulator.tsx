@@ -94,7 +94,7 @@ function MultiTerminal({
       {terminals.map((term) => (
         <Terminal
           key={term.id}
-          step={terminalStates[term.id]}
+          step={terminalStates[term.id] ?? null}
           def={term}
           isActive={term.id === activeTerminalId}
         />
@@ -143,10 +143,9 @@ function computeTerminalStates(
   if (!scenario.terminals) return {};
   const states: Record<string, SimStep | null> = {};
   for (const t of scenario.terminals) states[t.id] = null;
-  for (let i = 0; i <= stepIdx; i++) {
-    const step = scenario.steps[i];
-    const tid = step.terminalId ?? scenario.terminals[0].id;
-    if (tid in states) states[tid] = step;
+  for (const step of scenario.steps.slice(0, stepIdx + 1)) {
+    const tid = step.terminalId ?? scenario.terminals[0]?.id;
+    if (tid !== undefined && tid in states) states[tid] = step;
   }
   return states;
 }
@@ -158,8 +157,8 @@ export default function VcsSimulatorPage() {
   const [stepIdx, setStepIdx] = useState(-1);
   const [dark, setDark] = useState(false);
 
-  const scenario = SCENARIOS[scenarioIdx];
-  const currentStep = stepIdx >= 0 ? scenario.steps[stepIdx] : null;
+  const scenario = SCENARIOS[scenarioIdx] ?? SCENARIOS[0];
+  const currentStep = scenario.steps[stepIdx] ?? null;
   const totalSteps = scenario.steps.length;
   const isMultiTerminal = !!scenario.terminals;
 

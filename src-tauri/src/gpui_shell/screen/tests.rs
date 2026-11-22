@@ -1,3 +1,4 @@
+use crate::gpui_shell::test_helpers::WindowHarness;
 use std::{
   cell::RefCell,
   collections::HashMap,
@@ -17,6 +18,12 @@ struct Harness {
   screen: Entity<Screen>,
   sent: Rc<RefCell<Vec<ScreenAction>>>,
   popups: Rc<RefCell<Vec<crate::gpui_shell::popup::PopupRequest>>>,
+}
+
+impl WindowHarness for Harness {
+  fn cx(&mut self) -> &mut VisualTestContext {
+    &mut self.cx
+  }
 }
 
 type Sink = Arc<dyn Fn(&[u8]) + Send + Sync>;
@@ -1921,25 +1928,6 @@ impl Harness {
     self.cx.debug_bounds(selector).is_some()
   }
 
-  /// The window as the user sees it, once everything pending has run.
-  fn rendered(&mut self) -> gpui_testing_library::Screen {
-    self.cx.run_until_parked();
-    let window = self.cx.update(|window, _| window.window_handle());
-    let screen = gpui_testing_library::Screen::new(&self.cx, window);
-    screen.redraw();
-    screen
-  }
-
-  /// Whether the user sees an element of `role` named `name`.
-  fn shows(&mut self, role: gpui::Role, name: &str) -> bool {
-    !self
-      .rendered()
-      .query_all_by_role(
-        gpui_testing_library::by::role(role).name(gpui_testing_library::normalize(name)),
-      )
-      .is_empty()
-  }
-
   /// Clicks `button` in the confirmation on screen, found by role and
   /// name, as the user would.
   fn answer(&mut self, button: &str) {
@@ -1961,30 +1949,6 @@ impl Harness {
       .unwrap_or_else(|| panic!("no {button} button in the confirmation"));
     screen.user().click(&target);
     self.cx.run_until_parked();
-  }
-
-  fn click(&mut self, selector: &'static str) {
-    self.cx.run_until_parked();
-    let bounds = self
-      .cx
-      .debug_bounds(selector)
-      .unwrap_or_else(|| panic!("{selector} is not drawn"));
-    self.cx.simulate_click(bounds.center(), Modifiers::none());
-  }
-
-  fn right_click(&mut self, selector: &'static str) {
-    self.cx.run_until_parked();
-    let at = self
-      .cx
-      .debug_bounds(selector)
-      .unwrap_or_else(|| panic!("{selector} is not drawn"))
-      .center();
-    self
-      .cx
-      .simulate_mouse_down(at, gpui::MouseButton::Right, Modifiers::none());
-    self
-      .cx
-      .simulate_mouse_up(at, gpui::MouseButton::Right, Modifiers::none());
   }
 
   fn sent(&self) -> Vec<ScreenAction> {
@@ -2526,8 +2490,18 @@ fn selected_lines(h: &mut Harness) -> Option<(String, Vec<(usize, usize)>)> {
   })
 }
 
+/// Rests the pointer on the diff line with element id `id`, which shows its
+/// Add comment button.
+fn hover_line(h: &mut Harness, id: &str) {
+  use gpui_testing_library::prelude::*;
+  let screen = h.rendered();
+  let row = screen.get_by_element_id(gpui::SharedString::from(id.to_owned()));
+  screen.user().hover(&row);
+}
+
 /// Comments line `+b` of a.rs with `text`.
 fn comment_line(h: &mut Harness, text: &str) {
+  hover_line(h, "diff-line-a.rs-0-1");
   h.click("add-comment-a.rs-0-1");
   let screen = h.rendered();
   gpui_testing_library::expect(screen.get_by_role(

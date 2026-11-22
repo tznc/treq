@@ -56,6 +56,7 @@ ignores:
   - "src-tauri/src/gpui_shell/screen/tests/virtual_lists.rs"
   - "src-tauri/src/gpui_shell/screen/tests/workspace_dialogs.rs"
   - "src-tauri/src/gpui_shell/sidebar/tests.rs"
+  - "src-tauri/src/gpui_shell/test_helpers/mod.rs"
   - "src-tauri/src/gpui_shell/toast_layer.rs"
 rule:
   kind: call_expression

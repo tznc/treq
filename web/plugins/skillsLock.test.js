@@ -3,10 +3,9 @@ const {lockProblems, nextLock, sourceCacheKey} = require('./skillsLock');
 
 /** @param {string} c */
 const sha = (c) => c.repeat(40);
-const sources = [
-  {id: 'a', org: 'o', repo: 'a', branch: 'main', skillsRoot: 'skills', excludeCategories: []},
-  {id: 'b', org: 'o', repo: 'b', branch: 'main', skillsRoot: '', excludeCategories: []},
-];
+const a = {id: 'a', org: 'o', repo: 'a', branch: 'main', skillsRoot: 'skills', excludeCategories: []};
+const b = {id: 'b', org: 'o', repo: 'b', branch: 'main', skillsRoot: '', excludeCategories: []};
+const sources = [a, b];
 
 describe('lockProblems', () => {
   test('passes a lock that pins every source to a full commit SHA', () => {
@@ -34,27 +33,31 @@ describe('nextLock', () => {
   });
 
   test('keeps the previous star count when the API gives none', () => {
-    expect(nextLock([sources[0]], {a: {commit: sha('0'), stars: 7}}, {a: sha('1')}, {a: null}).a.stars).toBe(7);
+    expect(nextLock([a], {a: {commit: sha('0'), stars: 7}}, {a: sha('1')}, {a: null}).a?.stars).toBe(7);
+  });
+
+  test('throws for a source without a branch head', () => {
+    expect(() => nextLock(sources, {}, {a: sha('1')}, {})).toThrow('b: no branch head');
   });
 
   test('drops entries for removed sources', () => {
-    expect(nextLock([sources[0]], {gone: {commit: sha('9'), stars: 1}}, {a: sha('1')}, {})).toEqual({
+    expect(nextLock([a], {gone: {commit: sha('9'), stars: 1}}, {a: sha('1')}, {})).toEqual({
       a: {commit: sha('1'), stars: null},
     });
   });
 });
 
 describe('sourceCacheKey', () => {
-  const key = sourceCacheKey(sources[0], sha('1'), 'code');
+  const key = sourceCacheKey(a, sha('1'), 'code');
 
   test('is stable and starts with the source id', () => {
-    expect(sourceCacheKey(sources[0], sha('1'), 'code')).toBe(key);
+    expect(sourceCacheKey(a, sha('1'), 'code')).toBe(key);
     expect(key).toMatch(/^a-[0-9a-f]{16}$/);
   });
 
   test('changes with the commit, the source config or the generator code', () => {
-    expect(sourceCacheKey(sources[0], sha('2'), 'code')).not.toBe(key);
-    expect(sourceCacheKey({...sources[0], skillsRoot: 'other'}, sha('1'), 'code')).not.toBe(key);
-    expect(sourceCacheKey(sources[0], sha('1'), 'code2')).not.toBe(key);
+    expect(sourceCacheKey(a, sha('2'), 'code')).not.toBe(key);
+    expect(sourceCacheKey({...a, skillsRoot: 'other'}, sha('1'), 'code')).not.toBe(key);
+    expect(sourceCacheKey(a, sha('1'), 'code2')).not.toBe(key);
   });
 });
