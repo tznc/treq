@@ -1,0 +1,89 @@
+id: no-raw-gpui-input
+snapshots:
+  ? |
+    fn t(cx: &mut VisualTestContext) {
+      cx.simulate_click(point(px(1.), px(1.)), Modifiers::none());
+    }
+  : labels:
+    - source: cx.simulate_click(point(px(1.), px(1.)), Modifiers::none())
+      style: primary
+      start: 37
+      end: 96
+    - source: simulate_click
+      style: secondary
+      start: 40
+      end: 54
+    - source: cx.simulate_click
+      style: secondary
+      start: 37
+      end: 54
+  ? |
+    fn t(cx: &mut VisualTestContext, at: Point<Pixels>) {
+      cx.simulate_mouse_move(at, None, Modifiers::none());
+      cx.simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
+      cx.simulate_mouse_up(at, MouseButton::Left, Modifiers::none());
+    }
+  : labels:
+    - source: cx.simulate_mouse_move(at, None, Modifiers::none())
+      style: primary
+      start: 56
+      end: 107
+    - source: simulate_mouse_move
+      style: secondary
+      start: 59
+      end: 78
+    - source: cx.simulate_mouse_move
+      style: secondary
+      start: 56
+      end: 78
+  ? |
+    fn t(cx: &mut VisualTestContext, e: ScrollWheelEvent) {
+      cx.simulate_event(e);
+    }
+  : labels:
+    - source: cx.simulate_event(e)
+      style: primary
+      start: 58
+      end: 78
+    - source: simulate_event
+      style: secondary
+      start: 61
+      end: 75
+    - source: cx.simulate_event
+      style: secondary
+      start: 58
+      end: 75
+  ? |
+    fn t(h: &mut Harness) {
+      h.cx.simulate_input("hello");
+    }
+  : labels:
+    - source: h.cx.simulate_input("hello")
+      style: primary
+      start: 26
+      end: 54
+    - source: simulate_input
+      style: secondary
+      start: 31
+      end: 45
+    - source: h.cx.simulate_input
+      style: secondary
+      start: 26
+      end: 45
+  ? |
+    fn t(h: &mut Harness) {
+      h.cx.simulate_keystrokes("cmd-k");
+    }
+  : labels:
+    - source: h.cx.simulate_keystrokes("cmd-k")
+      style: primary
+      start: 26
+      end: 59
+    - source: simulate_keystrokes
+      style: secondary
+      start: 31
+      end: 50
+    - source: h.cx.simulate_keystrokes
+      style: secondary
+      start: 26
+      end: 50
