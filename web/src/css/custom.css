@@ -478,6 +478,22 @@ code {
   }
 }
 
+/* Collapsed navbar: the account link (Sign in, or Dashboard when signed in)
+   stays at the right of the top bar. Every other item lives in the drawer. */
+@media screen and (max-width: 996px) {
+  .navbar__items--right > .navbar__item.navbar-account {
+    display: flex;
+    align-items: center;
+    padding: 0;
+  }
+
+  .navbar__items--right > .navbar__item.navbar-account .button {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+}
+
 /* Thin chevron caret (replaces Infima's solid triangle) */
 .dropdown > .navbar__link:after {
   border: none;
