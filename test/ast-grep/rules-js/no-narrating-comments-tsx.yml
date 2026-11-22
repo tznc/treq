@@ -1,0 +1,14 @@
+id: no-narrating-comments-tsx
+language: tsx
+severity: error
+message: >
+  This comment narrates the next line ("Create a ...", "Get the ...") and adds
+  nothing the code does not say. Delete it, or rewrite it to say why the code
+  does this.
+note: >
+  Matches // line comments that open with a narrating verb and an article.
+  Block and JSDoc comments are not checked.
+files: ["**/*.tsx"]
+rule:
+  kind: comment
+  regex: '^//\s(Create|Get|Set|Check if|Return|Initialize|Loop (through|over)|Iterate (through|over)|Call|Update|Add|Convert|Parse|Build|Store|Save|Handle|Increment) (the|a|an)\b'
