@@ -18,13 +18,17 @@ import { reensureServicesAfterWake } from "../_shared/remote/machine-setup.ts";
 import { deleteInstanceMachines } from "../_shared/remote/placement-store.ts";
 import { DAYTONA_CAPABILITIES } from "../_shared/remote/daytona-adapter.ts";
 import { ProviderError, type SandboxProvider } from "../_shared/remote/provider.ts";
-import { migrationRow, placementRow as placement, providerInstance } from "./helpers/remote_fakes.ts";
+import { migrationRow, placementRow as placement, providerInstance, unexpectedCall } from "./helpers/remote_fakes.ts";
 
-class FakeProvider {
+class FakeProvider implements SandboxProvider {
   calls: string[] = [];
   machines = new Map<string, "ready" | "suspended">();
   failWake = false;
   kind = "daytona" as const;
+  createInstance = unexpectedCall("createInstance");
+  replaceInstance = unexpectedCall("replaceInstance");
+  execOnMachine = unexpectedCall("execOnMachine");
+  gatewayEndpoint = unexpectedCall("gatewayEndpoint");
   capabilities() {
     return { ...DAYTONA_CAPABILITIES, serviceSupervisor: false };
   }
@@ -55,7 +59,7 @@ class FakeProvider {
   }
 }
 
-const asProvider = (p: FakeProvider) => p as unknown as SandboxProvider;
+const asProvider = (p: FakeProvider): SandboxProvider => p;
 
 // ── Recorded wakes ──────────────────────────────────────────────────────
 

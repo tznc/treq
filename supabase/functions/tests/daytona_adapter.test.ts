@@ -223,7 +223,7 @@ Deno.test("getInstance reports the provider's updatedAt as stateChangedAt", asyn
     id: "dt_t", name: "t", state: "stopped", labels: {}, cpu: 2, memory: 4, disk: 10,
     autoStopInterval: 60, autoArchiveInterval: 0, autoDeleteInterval: -1, toolboxProxyUrl: "",
     updatedAt: "2026-10-28T10:01:00Z",
-  } as unknown as Parameters<typeof fake.sandboxes.set>[1]);
+  });
   assertEquals((await provider.getInstance("dt_t")).stateChangedAt, "2026-10-28T10:01:00Z");
 });
 

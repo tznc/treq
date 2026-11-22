@@ -192,13 +192,13 @@ type FetchCall = { url: string; init: RequestInit };
 
 function fakeFetch(responses: Array<() => Response>) {
   const calls: FetchCall[] = [];
-  const impl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+  const impl = vi.fn<typeof fetch>(async (input, init) => {
     calls.push({ url: String(input), init: init ?? {} });
     const next = responses.shift();
     if (!next) throw new Error(`unexpected fetch ${String(input)}`);
     return next();
   });
-  return { calls, impl: impl as unknown as typeof fetch };
+  return { calls, impl };
 }
 
 const jsonResponse =

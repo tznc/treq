@@ -36,8 +36,8 @@ function setup(opts: {
   oauth?: Route;
   pro?: boolean;
 }) {
-  const fetch = vi.fn(
-    async (url: string | URL | Request, init?: RequestInit) => {
+  const fetch = vi.fn<typeof globalThis.fetch>(
+    async (url, init) => {
       const target = String(url);
       if (target === "https://api.linear.app/graphql" && opts.graphql) {
         return opts.graphql(init ?? {});
@@ -54,7 +54,7 @@ function setup(opts: {
   );
   const deps: ProxyDeps = {
     store: { load, save },
-    fetch: fetch as unknown as typeof globalThis.fetch,
+    fetch,
     linearClient: { id: "client-id", secret: "client-secret" },
     hasPro: vi.fn(async () => opts.pro ?? true),
     now: () => NOW,

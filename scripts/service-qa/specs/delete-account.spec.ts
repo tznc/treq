@@ -16,6 +16,7 @@ import {
   StripeApiError,
   type StripeClient,
 } from "../../../supabase/functions/_shared/billing/stripe-api";
+import { supabaseUsageReportStore } from "../../../supabase/functions/_shared/billing/usage-report";
 import type { ManagedComputeProvider } from "../../../supabase/functions/_shared/remote/provider";
 import {
   deleteAccount,
@@ -43,6 +44,23 @@ type Stubs = {
   machinesDeleted: string[];
   linearRevoked: string[];
 };
+
+// A provider that records deleted machines; delete-account makes no other call.
+function machineDeleter(deleted: string[]): ManagedComputeProvider {
+  const unexpected = () => Promise.reject(new Error("delete-account only deletes machines"));
+  return {
+    createInstance: unexpected,
+    getInstance: unexpected,
+    wakeInstance: unexpected,
+    stopInstance: unexpected,
+    replaceInstance: unexpected,
+    async deleteInstance(providerId) {
+      deleted.push(providerId);
+    },
+    execOnMachine: unexpected,
+    ensureService: unexpected,
+  };
+}
 
 function stubStripe(calls: string[], failDelete = false): StripeClient {
   const canceled = new Set<string>();
@@ -77,14 +95,10 @@ function callDeleteAccount(
       const { data, error } = await getAnonClient().auth.getUser(token);
       return error || !data.user ? null : { id: data.user.id };
     },
-    storeFor: (userId) => deleteAccountStoreFor(admin, userId),
+    storeFor: (userId) =>
+      deleteAccountStoreFor(admin, userId, (ownerUserId) => supabaseUsageReportStore(admin, { ownerUserId })),
     stripe: stubStripe(stubs.stripeCalls, opts.stripeFails),
-    provider: () =>
-      ({
-        async deleteInstance(providerId: string) {
-          stubs.machinesDeleted.push(providerId);
-        },
-      }) as unknown as ManagedComputeProvider,
+    provider: () => machineDeleter(stubs.machinesDeleted),
     revokeLinearToken: async (token) => {
       stubs.linearRevoked.push(token);
     },

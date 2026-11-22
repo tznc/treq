@@ -27,7 +27,7 @@ function setup(opts: {
   client?: { id: string; secret: string } | null;
 }) {
   const loads = [...opts.grants];
-  const fetch = vi.fn(async () =>
+  const fetch = vi.fn<typeof globalThis.fetch>(async () =>
     (opts.refresh ?? (() => new Response("{}")))(),
   );
   const deps: UserTokenDeps & {
@@ -39,7 +39,7 @@ function setup(opts: {
       ),
       save: vi.fn(async () => {}),
     },
-    fetch: fetch as unknown as typeof globalThis.fetch,
+    fetch,
     appClient:
       opts.client === undefined
         ? { id: "Iv1.client", secret: "s" }
@@ -90,9 +90,9 @@ describe("githubUserToken", () => {
       body: { token: "ghu_new", expires_at: iso(8 * HOUR) },
     });
 
-    const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    const [url, init] = fetch.mock.calls[0];
     expect(url).toBe("https://github.com/login/oauth/access_token");
-    expect(Object.fromEntries(new URLSearchParams(String(init.body)))).toEqual({
+    expect(Object.fromEntries(new URLSearchParams(String(init?.body)))).toEqual({
       client_id: "Iv1.client",
       client_secret: "s",
       grant_type: "refresh_token",

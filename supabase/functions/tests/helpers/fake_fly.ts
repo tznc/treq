@@ -22,6 +22,7 @@ export interface FakeFlyMachine {
     services?: Array<Record<string, unknown>>;
     metadata?: Record<string, string>;
   };
+  updated_at?: string;
 }
 
 export interface RecordedRequest {

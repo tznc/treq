@@ -212,7 +212,7 @@ Deno.test("getInstance reports the machine's updated_at as stateChangedAt", asyn
   fake.machines.set("m_t", {
     id: "m_t", name: "t", state: "stopped", region: "ams", config: {},
     updated_at: "2026-10-28T10:01:00Z",
-  } as unknown as Parameters<typeof fake.machines.set>[1]);
+  });
   assertEquals((await provider.getInstance("m_t")).stateChangedAt, "2026-10-28T10:01:00Z");
 });
 

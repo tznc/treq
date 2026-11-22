@@ -559,6 +559,7 @@ it("sends an account's remaining usage, then cancels with a final invoice, befor
     const grant = await grantPro(admin, id);
     const { deleteAccount, deleteAccountStoreFor } =
       await import("../../../supabase/functions/delete-account/lib");
+    const { supabaseUsageReportStore } = await import("../../../supabase/functions/_shared/billing/usage-report");
     const { data: inst, error } = await admin
       .from("remote_instances")
       .insert({
@@ -609,7 +610,8 @@ it("sends an account's remaining usage, then cancels with a final invoice, befor
       method: "POST",
       authorization: "Bearer jwt",
       verifyUser: async () => ({ id }),
-      storeFor: (userId) => deleteAccountStoreFor(admin as never, userId),
+      storeFor: (userId) =>
+        deleteAccountStoreFor(admin as never, userId, (ownerUserId) => supabaseUsageReportStore(admin, { ownerUserId })),
       stripe: {
         request: async <T>(
           method: string,

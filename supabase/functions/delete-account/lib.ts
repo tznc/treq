@@ -37,8 +37,7 @@ import {
   StripeApiError,
   type StripeClient,
 } from "../_shared/billing/stripe-api.ts";
-import type { SupabaseClient } from "npm:@supabase/supabase-js@2.95.3";
-import { reportUsage, supabaseUsageReportStore, type UsageReportStore } from "../_shared/billing/usage-report.ts";
+import { reportUsage, type UsageReportStore } from "../_shared/billing/usage-report.ts";
 import { fetchWithTimeout } from "../_shared/http/fetch-with-timeout.ts";
 import type { PlacementRow } from "../_shared/remote/migration-engine.ts";
 import { deleteInstanceMachines } from "../_shared/remote/placement-store.ts";
@@ -276,9 +275,14 @@ function check(result: QueryResult, what: string): unknown {
 
 const ENDED_LIST = `(${[...ENDED_STATUSES].join(",")})`;
 
+/**
+ * `usageReports` builds the user's final usage store; it takes the real
+ * Supabase client, which `DeleteAccountClient` only describes in part.
+ */
 export function deleteAccountStoreFor(
   client: DeleteAccountClient,
   userId: string,
+  usageReports: (ownerUserId: string) => UsageReportStore,
 ): DeleteAccountStore {
   return {
     async lastOwnedOrganizations() {
@@ -391,7 +395,7 @@ export function deleteAccountStoreFor(
     },
 
     finalUsage() {
-      return supabaseUsageReportStore(client as unknown as SupabaseClient, { ownerUserId: userId });
+      return usageReports(userId);
     },
 
     async markInstanceDeleted(instanceId) {
