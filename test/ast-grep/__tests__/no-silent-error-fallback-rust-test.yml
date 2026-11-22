@@ -1,0 +1,90 @@
+id: no-silent-error-fallback-rust
+valid:
+  - |
+    fn logs_before_falling_back(value: &Value) -> String {
+      serde_json::to_string(value).unwrap_or_else(|e| {
+        tracing::warn!("Could not serialize the event: {e}");
+        String::new()
+      })
+    }
+  - |
+    fn option_fallback_takes_no_argument(name: Option<String>) -> String {
+      name.unwrap_or_else(|| "main".to_string())
+    }
+  - |
+    fn option_fallback_value(name: Option<String>) -> String {
+      name.unwrap_or_default()
+    }
+  - |
+    fn propagates(path: &Path) -> std::io::Result<String> {
+      let text = std::fs::read_to_string(path)?;
+      Ok(text)
+    }
+  - |
+    fn matches_the_error(path: &Path) -> String {
+      match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => {
+          log::warn!("Could not read {}: {e}", path.display());
+          String::new()
+        }
+      }
+    }
+  - |
+    fn keeps_the_option(path: &Path) -> Option<String> {
+      std::fs::read_to_string(path).ok()
+    }
+  - |
+    fn maps_a_value_closure(items: Vec<u32>) -> Vec<u32> {
+      items.iter().map(|_| 1).collect()
+    }
+invalid:
+  - |
+    fn discards_with_underscore(value: &Value) -> String {
+      serde_json::to_string(value).unwrap_or_else(|_| String::new())
+    }
+  - |
+    fn discards_with_a_prefixed_name(value: &Value) -> String {
+      serde_json::to_string(value).unwrap_or_else(|_err| String::new())
+    }
+  - |
+    fn discards_with_a_typed_underscore(path: &Path) -> String {
+      std::fs::read_to_string(path).unwrap_or_else(|_: std::io::Error| String::new())
+    }
+  - |
+    fn discards_in_a_move_closure(path: &Path, fallback: String) -> String {
+      std::fs::read_to_string(path).unwrap_or_else(move |_| fallback)
+    }
+  - |
+    fn discards_with_a_block(path: &Path) -> String {
+      std::fs::read_to_string(path).unwrap_or_else(|_| {
+        String::new()
+      })
+    }
+  - |
+    fn converts_then_defaults(path: &Path) -> String {
+      std::fs::read_to_string(path).ok().unwrap_or_default()
+    }
+  - |
+    fn converts_then_falls_back(path: &Path) -> String {
+      std::fs::read_to_string(path).ok().unwrap_or(String::new())
+    }
+  - |
+    fn converts_then_computes(path: &Path) -> String {
+      std::fs::read_to_string(path).ok().unwrap_or_else(String::new)
+    }
+  - |
+    fn converts_across_lines(source_path: &Path, branch: &str, checkout_tip: String) -> String {
+      jj::jj_get_commit_id(source_path, branch)
+        .ok()
+        .unwrap_or(checkout_tip)
+    }
+  - |
+    fn converts_then_maps(path: &Path) -> usize {
+      std::fs::read_to_string(path).ok().map_or(0, |text| text.len())
+    }
+  - |
+    fn converts_then_maps_lazily(path: &Path) -> usize {
+      std::fs::read_to_string(path).ok().map_or_else(|| 0, |text| text.len())
+    }

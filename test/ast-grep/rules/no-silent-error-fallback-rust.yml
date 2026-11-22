@@ -1,0 +1,38 @@
+id: no-silent-error-fallback-rust
+language: rust
+severity: error
+message: >
+  This fallback throws the error away. Name the error and log it with
+  context before falling back, propagate it with `?`, or match on it so the
+  fallback is explicit and only covers the errors it should (for example
+  `ErrorKind::NotFound`). Renaming `_` to `_e` does not count.
+note: >
+  Matches `unwrap_or_else` with a one-parameter closure whose parameter is `_`
+  or `_`-prefixed (Option's `unwrap_or_else` takes no argument, so this is a
+  Result), and `.ok()` followed by `unwrap_or`, `unwrap_or_default`,
+  `unwrap_or_else`, `map_or` or `map_or_else`.
+files:
+  - "src-tauri/**/*.rs"
+  - "crates/**/*.rs"
+rule:
+  any:
+    - kind: call_expression
+      all:
+        - has:
+            field: function
+            kind: field_expression
+            has:
+              field: field
+              regex: ^unwrap_or_else$
+        - has:
+            field: arguments
+            has:
+              kind: closure_expression
+              has:
+                field: parameters
+                regex: ^\|\s*(mut\s+)?_\w*\s*(:[^|,]*)?\|$
+    - pattern: $X.ok().unwrap_or($Y)
+    - pattern: $X.ok().unwrap_or_default()
+    - pattern: $X.ok().unwrap_or_else($Y)
+    - pattern: $X.ok().map_or($$$)
+    - pattern: $X.ok().map_or_else($$$)

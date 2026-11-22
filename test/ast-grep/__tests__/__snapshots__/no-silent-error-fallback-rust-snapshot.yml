@@ -1,0 +1,217 @@
+id: no-silent-error-fallback-rust
+snapshots:
+  ? |
+    fn converts_across_lines(source_path: &Path, branch: &str, checkout_tip: String) -> String {
+      jj::jj_get_commit_id(source_path, branch)
+        .ok()
+        .unwrap_or(checkout_tip)
+    }
+  : labels:
+    - source: |-
+        jj::jj_get_commit_id(source_path, branch)
+            .ok()
+            .unwrap_or(checkout_tip)
+      style: primary
+      start: 95
+      end: 175
+  ? |
+    fn converts_then_computes(path: &Path) -> String {
+      std::fs::read_to_string(path).ok().unwrap_or_else(String::new)
+    }
+  : labels:
+    - source: std::fs::read_to_string(path).ok().unwrap_or_else(String::new)
+      style: primary
+      start: 53
+      end: 115
+  ? |
+    fn converts_then_defaults(path: &Path) -> String {
+      std::fs::read_to_string(path).ok().unwrap_or_default()
+    }
+  : labels:
+    - source: std::fs::read_to_string(path).ok().unwrap_or_default()
+      style: primary
+      start: 53
+      end: 107
+  ? |
+    fn converts_then_falls_back(path: &Path) -> String {
+      std::fs::read_to_string(path).ok().unwrap_or(String::new())
+    }
+  : labels:
+    - source: std::fs::read_to_string(path).ok().unwrap_or(String::new())
+      style: primary
+      start: 55
+      end: 114
+  ? |
+    fn converts_then_maps(path: &Path) -> usize {
+      std::fs::read_to_string(path).ok().map_or(0, |text| text.len())
+    }
+  : labels:
+    - source: std::fs::read_to_string(path).ok().map_or(0, |text| text.len())
+      style: primary
+      start: 48
+      end: 111
+  ? |
+    fn converts_then_maps_lazily(path: &Path) -> usize {
+      std::fs::read_to_string(path).ok().map_or_else(|| 0, |text| text.len())
+    }
+  : labels:
+    - source: std::fs::read_to_string(path).ok().map_or_else(|| 0, |text| text.len())
+      style: primary
+      start: 55
+      end: 126
+  ? |
+    fn discards_in_a_move_closure(path: &Path, fallback: String) -> String {
+      std::fs::read_to_string(path).unwrap_or_else(move |_| fallback)
+    }
+  : labels:
+    - source: std::fs::read_to_string(path).unwrap_or_else(move |_| fallback)
+      style: primary
+      start: 75
+      end: 138
+    - source: unwrap_or_else
+      style: secondary
+      start: 105
+      end: 119
+    - source: std::fs::read_to_string(path).unwrap_or_else
+      style: secondary
+      start: 75
+      end: 119
+    - source: '|_|'
+      style: secondary
+      start: 125
+      end: 128
+    - source: move |_| fallback
+      style: secondary
+      start: 120
+      end: 137
+    - source: move |_| fallback
+      style: secondary
+      start: 120
+      end: 137
+  ? |
+    fn discards_with_a_block(path: &Path) -> String {
+      std::fs::read_to_string(path).unwrap_or_else(|_| {
+        String::new()
+      })
+    }
+  : labels:
+    - source: |-
+        std::fs::read_to_string(path).unwrap_or_else(|_| {
+            String::new()
+          })
+      style: primary
+      start: 52
+      end: 125
+    - source: unwrap_or_else
+      style: secondary
+      start: 82
+      end: 96
+    - source: std::fs::read_to_string(path).unwrap_or_else
+      style: secondary
+      start: 52
+      end: 96
+    - source: '|_|'
+      style: secondary
+      start: 97
+      end: 100
+    - source: |-
+        |_| {
+            String::new()
+          }
+      style: secondary
+      start: 97
+      end: 124
+    - source: |-
+        |_| {
+            String::new()
+          }
+      style: secondary
+      start: 97
+      end: 124
+  ? |
+    fn discards_with_a_prefixed_name(value: &Value) -> String {
+      serde_json::to_string(value).unwrap_or_else(|_err| String::new())
+    }
+  : labels:
+    - source: serde_json::to_string(value).unwrap_or_else(|_err| String::new())
+      style: primary
+      start: 62
+      end: 127
+    - source: unwrap_or_else
+      style: secondary
+      start: 91
+      end: 105
+    - source: serde_json::to_string(value).unwrap_or_else
+      style: secondary
+      start: 62
+      end: 105
+    - source: '|_err|'
+      style: secondary
+      start: 106
+      end: 112
+    - source: '|_err| String::new()'
+      style: secondary
+      start: 106
+      end: 126
+    - source: '|_err| String::new()'
+      style: secondary
+      start: 106
+      end: 126
+  ? |
+    fn discards_with_a_typed_underscore(path: &Path) -> String {
+      std::fs::read_to_string(path).unwrap_or_else(|_: std::io::Error| String::new())
+    }
+  : labels:
+    - source: 'std::fs::read_to_string(path).unwrap_or_else(|_: std::io::Error| String::new())'
+      style: primary
+      start: 63
+      end: 142
+    - source: unwrap_or_else
+      style: secondary
+      start: 93
+      end: 107
+    - source: std::fs::read_to_string(path).unwrap_or_else
+      style: secondary
+      start: 63
+      end: 107
+    - source: '|_: std::io::Error|'
+      style: secondary
+      start: 108
+      end: 127
+    - source: '|_: std::io::Error| String::new()'
+      style: secondary
+      start: 108
+      end: 141
+    - source: '|_: std::io::Error| String::new()'
+      style: secondary
+      start: 108
+      end: 141
+  ? |
+    fn discards_with_underscore(value: &Value) -> String {
+      serde_json::to_string(value).unwrap_or_else(|_| String::new())
+    }
+  : labels:
+    - source: serde_json::to_string(value).unwrap_or_else(|_| String::new())
+      style: primary
+      start: 57
+      end: 119
+    - source: unwrap_or_else
+      style: secondary
+      start: 86
+      end: 100
+    - source: serde_json::to_string(value).unwrap_or_else
+      style: secondary
+      start: 57
+      end: 100
+    - source: '|_|'
+      style: secondary
+      start: 101
+      end: 104
+    - source: '|_| String::new()'
+      style: secondary
+      start: 101
+      end: 118
+    - source: '|_| String::new()'
+      style: secondary
+      start: 101
+      end: 118
