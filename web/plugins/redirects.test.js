@@ -21,6 +21,22 @@ const rules = fs
   .map((line) => line.trim().split(/\s+/));
 const moved = rules.filter(([, , status]) => status === '301');
 
+// Cloudflare Pages allows 100 dynamic rules (splats or placeholders) and wants
+// static rules first. In production, only the first 100 rules applied while a
+// dynamic rule sat at the top of the file.
+/** @param {string[]} rule */
+const isDynamic = ([from]) => /[*:]/.test(from);
+
+test('static rules come before dynamic ones', () => {
+  const firstDynamic = rules.findIndex(isDynamic);
+  expect(firstDynamic === -1 || rules.slice(firstDynamic).every(isDynamic)).toBe(true);
+});
+
+test('stays within the Cloudflare Pages rule limits', () => {
+  expect(rules.filter(isDynamic).length).toBeLessThanOrEqual(100);
+  expect(rules.filter((rule) => !isDynamic(rule)).length).toBeLessThanOrEqual(2000);
+});
+
 test('moved worktree vs clone guide redirects to the concept page', () => {
   expect(rules).toContainEqual(['/learn/how-to/git-worktrees-vs-clones-for-agents/', '/learn/concepts/git/git-worktrees-vs-clones/', '301']);
 });
