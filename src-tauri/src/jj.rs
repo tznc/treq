@@ -5169,9 +5169,10 @@ mod tests {
             let now = CONCURRENT.fetch_add(1, Ordering::SeqCst) + 1;
             MAX.fetch_max(now, Ordering::SeqCst);
             // The workspace's lock is held for the whole call.
-            assert!(working_copy_lock("/tmp/shared-workspace")
-              .try_lock()
-              .is_err());
+            assert!(matches!(
+              working_copy_lock("/tmp/shared-workspace").try_lock(),
+              Err(std::sync::TryLockError::WouldBlock)
+            ));
             CONCURRENT.fetch_sub(1, Ordering::SeqCst);
           })
         })
