@@ -830,8 +830,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card(
   confirming_delete: bool,
 ) -> CloudCard {
   let record = cloud.instance.as_ref();
-  // A deleted instance keeps its provider resource id, but there is nothing
-  // left to manage.
+  // A deleted instance keeps its provider resource id, but there is nothing left to manage.
   let instance = record.filter(|i| i.provider_resource_id.is_some() && i.status != "deleted");
   let creation_retry =
     record.is_some_and(|i| i.status == "failed" && i.provider_resource_id.is_none());
@@ -1044,8 +1043,7 @@ fn team_sections(
         .cloned()
         .unwrap_or_default();
       let saved = cloud.org_keys.get(&o.org_id).cloned().unwrap_or_default();
-      // "Create workspace on this account" runs on the selected profile, so
-      // it shows on this organization's keys only while it is selected.
+      // "Create workspace on this account" uses the selected profile, so shows only while selected.
       let creates_here = no_workspace && o.allow_byos && current == Some(o.org_id.as_str());
       let keys: Vec<ProviderKeyRow> = saved
         .iter()
@@ -1651,8 +1649,7 @@ impl SettingsView {
     }
     match id {
       "account.signIn" => self.host.open_url(&format!("{web}/sign-in?source=desktop")),
-      // A failed payment goes straight to the subscription tab, where the
-      // billing portal updates the card.
+      // A failed payment opens the subscription tab, where the billing portal updates the card.
       "account.manage" if past_due(self.account_route().and_then(|a| a.subscription).as_ref()) => {
         self
           .host
@@ -2170,8 +2167,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
       .gap_1()
       .when_some(c.idle_stop.clone(), |this, eta| {
         this.child(
-          // Short label (['countdown']): 11px is fine.
-          // ast-grep-ignore: gpui-text-xs-short-label-only
+          // Short label (countdown). ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .selector("cloud-idle-stop")
             .text_color(p.muted_foreground)
@@ -2706,8 +2702,7 @@ impl SettingsView {
       .rounded(radius::MD)
       .bg(Tone::Warning.tint(p))
       .child(
-        // Short label (['section heading']): 11px is fine.
-        // ast-grep-ignore: gpui-text-xs-short-label-only
+        // Short label (section heading). ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .mb_2()
           .font_weight(FontWeight::MEDIUM)

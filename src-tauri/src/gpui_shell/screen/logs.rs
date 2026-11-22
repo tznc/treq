@@ -1395,8 +1395,7 @@ impl LogsView {
             .child(ui::input(&input).appearance(false).bordered(false)),
         )
         .child(
-          // Short label (['count']): 11px is fine.
-          // ast-grep-ignore: gpui-text-xs-short-label-only
+          // Short label (count). ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .px_2()
             .whitespace_nowrap()
@@ -1470,8 +1469,7 @@ impl LogsView {
       .justify_center()
       .gap_3()
       .children(SERIES.iter().zip(colors).map(|((_, label), color)| {
-        // Short label (['legend label']): 11px is fine.
-        // ast-grep-ignore: gpui-text-xs-short-label-only
+        // Short label (legend label). ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .flex()
           .items_center()
@@ -1536,8 +1534,7 @@ impl LogsView {
       .h(zpx(plot_height))
       .children(ticks.iter().map(|t| {
         let y = plot_height - plot_height * (*t as f32 / top as f32);
-        // Short label (['axis label']): 11px is fine.
-        // ast-grep-ignore: gpui-text-xs-short-label-only
+        // Short label (axis label). ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .absolute()
           .right_0()
@@ -1545,8 +1542,7 @@ impl LogsView {
           .text_color(p.muted_foreground)
           .child(t.to_string())
       }));
-    // A handful of evenly spaced times, each wide enough to read in full,
-    // however many columns the bars are.
+    // A few evenly spaced times, each wide enough to read, however many bar columns there are.
     let columns = data.labels.len();
     let label_width = 64.;
     let labelled = ((width / (label_width + 24.)).floor() as usize)
@@ -1562,8 +1558,7 @@ impl LogsView {
         let column = (((k as f32 + 0.5) * columns as f32 / labelled as f32 - 0.5).round() as usize)
           .min(columns - 1);
         let centre = (column as f32 + 0.5) / columns as f32;
-        // Short label (['axis label']): 11px is fine.
-        // ast-grep-ignore: gpui-text-xs-short-label-only
+        // Short label (axis label). ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .absolute()
           .top_0()

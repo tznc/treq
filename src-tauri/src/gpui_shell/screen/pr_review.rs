@@ -274,8 +274,7 @@ impl PrReviewView {
           .filter(|a| !a.is_empty());
         let summary = review_summary(&full_name, number, &title, files);
         let prompt = review_prompt_for(custom.as_deref(), TARGET, &number.to_string(), &summary);
-        // A PR is usually not checked out, so its review runs in the home
-        // repository and reads the diff through gh.
+        // A PR is rarely checked out: its review runs in the home repo and reads the diff via gh.
         let link = format!("https://github.com/{full_name}/pull/{number}");
         host
           .launch_session(
@@ -689,8 +688,7 @@ impl PrReviewView {
               .when_some(counts.get(&file.path).copied(), |this, count| {
                 let comments = format!("pr-file-comments-{}", file.path);
                 this.child(
-                  // Short label (comment count): 11px is fine.
-                  // ast-grep-ignore: gpui-text-xs-short-label-only
+                  // Short label (comment count). ast-grep-ignore: gpui-text-xs-short-label-only
                   ui::text(div(), TextSize::Xs)
                     .selector(SharedString::from(comments))
                     .role(gpui::Role::Label)
@@ -705,8 +703,7 @@ impl PrReviewView {
                 )
               })
               .child(
-                // Short label (status letter): 11px is fine.
-                // ast-grep-ignore: gpui-text-xs-short-label-only
+                // Short label (status letter). ast-grep-ignore: gpui-text-xs-short-label-only
                 ui::text(div(), TextSize::Xs)
                   .text_color(p.muted_foreground)
                   .child(file.status.clone()),

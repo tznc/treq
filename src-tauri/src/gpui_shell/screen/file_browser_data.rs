@@ -111,8 +111,7 @@ pub fn inherit_ignored(
 /// Directories first, then by name as `localeCompare` orders them: case
 /// folded, lowercase first on a tie.
 pub fn compare_entries(a: &WorkspaceEntry, b: &WorkspaceEntry) -> Ordering {
-  // Folded char by char, not into new strings: a sort makes thousands of
-  // comparisons.
+  // Folded char by char, not into new strings: a sort makes thousands of comparisons.
   fn fold(s: &str) -> impl Iterator<Item = char> + '_ {
     s.chars().flat_map(char::to_lowercase)
   }

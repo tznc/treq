@@ -332,8 +332,7 @@ impl FileBrowserView {
       }
       (true, Some(at)) => {
         self.hidden_at = None;
-        // Until its first read lands (a view made ahead), that read is
-        // still on the way.
+        // Before its first read lands (a view made ahead), that read is still in flight.
         if at == self.revision && self.ready() {
           self.refresh(cx);
         }
@@ -642,8 +641,7 @@ impl FileBrowserView {
           return;
         }
         view.loading_file = false;
-        // Another file's marks never show on this one; a file read again
-        // keeps its marks until the new ones land.
+        // Another file's marks never show here. A reread file keeps its marks until new ones land.
         if !hunks || (!refreshing && view.marks_read != read) {
           view.marks = LineMarks::default();
         }
@@ -1505,8 +1503,7 @@ impl FileBrowserView {
                 if count == 1 { "" } else { "s" }
               ),
               Side::Top,
-              // Short label (['count']): 11px is fine.
-              // ast-grep-ignore: gpui-text-xs-short-label-only
+              // Short label (count). ast-grep-ignore: gpui-text-xs-short-label-only
               ui::text(div(), TextSize::Xs)
                 .flex()
                 .items_center()
@@ -1613,8 +1610,7 @@ impl FileBrowserView {
     let markdown = is_markdown(&path);
     let previewing = markdown && self.preview.as_deref() == Some(path.as_str());
     let body = if previewing {
-      // The preview scrolls itself, so a long README draws only the blocks
-      // on screen.
+      // The preview scrolls itself, so a long README draws only the blocks on screen.
       div()
         .selector("file-markdown-preview")
         .size_full()
@@ -1782,8 +1778,7 @@ impl FileBrowserView {
     let bg = line_fill(selected, has_comment, added, &p);
     let selecting = self.selecting;
     let accent = p.primary;
-    // Code line: the file view sets the mono font on its parent.
-    // ast-grep-ignore: gpui-sans-text-min-size
+    // Code line: its parent sets the mono font. ast-grep-ignore: gpui-sans-text-min-size
     let line = ui::text(div(), TextSize::Code)
       .selector(SharedString::from(format!("code-line-{n}")))
       .group("code-line")

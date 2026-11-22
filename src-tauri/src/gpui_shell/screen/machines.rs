@@ -441,8 +441,7 @@ impl MachinesHost for Backend {
     };
     let reset = self.reset_terminals(place);
     self.with_db(|db| remote_records::set_terminal_backend(db, endpoint_id, backend));
-    // Switched either way: a host that could not be reached has nothing
-    // of Treq's to see, but say so.
+    // Switched either way: an unreachable host has nothing of Treq's to see, but say so.
     reset.map_err(|error| format!("Switched, but the old terminals could not be closed: {error}"))
   }
 
@@ -469,8 +468,7 @@ impl MachinesHost for Backend {
     let (endpoint, _) = self
       .machine_endpoint(endpoint_id)
       .ok_or_else(|| "This machine cannot be reached.".to_string())?;
-    // A reset is safe to send twice, so it goes as a read, which retries
-    // once on a dropped connection.
+    // A reset is safe to send twice, so it goes as a read, which retries on a dropped connection.
     self
       .remote_read(
         &endpoint,
@@ -491,9 +489,7 @@ fn hostname() -> String {
 #[cfg(unix)]
 fn read_hostname() -> String {
   let mut name = [0u8; 256];
-  // SAFETY: `name` is writable for the length given, and `gethostname`
-  // terminates what it writes unless the name is longer, which the last
-  // byte below covers.
+  // SAFETY: `name` is writable for the length passed, which leaves its last byte as a NUL.
   let found = unsafe { libc::gethostname(name.as_mut_ptr().cast(), name.len() - 1) } == 0;
   let end = name.iter().position(|b| *b == 0).unwrap_or(name.len() - 1);
   match found {

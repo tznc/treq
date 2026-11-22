@@ -178,9 +178,7 @@ impl Emulator {
     let kept = self.term.selection.clone();
     let history = self.history();
     self.parser.advance(&mut self.term, bytes);
-    // A program redrawing lines (an agent's prompt, a spinner) drops any
-    // selection over them; xterm keeps it, so put it back, moved up by
-    // the lines that scrolled into history.
+    // Redraws drop the selection, but xterm keeps it: restore it, moved up by lines scrolled away.
     if self.term.selection.is_none() && self.found.is_none() {
       let scrolled = self.history().saturating_sub(history) as i32;
       let range = Line(0)..Line(self.size.rows as i32);
@@ -338,8 +336,7 @@ impl Emulator {
       };
       return Some(format!("\x1b[<{code};{col};{row}{end}").into_bytes());
     }
-    // The X10 encoding: each value a character offset by 32. Plain bytes
-    // stop at 127 here, since the PTY takes text.
+    // X10: each value a char offset by 32. Plain bytes stop at 127, as the PTY takes text.
     let limit = if mode.contains(TermMode::UTF8_MOUSE) {
       2047
     } else {
@@ -770,8 +767,7 @@ pub struct Key<'a> {
 /// The bytes xterm sends for a key press; `None` leaves the key to the app.
 pub fn encode_key(key: Key<'_>, app_cursor: bool) -> Option<Vec<u8>> {
   if key.platform {
-    // Cmd+Backspace: macOS "delete to line start", sent as readline's Ctrl+U.
-    // Cmd+←/→: line start/end, sent as readline's Ctrl+A / Ctrl+E.
+    // Cmd+Backspace, Cmd+← and Cmd+→ map to readline's Ctrl+U, Ctrl+A and Ctrl+E.
     return match key.key {
       "backspace" => Some(b"\x15".to_vec()),
       "left" => Some(b"\x01".to_vec()),
