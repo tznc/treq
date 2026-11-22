@@ -66,7 +66,7 @@ fn item(toast: &Toast, palette: Palette, on_click: ToastClick) -> AnyElement {
   let (action_id, close_id) = (toast.id.clone(), toast.id.clone());
   let on_action = on_click.clone();
   div()
-    .selector(SharedString::from(selector.clone()))
+    .selector(SharedString::from(selector))
     .flex()
     .items_start()
     .gap_3()

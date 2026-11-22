@@ -2467,7 +2467,7 @@ impl LinearView {
     });
     let selector = format!("linear-kanban-card-{id}");
     ui::text(div(), TextSize::Sm)
-      .selector(SharedString::from(selector.clone()))
+      .selector(SharedString::from(selector))
       .role(Role::ListItem)
       .aria_label(SharedString::from(issue.title.clone()))
       .bg(p.background)
@@ -2627,7 +2627,7 @@ impl LinearView {
             let id = project.id.clone();
             let selector = format!("linear-project-item-{id}");
             div()
-              .selector(SharedString::from(selector.clone()))
+              .selector(SharedString::from(selector))
               .role(gpui::Role::Button)
               .aria_label(project.name.clone())
               .w_full()
@@ -2775,7 +2775,7 @@ impl LinearView {
             let selector = format!("linear-document-item-{}", doc.id);
             let doc = doc.clone();
             ui::text(div(), TextSize::Sm)
-              .selector(SharedString::from(selector.clone()))
+              .selector(SharedString::from(selector))
               .role(gpui::Role::Link)
               .aria_label(doc.title.clone())
               .px_3()

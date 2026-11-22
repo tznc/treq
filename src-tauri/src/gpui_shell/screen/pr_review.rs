@@ -692,7 +692,7 @@ impl PrReviewView {
                   // Short label (comment count): 11px is fine.
                   // ast-grep-ignore: gpui-text-xs-short-label-only
                   ui::text(div(), TextSize::Xs)
-                    .selector(SharedString::from(comments.clone()))
+                    .selector(SharedString::from(comments))
                     .role(gpui::Role::Label)
                     .aria_label(count_label(count, "review comment"))
                     .test_support()

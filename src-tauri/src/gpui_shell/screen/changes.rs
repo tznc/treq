@@ -3677,7 +3677,7 @@ impl ChangesView {
     };
     let card = format!("conflict-card-{}", conflict.id);
     div()
-      .selector(SharedString::from(card.clone()))
+      .selector(SharedString::from(card))
       .role(gpui::Role::Group)
       .aria_label(number.clone())
       .bg(p.destructive.opacity(0.1))

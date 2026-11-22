@@ -1906,7 +1906,7 @@ impl LogsView {
         }
       }
       Open::Templates => {
-        for (label, description, sql) in TEMPLATES.iter() {
+        for (label, description, sql) in &TEMPLATES {
           list = list.child(
             div()
               .selector(format!("sql-template-{label}"))

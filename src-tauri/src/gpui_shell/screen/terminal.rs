@@ -3801,7 +3801,7 @@ impl TerminalPane {
           )
         })
         .child(div().min_w_0().truncate().child(name))
-        .children(loc.map(|loc| loc))
+        .children(loc)
     };
     let close_id = column.id.clone();
     let close = div()

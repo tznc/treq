@@ -701,7 +701,7 @@ impl SettingsView {
       });
       let selector = format!("team-org-{id}");
       ui::text(div(), TextSize::Sm)
-        .selector(SharedString::from(selector.clone()))
+        .selector(SharedString::from(selector))
         .role(gpui::Role::Group)
         .aria_label(org.name.clone())
         .border_1()

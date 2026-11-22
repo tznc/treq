@@ -852,7 +852,7 @@ impl AgentPromptView {
             let chosen = self.selected == id;
             let selector = SharedString::from(format!("agent-prompt-workspace-{}", label));
             ui::text(div(), TextSize::Sm)
-              .selector(selector.clone())
+              .selector(selector)
               .role(gpui::Role::MenuItemCheckBox)
               .aria_label(label.clone())
               .flex()

@@ -377,7 +377,7 @@ impl Popover {
           let selector = format!("ci-inactive-{i}");
           row.child(
             div()
-              .selector(SharedString::from(selector.clone()))
+              .selector(SharedString::from(selector))
               .role(gpui::Role::Label)
               .aria_label(format!("{} inactive", check.name))
               .flex_none()

@@ -936,7 +936,7 @@ impl MergeView {
         .children(self.warnings().into_iter().enumerate().map(|(i, warning)| {
           let selector = format!("merge-warning-{i}");
           ui::text(div(), TextSize::Sm)
-            .selector(SharedString::from(selector.clone()))
+            .selector(SharedString::from(selector))
             .role(gpui::Role::Alert)
             .aria_label(warning.clone())
             .flex()
@@ -1371,7 +1371,7 @@ impl MergeView {
         let path = files.get(i).map(|f| f.path.clone()).unwrap_or_default();
         let id = format!("merge-hunk-{i}-{h}");
         ui::text(div(), TextSize::Sm)
-          .selector(SharedString::from(id.clone()))
+          .selector(SharedString::from(id))
           .role(gpui::Role::Heading)
           .aria_label(format!("{path} {header}"))
           .when(h == 0, |this| this.border_t_1().border_color(p.border))

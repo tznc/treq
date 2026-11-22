@@ -854,7 +854,7 @@ impl CommitsView {
       )
       .child(
         div()
-          .selector(SharedString::from(code_selector.clone()))
+          .selector(SharedString::from(code_selector))
           .relative()
           .flex_1()
           .min_w_0()

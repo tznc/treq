@@ -1970,7 +1970,7 @@ impl Mark {
     self.saved.then(|| {
       let id = format!("settings-saved-{}", self.key);
       ui::text(div(), TextSize::Sm)
-        .selector(SharedString::from(id.clone()))
+        .selector(SharedString::from(id))
         .role(gpui::Role::Status)
         .aria_label("Saved")
         .flex()
@@ -1989,7 +1989,7 @@ impl Mark {
     self.error.clone().map(|text| {
       let id = format!("settings-error-{}", self.key);
       ui::text(div().mt_1(), TextSize::Sm)
-        .selector(SharedString::from(id.clone()))
+        .selector(SharedString::from(id))
         .role(gpui::Role::Alert)
         .aria_label(text.clone())
         .text_color(ui::Tone::Danger.text(p))

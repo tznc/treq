@@ -1936,7 +1936,7 @@ impl WorkspaceDialog {
           let checked = self.selected_hunks.contains(&key);
           let selector = format!("dialog-hunk-{file}-{i}");
           div()
-            .selector(SharedString::from(selector.clone()))
+            .selector(SharedString::from(selector))
             .role(gpui::Role::CheckBox)
             .aria_label(hunk.header.clone())
             .flex()
