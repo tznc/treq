@@ -17,6 +17,7 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2.95.3";
 import { setPlacementState, stopWorkspace } from "../remote/placement-store.ts";
 import type { ManagedComputeProvider, ProviderKind } from "../remote/provider.ts";
 import { must, rpc } from "../remote/db.ts";
+import { errorMessage } from "../error-message.ts";
 
 export type SpendState = "ok" | "warning" | "capped";
 
@@ -157,14 +158,14 @@ export async function enforceSpendCaps(deps: SpendCapDeps): Promise<SpendCapResu
     try {
       result.rolledBackMigrations.push(...await deps.store.rollBackOpenResizes(c.user_id));
     } catch (err) {
-      deps.log({ operation: "spend_cap_rollback_failed", user_id: c.user_id, error: (err as Error).message });
+      deps.log({ operation: "spend_cap_rollback_failed", user_id: c.user_id, error: errorMessage(err) });
     }
     for (const w of await deps.store.runningWorkspaces(c.user_id)) {
       try {
         await stopWorkspace(deps.providers, w, deps.store.markStopped);
         result.stopped.push(w.instance_id);
       } catch (err) {
-        const error = err instanceof Error ? err.message : String(err);
+        const error = errorMessage(err);
         result.failed.push({ instanceId: w.instance_id, error });
         deps.log({ operation: "spend_cap_stop_failed", instance_id: w.instance_id, error });
       }

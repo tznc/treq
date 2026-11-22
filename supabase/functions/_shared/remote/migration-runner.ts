@@ -15,6 +15,7 @@ import {
   supabaseMigrationStore,
 } from "./placement-store.ts";
 import type { ProviderKind, SandboxProvider } from "./provider.ts";
+import { errorMessage } from "../error-message.ts";
 
 // The resize request runs the engine inline for about this long.
 export const INLINE_BUDGET_MS = 55_000;
@@ -94,7 +95,7 @@ export async function runLeasedMigrations(o: RunnerOptions): Promise<RunnerResul
       }
     } catch (err) {
       out.migrations.push({ id, state: "error", steps: 0 });
-      console.error(`migration ${id} step failed: ${(err as Error).message}`);
+      console.error(`migration ${id} step failed: ${errorMessage(err)}`);
     } finally {
       await releaseMigration(o.supabase, id, o.leaseOwner);
     }

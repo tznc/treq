@@ -15,6 +15,7 @@ import { copyFileSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, expect, test, type Browser, type Page } from "@playwright/test";
 import { appBinary, port } from "../env.ts";
+import { errorMessage } from "../error-message.ts";
 import { appEnv, makeFixture } from "../harness.ts";
 import { capture, theme } from "./capture.ts";
 import { popupBox, xPointer } from "./helpers.ts";
@@ -64,7 +65,7 @@ function docker(...args: string[]): void {
   try {
     execFileSync("docker", args, { stdio: "pipe" });
   } catch (e) {
-    note(`docker ${args.join(" ")} failed: ${e}`);
+    note(`docker ${args.join(" ")} failed: ${errorMessage(e)}`);
   }
 }
 
@@ -104,7 +105,7 @@ async function launch(): Promise<void> {
     } catch (error) {
       app?.kill("SIGKILL");
       if (attempt >= 3) throw error;
-      note(`app start failed (${error}); starting again`);
+      note(`app start failed (${errorMessage(error)}); starting again`);
       await new Promise((r) => setTimeout(r, 2000));
     }
   }
@@ -354,7 +355,7 @@ test("ssh chaos: changes behind the app (tmux, deleted dir, new commit)", async 
   const row = workspaceRow("Chaos one");
   await row.click();
   await row.hover();
-  await row.getByRole("button", { name: "Open shell" }).click().catch((e) => note(`open shell: ${e}`));
+  await row.getByRole("button", { name: "Open shell" }).click().catch((e) => note(`open shell: ${errorMessage(e)}`));
   await page.waitForTimeout(4000);
   note("kill remote tmux and treq daemon");
   onServer("tmux kill-server 2>/dev/null; pkill -f '[t]req pty' 2>/dev/null; true");
@@ -367,7 +368,7 @@ test("ssh chaos: changes behind the app (tmux, deleted dir, new commit)", async 
   note("new commit on the remote main");
   onServer(`cd '${env.repo}' && printf 'y\\n' > behind.txt && git add behind.txt && git -c user.name=QA -c user.email=qa@example.com commit -qm 'Commit behind the app'`);
   // main's home row, whose Commits list main.
-  await page.getByRole("button", { name: "main", exact: true }).first().click().catch((e) => note(`main row: ${e}`));
+  await page.getByRole("button", { name: "main", exact: true }).first().click().catch((e) => note(`main row: ${errorMessage(e)}`));
   await page.getByRole("tab", { name: "Commits" }).click();
   await page.getByRole("button", { name: "Refresh" }).first().click().catch(() => {});
   await recovered("refresh after remote commit");

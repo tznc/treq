@@ -11,6 +11,7 @@ import {
   applyInstallationFacts,
   type GitHubWebhookPayload,
 } from "./webhook-handlers.ts";
+import { errorMessage } from "../_shared/error-message.ts";
 
 async function verifySignature(
   secret: string,
@@ -162,7 +163,7 @@ Deno.serve(async (req) => {
       headers: { "Content-Type": "application/json" },
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     console.error(`[github-webhook] ingestion error for "${event}":`, message);
     await supabase
       .from("github_webhook_receipts")

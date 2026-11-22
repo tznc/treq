@@ -31,6 +31,7 @@ import {
   provisionIntegrationCredential,
   supabaseIntegrationSecrets,
 } from "./integration-credential.ts";
+import { errorMessage } from "../error-message.ts";
 
 /** Where per-placement gateway secrets are kept (Vault, via 051_gateway_secrets.sql). */
 export interface GatewaySecretStore {
@@ -208,7 +209,7 @@ export async function recordHostKeys(
       instanceId: p.instanceId,
       endpointId: p.endpointId,
       eventType: "readiness_stage_failed",
-      detail: { stage: "host_key_read", reason: scrubErrorText((err as Error).message) },
+      detail: { stage: "host_key_read", reason: scrubErrorText(errorMessage(err)) },
       correlationId: p.correlationId,
     });
   }
@@ -240,7 +241,7 @@ export async function establishSshTrust(
       instanceId: p.instanceId,
       endpointId: p.endpointId,
       eventType: "ca_trust_install_failed",
-      detail: { error: scrubErrorText((err as Error).message) },
+      detail: { error: scrubErrorText(errorMessage(err)) },
       correlationId: p.correlationId,
     });
     return;
@@ -260,7 +261,7 @@ export async function establishSshTrust(
         instanceId: p.instanceId,
         endpointId: p.endpointId,
         eventType: "readiness_stage_failed",
-        detail: { stage: "gateway", reason: scrubErrorText((err as Error).message) },
+        detail: { stage: "gateway", reason: scrubErrorText(errorMessage(err)) },
         correlationId: p.correlationId,
       });
     }
