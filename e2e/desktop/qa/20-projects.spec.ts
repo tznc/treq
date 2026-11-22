@@ -62,7 +62,7 @@ test("projects: sidebar, project menu, save and welcome list", async ({ page }) 
   });
   if (!menu) throw new Error("no project menu");
   // "Save Project…" is the first row.
-  await xPointer(page, menu.x + 60, menu.y + 18, 1);
+  xPointer(menu.x + 60, menu.y + 18, 1);
   await settle(page, 1000);
   await capture(page, {
     name: "20-projects-03-save-dialog",
@@ -100,7 +100,7 @@ test("projects: sidebar, project menu, save and welcome list", async ({ page }) 
   const menu2 = popupBox();
   if (!menu2) throw new Error("no project menu");
   // Rows: the project, a separator, Rename, Instructions, New Window.
-  await xPointer(page, menu2.x + 60, menu2.y + menu2.h - 41, 1);
+  xPointer(menu2.x + 60, menu2.y + menu2.h - 41, 1);
   await settle(page, 1200);
   await page.keyboard.type("Use pnpm. Keep the API and the docs in sync.");
   await capture(page, {

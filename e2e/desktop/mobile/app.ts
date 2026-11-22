@@ -4,8 +4,8 @@ import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { copyFileSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { chromium, expect, type Browser, type Page } from "@playwright/test";
-import { appEnv, makeFixture } from "../harness.ts";
+import { expect, type Browser, type Page } from "@playwright/test";
+import { appEnv, connectApp, makeFixture, serverUp } from "../harness.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "../../..");
@@ -41,31 +41,11 @@ export async function launchMobile(): Promise<MobileApp> {
     stdio: process.env.QA_DEBUG ? "inherit" : "ignore",
     env: { ...appEnv(fixture), GPUI_PLAYWRIGHT: String(mobilePort) },
   });
-  const deadline = Date.now() + 120_000;
-  let lastError: unknown;
-  for (;;) {
-    try {
-      if ((await fetch(`http://127.0.0.1:${mobilePort}/`)).ok) break;
-    } catch (err) {
-      lastError = err;
-    }
-    if (Date.now() > deadline) throw new Error("the mobile app did not start", { cause: lastError });
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  let browser: Browser | undefined;
-  for (let attempt = 1; ; attempt++) {
-    try {
-      browser = await chromium.connect(`ws://127.0.0.1:${mobilePort}/`);
-      const page = await (await browser.newContext()).newPage();
-      // A phone, as the example's window is: one pane, not the tablet split.
-      await page.setViewportSize({ width: 420, height: 860 });
-      return { app, browser, page, home: fixture.home };
-    } catch (error) {
-      await browser?.close();
-      if (attempt >= 10) throw error;
-      await new Promise((r) => setTimeout(r, 1000));
-    }
-  }
+  await serverUp(app, mobilePort);
+  const { browser, page } = await connectApp(mobilePort);
+  // A phone, as the example's window is: one pane, not the tablet split.
+  await page.setViewportSize({ width: 420, height: 860 });
+  return { app, browser, page, home: fixture.home };
 }
 
 /** Runs `script` on the host, outside the app. */

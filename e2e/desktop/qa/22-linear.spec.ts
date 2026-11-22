@@ -92,7 +92,7 @@ async function pickView(page: Page, row: number) {
   focusMain();
   const menu = popupBox();
   if (!menu) throw new Error("no view menu");
-  await xPointer(page, menu.x + 60, menu.y + 20 + row * 32, 1);
+  xPointer(menu.x + 60, menu.y + 20 + row * 32, 1);
   await settle(page, 600);
 }
 

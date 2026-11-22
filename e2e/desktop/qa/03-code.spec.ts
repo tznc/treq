@@ -217,7 +217,7 @@ test("code: commit history hover", async ({ page }) => {
     ]],
   ] as const) {
     await page.mouse.move(1288, y);
-    await xPointer(page, 1288, y);
+    xPointer(1288, y);
     await settle(page, 500);
     await capture(page, { name, title: "Code tab commit history: hovered row", rest: false, expectations: [...expectations] });
   }

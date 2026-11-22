@@ -122,7 +122,7 @@ test("not-a-repository: asks, and cancelled leaves the folder alone", async () =
     // The toast's Copy button sits left of its close button, `p-4` in.
     const toast = popupBox();
     expect(toast).not.toBeNull();
-    await xPointer(run.page, toast!.x + toast!.w - 68, toast!.y + 28, 1);
+    xPointer(toast!.x + toast!.w - 68, toast!.y + 28, 1);
     await capture(run.page, {
       name: "15-not-a-repository-02b-copied",
       title: "Error toast copied",

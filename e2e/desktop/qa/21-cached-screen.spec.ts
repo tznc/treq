@@ -20,7 +20,7 @@ test("cached-screen: the screen follows sidebar frames and its own changes", asy
   // The pointer crosses the sidebar's rows: sidebar-only frames. GPUI
   // hovers follow the real X pointer.
   for (const dy of [-60, -30, 0]) {
-    await xPointer(page, cache!.x + 40, cache!.y + cache!.height / 2 + dy);
+    xPointer(cache!.x + 40, cache!.y + cache!.height / 2 + dy);
   }
   await settle(page, 500);
   await capture(page, {

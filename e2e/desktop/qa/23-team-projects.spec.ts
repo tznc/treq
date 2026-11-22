@@ -143,7 +143,7 @@ test("team projects: save to a team, then Move to", async () => {
       await settle(page, 1500);
       const menu = popupBox();
       // Rows: synced projects, a separator, Save Project…, New Window….
-      if (menu) await xPointer(page, menu.x + 60, menu.y + menu.h - 41, 1);
+      if (menu) xPointer(menu.x + 60, menu.y + menu.h - 41, 1);
       await settle(page, 1500);
     }
     await expect(dialog).toBeVisible();
@@ -194,7 +194,7 @@ test("team projects: save to a team, then Move to", async () => {
     const menu2 = popupBox();
     if (menu2) {
       // Move to is the row above New Window…, the last row.
-      await xPointer(page, menu2.x + 60, menu2.y + menu2.h - 41, false);
+      xPointer(menu2.x + 60, menu2.y + menu2.h - 41, false);
       await settle(page, 1000);
       await capture(page, {
         name: "23-team-projects-04-move-to-open",

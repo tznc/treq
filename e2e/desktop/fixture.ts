@@ -48,16 +48,14 @@ export const mod = process.platform === "darwin" ? "Meta" : "Control";
  * `gpui_shell::e2e`). Dialogs draw in the repo window itself, in `page`.
  */
 export async function windowPage(context: BrowserContext): Promise<Page> {
-  const deadline = Date.now() + 10_000;
-  for (;;) {
-    try {
-      return await context.newPage();
-    } catch (error) {
-      // The window is not open, or not focused, yet.
-      if (Date.now() > deadline) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 200));
-    }
-  }
+  const pages: Page[] = [];
+  // `newPage` fails while the window is not open, or not focused, yet.
+  await expect(async () => {
+    pages.push(await context.newPage());
+  }, "a page for the new window").toPass({ intervals: [200], timeout: 10_000 });
+  const [page] = pages;
+  if (!page) throw new Error("no page for the new window");
+  return page;
 }
 
 /** Waits for the repo window to show its sidebar and home row. */

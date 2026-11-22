@@ -1,10 +1,13 @@
 // What `launch.ts` and `landing/launch.ts` share: a fresh home and app data
 // dir, a fake `claude` agent on PATH, and the `treq` binary built with
-// `--features e2e`, started with gpui-playwright listening.
-import { execFileSync, spawn } from "node:child_process";
+// `--features e2e`, started with gpui-playwright listening. Also how a spec
+// that runs its own app waits for it to start and stops it.
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { once } from "node:events";
 import { chmodSync, createWriteStream, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { chromium, expect, type Browser, type Page } from "@playwright/test";
 import { appBinary, fixtureFile, port } from "./env.ts";
 import type { Fixture } from "./fixture.ts";
 
@@ -113,4 +116,63 @@ export function startApp(
     console.log(`[harness] app exited: code=${code} signal=${signal}`);
     process.exit(code ?? 0);
   });
+}
+
+function exited(app: ChildProcess): boolean {
+  return app.exitCode !== null || app.signalCode !== null;
+}
+
+/**
+ * Resolves once the app's gpui-playwright server answers on `port`. Fails
+ * as soon as `app` exits, else after `timeout`.
+ */
+export async function serverUp(app: ChildProcess, port: number, timeout = 120_000): Promise<void> {
+  await expect(async () => {
+    // An exited app ends the wait; it is reported below.
+    if (exited(app)) return;
+    expect((await fetch(`http://127.0.0.1:${port}/`)).ok, "the server answers").toBe(true);
+  }, `the app's Playwright server answers on port ${port}`).toPass({ intervals: [500], timeout });
+  if (exited(app)) {
+    throw new Error(`the app exited (${app.exitCode ?? app.signalCode}) before its server answered`);
+  }
+}
+
+/**
+ * Connects Playwright to the app on `port` and opens a page on its window.
+ * The server can answer before the window is ready for a context, so this
+ * retries until `timeout`.
+ */
+export async function connectApp(
+  port: number,
+  timeout = 15_000,
+): Promise<{ browser: Browser; page: Page }> {
+  const connected: { browser: Browser; page: Page }[] = [];
+  await expect(async () => {
+    const browser = await chromium.connect(`ws://127.0.0.1:${port}/`);
+    try {
+      connected.push({ browser, page: await (await browser.newContext()).newPage() });
+    } catch (error) {
+      await browser.close();
+      throw error;
+    }
+  }, `Playwright opens a page on the app on port ${port}`).toPass({ intervals: [1000], timeout });
+  const [first] = connected;
+  if (!first) throw new Error(`no page on the app on port ${port}`);
+  return first;
+}
+
+/** Stops `app` with SIGTERM, then SIGKILL if it has not exited after `grace`. */
+export async function stopApp(app: ChildProcess, grace = 10_000): Promise<void> {
+  if (exited(app)) return;
+  const exit = once(app, "exit", { signal: AbortSignal.timeout(grace) });
+  app.kill("SIGTERM");
+  try {
+    await exit;
+  } catch (error) {
+    if (!(error instanceof Error && error.name === "AbortError")) throw error;
+    if (exited(app)) return;
+    const killed = once(app, "exit");
+    app.kill("SIGKILL");
+    await killed;
+  }
 }

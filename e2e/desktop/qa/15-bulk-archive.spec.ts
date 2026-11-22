@@ -32,7 +32,7 @@ test("bulk-archive: right-click opens the multi-select menu", async ({ page }) =
   const menu = popupBox();
   if (!menu) throw new Error("no context menu");
   // "Open in…" (the fourth row) opens a submenu on hover.
-  await xPointer(page, menu.x + 100, menu.y + 120);
+  xPointer(menu.x + 100, menu.y + 120);
   await settle(page, 900);
   await capture(page, {
     name: "15-bulk-archive-open-in",

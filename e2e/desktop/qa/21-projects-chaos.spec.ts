@@ -94,7 +94,7 @@ async function menuRow(page: Page, offset: number): Promise<boolean> {
   const menu = await openMenu(page);
   if (!menu) return false;
   const y = offset > 0 ? menu.y + offset : menu.y + menu.h + offset;
-  await xPointer(page, menu.x + 60, y, 1);
+  xPointer(menu.x + 60, y, 1);
   focusMain();
   await settle(page, 700);
   return true;
@@ -160,7 +160,7 @@ test("projects-chaos: targeted scenarios", async ({ page }) => {
   if (!menu) throw new Error("no menu");
   await escAll(page);
   focusMain();
-  await xPointer(page, 760, 40, 1);
+  xPointer(760, 40, 1);
 
   note("rename to the same name, then to empty, then to unicode");
   await rename(page, "Chaos one");
@@ -259,7 +259,7 @@ async function step(page: Page): Promise<string> {
       if (offset === 0) {
         await openMenu(page);
         focusMain();
-        await xPointer(page, 760, 40, 1);
+        xPointer(760, 40, 1);
         return "menu open+dismiss";
       }
       await menuRow(page, offset);
