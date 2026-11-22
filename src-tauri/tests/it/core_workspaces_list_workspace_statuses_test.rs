@@ -1,4 +1,4 @@
-use crate::common::TestRepo;
+use crate::common::{wait_until, TestRepo};
 use rusqlite::params;
 use treq_lib::local_db::get_local_db_path;
 
@@ -471,9 +471,9 @@ fn test_workspace_list_statuses_includes_last_activity_at_from_wc_tip() {
       .as_secs()
   };
   let older_second = unix_secs();
-  while unix_secs() == older_second {
-    std::thread::sleep(std::time::Duration::from_millis(10));
-  }
+  assert!(wait_until(std::time::Duration::from_secs(2), || {
+    unix_secs() != older_second
+  }));
 
   let newer = treq_lib::core::create_workspace(
     &repo.repo_path,

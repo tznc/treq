@@ -255,7 +255,6 @@ impl TestRepo {
     repo.remote_temp_dir =
       Some(TempDir::new().map_err(|e| format!("Failed to create remote temp dir: {}", e))?);
 
-    // Create a "remote" repository
     // Keep remote test infrastructure under Git metadata so jj never snapshots
     // the bare repository or temporary clones as working-copy content.
     let remote_dir = repo.remote_path();
@@ -295,7 +294,6 @@ impl TestRepo {
       "refs/remotes/origin/HEAD",
       &format!("refs/remotes/origin/{}", default_branch),
     )?;
-    // Create a remote branch with a commit for testing
     // The test expects a "feature.txt" file in the remote branch
     Self::gix_create_branch_at_head(&repo.repo_path, "feature-remote")?;
     Self::set_head_branch(&repo.repo_path, "feature-remote")?;
@@ -1283,3 +1281,5 @@ pub fn proptest_config(cases: u32) -> proptest::test_runner::Config {
     ..proptest::test_runner::Config::default()
   }
 }
+
+include!("wait.rs");

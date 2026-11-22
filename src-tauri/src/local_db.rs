@@ -4247,7 +4247,6 @@ mod tests {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let repo_path = temp_dir.path().to_str().unwrap();
 
-    // Create a workspace first
     let workspace_id = add_workspace(
       repo_path,
       "test".to_string(),
@@ -4259,7 +4258,6 @@ mod tests {
     )
     .expect("add_workspace should succeed");
 
-    // Save a pending review
     let comments = r#"[{"id":"c1","filePath":"test.txt","hunkId":"h1","startLine":1,"endLine":1,"lineContent":["+new"],"text":"Comment","createdAt":"2025-01-15T10:00:00Z"}]"#;
     let viewed_files = r#"["file1.txt","file2.txt"]"#;
     let summary = "Overall summary";
@@ -4296,7 +4294,6 @@ mod tests {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let repo_path = temp_dir.path().to_str().unwrap();
 
-    // Create a workspace
     let workspace_id = add_workspace(
       repo_path,
       "test".to_string(),
@@ -4343,7 +4340,6 @@ mod tests {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let repo_path = temp_dir.path().to_str().unwrap();
 
-    // Create a workspace
     let workspace_id = add_workspace(
       repo_path,
       "test".to_string(),
@@ -4355,7 +4351,6 @@ mod tests {
     )
     .expect("add_workspace should succeed");
 
-    // Save a review
     save_pending_review(
       repo_path,
       workspace_id,
@@ -4387,7 +4382,6 @@ mod tests {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let repo_path = temp_dir.path().to_str().unwrap();
 
-    // Create a workspace
     let workspace_id = add_workspace(
       repo_path,
       "test".to_string(),
@@ -4399,7 +4393,6 @@ mod tests {
     )
     .expect("add_workspace should succeed");
 
-    // Save a review
     save_pending_review(
       repo_path,
       workspace_id,
@@ -4434,7 +4427,6 @@ mod tests {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let repo_path = temp_dir.path().to_str().unwrap();
 
-    // Create a workspace
     let workspace_id = add_workspace(
       repo_path,
       "test".to_string(),
@@ -4465,7 +4457,6 @@ mod tests {
     // Wait a moment
     std::thread::sleep(std::time::Duration::from_millis(10));
 
-    // Update the review
     save_pending_review(
       repo_path,
       workspace_id,

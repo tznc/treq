@@ -14,7 +14,6 @@ fn test_list_repo_branches_handles_abandoned_commits() {
   let repo = TestRepo::new().expect("Failed to create test repo");
   let default_branch = repo.default_branch();
 
-  // Create a branch with a commit, then import it into jj.
   TestRepo::run_git(&repo.repo_path, &["checkout", "-b", "doomed"])
     .expect("Failed to create branch");
   repo

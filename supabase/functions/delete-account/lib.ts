@@ -43,6 +43,7 @@ import { fetchWithTimeout } from "../_shared/http/fetch-with-timeout.ts";
 import type { PlacementRow } from "../_shared/remote/migration-engine.ts";
 import { deleteInstanceMachines } from "../_shared/remote/placement-store.ts";
 import type { ManagedComputeProvider, ProviderKind } from "../_shared/remote/provider.ts";
+import { errorMessage } from "../_shared/error-message.ts";
 
 export type LiveInstance = {
   id: string;
@@ -156,7 +157,7 @@ export async function deleteAccount(
     } catch (err) {
       console.error(
         `[delete-account] delete instance ${instance.id} failed:`,
-        err instanceof Error ? err.message : String(err),
+        errorMessage(err),
       );
       return {
         status: 502,
@@ -205,7 +206,7 @@ export async function deleteAccount(
       } catch (err) {
         console.error(
           `[delete-account] cancel ${subscriptionId} failed:`,
-          err instanceof Error ? err.message : String(err),
+          errorMessage(err),
         );
         return {
           status: 502,
@@ -225,7 +226,7 @@ export async function deleteAccount(
     } catch (err) {
       console.warn(
         "[delete-account] Linear token revocation failed:",
-        err instanceof Error ? err.message : String(err),
+        errorMessage(err),
       );
     }
   }

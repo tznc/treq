@@ -37,12 +37,14 @@ const WEIGHTS = [5, 1, 0];
 // Each hit is weighted by column and by how rare the term is overall.
 export function score(blob: Uint8Array): number {
   const m = new Uint32Array(blob.buffer, blob.byteOffset, blob.byteLength / 4);
-  const [phrases, cols] = m;
+  const [phrases = 0, cols = 0] = m;
   let total = 0;
   for (let p = 0; p < phrases; p++) {
     for (let c = 0; c < cols; c++) {
       const i = 2 + 3 * (p * cols + c);
-      if (m[i]) total += (WEIGHTS[c] ?? 1) * m[i] / m[i + 1];
+      const hits = m[i];
+      const allHits = m[i + 1];
+      if (hits && allHits) total += (WEIGHTS[c] ?? 1) * hits / allHits;
     }
   }
   return total;
@@ -59,8 +61,9 @@ export function execSearch(db: Database, q: string): SearchResult[] {
      FROM docs_fts WHERE docs_fts MATCH ?`,
     [term],
   );
-  if (!res.length) return [];
-  return res[0].values
+  const [table] = res;
+  if (!table) return [];
+  return table.values
     .map(([title, url, excerpt, info]) => ({
       result: { title, url, excerpt } as SearchResult,
       rank: score(info as Uint8Array),

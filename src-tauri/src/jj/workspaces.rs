@@ -461,7 +461,7 @@ pub fn create_workspace(
 
   let new_ws_name: WorkspaceNameBuf = sanitized_name.clone().into();
 
-  // Initialize the new workspace (creates .jj, registers workspace, checks out root commit)
+  // init_workspace_with_existing_repo creates .jj, registers the workspace and checks out the root commit.
   let wc_factory = default_working_copy_factory();
   let (mut new_workspace, new_repo) = block_on(Workspace::init_workspace_with_existing_repo(
     &workspace_dir,
@@ -554,7 +554,7 @@ pub fn create_workspace(
     source_commit.id(),
   )?;
 
-  // Update the physical working copy to match the new wc commit
+  // The transaction only recorded the new wc commit; check it out so the files on disk match.
   block_on(new_workspace.check_out(verified_repo.op_id().clone(), None, &new_wc))
     .map_err(|e| JjError::GitWorkspaceError(format!("Failed to checkout workspace: {}", e)))?;
 

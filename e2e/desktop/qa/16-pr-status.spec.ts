@@ -29,7 +29,7 @@ for (const [branch, state, color] of [
       clip: await headerClip(page),
       expectations: [
         `The PR status is one fully rounded pill tinted ${color}, with a ${color} border`,
-        `'${state[0].toUpperCase()}${state.slice(1)}' reads in ${color} beside the state's PR icon`,
+        `'${state.charAt(0).toUpperCase()}${state.slice(1)}' reads in ${color} beside the state's PR icon`,
         "The open-on-web half shares the tint, split by a 1px divider in the same tone",
       ],
     });

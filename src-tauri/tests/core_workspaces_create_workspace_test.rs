@@ -1076,7 +1076,7 @@ fn test_create_workspace_parents_on_target_branch_tip_after_external_commit() {
     &["branch", "-f", default_branch, &initial_sha],
   )
   .expect("Failed to reset main");
-  // Create a temp branch to land the new commit, then move main there.
+  // commit_file commits on HEAD, so land the commit on a temp branch and move main there afterwards.
   TestRepo::run_git(&repo.repo_path, &["checkout", "-b", "tmp-advance"])
     .expect("Failed to create tmp branch");
   repo
@@ -1161,7 +1161,7 @@ fn test_create_workspace_sets_target_branch_in_db() {
 fn test_create_workspace_materializes_installed_library_skills() {
   let repo = TestRepo::new().expect("Failed to create test repo");
   let app_dir = repo.temp_dir.path().join("app-data");
-  fs::create_dir_all(&app_dir).expect("app data");
+  TestRepo::ensure_dir(&app_dir).expect("app data");
   let previous = std::env::var("TREQ_APP_DATA_DIR").ok();
   std::env::set_var("TREQ_APP_DATA_DIR", app_dir.to_str().unwrap());
 

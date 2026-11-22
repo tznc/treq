@@ -31,6 +31,7 @@ import {
   type RemoteInstanceDeps,
   type Reply,
 } from "../_shared/remote/instance-actions.ts";
+import { errorMessage } from "../_shared/error-message.ts";
 
 export type { RemoteInstanceDeps };
 
@@ -144,7 +145,7 @@ export async function handleRemoteInstanceAction(
     if (err instanceof HttpError) return reply({ status: err.status, body: { error: err.message, code: err.code } });
     const message = err instanceof ProviderError
       ? `provider ${err.kind}: ${err.message}`
-      : `failed: ${(err as Error).message}`;
+      : `failed: ${errorMessage(err)}`;
     logWithCorrelation(deps.correlationId, "error", `remote-instance action=${action} ${message}`);
     if (err instanceof ProviderError) {
       return reply({

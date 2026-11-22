@@ -497,10 +497,10 @@ export async function stepMigration(deps: EngineDeps, migrationId: string): Prom
           } catch (err) {
             // Lost to a concurrent cutover of this same target: fine.
             // Any other fence, source or role conflict is not ours to resolve.
-            const msg = (err as Error).message ?? "";
-            if (!/fence_mismatch|target_not_candidate|source_not_active/.test(msg)) throw err;
+            if (!(err instanceof Error)) throw err;
+            if (!/fence_mismatch|target_not_candidate|source_not_active/.test(err.message)) throw err;
             const now = await store.getPlacement(target.id);
-            if (now?.role !== "active") throw new StepFailure(msg);
+            if (now?.role !== "active") throw new StepFailure(err.message);
           }
         } else if (target.role !== "active") {
           throw new StepFailure(`target placement is ${target.role}`);

@@ -1,3 +1,4 @@
+use crate::gpui_shell::test_helpers::WindowHarness;
 use gpui_testing_library::Queries as _;
 use std::{cell::RefCell, rc::Rc, sync::Mutex};
 
@@ -201,6 +202,12 @@ struct Harness {
   host: Arc<FakeHost>,
 }
 
+impl WindowHarness for Harness {
+  fn cx(&mut self) -> &mut VisualTestContext {
+    &mut self.cx
+  }
+}
+
 impl Harness {
   fn new(cx: &mut TestAppContext, json: serde_json::Value, host: FakeHost) -> Self {
     let snapshot: OverlaySnapshot = serde_json::from_value(json).expect("parse");
@@ -220,25 +227,6 @@ impl Harness {
       sent,
       host,
     }
-  }
-
-  /// The window as the user sees it, once everything pending has run.
-  fn rendered(&mut self) -> gpui_testing_library::Screen {
-    self.cx.run_until_parked();
-    let window = self.cx.update(|window, _| window.window_handle());
-    let screen = gpui_testing_library::Screen::new(&self.cx, window);
-    screen.redraw();
-    screen
-  }
-
-  fn click(&mut self, selector: &'static str) {
-    self.cx.run_until_parked();
-    let bounds = self
-      .cx
-      .debug_bounds(selector)
-      .unwrap_or_else(|| panic!("{selector} is not drawn"));
-    self.cx.simulate_click(bounds.center(), Modifiers::none());
-    self.cx.run_until_parked();
   }
 
   fn keys(&mut self, keys: &str) {

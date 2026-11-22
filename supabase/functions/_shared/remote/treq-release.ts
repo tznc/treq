@@ -9,6 +9,7 @@
 
 import { allManifests, type BootManifest, type TreqSha256 } from "./boot-manifest.ts";
 import { ProviderError } from "./provider.ts";
+import { errorMessage } from "../error-message.ts";
 
 export interface ResolvedTreqRelease {
   version: string;
@@ -114,7 +115,7 @@ export function createTreqReleaseResolver(opts: TreqReleaseResolverOptions = {})
       }
       throw new ProviderError(
         "unavailable",
-        `cannot resolve a treq CLI release to bootstrap: ${(err as Error).message}; ` +
+        `cannot resolve a treq CLI release to bootstrap: ${errorMessage(err)}; ` +
           `manifest treq ${current?.treq_version} has no pinned digests`,
       );
     }

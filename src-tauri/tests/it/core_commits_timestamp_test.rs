@@ -2,7 +2,7 @@ use crate::common::TestRepo;
 
 fn parse_millis(timestamp: &str) -> i64 {
   chrono::DateTime::parse_from_rfc3339(timestamp)
-    .unwrap_or_else(|_| panic!("timestamp should be rfc3339, got {timestamp}"))
+    .unwrap_or_else(|e| panic!("timestamp should be rfc3339, got {timestamp}: {e}"))
     .timestamp_millis()
 }
 

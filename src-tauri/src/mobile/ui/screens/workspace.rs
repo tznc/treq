@@ -1074,7 +1074,10 @@ impl WorkspaceScreen {
     list(self.change_rows.clone(), move |ix, _, cx| {
       screen
         .update(cx, |this, cx| this.change_item(ix, cx))
-        .unwrap_or_else(|_| div().into_any_element())
+        .unwrap_or_else(|e| {
+          log::debug!("Drawing change row {ix} empty: the screen closed: {e}");
+          div().into_any_element()
+        })
     })
     .size_full()
     .into_any_element()

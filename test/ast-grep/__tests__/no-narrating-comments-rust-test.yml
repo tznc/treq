@@ -1,0 +1,37 @@
+id: no-narrating-comments-rust
+valid:
+  - |
+    // Seed the DB first: get_workspaces reads the row this test asserts on.
+    fn f() {}
+  - |
+    /// Create a workspace for `branch`.
+    fn create_workspace() {}
+  - |
+    //! Get the current operation from the op log.
+  - |
+    fn f() {
+      // Return early: an empty diff has nothing to annotate.
+      // Settings the user never saved fall back to defaults.
+      // Getting the lock twice would deadlock.
+      // Create them lazily: most sessions never open a terminal.
+    }
+invalid:
+  - |
+    // Create a workspace
+    fn f() {}
+  - |
+    fn f() {
+      // Get the workspace ID
+      let id = ws.id;
+    }
+  - |
+    fn f() {
+      let x = 1; // Set the flag
+    }
+  - |
+    fn f() {
+      // Check if the file exists
+      // Loop through the rows
+      // Iterate over an index
+      // Increment the counter
+    }
