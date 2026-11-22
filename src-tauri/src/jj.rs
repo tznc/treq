@@ -45,7 +45,8 @@ fn block_on<F: std::future::Future>(future: F) -> F::Output {
 fn working_copy_lock_key(workspace_path: &str) -> std::path::PathBuf {
   use std::path::Component;
   let path = std::path::Path::new(workspace_path);
-  std::fs::canonicalize(path).unwrap_or_else(|_| {
+  std::fs::canonicalize(path).unwrap_or_else(|error| {
+    tracing::debug!(%error, workspace_path, "keying the working-copy lock by the uncanonical path");
     path
       .components()
       .filter(|c| *c != Component::CurDir)
@@ -228,9 +229,10 @@ use crate::conflict_markers::{self, ConflictRegionView, ConflictStyle};
 use crate::local_db;
 
 fn chain_ignore_file(base: &Arc<GitIgnoreFile>, prefix: &str, path: PathBuf) -> Arc<GitIgnoreFile> {
-  base
-    .chain_with_file(prefix, path)
-    .unwrap_or_else(|_| base.clone())
+  base.chain_with_file(prefix, path).unwrap_or_else(|error| {
+    tracing::warn!(%error, prefix, "skipping an ignore file that could not be read");
+    base.clone()
+  })
 }
 
 fn repo_root_matcher() -> PrefixMatcher {
@@ -261,7 +263,10 @@ fn build_snapshot_base_ignores(ignore_root: &str) -> Arc<GitIgnoreFile> {
       Path::new("<treq builtins>"),
       b".jj/\n.treq/*\n!.treq/config.yaml\n!.treq/workflows/\n.jj*/\nnode_modules/\n.agents/skills/treq*/\n.claude/skills/treq*/\n",
     )
-    .unwrap_or_else(|_| GitIgnoreFile::empty());
+    .unwrap_or_else(|error| {
+      tracing::warn!(%error, "the built-in ignore rules did not parse");
+      GitIgnoreFile::empty()
+    });
 
   if let Some(global_excludes) = git_global_excludes_path(ignore_root) {
     base_ignores = chain_ignore_file(&base_ignores, "", global_excludes);
@@ -1079,7 +1084,10 @@ fn compute_commit_stats(
     let parent_tree = commit
       .parent_tree(repo.as_ref())
       .await
-      .unwrap_or_else(|_| repo.store().root_commit().tree());
+      .unwrap_or_else(|error| {
+        tracing::warn!(%error, commit = %commit.id().hex(), "counting stats against the root tree");
+        repo.store().root_commit().tree()
+      });
     let commit_tree = tree_override.cloned().unwrap_or_else(|| commit.tree());
     let conflict_labels = ConflictLabels::unlabeled();
     let copy_records = CopyRecords::default();
@@ -1136,9 +1144,24 @@ fn compute_commit_stats(
   })
 }
 
+/// The author time as RFC 3339, or the raw milliseconds when it is out of
+/// chrono's range.
+fn author_timestamp(commit: &jj_lib::commit::Commit) -> String {
+  let timestamp = &commit.author().timestamp;
+  timestamp
+    .to_datetime()
+    .map(|ts| ts.to_rfc3339())
+    .unwrap_or_else(|error| {
+      tracing::debug!(%error, commit = %commit.id().hex(), "author time is out of range");
+      timestamp.timestamp.0.to_string()
+    })
+}
+
 fn is_empty_commit(repo: &Arc<ReadonlyRepo>, commit: &jj_lib::commit::Commit) -> bool {
-  let parent_tree = block_on(commit.parent_tree(repo.as_ref()))
-    .unwrap_or_else(|_| repo.store().root_commit().tree());
+  let parent_tree = block_on(commit.parent_tree(repo.as_ref())).unwrap_or_else(|error| {
+    tracing::warn!(%error, commit = %commit.id().hex(), "comparing against the root tree");
+    repo.store().root_commit().tree()
+  });
   parent_tree.tree_ids() == commit.tree().tree_ids()
 }
 
@@ -1330,12 +1353,7 @@ fn build_log_commit(
       let change_id = HexPrefix::from_id(commit.change_id()).reverse_hex()[..12].to_string();
       let description = commit_description_first_line(commit);
       let author_name = commit.author().name.clone();
-      let timestamp = commit
-        .author()
-        .timestamp
-        .to_datetime()
-        .map(|ts| ts.to_rfc3339())
-        .unwrap_or_else(|_| commit.author().timestamp.timestamp.0.to_string());
+      let timestamp = author_timestamp(commit);
 
       let (insertions, deletions) = compute_commit_stats(repo, commit, tree_override);
 
@@ -1750,10 +1768,16 @@ fn build_user_settings(repo_path: &str) -> Result<UserSettings, JjError> {
   // Get system hostname and username
   let hostname = std::env::var("HOSTNAME")
     .or_else(|_| std::env::var("COMPUTERNAME")) // Windows fallback
-    .unwrap_or_else(|_| "treq".to_string());
+    .unwrap_or_else(|error| {
+      tracing::debug!(%error, "no HOSTNAME or COMPUTERNAME; using treq");
+      "treq".to_string()
+    });
   let username = std::env::var("USER")
     .or_else(|_| std::env::var("USERNAME")) // Windows fallback
-    .unwrap_or_else(|_| "treq".to_string());
+    .unwrap_or_else(|error| {
+      tracing::debug!(%error, "no USER or USERNAME; using treq");
+      "treq".to_string()
+    });
 
   // Build configuration with required fields
   let config_text = format!(
@@ -2196,8 +2220,7 @@ pub fn jj_shift_commit_timestamps(
     .map_err(|e| JjError::IoError(format!("Failed to load working-copy commit: {}", e)))?;
 
   let lineage = first_parent_lineage_from_target_to_wc(&target, &wc_commit)?;
-  let immutable_ref = resolve_target_branch_symbol(&loaded, workspace_path, target_branch)
-    .unwrap_or_else(|_| target_branch.to_string());
+  let immutable_ref = target_symbol_or_name(&loaded, workspace_path, target_branch);
   let immutable_revset = evaluate_revset(
     &loaded,
     &format!("::{}", format_revset_symbol(&immutable_ref)),
@@ -2301,8 +2324,7 @@ pub fn jj_shift_mutable_lineage_to_now(
     .get_commit(&wc_commit_id)
     .map_err(|e| JjError::IoError(format!("Failed to load working-copy commit: {}", e)))?;
 
-  let immutable_ref = resolve_target_branch_symbol(&loaded, workspace_path, target_branch)
-    .unwrap_or_else(|_| target_branch.to_string());
+  let immutable_ref = target_symbol_or_name(&loaded, workspace_path, target_branch);
   let immutable_revset = evaluate_revset(
     &loaded,
     &format!("::{}", format_revset_symbol(&immutable_ref)),
@@ -3131,7 +3153,7 @@ pub fn jj_split(
   // No old tree: the snapshot already moved tree_state, so a check would hit ConcurrentCheckout.
   update_workspace_after_history_edit(&mut loaded, &new_repo, None, CheckoutMode::Immediate)?;
 
-  // Set the bookmark to point at @- (critical - same as jj_commit)
+  // Like jj_commit: the committed half is now @-, so the branch bookmark must move there.
   jj_set_bookmark(workspace_path, &branch, "@-")
     .map_err(|e| JjError::IoError(format!("Failed to advance bookmark '{}': {}", branch, e)))?;
 
@@ -3569,12 +3591,7 @@ fn collect_bookmark_conflict_info(
       let Ok(commit) = loaded.repo.store().get_commit(commit_id) else {
         continue;
       };
-      let timestamp = commit
-        .author()
-        .timestamp
-        .to_datetime()
-        .map(|ts| ts.to_rfc3339())
-        .unwrap_or_else(|_| commit.author().timestamp.timestamp.0.to_string());
+      let timestamp = author_timestamp(&commit);
       let (insertions, deletions) = compute_commit_stats(&loaded.repo, &commit, None);
       let diff_summary = if insertions == 0 && deletions == 0 {
         String::new()
@@ -4324,6 +4341,19 @@ fn resolve_target_branch_symbol(
       "Target branch '{}' could not be resolved",
       target_branch
     ))
+  })
+}
+
+/// The resolved target branch symbol, or the bare name when it does not
+/// resolve (the immutability revset then uses the name as written).
+fn target_symbol_or_name(
+  loaded: &LoadedWorkspaceRepo,
+  workspace_path: &str,
+  target_branch: &str,
+) -> String {
+  resolve_target_branch_symbol(loaded, workspace_path, target_branch).unwrap_or_else(|error| {
+    tracing::debug!(%error, workspace_path, target_branch, "using the bare target name");
+    target_branch.to_string()
   })
 }
 

@@ -8,8 +8,7 @@
 // log (`<fixture>/app.log`, see harness.ts) must have no `panicked`.
 // `QA_SEED` and `CHAOS_STEPS` vary the monkey; the seed and the trail print.
 import { execFileSync } from "node:child_process";
-import { readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readdirSync, readFileSync, renameSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { port } from "../env.ts";
@@ -31,7 +30,11 @@ function random(): number {
   t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 }
-const pick = <T>(items: T[]): T => items[Math.floor(random() * items.length)];
+const pick = <T>(items: T[]): T => {
+  const item = items[Math.floor(random() * items.length)];
+  if (item === undefined) throw new Error("pick from an empty list");
+  return item;
+};
 
 /** This run's fixture: the parent of the app's HOME (see harness.ts). */
 function fixtureRoot(): string {

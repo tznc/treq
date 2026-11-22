@@ -1,0 +1,9 @@
+id: no-narrating-comments-tsx
+valid:
+  - |
+    // The handoff token is single use, so mint it only after sign-in succeeds.
+    const el = <Callback token={token} />;
+invalid:
+  - |
+    // Create a one-time token for desktop auth handoff
+    const el = <Callback token={token} />;

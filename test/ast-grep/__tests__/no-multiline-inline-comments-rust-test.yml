@@ -1,0 +1,48 @@
+id: no-multiline-inline-comments-rust
+valid:
+  - |
+    fn one_line() {
+      // One line of context.
+      run();
+    }
+  - |
+    impl Worker {
+      /// Starts the worker.
+      ///
+      /// Returns once the first job is queued.
+      pub fn start(&self) {}
+    }
+  - |
+    mod inner {
+      //! Inner module docs
+      //! that span lines.
+    }
+  - |
+    fn separated() {
+      // First step.
+
+      // Second step.
+      run();
+    }
+  - |
+    fn trailing() {
+      let a = 1; // first
+      let b = 2; // second
+    }
+  - |
+    // Module-level comments are not indented
+    // and may span lines.
+    fn top() {}
+invalid:
+  - |
+    fn two_lines() {
+      // First line of context
+      // continues here.
+      run();
+    }
+  - |
+    fn block() {
+      /* First line
+         second line */
+      run();
+    }

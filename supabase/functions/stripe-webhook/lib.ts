@@ -15,6 +15,7 @@ import {
 } from "../_shared/billing/plans.ts";
 import { verifyStripeSignature } from "../_shared/billing/stripe-signature.ts";
 import type { StripeClient } from "../_shared/billing/stripe-api.ts";
+import { errorMessage } from "../_shared/error-message.ts";
 
 type SubscriptionEventType =
   | "customer.subscription.created"
@@ -375,7 +376,7 @@ async function resolveTie(
       `/v1/subscriptions/${encodeURIComponent(subscriptionId)}`,
     );
   } catch (err) {
-    return fail(err instanceof Error ? err.message : String(err));
+    return fail(errorMessage(err));
   }
 
   const args = subscriptionSnapshotArgs(current, nowSeconds);

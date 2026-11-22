@@ -60,7 +60,7 @@ function BranchEditor({
   const add = () =>
     onChange([
       ...branches,
-      { name: `branch-${branches.length + 1}`, color: DEFAULT_COLORS[branches.length % DEFAULT_COLORS.length] },
+      { name: `branch-${branches.length + 1}`, color: DEFAULT_COLORS[branches.length % DEFAULT_COLORS.length] ?? '#888' },
     ]);
 
   const remove = (i: number) => onChange(branches.filter((_, idx) => idx !== i));
@@ -116,7 +116,9 @@ function CommitEditor({
     onChange(commits.map((c, idx) => (idx === i ? { ...c, [field]: val } : c)));
 
   const toggleParent = (i: number, parentId: string) => {
-    const current = commits[i].parents;
+    const commit = commits[i];
+    if (!commit) return;
+    const current = commit.parents;
     const next = current.includes(parentId)
       ? current.filter((p) => p !== parentId)
       : [...current, parentId];

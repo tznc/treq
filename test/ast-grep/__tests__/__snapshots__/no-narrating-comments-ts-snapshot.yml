@@ -1,0 +1,26 @@
+id: no-narrating-comments-ts
+snapshots:
+  ? |
+    // Check if the user exists
+    // Loop over the rows
+    // Parse the body
+  : labels:
+    - source: // Check if the user exists
+      style: primary
+      start: 0
+      end: 27
+  ? |
+    // Create a one-time token for desktop auth handoff
+    const token = createToken();
+  : labels:
+    - source: // Create a one-time token for desktop auth handoff
+      style: primary
+      start: 0
+      end: 51
+  ? |
+    const url = base; // Set the production url of your site here
+  : labels:
+    - source: // Set the production url of your site here
+      style: primary
+      start: 18
+      end: 61

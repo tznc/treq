@@ -1,7 +1,6 @@
-use crate::common::TestRepo;
+use crate::common::{wait_until, TestRepo};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
-use std::thread;
 use std::time::Duration;
 use treq_lib::pty::{line_matches_auto_command, strip_ansi_codes, PtyManager, PtyOutput};
 
@@ -23,20 +22,9 @@ fn make_callback(output: &Arc<Mutex<String>>) -> PtyOutput {
 
 /// Helper: wait for output buffer to contain a substring (with timeout).
 fn wait_for_output(output: &Arc<Mutex<String>>, needle: &str, timeout_ms: u64) -> bool {
-  let start = std::time::Instant::now();
-  let timeout = Duration::from_millis(timeout_ms);
-  loop {
-    {
-      let buf = output.lock().unwrap();
-      if buf.contains(needle) {
-        return true;
-      }
-    }
-    if start.elapsed() > timeout {
-      return false;
-    }
-    thread::sleep(Duration::from_millis(50));
-  }
+  wait_until(Duration::from_millis(timeout_ms), || {
+    output.lock().unwrap().contains(needle)
+  })
 }
 
 /// Helper: wait until the buffer holds any output (the shell prompt), or the timeout passes.
@@ -46,14 +34,9 @@ fn wait_for_shell_ready(output: &Arc<Mutex<String>>, timeout_ms: u64) {
 
 /// Helper: wait until the buffer grows past `len` bytes (with timeout).
 fn wait_for_output_len_above(output: &Arc<Mutex<String>>, len: usize, timeout_ms: u64) -> bool {
-  let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms);
-  while std::time::Instant::now() < deadline {
-    if output.lock().unwrap().len() > len {
-      return true;
-    }
-    thread::sleep(Duration::from_millis(20));
-  }
-  false
+  wait_until(Duration::from_millis(timeout_ms), || {
+    output.lock().unwrap().len() > len
+  })
 }
 
 #[cfg(unix)]
@@ -241,12 +224,8 @@ fn test_session_lifecycle_and_io() {
     "closing again should still succeed (idempotent)"
   );
 
-  let deadline = std::time::Instant::now() + Duration::from_secs(3);
-  while std::time::Instant::now() < deadline && is_process_alive(pid) {
-    thread::sleep(Duration::from_millis(50));
-  }
   assert!(
-    !is_process_alive(pid),
+    wait_until(Duration::from_secs(3), || !is_process_alive(pid)),
     "Process should be terminated after close. pid={pid}"
   );
 }
@@ -583,6 +562,9 @@ fn test_suppress_echo_at_creation_filters_initial_prompt() {
 
   // Use `true` so only the echo is filtered, not command output
   let filter_cmd = "true # creation-filter-unique-ident-1234567890";
+  // A first command that leaves a file: once it exists, the shell has
+  // printed its prompt (filtered, since the filter is active) and run it.
+  let ready = std::path::Path::new(&repo.repo_path).join("shell-ready");
   manager
     .create_session(
       "test-creation-filter".to_string(),
@@ -590,14 +572,15 @@ fn test_suppress_echo_at_creation_filters_initial_prompt() {
       Some(repo.repo_path),
       None,
       Vec::new(),
-      None,
+      Some(format!("echo ready > '{}'", ready.display())),
       Some(filter_cmd.to_string()),
       make_callback(&output),
     )
     .expect("create_session should succeed");
-
-  // Wait for shell prompt to be emitted (and filtered since filter is active)
-  thread::sleep(Duration::from_millis(500));
+  assert!(
+    wait_until(Duration::from_secs(30), || ready.exists()),
+    "the shell never ran its first command"
+  );
 
   // The initial prompt should have been suppressed.
   {
@@ -633,8 +616,9 @@ fn test_suppress_echo_at_creation_filters_initial_prompt() {
   let _ = manager.close_session("test-creation-filter");
 }
 
-/// Starts a session whose echo filter is set for `command`, types the command
-/// the way ptyWriteSuppressEcho does, and returns the visible output lines.
+/// Starts a session, and once its shell has printed the prompt, sets the echo
+/// filter for `command` and types it the way ptyWriteSuppressEcho does.
+/// Returns the output lines shown after the prompt.
 #[cfg(unix)]
 fn run_filtered_command(session_id: &str, command: &str, until: &str) -> Vec<String> {
   let repo = TestRepo::new_without_init().expect("Failed to create test repo");
@@ -647,11 +631,19 @@ fn run_filtered_command(session_id: &str, command: &str, until: &str) -> Vec<Str
       Some("/bin/sh".to_string()),
       Vec::new(),
       None,
-      Some(command.to_string()),
+      None,
       make_callback(&output),
     )
     .expect("create_session should succeed");
-  thread::sleep(Duration::from_millis(300));
+  // Typed before the prompt, the command's echo would come ahead of it.
+  assert!(
+    wait_for_output_len_above(&output, 0, 5000),
+    "the shell printed no prompt"
+  );
+  output.lock().unwrap().clear();
+  manager
+    .set_auto_command(session_id, command)
+    .expect("set the echo filter");
   manager
     .write_to_session(session_id, &format!("{command}\r"))
     .expect("write filtered command");

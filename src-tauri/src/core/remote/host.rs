@@ -417,9 +417,7 @@ pub(super) fn decode_base64(input: &str) -> Result<Vec<u8>, String> {
   Ok(out)
 }
 
-// ---------------------------------------------------------------------------
 // Native (Phase 4) SSH exec transport for typed commands
-// ---------------------------------------------------------------------------
 //
 // Every reachable connection path, managed or user-managed, goes through the
 // pooled native `russh` transport below and in

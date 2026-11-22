@@ -33,8 +33,8 @@ const allPlatforms = [
 test.describe('pickDownloads', () => {
   test('macOS gets the arm64 DMG with an Intel DMG link', () => {
     const { primary, secondary } = pickDownloads(macOnly, UA.mac);
-    expect(primary).toEqual({ href: macOnly[0].url, label: 'Download for macOS', platform: 'mac-arm64' });
-    expect(secondary).toEqual({ href: macOnly[1].url, label: 'Intel Mac', platform: 'mac-x64' });
+    expect(primary).toEqual({ href: macOnly[0]?.url, label: 'Download for macOS', platform: 'mac-arm64' });
+    expect(secondary).toEqual({ href: macOnly[1]?.url, label: 'Intel Mac', platform: 'mac-x64' });
   });
 
   test('Windows prefers the setup.exe over the msi', () => {

@@ -7,6 +7,7 @@
 
 import { parseUserGrant, type UserGrant } from "../_shared/github/user-token.ts";
 import type { Result } from "./lib.ts";
+import { errorMessage } from "../_shared/error-message.ts";
 
 export type StoredGrant = UserGrant & { updatedAt: string };
 
@@ -88,7 +89,7 @@ export async function githubUserToken(deps: UserTokenDeps): Promise<Result> {
     // reconnect once this token expires; this request still gets it.
     console.error(
       "[integration-proxy] storing the refreshed GitHub token failed:",
-      err instanceof Error ? err.message : String(err),
+      errorMessage(err),
     );
   }
   return issued(fresh);

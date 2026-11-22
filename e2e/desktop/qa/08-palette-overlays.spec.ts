@@ -8,7 +8,7 @@ import { home, mod, openWorkspace, settle } from "./helpers.ts";
 
 test.describe.configure({ mode: "serial" });
 
-test("palette-overlays: command palette", async ({ page, context }) => {
+test("palette-overlays: command palette", async ({ page }) => {
   await openWorkspace(page, "feat/empty-event-message");
   await page.keyboard.press(`${mod}+k`);
   const palette = page;
@@ -109,7 +109,6 @@ test("palette-overlays: file picker", async ({ page }) => {
 
 test("palette-overlays: shortcuts, go to workspace, prompt history, branch switcher", async ({
   page,
-  context,
 }) => {
   await home(page);
   await page.getByRole("tab", { name: "Commits" }).click();

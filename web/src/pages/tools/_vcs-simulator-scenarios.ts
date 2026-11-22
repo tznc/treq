@@ -780,7 +780,7 @@ const GIT_WORKTREES: Scenario = {
 
 // ── Export ────────────────────────────────────────────────────────────────────
 
-export const SCENARIOS: Scenario[] = [
+export const SCENARIOS: [Scenario, ...Scenario[]] = [
   GIT_BRANCH_MERGE,
   GIT_BRANCH_REBASE,
   JJ_STACKED,

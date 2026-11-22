@@ -4,7 +4,7 @@ mod tests {
   use std::io::Write;
   use std::sync::atomic::{AtomicBool, Ordering};
   use std::sync::Arc;
-  use std::time::{Duration, Instant};
+  use std::time::Duration;
   use tempfile::TempDir;
 
   #[cfg(unix)]
@@ -56,14 +56,10 @@ mod tests {
     // The invoking path returns a join handle immediately; work happens on
     // the blocking pool. We must observe the subprocess start without the
     // caller thread being stuck inside `Command::output`.
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while !started.load(Ordering::SeqCst) {
-      assert!(
-        Instant::now() < deadline,
-        "gh_create_pr blocking task never started"
-      );
-      std::thread::sleep(Duration::from_millis(10));
-    }
+    assert!(
+      crate::test_repo::wait_until(Duration::from_secs(2), || started.load(Ordering::SeqCst)),
+      "gh_create_pr blocking task never started"
+    );
 
     let number = join.join().expect("worker thread").unwrap();
     assert_eq!(number, 11);

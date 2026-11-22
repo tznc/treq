@@ -103,7 +103,7 @@ export default function RoadmapGraphicTabs({
     );
   }
 
-  const slot = year.quarters[active];
+  const slot = year.quarters[active] ?? year.quarters[0];
   const planned = isQuarterPlanned(slot);
 
   return (
