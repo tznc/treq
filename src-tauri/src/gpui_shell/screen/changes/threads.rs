@@ -5,7 +5,7 @@
 use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
-use gpui_kit::base::TestSupportExt as _;
+use gpui_kit::base::{ObservedElement, TestSupportExt as _};
 use std::time::Duration;
 
 use gpui::{AnyElement, StrikethroughStyle, StyledText, Task};
@@ -337,6 +337,7 @@ impl ChangesView {
     {
       let mut list = div()
         .debug_selector(|| "agent-review-inline-list".into())
+        .test_support()
         .border_y_1()
         .border_color(violet(p, 0.3))
         .bg(violet(p, 0.03))
@@ -383,6 +384,7 @@ impl ChangesView {
         "github-outdated-threads-{path}"
       )))
       .debug_selector(|| "github-outdated-threads".into())
+      .test_support()
       .role(gpui::Role::Group)
       .aria_label(format!("Outdated threads on {path}"))
       .border_b_1()
@@ -430,6 +432,7 @@ impl ChangesView {
     let mut toggle = div()
       .id(SharedString::from(format!("github-thread-{}", thread.id)))
       .debug_selector(|| "github-thread-toggle".into())
+      .test_support()
       .role(gpui::Role::Button)
       .aria_label(if collapsed {
         "Show review thread"
@@ -556,6 +559,7 @@ impl ChangesView {
       // One card per thread; replies follow flush, split by a rule.
       let mut comments = div()
         .debug_selector(|| "github-thread-comments".into())
+        .test_support()
         .min_w_0()
         .flex()
         .flex_col()
@@ -568,6 +572,7 @@ impl ChangesView {
         let id = comment.id.clone();
         let mut c = div()
           .debug_selector(move || format!("github-comment-{id}"))
+          .test_support()
           .child(self.thread_comment(comment, lines, path, anchor.clone(), line, side, p, cx));
         if i > 0 {
           c = c.border_t_1().border_color(p.border.opacity(0.6));
@@ -582,7 +587,7 @@ impl ChangesView {
 
   /// A GitHub comment's text, its ```` ```suggestion ```` block drawn as a
   /// diff against the line it replaces rather than as a code block.
-  fn github_comment_body(&self, comment: &GhReviewComment, lines: usize, p: &Palette) -> Div {
+  fn github_comment_body(&self, comment: &GhReviewComment, lines: usize, p: &Palette) -> ObservedElement<Div> {
     let md = |key: &str, text: &str| {
       super::super::code::markdown(
         format!("github-comment-{}{key}", comment.id),
@@ -591,7 +596,9 @@ impl ChangesView {
         self.dark,
       )
     };
-    let body = div().debug_selector(|| "github-comment-body".into());
+    let body = div()
+      .debug_selector(|| "github-comment-body".into())
+      .test_support();
     let Some(s) = crate::core::review::parse_suggestion(&comment.body) else {
       return body.child(md("", &comment.body));
     };
@@ -665,6 +672,7 @@ impl ChangesView {
         .child(
           div()
             .debug_selector(|| "github-comment-quote".into())
+            .test_support()
             .child(
               self.tip(
                 format!("quote-{}", comment.id),
@@ -706,6 +714,7 @@ impl ChangesView {
         comment.id
       )))
       .debug_selector(|| "agent-review-comment-card".into())
+      .test_support()
       .max_w(zpx(CARD_MAX_W))
       .role(gpui::Role::Group)
       .aria_label(format!(
@@ -898,6 +907,7 @@ pub(in crate::gpui_shell::screen) fn suggestion_box(
       let mut el = ui::text(div(), TextSize::Sm)
         .id("agent-review-suggestion")
         .debug_selector(|| "agent-review-suggestion".into())
+        .test_support()
         .role(gpui::Role::Group)
         .aria_label("Suggestion")
         .font_family(theme::MONO_FONT);

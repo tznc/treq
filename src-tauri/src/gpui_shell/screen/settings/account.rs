@@ -2120,6 +2120,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
   let sizes = (!c.sizes.is_empty()).then(|| {
     div()
       .debug_selector(|| "cloud-size-picker".into())
+      .test_support()
       .flex()
       .flex_col()
       .gap_1()
@@ -2171,6 +2172,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
           // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .debug_selector(|| "cloud-idle-stop".into())
+            .test_support()
             .text_color(p.muted_foreground)
             .child(eta),
         )
@@ -2255,6 +2257,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
         .unwrap_or_default();
       div()
         .debug_selector(|| "cloud-spend-capped".into())
+        .test_support()
         .mt_3()
         .child(
           ui::Alert::new("cloud-spend-capped-alert", "Monthly spend cap reached", p)
@@ -2303,6 +2306,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
     div()
       .mt_3()
       .debug_selector(|| "cloud-migration-alert".into())
+      .test_support()
       .child(
         ui::Alert::new("cloud-migration", m.title, p)
           .severity(if m.stuck {
@@ -2314,7 +2318,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
       )
   });
   let resize_confirm = c.resize_confirm.clone().map(|lines| {
-    div().debug_selector(|| "cloud-resize-confirm-alert".into()).child(
+    div().debug_selector(|| "cloud-resize-confirm-alert".into()).test_support().child(
       ui::Alert::new("cloud-resize-unpushed", "Resizing loses unpushed work", p)
         .severity(ui::Severity::Warning)
         .message(format!(
@@ -2365,7 +2369,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
           )
           .child(
             div()
-              .debug_selector(|| "cloud-disk-usage".into())
+              .debug_selector(|| "cloud-disk-usage".into()).test_support()
               .h(zpx(6.))
               .rounded_full()
               .overflow_hidden()
@@ -2529,6 +2533,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
       this.child(
         ui::text(div().mt_3(), TextSize::Sm)
           .debug_selector(|| "cloud-credential-invalid".into())
+          .test_support()
           .text_color(red)
           .child(message),
       )
@@ -2848,7 +2853,7 @@ impl SettingsView {
       }));
     div()
       .id("byos-provider-keys")
-      .debug_selector(|| "byos-provider-keys".into())
+      .debug_selector(|| "byos-provider-keys".into()).test_support()
       .flex()
       .flex_col()
       .gap_2()
@@ -2874,6 +2879,7 @@ impl SettingsView {
     div()
       .id("team-profile")
       .debug_selector(|| "team-profile".into())
+      .test_support()
       .flex()
       .flex_col()
       .gap_2()
@@ -3105,6 +3111,7 @@ impl SettingsView {
     };
     div()
       .debug_selector(|| "cloud-spend-cap".into())
+      .test_support()
       .flex()
       .flex_col()
       .gap_1()
@@ -3513,6 +3520,7 @@ impl SettingsView {
         let id = format!("integration-status-{}", card.id);
         move || id
       })
+      .test_support()
       .flex()
       .items_center()
       .gap_1p5()
@@ -3637,6 +3645,7 @@ impl SettingsView {
             this.child(
               ui::text(div(), TextSize::Sm)
                 .debug_selector(|| "github-repositories".into())
+                .test_support()
                 .border_t_1()
                 .border_color(p.border)
                 .py_2()

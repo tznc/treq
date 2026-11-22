@@ -293,6 +293,7 @@ impl RenderOnce for Dialog {
         div()
           .id(SharedString::from(format!("{}-body", self.id)))
           .debug_selector(move || body_selector)
+          .test_support()
           .flex_auto()
           .min_h_0()
           .overflow_y_scroll()
@@ -447,6 +448,7 @@ impl Dialog {
         div().flex().justify_center().pt_2().child(
           div()
             .debug_selector(|| "sheet-grabber".into())
+            .test_support()
             .w(px(36.))
             .h(px(4.))
             .rounded_full()
@@ -484,6 +486,7 @@ impl Dialog {
         el.child(
           div()
             .debug_selector(move || description_selector)
+            .test_support()
             .text_size(px(SHEET_BODY_PX))
             .line_height(px(SHEET_BODY_PX + 5.))
             .text_color(p.muted_foreground)

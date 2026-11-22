@@ -368,6 +368,7 @@ impl RenderOnce for Tabs {
             el.child(
               div()
                 .debug_selector(move || id)
+                .test_support()
                 .when(bar, |el| {
                   el.absolute().top(zpx(6.)).left(gpui::relative(0.6))
                 })

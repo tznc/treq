@@ -11,7 +11,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
-use gpui_kit::base::TestSupportExt as _;
+use gpui_kit::base::{ObservedElement, TestSupportExt as _};
 use gpui_kit::component::input::{InputEvent, InputState};
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
@@ -224,6 +224,7 @@ fn input(id: &'static str, state: &Entity<InputState>, p: &Palette) -> impl Into
   div()
     .id(id)
     .debug_selector(|| id.into())
+    .test_support()
     .w_full()
     .h(zpx(34.))
     .px_2()
@@ -244,7 +245,7 @@ fn caption(text: &'static str) -> impl IntoElement {
 
 /// The directory browser: home and the path's breadcrumbs, Show hidden,
 /// and the folders in it; a folder opens on click.
-fn browser(form: &Form, react: &ActionSink, p: &Palette) -> Div {
+fn browser(form: &Form, react: &ActionSink, p: &Palette) -> ObservedElement<Div> {
   let crumbs = crumbs(&form.path);
   let last = crumbs.len().saturating_sub(1);
   let crumb_row = div()
@@ -345,6 +346,7 @@ fn browser(form: &Form, react: &ActionSink, p: &Palette) -> Div {
   };
   div()
     .debug_selector(|| "remote-browser".into())
+    .test_support()
     .flex()
     .flex_col()
     .rounded(radius::MD)
@@ -367,6 +369,7 @@ fn browser(form: &Form, react: &ActionSink, p: &Palette) -> Div {
       div()
         .id("remote-browse-folders")
         .debug_selector(|| "remote-browse-folders".into())
+        .test_support()
         .max_h(zpx(260.))
         .overflow_y_scroll()
         .p_1()
@@ -376,7 +379,7 @@ fn browser(form: &Form, react: &ActionSink, p: &Palette) -> Div {
     )
 }
 
-fn selector(form: &Form, inputs: &Inputs, react: &ActionSink, p: &Palette, cx: &App) -> Div {
+fn selector(form: &Form, inputs: &Inputs, react: &ActionSink, p: &Palette, cx: &App) -> ObservedElement<Div> {
   let here_is_repo = form.listing.as_ref().is_some_and(|l| l.is_repo);
   let listed = form.listing.is_some();
   let clone_url = inputs
@@ -480,6 +483,7 @@ fn selector(form: &Form, inputs: &Inputs, react: &ActionSink, p: &Palette, cx: &
   });
   div()
     .debug_selector(|| "remote-repository-selector".into())
+    .test_support()
     .flex()
     .flex_col()
     .gap_3()
@@ -497,10 +501,10 @@ pub fn render(
   _dark: bool,
   p: &Palette,
   cx: &App,
-) -> Div {
+) -> ObservedElement<Div> {
   let cutoff = form.cutoff.as_ref().map(|reason| {
     ui::text(div(), TextSize::Sm)
-      .debug_selector(|| "remote-repo-cutoff".into())
+      .debug_selector(|| "remote-repo-cutoff".into()).test_support()
       .rounded(radius::MD)
       .border_1()
       .border_color(Tone::Danger.border(p))
@@ -528,6 +532,7 @@ pub fn render(
   let show_selector = form.selector && form.cutoff.is_none();
   div()
     .debug_selector(|| "remote-repo-form".into())
+    .test_support()
     .flex()
     .flex_col()
     .gap_3()

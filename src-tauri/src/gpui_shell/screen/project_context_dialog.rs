@@ -4,6 +4,7 @@
 
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
+use gpui_kit::base::TestSupportExt as _;
 use std::sync::Arc;
 
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
@@ -259,7 +260,7 @@ impl Render for ProjectContextDialog {
           .child(label("Instructions"))
           .child(
             div()
-              .debug_selector(|| "project-context-prompt".into())
+              .debug_selector(|| "project-context-prompt".into()).test_support()
               .min_h(zpx(90.))
               .child(ui::text(Textarea::new(&prompt), TextSize::Sm)),
           )
@@ -280,7 +281,7 @@ impl Render for ProjectContextDialog {
           .child(
             div()
               .id("project-context-paths")
-              .debug_selector(|| "project-context-paths".into())
+              .debug_selector(|| "project-context-paths".into()).test_support()
               .min_h(zpx(70.))
               .rounded_md()
               .drag_over::<ExternalPaths>(move |style, _, _, _| {

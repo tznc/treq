@@ -1,6 +1,7 @@
 //! A shell window's toasts, drawn in that window above its screen and
 //! dialogs, in its bottom-left corner. `toasts` keeps each window's list.
 
+use gpui_kit::base::TestSupportExt as _;
 use std::rc::Rc;
 
 use tauri_plugin_gpui::gpui::{self, div, prelude::*, svg, AnyElement, App, SharedString};
@@ -68,6 +69,7 @@ fn item(toast: &Toast, palette: Palette, on_click: ToastClick) -> AnyElement {
   div()
     .id(SharedString::from(selector.clone()))
     .debug_selector(move || selector)
+    .test_support()
     .flex()
     .items_start()
     .gap_3()
@@ -140,6 +142,7 @@ fn item(toast: &Toast, palette: Palette, on_click: ToastClick) -> AnyElement {
         div()
           .id("close")
           .debug_selector(move || close_selector)
+          .test_support()
           .role(gpui::Role::Button)
           .aria_label("Dismiss")
           .group("close")

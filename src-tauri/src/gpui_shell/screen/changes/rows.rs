@@ -460,6 +460,7 @@ impl ChangesView {
   pub(super) fn diff_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
     div()
       .debug_selector(|| "changes-diff-list".into())
+      .test_support()
       .size_full()
       .child(
         list(
@@ -572,6 +573,7 @@ impl ChangesView {
                 }))
             }),
         )
+        .test_support()
         .child(
           div()
             .flex_1()

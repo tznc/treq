@@ -354,6 +354,7 @@ impl Render for SaveProjectDialog {
               div()
                 .id("save-project-name")
                 .debug_selector(|| "save-project-name".into())
+                .test_support()
                 .w_full()
                 .child(Styled::h(ui::input(&input).disabled(pending), zpx(32.))),
             )
@@ -375,6 +376,7 @@ impl Render for SaveProjectDialog {
             this.child(
               ui::text(div(), TextSize::Sm)
                 .debug_selector(|| "save-project-error".into())
+                .test_support()
                 .text_color(p.destructive)
                 .child(self.error.clone()),
             )

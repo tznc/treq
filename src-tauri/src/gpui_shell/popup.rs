@@ -10,6 +10,7 @@
 use crate::gpui_shell::ui::zpx;
 use crate::gpui_shell::ui::{self, radius, TextSize};
 use crate::result_ext::ResultExt;
+use gpui_kit::base::TestSupportExt as _;
 use std::{
   cell::{Cell, RefCell},
   collections::HashMap,
@@ -820,6 +821,7 @@ impl PopupView {
           // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .debug_selector(|| "tooltip-kbd".into())
+            .test_support()
             .h(zpx(KBD_HEIGHT))
             .min_w(zpx(KBD_HEIGHT))
             .px(zpx(KBD_PADDING_X))
@@ -1141,6 +1143,7 @@ fn menu_indicator(row: ui::Row, mark: Option<gpui::AnyElement>) -> ui::Row {
   row.pl(zpx(RADIO_INSET)).overlay(
     div()
       .debug_selector(|| "menu-indicator".into())
+      .test_support()
       .absolute()
       .top_0()
       .bottom_0()

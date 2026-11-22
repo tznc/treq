@@ -11,7 +11,7 @@ use std::{
   time::Duration,
 };
 
-use gpui_kit::base::TestSupportExt as _;
+use gpui_kit::base::{ObservedElement, TestSupportExt as _};
 use serde::{Deserialize, Serialize};
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, px, svg, Animation, AnimationExt as _, AnyElement, App, ClickEvent,
@@ -784,6 +784,7 @@ impl Render for Sidebar {
     let mut sidebar = ui::text(div(), TextSize::Sm)
       .id("sidebar")
       .debug_selector(|| "sidebar".into())
+      .test_support()
       .relative()
       .flex()
       .flex_col()
@@ -844,6 +845,7 @@ impl Render for Sidebar {
     let list = div()
       .id("workspaces")
       .debug_selector(|| "workspaces".into())
+      .test_support()
       .flex_1()
       .min_h_0()
       // A click on the empty list clears the selection; it is not a control.
@@ -927,10 +929,11 @@ impl Render for Sidebar {
 
 /// The webview modal's backdrop, continued over the sidebar in the same
 /// translucent black. It takes every click and hover.
-fn modal_backdrop(palette: &Palette, opacity: f32) -> gpui::Stateful<gpui::Div> {
+fn modal_backdrop(palette: &Palette, opacity: f32) -> ObservedElement<gpui::Stateful<gpui::Div>> {
   div()
     .id("modal-backdrop")
     .debug_selector(|| "modal-backdrop".into())
+    .test_support()
     .absolute()
     .inset_0()
     .bg(palette.scrim().alpha(opacity.clamp(0., 1.)))
@@ -1447,6 +1450,7 @@ impl Sidebar {
     div()
       .id("resize-handle")
       .debug_selector(|| "resize-handle".into())
+      .test_support()
       .absolute()
       .top_0()
       .bottom_0()
@@ -1575,6 +1579,7 @@ impl Sidebar {
           this.child(
             div()
               .debug_selector(move || format!("conflict-{id}"))
+              .test_support()
               .child(ui::Dot::new(Tone::Danger, "Conflict", palette)),
           )
         },
@@ -1652,6 +1657,7 @@ impl Sidebar {
             let selector = format!("{prefix}workspace-{id}-title");
             move || selector
           })
+          .test_support()
           .flex_1()
           .min_w_0()
           .truncate()
@@ -1769,6 +1775,7 @@ fn skeleton_row(index: usize, palette: &Palette) -> impl IntoElement {
   let width = [70., 55., 80., 60., 75., 50.][index % 6];
   div()
     .debug_selector(move || format!("skeleton-{index}"))
+    .test_support()
     .flex()
     .items_center()
     .gap_2()

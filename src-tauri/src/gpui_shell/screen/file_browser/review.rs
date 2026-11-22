@@ -17,6 +17,7 @@ impl FileBrowserView {
   ) -> impl IntoElement {
     let mut section = ui::text(div(), TextSize::Sm)
       .debug_selector(|| "file-comment-section".into())
+      .test_support()
       .border_b_1()
       .border_color(p.border)
       .bg(comment_section_fill(p))
@@ -95,6 +96,7 @@ impl FileBrowserView {
                 .role(gpui::Role::Button)
                 .aria_label("Delete comment")
                 .debug_selector(|| "delete-comment".into())
+                .test_support()
                 .flex_none()
                 .p_1()
                 .rounded(radius::SM)
@@ -122,6 +124,7 @@ impl FileBrowserView {
     let empty = self.edit_text.trim().is_empty();
     div()
       .debug_selector(|| "comment-edit".into())
+      .test_support()
       .flex()
       .flex_col()
       .gap_2()
@@ -179,6 +182,7 @@ impl FileBrowserView {
     let empty = self.draft_text.trim().is_empty();
     div()
       .debug_selector(|| "comment-input".into())
+      .test_support()
       .bg(p.muted)
       .border_1()
       .border_color(p.border)
@@ -253,6 +257,7 @@ impl FileBrowserView {
       .role(gpui::Role::CheckBox)
       .aria_label("Use an idle agent")
       .debug_selector(|| "use-idle-agent".into())
+      .test_support()
       .flex()
       .items_center()
       .gap_1p5()
@@ -287,6 +292,7 @@ impl FileBrowserView {
     let panel = div()
       .id("finish-review-popover")
       .debug_selector(|| "finish-review-popover".into())
+      .test_support()
       .w(zpx(width))
       .relative()
       .p_4()

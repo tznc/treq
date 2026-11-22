@@ -12,7 +12,7 @@ use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::sync::Arc;
 
-use gpui_kit::base::TestSupportExt as _;
+use gpui_kit::base::{ObservedElement, TestSupportExt as _};
 use gpui_kit::component::input::{
   Input, InputEvent, InputState, MoveEnd, MoveHome, MoveToEnd, MoveToStart,
 };
@@ -191,10 +191,11 @@ impl Popover {
     width: f32,
     padding: f32,
     p: &Palette,
-  ) -> gpui::Stateful<gpui::Div> {
+  ) -> ObservedElement<gpui::Stateful<gpui::Div>> {
     div()
       .id(id)
       .debug_selector(move || id.into())
+      .test_support()
       .w(zpx(width))
       .p(zpx(padding))
       .rounded(radius::MD)
@@ -256,6 +257,7 @@ impl Render for Popover {
       // A dismiss target, not a control.
       .cursor_default()
       .debug_selector(|| "header-popover-backdrop".into())
+      .test_support()
       .track_focus(&self.focus)
       // The workspace view places it at the window's origin; it covers the
       // window.

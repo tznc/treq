@@ -23,7 +23,7 @@ use std::{
   time::Duration,
 };
 
-use gpui_kit::base::TestSupportExt as _;
+use gpui_kit::base::{ObservedElement, TestSupportExt as _};
 use gpui_kit::component::{
   input::{Escape, Textarea, TextareaState},
   text::{TextView, TextViewStyle},
@@ -1061,7 +1061,11 @@ impl CodeView {
     );
   }
 
-  fn close_menu_on_outside(&self, panel: Stateful<Div>, cx: &mut Context<Self>) -> Stateful<Div> {
+  fn close_menu_on_outside(
+    &self,
+    panel: ObservedElement<Stateful<Div>>,
+    cx: &mut Context<Self>,
+  ) -> ObservedElement<Stateful<Div>> {
     panel.dismiss_with("code-menu", cx, |view, cx| {
       let open = view.menu.take().is_some();
       if open {
@@ -1098,10 +1102,11 @@ fn section(p: &Palette) -> Div {
 }
 
 /// A dropdown's panel (`DropdownMenuContent`), drawn over the tab.
-pub(super) fn menu_panel(id: &'static str, p: &Palette) -> Stateful<Div> {
+pub(super) fn menu_panel(id: &'static str, p: &Palette) -> ObservedElement<Stateful<Div>> {
   div()
     .id(id)
     .debug_selector(move || id.into())
+    .test_support()
     .absolute()
     .p_1()
     .rounded(radius::MD)
@@ -1328,6 +1333,7 @@ fn skeleton(p: &Palette) -> impl IntoElement {
   let bar = |h: f32| div().h(zpx(h)).rounded(radius::SM).bg(p.muted.opacity(0.4));
   div()
     .debug_selector(|| "workspace-overview-skeleton".into())
+    .test_support()
     .flex()
     .flex_col()
     .gap_4()
@@ -1703,6 +1709,7 @@ impl CodeView {
     let panel = div()
       .id("workspace-about-github")
       .debug_selector(|| "workspace-about-github".into())
+      .test_support()
       .role(gpui::Role::Group)
       .aria_label("Pull request on GitHub")
       .flex()
@@ -1750,6 +1757,7 @@ impl CodeView {
     let card = div()
       .id("workspace-description")
       .debug_selector(|| "workspace-description".into())
+      .test_support()
       .role(gpui::Role::Group)
       .aria_label("Description")
       .relative();
@@ -1822,6 +1830,7 @@ impl CodeView {
             .child(
               ui::text(div(), TextSize::Sm)
                 .debug_selector(|| "workspace-description-input".into())
+                .test_support()
                 .child(Textarea::new(&draft).aria_label("Workspace description")),
             )
             .child(
@@ -1990,6 +1999,7 @@ impl CodeView {
           .max_w(zpx(220.))
           .truncate()
           .debug_selector(|| "workspace-branch".into())
+          .test_support()
           .child(card.branch.clone()),
       );
     if let Some(target) = &card.target {
@@ -2621,6 +2631,7 @@ impl CodeView {
         div()
           .id(id)
           .debug_selector(move || id.into())
+          .test_support()
           .mt_1()
           .w(zpx(360.))
           .p_2()
@@ -3054,6 +3065,7 @@ fn loc_indicator(
   };
   div()
     .debug_selector(|| "workspace-loc-indicator".into())
+    .test_support()
     .flex()
     .items_center()
     .gap_1p5()

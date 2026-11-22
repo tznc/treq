@@ -9,7 +9,7 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
-use gpui_kit::base::TestSupportExt as _;
+use gpui_kit::base::{ObservedElement, TestSupportExt as _};
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, AnyElement, Context, Div, FontWeight, Hsla, SharedString,
 };
@@ -215,6 +215,7 @@ impl Popover {
           ui::text(div(), TextSize::Sm)
             .id(SharedString::from(format!("checks-workflow-{i}")))
             .debug_selector(move || format!("checks-workflow-{i}"))
+            .test_support()
             .flex()
             .items_center()
             .gap_2()
@@ -326,7 +327,7 @@ impl Popover {
     after_treq: bool,
     p: &Palette,
     cx: &mut Context<Self>,
-  ) -> Div {
+  ) -> ObservedElement<Div> {
     let p = *p;
     let mut checks: Vec<&PrCheckEntry> = ci.checks.iter().collect();
     checks.sort_by_key(|c| severity(c));
@@ -359,6 +360,7 @@ impl Popover {
           el.role(gpui::Role::Link).aria_label(check.name.clone())
         })
         .debug_selector(move || selector)
+        .test_support()
         .w_full()
         .flex()
         .items_center()
@@ -404,6 +406,7 @@ impl Popover {
     });
     div()
       .debug_selector(|| "checks-github".into())
+      .test_support()
       .when(after_treq, |this| {
         this.mt_2().border_t_1().border_color(p.border).pt_2()
       })

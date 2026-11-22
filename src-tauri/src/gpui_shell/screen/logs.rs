@@ -11,7 +11,7 @@
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use crate::result_ext::ResultExt;
-use gpui_kit::base::TestSupportExt as _;
+use gpui_kit::base::{ObservedElement, TestSupportExt as _};
 use std::{cell::RefCell, collections::HashMap, ops::Range, rc::Rc, time::Duration};
 
 use gpui_kit::component::input::{Escape, InputEvent, InputState, Textarea, TextareaState};
@@ -796,10 +796,11 @@ impl LogsView {
     min_width: f32,
     disabled: bool,
     p: &Palette,
-  ) -> gpui::Stateful<Div> {
+  ) -> ObservedElement<gpui::Stateful<Div>> {
     ui::text(div(), TextSize::Sm)
       .id(key)
       .debug_selector(move || key.into())
+      .test_support()
       .role(gpui::Role::ComboBox)
       .aria_label(SharedString::from(format!("{name}: {label}")))
       .relative()
@@ -831,6 +832,7 @@ impl LogsView {
     };
     ui::text(div(), TextSize::Sm)
       .debug_selector(move || label.into())
+      .test_support()
       .ml_auto()
       .h_8()
       .w(zpx(384.))
@@ -1076,18 +1078,20 @@ impl LogsView {
   }
 
   /// `LogFeed`.
-  fn feed(&mut self, records: Rc<Vec<LogRecordView>>, p: &Palette, cx: &mut Context<Self>) -> Div {
+  fn feed(&mut self, records: Rc<Vec<LogRecordView>>, p: &Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
     let spec = feed_spec(self.source);
     if records.is_empty() {
       let (title, why) = self.empty_message();
       return div()
         .debug_selector(move || spec.output.into())
+        .test_support()
         .flex_1()
         .child(
           ui::EmptyState::new("logs-empty", title, p)
             .icon(theme::ICON_FILE_TEXT)
             .message(why),
-        );
+        )
+        .into_any_element();
     }
     let selected = self.selection.selected.len();
     let multi = self.selection.multi;
@@ -1214,6 +1218,7 @@ impl LogsView {
           .children(self.find_bar(p, cx)),
       )
       .children(inspected.map(|record| self.inspect_panel(&record, p, cx)))
+      .into_any_element()
   }
 
   fn rows(
@@ -1294,9 +1299,10 @@ impl LogsView {
       .collect()
   }
 
-  fn inspect_panel(&self, record: &LogRecordView, p: &Palette, cx: &mut Context<Self>) -> Div {
+  fn inspect_panel(&self, record: &LogRecordView, p: &Palette, cx: &mut Context<Self>) -> ObservedElement<Div> {
     ui::text(div(), TextSize::Sm)
       .debug_selector(|| "log-inspect-panel".into())
+      .test_support()
       .flex_none()
       .border_t_1()
       .border_color(p.border)
@@ -1360,6 +1366,7 @@ impl LogsView {
       div()
         .id("logs-find")
         .debug_selector(|| "logs-find".into())
+        .test_support()
         .absolute()
         .top_2()
         .right_3()
@@ -1596,7 +1603,7 @@ impl LogsView {
   }
 
   /// `LogsSqlExplorer`.
-  fn explorer(&self, p: &Palette, cx: &mut Context<Self>) -> Div {
+  fn explorer(&self, p: &Palette, cx: &mut Context<Self>) -> ObservedElement<Div> {
     let has_result = self.explorer.result.is_some() && self.explorer.error.is_none();
     let bar = div()
       .flex()
@@ -1643,6 +1650,7 @@ impl LogsView {
       .child(
         ui::text(div(), TextSize::Sm)
           .debug_selector(|| "sql-editor".into())
+          .test_support()
           .font_family(theme::MONO_FONT)
           .children(self.explorer.input.as_ref().map(|input| {
             ui::text(
@@ -1753,6 +1761,7 @@ impl LogsView {
     }
     div()
       .debug_selector(|| "logs-sql-explorer".into())
+      .test_support()
       .flex_1()
       .min_h_0()
       .flex()
@@ -1845,6 +1854,7 @@ impl LogsView {
     let mut list = div()
       .id("logs-filter-list")
       .debug_selector(|| "logs-filter-list".into())
+      .test_support()
       .w(zpx(width))
       .p_1()
       .rounded(radius::MD)
@@ -1974,7 +1984,7 @@ impl Render for LogsView {
     self.matches = find_matches(&shown, &self.find.query);
     self.visible = shown.clone();
     let body = if self.source == Source::Checks && self.explorer_open {
-      self.explorer(&p, cx)
+      self.explorer(&p, cx).into_any_element()
     } else {
       let bar = match self.source {
         Source::Agent => self.agent_bar(&p, cx).into_any_element(),
@@ -1985,7 +1995,7 @@ impl Render for LogsView {
         _ => "Loading logs…",
       };
       let feed = if self.records.is_none() {
-        self.pending(loading, &p)
+        self.pending(loading, &p).into_any_element()
       } else {
         self.feed(shown, &p, cx)
       };
@@ -2001,11 +2011,13 @@ impl Render for LogsView {
             .flatten(),
         )
         .child(feed)
+        .into_any_element()
     };
     let popover = self.popover(&p, cx);
     div()
       .id("logs-tab")
       .debug_selector(|| "logs-tab".into())
+      .test_support()
       .size_full()
       .flex()
       .flex_col()

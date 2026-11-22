@@ -625,6 +625,7 @@ impl ChangesView {
           .role(gpui::Role::Button)
           .aria_label("Reply")
           .debug_selector(|| "github-thread-reply".into())
+          .test_support()
           .font_family(theme::SANS_FONT)
           .text_color(muted)
           .cursor_pointer()
@@ -640,6 +641,7 @@ impl ChangesView {
     Some(
       div()
         .debug_selector(|| "github-thread-reply-box".into())
+        .test_support()
         .flex()
         .flex_col()
         .gap_1p5()
@@ -694,6 +696,7 @@ impl ChangesView {
                 .role(gpui::Role::Button)
                 .aria_label("Send reply")
                 .debug_selector(|| "github-thread-reply-send".into())
+                .test_support()
                 .rounded(radius::SM)
                 .bg(p.primary)
                 .text_color(p.primary_foreground)

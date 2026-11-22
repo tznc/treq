@@ -309,6 +309,7 @@ impl Render for WorkspaceDeletion {
     let dialog = div()
       .id("workspace-deletion")
       .debug_selector(|| "workspace-deletion".into())
+      .test_support()
       .w(viewport.width * 0.4)
       .map(|el| ui::floating(el, &p))
       .bg(p.background)

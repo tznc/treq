@@ -609,6 +609,7 @@ impl PrReviewView {
     div()
       .id("pr-review-files")
       .debug_selector(|| "pr-review-files".into())
+      .test_support()
       .w_64()
       .flex_none()
       .border_r_1()
@@ -744,6 +745,7 @@ impl PrReviewView {
     let own = self.own_pr();
     let mut radios = div()
       .debug_selector(|| "pr-review-events".into())
+      .test_support()
       .flex()
       .flex_col()
       .gap_2();
@@ -815,6 +817,7 @@ impl PrReviewView {
     let panel = div()
       .id("pr-review-popover")
       .debug_selector(|| "pr-review-popover".into())
+      .test_support()
       .w(zpx(width))
       .p_4()
       .rounded(radius::MD)
@@ -851,6 +854,7 @@ impl PrReviewView {
           .child(
             ui::text(div(), TextSize::Sm)
               .debug_selector(|| "pr-review-pending".into())
+              .test_support()
               .text_color(p.muted_foreground)
               .child(finish_text(postable.len(), outdated)),
           ),

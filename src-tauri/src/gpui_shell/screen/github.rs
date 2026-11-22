@@ -1211,6 +1211,7 @@ impl Render for GithubView {
     let dialogs = self.dialogs(&p, window, cx);
     div()
       .debug_selector(|| "github-panel".into())
+      .test_support()
       .size_full()
       .flex()
       .bg(p.background)
@@ -1392,6 +1393,7 @@ impl GithubView {
       div()
         .id("github-search")
         .debug_selector(|| "github-search".into())
+        .test_support()
         .flex_1()
         .min_w(zpx(160.))
         .max_w(zpx(320.))

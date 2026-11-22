@@ -2,6 +2,7 @@
 //! picker of GitHub's eight reactions that adds or removes the user's own.
 
 use crate::gpui_shell::ui::radius;
+use gpui_kit::base::TestSupportExt as _;
 use tauri_plugin_gpui::gpui::{deferred, div, img, prelude::*, Context, Div, SharedString};
 
 use crate::{
@@ -180,6 +181,7 @@ fn picker<V: Reacts>(
     div()
       .id(SharedString::from(format!("reaction-picker-{id}")))
       .debug_selector(|| "reaction-picker".into())
+      .test_support()
       .absolute()
       .top(zpx(28.))
       .left_0()

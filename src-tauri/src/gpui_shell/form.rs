@@ -305,6 +305,7 @@ pub fn input_field(
   div()
     .id(id)
     .debug_selector(move || selector)
+    .test_support()
     .w_full()
     .child(
       // `Input::h` sets a multi-line height; a single line takes its own.
@@ -336,6 +337,7 @@ pub fn select_field(
   div()
     .id(id.clone())
     .debug_selector(move || selector)
+    .test_support()
     .w_full()
     .child(
       Select::new(state)
@@ -360,6 +362,7 @@ pub fn small_select_field(
   div()
     .id(id.clone())
     .debug_selector(move || selector)
+    .test_support()
     .w_full()
     .child(
       Select::new(state)

@@ -1030,6 +1030,7 @@ impl GithubView {
             div()
               .id("github-checks-list")
               .debug_selector(|| "github-checks-list".into())
+              .test_support()
               .max_h(zpx(data::CHECKS_MAX_HEIGHT))
               .overflow_y_scroll()
               .border_1()

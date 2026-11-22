@@ -1,6 +1,7 @@
 //! Cards: a surface for one object, with an optional header, a body and a
 //! footer of actions (Bootstrap's card, MUI's outlined and elevated paper).
 
+use gpui_kit::base::{ObservedElement, TestSupportExt as _};
 use gpui::{
   div, prelude::*, AnyElement, App, ClickEvent, Div, MouseButton, Role, SharedString, Window,
 };
@@ -196,7 +197,7 @@ impl RenderOnce for Card {
     let id = self.id.clone();
     let part = |name: &str| {
       let selector = format!("{id}-{name}");
-      div().debug_selector(move || selector)
+      div().debug_selector(move || selector).test_support()
     };
     let name = self
       .label
@@ -241,7 +242,7 @@ impl RenderOnce for Card {
         )
         .children(h.action)
     });
-    let body: Option<Div> = has_body.then(|| {
+    let body: Option<ObservedElement<Div>> = has_body.then(|| {
       part("body")
         .flex()
         .flex_col()
@@ -272,6 +273,7 @@ impl RenderOnce for Card {
     div()
       .id(self.id)
       .debug_selector(move || selector)
+      .test_support()
       .flex()
       .flex_col()
       .min_w_0()

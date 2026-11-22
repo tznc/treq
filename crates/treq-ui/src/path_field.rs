@@ -2,6 +2,7 @@
 
 use std::{path::PathBuf, rc::Rc};
 
+use gpui_kit::base::TestSupportExt as _;
 use gpui::{div, prelude::*, App, ExternalPaths, PathPromptOptions, SharedString, Window};
 
 use crate::{text, theme, theme::Palette, zpx, Button, Size, TextSize, Variant};
@@ -129,6 +130,7 @@ impl RenderOnce for PathField {
     };
     let value = div()
       .debug_selector(move || selector)
+      .test_support()
       .flex_1()
       .min_w_0()
       .h_full()

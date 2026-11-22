@@ -448,6 +448,7 @@ impl ProjectHomeView {
             let id = format!("project-home-changes-{i}");
             move || id
           })
+          .test_support()
           .flex()
           .flex_col()
           .rounded_lg()
@@ -708,6 +709,7 @@ impl ProjectHomeView {
     div()
       .id("project-home-commits")
       .debug_selector(|| "project-home-commits".into())
+      .test_support()
       .overflow_x_scroll()
       .child(
         div()
@@ -803,6 +805,7 @@ fn activity_chart(counts: Vec<u32>, line: gpui::Hsla, base: gpui::Hsla) -> impl 
   let max = counts.iter().copied().max().unwrap_or(0).max(1) as f32;
   div()
     .debug_selector(|| "project-home-activity".into())
+    .test_support()
     .flex_1()
     .h(zpx(36.))
     .child(
@@ -893,6 +896,7 @@ impl Render for ProjectHomeView {
     div()
       .id("project-home")
       .debug_selector(|| "project-home".into())
+      .test_support()
       .size_full()
       .overflow_y_scroll()
       .bg(p.background)

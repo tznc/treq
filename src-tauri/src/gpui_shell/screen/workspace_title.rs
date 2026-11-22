@@ -4,6 +4,7 @@
 //! draft" keeps it here until the next push.
 
 use crate::gpui_shell::native::Toast;
+use gpui_kit::base::TestSupportExt as _;
 use std::sync::Arc;
 
 use gpui_kit::component::input::{Enter, Escape, InputEvent, Textarea, TextareaState};
@@ -222,6 +223,7 @@ impl Render for TitleEditor {
     };
     let panel = div()
       .debug_selector(|| "workspace-title".into())
+      .test_support()
       .flex()
       .items_center()
       .gap_1()
@@ -233,6 +235,7 @@ impl Render for TitleEditor {
             .min_w_0()
             .truncate()
             .debug_selector(|| "workspace-title-text".into())
+            .test_support()
             .child(self.title.clone()),
         )
         .child(
@@ -264,6 +267,7 @@ impl Render for TitleEditor {
         heading(div())
           .w(zpx(320.))
           .debug_selector(|| "workspace-title-input".into())
+          .test_support()
           .child(Textarea::new(&draft)),
       )
       .child(

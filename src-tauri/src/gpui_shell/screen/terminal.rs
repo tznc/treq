@@ -25,7 +25,7 @@ use std::{
 };
 
 use futures::StreamExt as _;
-use gpui_kit::base::TestSupportExt as _;
+use gpui_kit::base::{ObservedElement, TestSupportExt as _};
 use gpui_kit::component::{
   input::{Escape, Input, InputEvent, InputState},
   Sizable,
@@ -308,12 +308,13 @@ pub fn cursor_div(
   (w, h): (f32, f32),
   (focused, on): (bool, bool),
   color: gpui::Hsla,
-) -> Div {
+) -> ObservedElement<Div> {
   // Plain pixels: the cell already carries the zoom, so rems would apply
   // it twice and move the cursor off its row.
   let origin = cell_origin(row, col, (w, h));
   let base = div()
     .debug_selector(|| "terminal-cursor".into())
+    .test_support()
     .absolute()
     .top(origin.y)
     .left(origin.x)
@@ -1546,6 +1547,7 @@ impl TerminalView {
       div()
         .id(id)
         .debug_selector(move || id.into())
+        .test_support()
         .size_5()
         .flex()
         .items_center()
@@ -1803,15 +1805,16 @@ impl TerminalView {
     if let Some(target) = self.remote_target() {
       return self.remote_overlay(&target.clone(), p, cx);
     }
-    self.local_overlay(p, cx).map(IntoElement::into_any_element)
+    self.local_overlay(p, cx)
   }
 
-  fn local_overlay(&self, p: &Palette, cx: &mut Context<Self>) -> Option<Div> {
+  fn local_overlay(&self, p: &Palette, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
     match &self.status {
       Status::Ready => None,
       Status::Preparing => Some(
         div()
           .debug_selector(|| "terminal-preparing".into())
+          .test_support()
           .absolute()
           .inset_0()
           .flex()
@@ -1825,7 +1828,8 @@ impl TerminalView {
             16.,
             p.muted_foreground,
           ))
-          .child(ui::text(div(), TextSize::Sm).child("Preparing terminal…")),
+          .child(ui::text(div(), TextSize::Sm).child("Preparing terminal…"))
+          .into_any_element(),
       ),
       Status::AgentFailed(error) => Some(
         div()
@@ -1844,13 +1848,15 @@ impl TerminalView {
               .text_center()
               .text_color(p.muted_foreground)
               .child(format!("Failed to start agent: {error}")),
-          ),
+          )
+          .into_any_element(),
       ),
       Status::Failed(error) => {
         let error = error.clone();
         Some(
           div()
             .debug_selector(|| "terminal-error".into())
+            .test_support()
             .absolute()
             .inset_0()
             .p_6()
@@ -1896,7 +1902,8 @@ impl TerminalView {
                         ),
                     ),
                 ),
-            ),
+            )
+          .into_any_element(),
         )
       }
     }
@@ -1920,6 +1927,7 @@ impl Render for TerminalView {
     div()
       .id(SharedString::from(format!("terminal-{}", self.pty)))
       .debug_selector(|| "terminal-body".into())
+      .test_support()
       .key_context(TERMINAL_CONTEXT)
       .track_focus(&self.focus)
       .relative()
@@ -3472,6 +3480,7 @@ impl TerminalPane {
               "terminal-send-previews-drop-{column_id}"
             )))
             .debug_selector(|| "terminal-send-previews-drop".into())
+            .test_support()
             .relative()
             .px_3()
             .pb_8()
@@ -3602,6 +3611,7 @@ impl TerminalPane {
       div()
         .id(id)
         .debug_selector(move || id.into())
+        .test_support()
         .role(gpui::Role::Button)
         .aria_label(name)
         .size_5()
@@ -3796,6 +3806,7 @@ impl TerminalPane {
             )
           })
           .debug_selector(|| "terminal-workspace-loc".into())
+          .test_support()
           .child(super::workspace::loc_count(
             format!("+{}", loc.insertions),
             ui::Tone::DiffAdded.text(tones),
@@ -3852,6 +3863,7 @@ impl TerminalPane {
       .role(gpui::Role::Button)
       .aria_label("Close terminal")
       .debug_selector(|| "terminal-close".into())
+      .test_support()
       .flex()
       .items_center()
       .justify_center()
@@ -3935,6 +3947,7 @@ impl TerminalPane {
           .role(gpui::Role::Button)
           .aria_label("Search terminal")
           .debug_selector(|| "terminal-search-button".into())
+          .test_support()
           .h_6()
           .px_2()
           .flex()
@@ -4303,6 +4316,7 @@ impl TerminalPane {
         let (on_asset, on_files) = (view.clone(), view.clone());
         div()
           .debug_selector(move || state)
+          .test_support()
           .when(dimmed, |d| d.opacity(DIMMED_OPACITY))
           .relative()
           .flex_1()

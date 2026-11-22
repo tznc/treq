@@ -5,6 +5,7 @@
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
+use gpui_kit::base::TestSupportExt as _;
 use std::{sync::Arc, time::Duration};
 
 use gpui_kit::component::input::{Escape, InputEvent, InputState, MoveDown, MoveUp};
@@ -197,6 +198,7 @@ impl Render for FilePicker {
     let dialog = div()
       .id("file-picker")
       .debug_selector(|| "file-picker".into())
+      .test_support()
       .w(width)
       .map(|el| ui::floating(el, &p))
       .bg(p.background)

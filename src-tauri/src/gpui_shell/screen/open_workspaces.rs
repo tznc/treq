@@ -918,6 +918,7 @@ impl OpenWorkspacesDialog {
         .child(
           div()
             .debug_selector(move || selector.into())
+            .test_support()
             .child(ui::text(
               Textarea::new(area).aria_label(label).disabled(self.pending),
               TextSize::Sm,
@@ -943,6 +944,7 @@ impl OpenWorkspacesDialog {
             div()
               .id("open-workspaces-stack-on")
               .debug_selector(|| "open-workspaces-stack-on".into())
+              .test_support()
               .w(zpx(240.))
               .map(|this| match select {
                 Some(state) => this.child(ui::text(
@@ -1025,7 +1027,7 @@ impl OpenWorkspacesDialog {
           .child(field_label("Workspaces"))
           .child(
             div()
-              .debug_selector(|| "open-workspaces-lines".into())
+              .debug_selector(|| "open-workspaces-lines".into()).test_support()
               .child(ui::text(
                 Textarea::new(lines)
                   .aria_label("Workspaces")
@@ -1041,7 +1043,7 @@ impl OpenWorkspacesDialog {
       .when(!self.errors.is_empty(), |this| {
         this.child(
           ui::text(div(), TextSize::Sm)
-            .debug_selector(|| "open-workspaces-errors".into())
+            .debug_selector(|| "open-workspaces-errors".into()).test_support()
             .flex()
             .flex_col()
             .gap_1()
@@ -1267,6 +1269,7 @@ impl OpenWorkspacesDialog {
     let divider = div()
       .id("open-workspaces-integrations-divider")
       .debug_selector(|| "open-workspaces-integrations-divider".into())
+      .test_support()
       .h(zpx(1.))
       .w_full()
       .flex_none()
@@ -1598,6 +1601,7 @@ fn pane(
             .flex_1()
             .min_w_0()
             .debug_selector(move || format!("{id}-search"))
+            .test_support()
             .child(ui::text(
               Styled::h(
                 search.prefix(ui::icon(theme::ICON_SEARCH, 14., p.muted_foreground)),

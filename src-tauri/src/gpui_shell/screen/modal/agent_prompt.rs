@@ -9,7 +9,7 @@ use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
 
-use gpui_kit::base::TestSupportExt as _;
+use gpui_kit::base::{ObservedElement, TestSupportExt as _};
 use gpui_kit::component::{
   input::{
     Enter, Escape, IndentInline, InputEvent, InputState, MoveDown, MoveUp, Textarea, TextareaState,
@@ -987,6 +987,7 @@ impl AgentPromptView {
               .role(gpui::Role::Button)
               .aria_label("Remove issue")
               .debug_selector(|| "issue-chip-remove".into())
+              .test_support()
               .ml_0p5()
               .p_0p5()
               .rounded(radius::SM)
@@ -1017,6 +1018,7 @@ impl AgentPromptView {
     let issue = self.issue.clone();
     div()
       .debug_selector(|| "agent-task-input".into())
+      .test_support()
       .w_full()
       .child(
         div()
@@ -1073,6 +1075,7 @@ impl AgentPromptView {
           .child(
             ui::text(div(), TextSize::Sm)
               .debug_selector(|| "task-input".into())
+              .test_support()
               // The textarea's own 4px inset makes up React's `px-4`.
               .px_3()
               .pt_3()
@@ -1100,6 +1103,7 @@ impl AgentPromptView {
   ) -> impl IntoElement {
     div()
       .debug_selector(|| "task-mentions".into())
+      .test_support()
       .mx_2()
       .mb_1()
       .rounded(radius::LG)
@@ -1277,9 +1281,9 @@ impl AgentPromptView {
 
   fn close_menu_on_outside(
     &self,
-    panel: Stateful<gpui::Div>,
+    panel: ObservedElement<Stateful<gpui::Div>>,
     cx: &mut Context<Self>,
-  ) -> Stateful<gpui::Div> {
+  ) -> ObservedElement<Stateful<gpui::Div>> {
     panel.on_mouse_down_out(cx.listener(|view, _, _, cx| {
       if view.menu.take().is_some() {
         cx.notify();

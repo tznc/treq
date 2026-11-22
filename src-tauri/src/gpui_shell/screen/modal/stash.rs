@@ -5,7 +5,7 @@ use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
-use gpui_kit::base::TestSupportExt as _;
+use gpui_kit::base::{ObservedElement, TestSupportExt as _};
 use gpui_kit::component::input::{Escape, InputEvent, InputState, MoveDown, MoveUp};
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
@@ -431,10 +431,11 @@ impl StashView {
 }
 
 impl StashView {
-  fn list(&self, entries: &[StashEntry], p: &Palette, cx: &mut Context<Self>) -> gpui::Div {
+  fn list(&self, entries: &[StashEntry], p: &Palette, cx: &mut Context<Self>) -> ObservedElement<gpui::Div> {
     let muted = p.muted_foreground;
     div()
       .debug_selector(|| "stash-list".into())
+      .test_support()
       .w(zpx(288.))
       .flex_none()
       .h_full()
@@ -513,9 +514,10 @@ impl StashView {
       )
   }
 
-  fn detail(&mut self, p: &Palette, cx: &mut Context<Self>) -> gpui::Div {
+  fn detail(&mut self, p: &Palette, cx: &mut Context<Self>) -> ObservedElement<gpui::Div> {
     let pane = div()
       .debug_selector(|| "stash-detail".into())
+      .test_support()
       .flex_1()
       .min_w_0()
       .h_full()
@@ -746,6 +748,7 @@ impl StashView {
       .role(gpui::Role::Dialog)
       .aria_label("Apply stash")
       .debug_selector(|| "stash-apply-popover".into())
+      .test_support()
       .absolute()
       .top(zpx(32.))
       .right_0()
@@ -781,6 +784,7 @@ impl StashView {
           .child(
             div()
               .debug_selector(|| "stash-apply-workspace-select".into())
+              .test_support()
               .w_full()
               .child(ui::input(&input).appearance(false).bordered(false).flex_1()),
           ),

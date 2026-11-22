@@ -11,7 +11,7 @@ use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
-use gpui_kit::base::TestSupportExt as _;
+use gpui_kit::base::{ObservedElement, TestSupportExt as _};
 use gpui_kit::component::{
   input::{Escape, Input, InputEvent, InputState, MoveDown, MoveUp, Textarea, TextareaState},
   select::{Select, SelectEvent, SelectState},
@@ -950,13 +950,14 @@ impl WorkspaceDialog {
 
 /// `text-xs text-muted-foreground hover:text-foreground`, as the dialog's
 /// small text buttons.
-fn text_button(id: &'static str, label: &'static str, p: &Palette) -> Stateful<Div> {
+fn text_button(id: &'static str, label: &'static str, p: &Palette) -> ObservedElement<Stateful<Div>> {
   let fg = p.foreground;
   // Short label (['button label']): 11px is fine.
   // ast-grep-ignore: gpui-text-xs-short-label-only
   ui::text(div(), TextSize::Xs)
     .id(id)
     .debug_selector(move || id.into())
+    .test_support()
     .flex()
     .items_center()
     .gap_1()
@@ -1094,6 +1095,7 @@ impl WorkspaceDialog {
         ui::text(div(), TextSize::Xs)
           .id(id)
           .debug_selector(move || id.into())
+          .test_support()
           .px_2p5()
           .py_1()
           .rounded(radius::SM)
@@ -1180,6 +1182,7 @@ impl WorkspaceDialog {
             Some(state) => div()
               .id("target-workspace")
               .debug_selector(|| "target-workspace".into())
+              .test_support()
               .w_full()
               .child(
                 ui::text(
@@ -1203,6 +1206,7 @@ impl WorkspaceDialog {
               div()
                 .id("workspace-dialog-title")
                 .debug_selector(|| "workspace-dialog-title".into())
+                .test_support()
                 .w_full()
                 .child(ui::text(
                   Styled::h(Input::new(&title).aria_label("Title"), zpx(32.)),
@@ -1219,6 +1223,7 @@ impl WorkspaceDialog {
             .child(
               div()
                 .debug_selector(|| "workspace-dialog-description".into())
+                .test_support()
                 .min_h(zpx(58.))
                 .child(ui::text(Textarea::new(&description), TextSize::Sm)),
             ),
@@ -1254,6 +1259,7 @@ impl WorkspaceDialog {
                 .child(
                   div()
                     .debug_selector(|| "workspace-dialog-sparse".into())
+                    .test_support()
                     .min_h(zpx(58.))
                     .child(ui::text(Textarea::new(&sparse), TextSize::Sm)),
                 ),
@@ -1269,6 +1275,7 @@ impl WorkspaceDialog {
                 .child(
                   div()
                     .debug_selector(|| "workspace-dialog-symlinks".into())
+                    .test_support()
                     .min_h(zpx(58.))
                     .child(ui::text(Textarea::new(&symlinks), TextSize::Sm)),
                 )
@@ -1374,6 +1381,7 @@ impl WorkspaceDialog {
           div()
             .id("branch-picker")
             .debug_selector(|| "branch-picker".into())
+            .test_support()
             .mt_1()
             .w(zpx(300.))
             .rounded(radius::MD)
@@ -1468,6 +1476,7 @@ impl WorkspaceDialog {
     let mut new_row = Some(
       div()
         .debug_selector(|| "new-workspace-stack-item".into())
+        .test_support()
         .relative()
         .flex()
         .w_full()
@@ -1495,6 +1504,7 @@ impl WorkspaceDialog {
               div()
                 .id("workspace-dialog-branch")
                 .debug_selector(|| "workspace-dialog-branch".into())
+                .test_support()
                 .w_full()
                 .child(
                   ui::text(
@@ -1878,6 +1888,7 @@ impl WorkspaceDialog {
                   let selector = format!("dialog-file-path-{i}");
                   move || selector
                 })
+                .test_support()
                 .flex_1()
                 .min_w_0()
                 .truncate()
@@ -2106,6 +2117,7 @@ impl Render for WorkspaceDialog {
         this.child(
           ui::text(div(), TextSize::Sm)
             .debug_selector(|| "workspace-dialog-error".into())
+            .test_support()
             .mt_2()
             .text_color(p.destructive)
             .child(self.error.clone()),

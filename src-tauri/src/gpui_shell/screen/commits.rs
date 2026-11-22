@@ -2009,6 +2009,7 @@ impl CommitsView {
                     let id = format!("commit-conflict-badge-{}", commit.change_id);
                     move || id
                   })
+                  .test_support()
                   .child(ui::Badge::new("Conflict", p).tone(ui::Tone::Danger)),
               )
             })
@@ -2053,6 +2054,7 @@ impl CommitsView {
         let id = format!("commit-{}", commit.commit_id);
         move || id
       })
+      .test_support()
       .child(row)
       .when(expanded, |this| {
         this.child(self.expanded_commit(commit, kind, p, cx))
@@ -2119,6 +2121,7 @@ impl CommitsView {
         let panel = div()
           .id("move-commit-menu")
           .debug_selector(|| "move-commit-menu".into())
+          .test_support()
           .absolute()
           .top(zpx(36.))
           .left_0()
@@ -2516,14 +2519,15 @@ impl CommitsView {
   }
 
   /// `CommentInput` with Plan and Edit.
-  fn comment_box(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+  fn comment_box(&self, p: &Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
     let Some(comment) = &self.comment else {
-      return div();
+      return div().into_any_element();
     };
     let empty = comment.text.trim().is_empty();
     let target = &comment.target;
     div()
       .debug_selector(|| "comment-input".into())
+      .test_support()
       .bg(p.muted)
       .border_1()
       .border_color(p.border)
@@ -2584,6 +2588,7 @@ impl CommitsView {
               .on_click(cx.listener(|view, _, _, cx| view.send_comment(false, cx))),
           ),
       )
+      .into_any_element()
   }
 
   fn dialog_view(
@@ -2784,6 +2789,7 @@ impl CommitsView {
             .role(gpui::Role::Button)
             .aria_label("Learn about resolving conflicts")
             .debug_selector(|| "resolve-conflicts-help".into())
+            .test_support()
             .cursor_pointer()
             .child(ui::icon(
               theme::ICON_CIRCLE_HELP,
@@ -2816,6 +2822,7 @@ impl CommitsView {
           .child(
             div()
               .debug_selector(|| "resolve-conflicts-prompt".into())
+              .test_support()
               .children(input.as_ref().map(Textarea::new)),
           )
           .when_some(failed, |this, err| {

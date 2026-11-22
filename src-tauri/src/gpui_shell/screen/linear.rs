@@ -23,7 +23,7 @@ use std::{
   time::{Duration, Instant},
 };
 
-use gpui_kit::base::TestSupportExt as _;
+use gpui_kit::base::{ObservedElement, TestSupportExt as _};
 use serde_json::json;
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, px, AnyElement, App, Bounds, ClickEvent, Context, Div, FocusHandle,
@@ -1195,7 +1195,7 @@ impl LinearView {
     url: &str,
     color: Hsla,
     cx: &mut Context<Self>,
-  ) -> Stateful<Div> {
+  ) -> ObservedElement<Stateful<Div>> {
     let (url, selector) = (url.to_string(), id.clone());
     let text: SharedString = text.into();
     div()
@@ -1203,6 +1203,7 @@ impl LinearView {
       .role(gpui::Role::Link)
       .aria_label(text.clone())
       .debug_selector(move || selector)
+      .test_support()
       .text_color(color)
       .cursor_pointer()
       .hover(|s| s.underline())
@@ -1348,6 +1349,7 @@ impl LinearView {
               .role(gpui::Role::Button)
               .aria_label("Clear filter")
               .debug_selector(move || selector)
+              .test_support()
               .cursor_pointer()
               .text_color(p.foreground)
               .hover(move |s| s.text_color(destructive))
@@ -2802,6 +2804,7 @@ impl LinearView {
               .role(gpui::Role::Link)
               .aria_label(doc.title.clone())
               .debug_selector(move || selector)
+              .test_support()
               .px_3()
               .py_1()
               .rounded_full()
@@ -3149,6 +3152,7 @@ impl LinearView {
     });
     div()
       .debug_selector(|| "linear-commented-content".into())
+      .test_support()
       .flex()
       .flex_col()
       .gap_4()

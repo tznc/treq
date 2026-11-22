@@ -6,7 +6,7 @@ use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
-use gpui_kit::base::TestSupportExt as _;
+use gpui_kit::base::{ObservedElement, TestSupportExt as _};
 use serde::Deserialize;
 use serde_json::json;
 use std::{ops::Range, rc::Rc};
@@ -349,9 +349,10 @@ impl PromptHistoryView {
     entries: &[PromptHistoryEntry],
     p: &Palette,
     cx: &mut Context<Self>,
-  ) -> gpui::Div {
+  ) -> ObservedElement<gpui::Div> {
     let pane = div()
       .debug_selector(|| "prompt-history-detail".into())
+      .test_support()
       .flex_1()
       .min_w_0()
       .h_full();

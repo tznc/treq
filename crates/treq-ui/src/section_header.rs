@@ -174,6 +174,7 @@ impl RenderOnce for SectionHeader {
         el.child(
           div()
             .debug_selector(move || count_selector)
+            .test_support()
             .child(Count::new(count, &p)),
         )
       })

@@ -1129,6 +1129,7 @@ impl Render for Overlay {
       // A dismiss target, not a control.
       .cursor_default()
       .debug_selector(|| "overlay-backdrop".into())
+      .test_support()
       .key_context(KEY_CONTEXT)
       .track_focus(&self.focus)
       .absolute()

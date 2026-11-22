@@ -305,6 +305,7 @@ impl Render for RenameDialog {
                 div()
                   .id("rename-branch-name")
                   .debug_selector(|| "rename-branch-name".into())
+                  .test_support()
                   .w_full()
                   .child(
                     Styled::h(ui::input(&input).disabled(pending), zpx(40.))
@@ -332,6 +333,7 @@ impl Render for RenameDialog {
             this.child(
               ui::text(div(), TextSize::Sm)
                 .debug_selector(|| "rename-error".into())
+                .test_support()
                 .text_color(p.destructive)
                 .child(self.error.clone()),
             )

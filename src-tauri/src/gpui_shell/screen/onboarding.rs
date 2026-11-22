@@ -15,7 +15,7 @@ use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
 use std::{collections::HashMap, rc::Rc, sync::Arc, time::Instant};
 
-use gpui_kit::base::TestSupportExt as _;
+use gpui_kit::base::{ObservedElement, TestSupportExt as _};
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, AnyElement, Context, Div, FontWeight, Window,
@@ -797,6 +797,7 @@ impl OnboardingView {
     let switchable = matches!(machine.place, Place::Ssh { .. });
     div()
       .debug_selector(|| "machine-terminals".into())
+      .test_support()
       .pt_2()
       .border_t_1()
       .border_color(p.border)
@@ -854,7 +855,7 @@ impl OnboardingView {
   }
 
   /// The left panel: the machines by section, and adding one.
-  fn machines_panel(&self, ctx: &Ctx, cx: &mut Context<Self>) -> Div {
+  fn machines_panel(&self, ctx: &Ctx, cx: &mut Context<Self>) -> ObservedElement<Div> {
     let p = ctx.palette;
     let mut sections: Vec<(&'static str, Vec<AnyElement>)> = Vec::new();
     for machine in &self.listing.machines {
@@ -967,6 +968,7 @@ impl OnboardingView {
     });
     div()
       .debug_selector(|| "onboarding-machines".into())
+      .test_support()
       .flex_none()
       .w(zpx(MACHINES_WIDTH))
       .h_full()
@@ -996,6 +998,7 @@ impl OnboardingView {
             let group = group_id(section);
             div()
               .debug_selector(move || group.into())
+              .test_support()
               .pb_3()
               .child(
                 div()
@@ -1112,6 +1115,7 @@ impl OnboardingView {
         let form = with_form.then(|| {
           div()
             .debug_selector(|| "onboarding-remote-form".into())
+            .test_support()
             .mx_2()
             .mt_2()
             .p_3()
@@ -1133,6 +1137,7 @@ impl OnboardingView {
         Some(
           div()
             .debug_selector(|| "onboarding-recent-group".into())
+            .test_support()
             .pb_5()
             .child(
               div()
@@ -1216,6 +1221,7 @@ impl OnboardingView {
     let projects = (!shown.is_empty() || switcher.is_some()).then(|| {
       div()
         .debug_selector(|| "onboarding-projects".into())
+        .test_support()
         .pb_5()
         .child(
           ui::text(div(), TextSize::Sm)
@@ -1296,7 +1302,7 @@ impl OnboardingView {
       .child(
         div()
           .id("onboarding-recents")
-          .debug_selector(|| "onboarding-recents".into())
+          .debug_selector(|| "onboarding-recents".into()).test_support()
           .flex_1()
           .min_h_0()
           .overflow_y_scroll()

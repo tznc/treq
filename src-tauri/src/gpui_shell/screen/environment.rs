@@ -2,6 +2,7 @@
 //! repository run, this machine or its devcontainer. The task input, the
 //! agent prompt dialog and the terminal pane each show one.
 
+use gpui_kit::base::ObservedElement;
 use crate::gpui_shell::ui::zpx;
 use tauri_plugin_gpui::gpui::{div, prelude::*, Context, Div, Stateful};
 
@@ -93,7 +94,7 @@ pub(crate) fn menu<V: 'static>(
   set: fn(&mut V, bool, &mut Context<V>),
   start: fn(&mut V, &mut Context<V>),
   cx: &mut Context<V>,
-) -> Stateful<Div> {
+) -> ObservedElement<Stateful<Div>> {
   let status = env.status.as_ref();
   let usable = status.is_some_and(|s| s.configured && s.cli_available);
   let detail = match status {

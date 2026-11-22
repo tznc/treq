@@ -13,7 +13,7 @@
 use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
-use gpui_kit::base::TestSupportExt as _;
+use gpui_kit::base::{ObservedElement, TestSupportExt as _};
 use std::{
   cell::RefCell,
   collections::{HashMap, HashSet},
@@ -1193,7 +1193,7 @@ impl WorkspaceView {
     }
   }
 
-  fn header(&self, h: &Header, p: &Palette, cx: &mut Context<Self>) -> Div {
+  fn header(&self, h: &Header, p: &Palette, cx: &mut Context<Self>) -> ObservedElement<Div> {
     let mono_title = |text: &str| {
       ui::text(div(), TextSize::Sm)
         .font_family(theme::MONO_FONT)
@@ -1356,6 +1356,7 @@ impl WorkspaceView {
           .role(gpui::Role::Link)
           .aria_label(linear.key.clone())
           .debug_selector(|| "workspace-linear".into())
+          .test_support()
           .flex()
           .flex_none()
           .items_center()
@@ -1464,6 +1465,7 @@ impl WorkspaceView {
       .border_b_1()
       .border_color(p.border)
       .debug_selector(|| "workspace-header".into())
+      .test_support()
       .child(
         div()
           .flex()
@@ -1605,6 +1607,7 @@ impl WorkspaceView {
         // the button's border in both themes; inset so nothing clips it.
         div()
           .debug_selector(|| "workspace-sync-pip".into())
+          .test_support()
           .absolute()
           .top(zpx(-4.))
           .right(zpx(-4.))
@@ -1650,7 +1653,7 @@ impl WorkspaceView {
   }
 
   /// The workspace's tab bar: the view tabs, then its busy and loc status.
-  fn tab_bar(&self, row: &TabRow, p: &Palette) -> Div {
+  fn tab_bar(&self, row: &TabRow, p: &Palette) -> ObservedElement<Div> {
     // Counts are neutral, uncommitted changes yellow; a conflict shows once,
     // as a danger dot.
     let commits = ui::Tab::new("workspace-tab-commits", "Commits").icon(theme::ICON_COMMIT);
@@ -1741,6 +1744,7 @@ impl WorkspaceView {
       .border_b_1()
       .border_color(p.border)
       .debug_selector(|| "workspace-tab-row".into())
+      .test_support()
       .child(div().flex().min_w_0().items_center().gap_2().child(list))
       .child(div().flex_1().min_w_0())
       .child(status)
@@ -2390,6 +2394,7 @@ impl Body {
       Body::Logs(logs) => logs.into_any_element(),
       Body::StandIn(body) => div()
         .debug_selector(|| "workspace-tab-stand-in".into())
+        .test_support()
         .relative()
         .size_full()
         .opacity(STAND_IN_OPACITY)
@@ -2429,7 +2434,8 @@ impl Render for WorkspaceView {
         .h(zpx(49.))
         .border_b_1()
         .border_color(p.border)
-        .debug_selector(|| "workspace-header".into()),
+        .debug_selector(|| "workspace-header".into())
+        .test_support(),
     }
     .id("workspace-header")
     .role(gpui::Role::Banner)

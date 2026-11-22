@@ -833,6 +833,7 @@ impl Render for MergeView {
     let content = div()
       .id("merge-scroll")
       .debug_selector(|| "merge-scroll".into())
+      .test_support()
       .flex_1()
       .min_h_0()
       .child(
@@ -974,7 +975,8 @@ impl MergeView {
               ui::text(
                 div()
                   .id("merge-message")
-                  .debug_selector(|| "merge-message".into()),
+                  .debug_selector(|| "merge-message".into())
+                  .test_support(),
                 TextSize::Sm,
               )
               .child(form::textarea_field(&textarea, true, rebase)),
@@ -1122,6 +1124,7 @@ impl MergeView {
           .child(
             div()
               .debug_selector(|| "merge-landing".into())
+              .test_support()
               .border_1()
               .border_color(p.border)
               .rounded(radius::LG)
@@ -1220,6 +1223,7 @@ impl MergeView {
       div()
         .id("merge-strategy-menu")
         .debug_selector(|| "merge-strategy-menu".into())
+        .test_support()
         .absolute()
         .top(zpx(44.))
         .right_0()

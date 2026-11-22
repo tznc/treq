@@ -30,7 +30,7 @@ use std::{
 /// no diff lines to hash (binary, empty, mode-only, or not yet loaded).
 const CONTENT_ID_MARK: &str = "id:";
 
-use gpui_kit::base::TestSupportExt as _;
+use gpui_kit::base::{ObservedElement, TestSupportExt as _};
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use serde::Deserialize;
 use serde_json::json;
@@ -1890,12 +1890,13 @@ fn header_button(
   label: impl Into<SharedString>,
   fg: Hsla,
   p: &Palette,
-) -> Stateful<Div> {
+) -> ObservedElement<Stateful<Div>> {
   let id: SharedString = id.into();
   let selector = id.to_string();
   div()
     .id(id)
     .debug_selector(move || selector)
+    .test_support()
     .role(gpui::Role::Button)
     .aria_label(label.into())
     .p_1()
@@ -2166,6 +2167,7 @@ impl ChangesView {
     let handle = div()
       .id("changes-file-list-resize")
       .debug_selector(|| "changes-file-list-resize".into())
+      .test_support()
       .absolute()
       .top_0()
       .bottom_0()
@@ -2185,6 +2187,7 @@ impl ChangesView {
       }));
     div()
       .debug_selector(|| "changes-file-list".into())
+      .test_support()
       .relative()
       .w(zpx(self.side_width))
       .flex_none()
@@ -2459,6 +2462,7 @@ impl ChangesView {
       .child(
         div()
           .debug_selector(|| "commit-message".into())
+          .test_support()
           .when(error.is_some(), |this| {
             this
               .rounded(radius::MD)
@@ -3095,6 +3099,7 @@ impl ChangesView {
       return area.child(
         div()
           .debug_selector(|| "changes-loading-skeleton".into())
+          .test_support()
           .size_full()
           .p_4()
           .flex()
@@ -3209,7 +3214,7 @@ impl ChangesView {
       .child(header)
       .children(self.file_comments(&path, p, cx));
     let muted = p.muted_foreground;
-    let placeholder = |el: Div| div().font_family(theme::MONO_FONT).child(el);
+    let placeholder = |el: Div| div().font_family(theme::MONO_FONT).child(el.test_support());
     match kind {
       Body::Binary | Body::Deleted => card.child(placeholder(
         div()
@@ -3254,6 +3259,7 @@ impl ChangesView {
       Body::Empty => card.child(
         div()
           .debug_selector(|| "empty-diff-placeholder".into())
+          .test_support()
           .child(if conflicted_file {
             ui::EmptyState::new(
               "empty-diff-conflicted",
@@ -3271,6 +3277,7 @@ impl ChangesView {
         card.child(
           div()
             .debug_selector(|| "generated-file-placeholder".into())
+            .test_support()
             .py_6()
             .flex()
             .flex_col()
@@ -3487,6 +3494,7 @@ impl ChangesView {
       right = right.child(
         div()
           .debug_selector(|| "deleted-file-badge".into())
+          .test_support()
           .child(badge("Deleted", Tone::Danger)),
       );
     }
@@ -3623,6 +3631,7 @@ impl ChangesView {
         // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .debug_selector(move || format!("conflict-label-{label}"))
+          .test_support()
           .mr_2()
           .px_1p5()
           .py_0p5()
@@ -3637,6 +3646,7 @@ impl ChangesView {
       pre = pre.child(
         div()
           .debug_selector(move || line_id)
+          .test_support()
           .flex()
           .when_some(bg, |this, bg| this.bg(bg))
           .when(kind == ConflictLineKind::Marker, |this| {
@@ -3775,11 +3785,12 @@ fn file_action(
   fg: Hsla,
   hidden: bool,
   p: &Palette,
-) -> Stateful<Div> {
+) -> ObservedElement<Stateful<Div>> {
   let selector = id.clone();
   div()
     .id(SharedString::from(id))
     .debug_selector(move || selector)
+    .test_support()
     .role(gpui::Role::Button)
     .aria_label(name)
     .p_0p5()
@@ -3821,6 +3832,7 @@ fn context_row(
         .child(
           div()
             .debug_selector(move || selector)
+            .test_support()
             .w_10()
             .flex()
             .justify_end()

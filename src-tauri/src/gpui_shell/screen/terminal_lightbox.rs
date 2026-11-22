@@ -8,7 +8,7 @@ use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
-use gpui_kit::base::TestSupportExt as _;
+use gpui_kit::base::{ObservedElement, TestSupportExt as _};
 use std::{
   cell::Cell,
   collections::{HashMap, HashSet},
@@ -367,6 +367,7 @@ impl Lightbox {
       .role(gpui::Role::Button)
       .aria_label(format!("Block {b}"))
       .debug_selector(move || format!("treq-send-block-{b}"))
+      .test_support()
       .px_8()
       .py_1p5()
       .cursor_pointer()
@@ -878,7 +879,12 @@ fn content<E: InteractiveElement>(el: E) -> E {
 
 /// `Button variant="ghost" size="icon-xs" className="h-8 w-8 text-white
 /// hover:bg-white/15"`.
-fn tool(id: &'static str, name: &'static str, icon: &'static str, disabled: bool) -> Stateful<Div> {
+fn tool(
+  id: &'static str,
+  name: &'static str,
+  icon: &'static str,
+  disabled: bool,
+) -> ObservedElement<Stateful<Div>> {
   tool_with(
     id,
     name,
@@ -892,12 +898,13 @@ fn tool_with(
   name: &'static str,
   icon: gpui::AnyElement,
   disabled: bool,
-) -> Stateful<Div> {
+) -> ObservedElement<Stateful<Div>> {
   div()
     .id(id)
     .role(gpui::Role::Button)
     .aria_label(name)
     .debug_selector(move || id.into())
+    .test_support()
     .size_8()
     .flex()
     .items_center()
@@ -941,6 +948,7 @@ impl Lightbox {
           // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .debug_selector(|| "treq-send-zoom-level".into())
+            .test_support()
             .min_w_10()
             .px_1()
             .flex()
@@ -990,6 +998,7 @@ impl Lightbox {
         ui::text(div(), TextSize::Sm)
           .id("treq-send-review-input")
           .debug_selector(|| "treq-send-review-input".into())
+          .test_support()
           .min_w(zpx(224.))
           .max_w(zpx(448.))
           .flex_1()
@@ -1048,6 +1057,7 @@ impl Lightbox {
       .role(gpui::Role::Group)
       .aria_label(format!("Image at {}%", (self.zoom * 100.).round()))
       .debug_selector(|| "treq-send-highlight-layer".into())
+      .test_support()
       .relative()
       .flex_none()
       .w(zpx(w))
@@ -1126,6 +1136,7 @@ impl Lightbox {
                 .role(gpui::Role::Button)
                 .aria_label("Remove highlight")
                 .debug_selector(|| "treq-send-highlight-remove".into())
+                .test_support()
                 .size_6()
                 .flex()
                 .items_center()
@@ -1161,6 +1172,7 @@ impl Lightbox {
     let scroll = div()
       .id("treq-send-image-scroll")
       .debug_selector(|| "treq-send-image-scroll".into())
+      .test_support()
       .w_full()
       .max_w_full()
       .overflow_scroll()
@@ -1447,6 +1459,7 @@ impl Lightbox {
       .child(
         div()
           .debug_selector(|| "treq-send-text-hint".into())
+          .test_support()
           .child(hint),
       )
       .when(markdown, |this| {
@@ -1536,7 +1549,7 @@ impl Lightbox {
     div().w_full().flex().justify_center().child(content(panel))
   }
 
-  fn nav(&self, next: bool, cx: &mut Context<Self>) -> Stateful<Div> {
+  fn nav(&self, next: bool, cx: &mut Context<Self>) -> ObservedElement<Stateful<Div>> {
     let disabled = if next {
       self.index + 1 >= self.assets.len()
     } else {
@@ -1558,6 +1571,7 @@ impl Lightbox {
         .role(gpui::Role::Button)
         .aria_label(if next { "Next" } else { "Previous" })
         .debug_selector(move || id.into())
+        .test_support()
         .absolute()
         .top(gpui::relative(0.5))
         .mt_neg_8()
@@ -1648,6 +1662,7 @@ impl Render for Lightbox {
         ui::text(div(), TextSize::Sm)
           .id("treq-send-preview-title")
           .debug_selector(|| "treq-send-preview-title".into())
+          .test_support()
           .max_w_full()
           .truncate()
           .text_color(chrome(0.8))
@@ -1704,6 +1719,7 @@ impl Render for Lightbox {
           // A dismiss target, not a control.
           .cursor_default()
           .debug_selector(|| "treq-send-preview-carousel-shell".into())
+          .test_support()
           .relative()
           .w(zpx(vw * 0.9))
           .min_w(zpx(vw * 0.75))

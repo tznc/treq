@@ -11,7 +11,7 @@ use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
 use std::{collections::HashSet, rc::Rc, sync::Arc, time::Duration};
 
-use gpui_kit::base::TestSupportExt as _;
+use gpui_kit::base::{ObservedElement, TestSupportExt as _};
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, AnyElement, Context, FontWeight, Role, SharedString, Window,
@@ -1360,12 +1360,14 @@ impl SettingsView {
   ) -> impl IntoElement {
     div()
       .debug_selector(|| "settings-prompt-edits".into())
+      .test_support()
       .flex()
       .flex_col()
       .gap_3()
       .child(
         div()
           .debug_selector(|| "prompt-edits-header".into())
+          .test_support()
           .flex()
           .items_center()
           .justify_between()
@@ -2211,6 +2213,7 @@ impl Render for SettingsView {
         div()
           .id("settings-scroll")
           .debug_selector(|| "settings-scroll".into())
+          .test_support()
           .flex_1()
           .min_h_0()
           .overflow_y_scroll()
@@ -2652,7 +2655,7 @@ impl SettingsView {
         .child(
           // The repository's own choices over the Application tab's.
           div()
-            .debug_selector(|| "settings-repo-overrides".into())
+            .debug_selector(|| "settings-repo-overrides".into()).test_support()
             .flex()
             .flex_col()
             .gap_4()
@@ -2785,6 +2788,7 @@ impl SettingsView {
     // Which repository these settings belong to.
     let title = div()
       .debug_selector(|| "settings-repo-name".into())
+      .test_support()
       .child(
         ui::text(div(), TextSize::Xl)
           .id("settings-repo-name")
@@ -2928,7 +2932,7 @@ impl SettingsView {
       .flex()
       .flex_col()
       .gap_4()
-      .debug_selector(|| "skill-library-settings".into())
+      .debug_selector(|| "skill-library-settings".into()).test_support()
       .child(
         div()
           .child(
@@ -2963,7 +2967,7 @@ impl SettingsView {
       )
       .child(
         div()
-          .debug_selector(|| "skill-filters".into())
+          .debug_selector(|| "skill-filters".into()).test_support()
           .flex()
           .flex_wrap()
           .gap_2()
@@ -3005,7 +3009,7 @@ impl SettingsView {
     row: &SkillRow,
     level: Option<gpui::Entity<form::SelectStateOf>>,
     p: &Palette,
-  ) -> gpui::Div {
+  ) -> ObservedElement<gpui::Div> {
     let id = &row.id;
     let selector = format!("skill-row-{id}");
     div()
@@ -3018,6 +3022,7 @@ impl SettingsView {
       .rounded(radius::MD)
       .p_3()
       .debug_selector(move || selector)
+      .test_support()
       .child(
         div().flex().items_start().justify_between().gap_3().child(
           div()

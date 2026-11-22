@@ -193,6 +193,7 @@ fn text_field(
   div()
     .id(id)
     .debug_selector(|| id.into())
+    .test_support()
     .w_full()
     .h(zpx(34.))
     .px_2()

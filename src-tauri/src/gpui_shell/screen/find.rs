@@ -375,6 +375,7 @@ pub(in crate::gpui_shell::screen) fn bar<V: Findable>(
       .child(
         ui::text(div(), TextSize::Sm)
           .debug_selector(move || format!("{id}-input"))
+          .test_support()
           .h_6()
           .w_48()
           .px_2()
@@ -390,6 +391,7 @@ pub(in crate::gpui_shell::screen) fn bar<V: Findable>(
         // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .debug_selector(move || format!("{id}-count"))
+          .test_support()
           .px_2()
           .whitespace_nowrap()
           .text_color(p.muted_foreground)

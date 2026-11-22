@@ -7,7 +7,7 @@ use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
 use gpui_kit::base::TestSupportExt as _;
 use tauri_plugin_gpui::gpui::{
-  self, div, prelude::*, ClipboardItem, Context, Div, FontWeight, SharedString,
+  self, div, prelude::*, ClipboardItem, Context, FontWeight, SharedString,
 };
 
 use super::{data::StartingPrompt, Popover};
@@ -105,9 +105,9 @@ impl Popover {
     &mut self,
     p: &Palette,
     cx: &mut Context<Self>,
-  ) -> gpui::Stateful<Div> {
+  ) -> gpui::AnyElement {
     let super::Content::Details(state) = &self.content else {
-      return div().id("workspace-details-popover");
+      return div().id("workspace-details-popover").into_any_element();
     };
     let p = *p;
     let spec = state.spec.clone();
@@ -226,5 +226,6 @@ impl Popover {
       .gap_3()
       .child(details)
       .child(starting)
+      .into_any_element()
   }
 }

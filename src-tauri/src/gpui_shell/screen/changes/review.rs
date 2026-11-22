@@ -1249,6 +1249,7 @@ impl ChangesView {
             let id = format!("gutter-{path}-{h}-{l}");
             move || id
           })
+          .test_support()
           .w_24()
           .flex_none()
           .flex()
@@ -1286,6 +1287,7 @@ impl ChangesView {
                 let id = format!("line-new-{path}-{h}-{l}");
                 move || id
               })
+              .test_support()
               .w_10()
               .flex()
               .justify_end()
@@ -1353,6 +1355,7 @@ impl ChangesView {
             let id = format!("code-{path}-{h}-{l}");
             move || id
           })
+          .test_support()
           .flex_1()
           .min_w_0()
           .px_2()
@@ -1508,6 +1511,7 @@ impl ChangesView {
                 .role(gpui::Role::Button)
                 .aria_label("Delete comment")
                 .debug_selector(|| "delete-comment".into())
+                .test_support()
                 .flex_none()
                 .p_1()
                 .rounded(radius::SM)
@@ -1615,6 +1619,7 @@ impl ChangesView {
     let empty = self.review.edit_text.trim().is_empty();
     div()
       .debug_selector(|| "comment-edit".into())
+      .test_support()
       .flex()
       .flex_col()
       .gap_2()
@@ -1686,6 +1691,7 @@ impl ChangesView {
       .is_some_and(|d| suggestion_lines(d).is_some());
     ui::text(div(), TextSize::Sm)
       .debug_selector(|| "comment-input".into())
+      .test_support()
       .bg(p.muted)
       .border_1()
       .border_color(p.border)
@@ -1790,6 +1796,7 @@ impl ChangesView {
     let preview = div()
       .id("suggestion-preview")
       .debug_selector(|| "suggestion-preview".into())
+      .test_support()
       .role(gpui::Role::Group)
       .aria_label("Suggestion preview")
       .rounded(radius::SM)
@@ -2062,6 +2069,7 @@ impl ChangesView {
       out.push(
         div()
           .debug_selector(|| "conflict-comment-input".into())
+          .test_support()
           .bg(p.muted.opacity(0.6))
           .border_y_1()
           .border_color(p.border.opacity(0.4))
@@ -2311,6 +2319,7 @@ impl ChangesView {
         .role(gpui::Role::CheckBox)
         .aria_label("Use an idle agent")
         .debug_selector(|| "use-idle-agent".into())
+        .test_support()
         .flex()
         .items_center()
         .gap_1p5()
@@ -2342,6 +2351,7 @@ impl ChangesView {
     let panel = div()
       .id("finish-review-popover")
       .debug_selector(|| "finish-review-popover".into())
+      .test_support()
       .role(gpui::Role::Dialog)
       .aria_label(if conflicts {
         "Resolve conflicts"

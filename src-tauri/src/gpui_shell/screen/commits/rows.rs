@@ -495,6 +495,7 @@ impl CommitsView {
     div()
       .id("commits-scroll")
       .debug_selector(|| "commits-list".into())
+      .test_support()
       .size_full()
       .child(
         list(
@@ -868,6 +869,7 @@ impl CommitsView {
         div()
           .id(SharedString::from(code_selector.clone()))
           .debug_selector(move || code_selector)
+          .test_support()
           .relative()
           .flex_1()
           .min_w_0()
