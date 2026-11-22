@@ -361,7 +361,10 @@ fn absolute_repo_arg(repo: &str) -> Result<String, String> {
     return Err("invalid_arguments: --repo must not be empty".to_string());
   }
   let repo = crate::core::remote::expand_home(repo, std::env::var("HOME").ok().as_deref());
-  let absolute = std::path::absolute(&repo).unwrap_or_else(|_| repo.clone().into());
+  let absolute = std::path::absolute(&repo).unwrap_or_else(|error| {
+    tracing::debug!(%error, repo, "keeping --repo relative");
+    repo.clone().into()
+  });
   let mut normalized = std::path::PathBuf::new();
   for component in absolute.components() {
     match component {
@@ -1057,7 +1060,10 @@ fn run_github(matches: &Matches) -> Result<i32, String> {
           .flatten()
           .map(|remote| remote.full_name)
       });
-      let gh = std::env::var("TREQ_REAL_GH").unwrap_or_else(|_| "/usr/bin/gh".to_string());
+      let gh = std::env::var("TREQ_REAL_GH").unwrap_or_else(|error| {
+        tracing::debug!(%error, "TREQ_REAL_GH unset; using /usr/bin/gh");
+        "/usr/bin/gh".to_string()
+      });
       let mut command = std::process::Command::new(gh);
       command.args(&args);
       if let Some(repository) = repository {

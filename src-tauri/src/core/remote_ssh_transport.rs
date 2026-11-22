@@ -658,7 +658,10 @@ impl ClientAuthenticator {
 fn dirs_home() -> PathBuf {
   std::env::var("HOME")
     .map(PathBuf::from)
-    .unwrap_or_else(|_| PathBuf::from("."))
+    .unwrap_or_else(|error| {
+      tracing::warn!(%error, "HOME is unusable; resolving ~ against the current directory");
+      PathBuf::from(".")
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1984,7 +1987,8 @@ mod tests {
       source: SshEndpointSource::UserManaged,
       hostname: addr.ip().to_string(),
       port: addr.port(),
-      username: std::env::var("USER").unwrap_or_else(|_| "user".to_string()),
+      // The test server accepts any user.
+      username: "user".to_string(),
       host_keys: vec![TrustedHostKey {
         algorithm: "ssh-ed25519".to_string(),
         fingerprint_sha256: fingerprint,

@@ -745,9 +745,10 @@ pub fn sign_in(provider: OAuthProvider, cx: &mut App) {
       .await
   });
   cx.spawn(async move |cx| {
-    let result = done
-      .await
-      .unwrap_or_else(|_| Err("Sign-in was interrupted".into()));
+    let result = done.await.unwrap_or_else(|e| {
+      log::warn!("Sign-in task ended early: {e}");
+      Err("Sign-in was interrupted".into())
+    });
     model.update(cx, |m, cx| {
       m.auth_error = result.err().filter(|e| !is_cancel(e));
       cx.notify();

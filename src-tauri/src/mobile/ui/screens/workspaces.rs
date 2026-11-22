@@ -1002,7 +1002,10 @@ impl Render for WorkspacesScreen {
           list(self.rows.clone(), move |ix, _, cx| {
             screen
               .update(cx, |this, cx| this.item(ix, cx))
-              .unwrap_or_else(|_| div().into_any_element())
+              .unwrap_or_else(|e| {
+                log::debug!("Drawing workspace row {ix} empty: the screen closed: {e}");
+                div().into_any_element()
+              })
           })
           .size_full(),
         ),

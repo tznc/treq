@@ -42,7 +42,10 @@ impl Kbd {
   pub fn label(keystroke: &str) -> String {
     Keystroke::parse(keystroke)
       .map(|key| Self::format(&key, cfg!(target_os = "macos")))
-      .unwrap_or_else(|_| keystroke.to_string())
+      .unwrap_or_else(|e| {
+        log::debug!("Showing shortcut {keystroke:?} as written: {e}");
+        keystroke.to_string()
+      })
   }
 
   /// `key` as macOS (`mac`) or Windows and Linux write it.

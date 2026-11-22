@@ -229,7 +229,8 @@ pub(crate) fn start_agent_ipc_listener(app: AppHandle, listener: std::net::TcpLi
             serde_json::to_string(&agent_dispatch::AgentDispatchResponse::error(
               "invalid request payload",
             ))
-            .unwrap_or_else(|_| {
+            .unwrap_or_else(|e| {
+              log::error!("Failed to serialize the invalid-payload reply: {e}");
               "{\"status\":\"error\",\"reason\":\"invalid request payload\"}".to_string()
             })
             .as_bytes(),
@@ -243,7 +244,8 @@ pub(crate) fn start_agent_ipc_listener(app: AppHandle, listener: std::net::TcpLi
           // Answered off this thread: a send may wait on other instances.
           std::thread::spawn(move || {
             let response = crate::core::agent_msg::service::handle(&request);
-            let json = serde_json::to_string(&response).unwrap_or_else(|_| {
+            let json = serde_json::to_string(&response).unwrap_or_else(|e| {
+              log::error!("Failed to serialize the agent message reply: {e}");
               "{\"status\":\"error\",\"reason\":\"failed to serialize response\"}".to_string()
             });
             stream.write_all(json.as_bytes()).best_effort();
@@ -261,7 +263,8 @@ pub(crate) fn start_agent_ipc_listener(app: AppHandle, listener: std::net::TcpLi
         }
         Err(error) => agent_dispatch::AgentDispatchResponse::error(error),
       };
-      let response_json = serde_json::to_string(&response).unwrap_or_else(|_| {
+      let response_json = serde_json::to_string(&response).unwrap_or_else(|e| {
+        log::error!("Failed to serialize the dispatch reply: {e}");
         "{\"status\":\"error\",\"reason\":\"failed to serialize response\"}".to_string()
       });
       stream.write_all(response_json.as_bytes()).best_effort();

@@ -369,7 +369,10 @@ fn executable_with_extensions(
 
 #[cfg(not(unix))]
 fn executable_in(name: &str, search_path: &OsStr) -> Option<String> {
-  let pathext = env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
+  let pathext = env::var("PATHEXT").unwrap_or_else(|error| {
+    tracing::debug!(%error, "PATHEXT unusable; using the Windows default");
+    ".COM;.EXE;.BAT;.CMD".to_string()
+  });
   executable_with_extensions(name, search_path, &pathext, Path::is_file)
 }
 
