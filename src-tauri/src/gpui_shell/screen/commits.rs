@@ -17,13 +17,13 @@ use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use crate::result_ext::ResultExt;
-use gpui_kit::base::TestSupportExt as _;
 use std::{
   cell::RefCell,
   collections::{HashMap, HashSet, VecDeque},
   rc::Rc,
   time::Duration,
 };
+use treq_ui::SelectorExt as _;
 
 use gpui_kit::component::input::{InputEvent, InputState, Textarea, TextareaState};
 use serde_json::json;
@@ -1719,15 +1719,13 @@ impl Render for CommitsView {
     self.scroll_to_commit(cx);
     let p = theme::palette(self.dark);
     let root = ui::text(div(), TextSize::Sm)
-      .id("workspace-commits")
-      .debug_selector(|| "workspace-commits".into())
+      .selector("workspace-commits")
       .role(gpui::Role::Group)
       .aria_label("Commits")
       .relative()
       .size_full()
       .bg(p.background)
       .text_color(p.foreground)
-      .test_support()
       .track_focus(&self.focus)
       .on_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
         let held = crate::gpui_shell::keys::held(e.keystroke.modifiers);
@@ -2005,10 +2003,7 @@ impl CommitsView {
               this.child(
                 div()
                   .flex_none()
-                  .debug_selector({
-                    let id = format!("commit-conflict-badge-{}", commit.change_id);
-                    move || id
-                  })
+                  .selector(format!("commit-conflict-badge-{}", commit.change_id))
                   .child(ui::Badge::new("Conflict", p).tone(ui::Tone::Danger)),
               )
             })
@@ -2049,10 +2044,7 @@ impl CommitsView {
       cx.listener(move |view, _, _, cx| view.toggle(&id, cx))
     });
     div()
-      .debug_selector({
-        let id = format!("commit-{}", commit.commit_id);
-        move || id
-      })
+      .selector(format!("commit-{}", commit.commit_id))
       .child(row)
       .when(expanded, |this| {
         this.child(self.expanded_commit(commit, kind, p, cx))
@@ -2117,8 +2109,7 @@ impl CommitsView {
       .when(move_open, |this| {
         let (to_new, to_existing) = (commit.clone(), commit.clone());
         let panel = div()
-          .id("move-commit-menu")
-          .debug_selector(|| "move-commit-menu".into())
+          .selector("move-commit-menu")
           .absolute()
           .top(zpx(36.))
           .left_0()
@@ -2432,10 +2423,9 @@ impl CommitsView {
           })
           .child(
             div()
-              .id(SharedString::from(format!("load-diff-{}", file.path)))
+              .selector(SharedString::from(format!("load-diff-{}", file.path)))
               .role(gpui::Role::Button)
               .aria_label("Load diff")
-              .debug_selector(|| "load-deferred-diff".into())
               .rounded(radius::MD)
               .border_1()
               .border_color(p.border)
@@ -2452,8 +2442,7 @@ impl CommitsView {
               .when(busy, |this| {
                 this.child(ui::Loading::new(spin, p).label("Loading diff…"))
               })
-              .when(!busy, |this| this.child("Load diff"))
-              .test_support(),
+              .when(!busy, |this| this.child("Load diff")),
           ),
       )
       .into_any_element()
@@ -2516,14 +2505,14 @@ impl CommitsView {
   }
 
   /// `CommentInput` with Plan and Edit.
-  fn comment_box(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+  fn comment_box(&self, p: &Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
     let Some(comment) = &self.comment else {
-      return div();
+      return div().into_any_element();
     };
     let empty = comment.text.trim().is_empty();
     let target = &comment.target;
     div()
-      .debug_selector(|| "comment-input".into())
+      .selector("comment-input")
       .bg(p.muted)
       .border_1()
       .border_color(p.border)
@@ -2584,6 +2573,7 @@ impl CommitsView {
               .on_click(cx.listener(|view, _, _, cx| view.send_comment(false, cx))),
           ),
       )
+      .into_any_element()
   }
 
   fn dialog_view(
@@ -2780,10 +2770,9 @@ impl CommitsView {
           Side::Top,
           Some(TooltipContent::Text(RESOLVE_HELP.into())),
           div()
-            .id("resolve-conflicts-help")
+            .selector("resolve-conflicts-help")
             .role(gpui::Role::Button)
             .aria_label("Learn about resolving conflicts")
-            .debug_selector(|| "resolve-conflicts-help".into())
             .cursor_pointer()
             .child(ui::icon(
               theme::ICON_CIRCLE_HELP,
@@ -2815,17 +2804,15 @@ impl CommitsView {
           .primary_disabled(!ready || *submitting)
           .child(
             div()
-              .debug_selector(|| "resolve-conflicts-prompt".into())
+              .selector("resolve-conflicts-prompt")
               .children(input.as_ref().map(Textarea::new)),
           )
           .when_some(failed, |this, err| {
             this.child(
               ui::text(div(), TextSize::Sm)
-                .id("resolve-conflicts-error")
-                .debug_selector(|| "resolve-conflicts-error".into())
+                .selector("resolve-conflicts-error")
                 .role(tauri_plugin_gpui::gpui::Role::Alert)
                 .aria_label(err.clone())
-                .test_support()
                 .text_color(p.destructive)
                 .child(err),
             )

@@ -11,10 +11,10 @@
 //! a long name then gives way with an ellipsis and the chevron keeps its
 //! size, never clipped or pushed out of the row. The toggle is `flex_none`.
 
+use crate::SelectorExt as _;
 use std::rc::Rc;
 
 use gpui::{div, prelude::*, App, ClickEvent, SharedString, Window};
-use gpui_kit::base::TestSupportExt as _;
 
 use crate::theme::{self, Palette};
 
@@ -71,16 +71,13 @@ impl FoldToggle {
 impl RenderOnce for FoldToggle {
   fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
     let p = self.palette;
-    let selector = self.id.to_string();
     let label = self.label();
     let chevron = self.chevron();
     let on_toggle = self.on_toggle;
     div()
-      .id(self.id)
-      .debug_selector(move || selector)
+      .selector(self.id)
       .role(gpui::Role::Button)
       .aria_label(label)
-      .test_support()
       .flex()
       .flex_none()
       .items_center()

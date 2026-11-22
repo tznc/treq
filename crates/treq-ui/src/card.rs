@@ -1,9 +1,11 @@
 //! Cards: a surface for one object, with an optional header, a body and a
 //! footer of actions (Bootstrap's card, MUI's outlined and elevated paper).
 
+use crate::SelectorExt as _;
 use gpui::{
   div, prelude::*, AnyElement, App, ClickEvent, Div, MouseButton, Role, SharedString, Window,
 };
+use gpui_kit::base::ObservedElement;
 
 use crate::{
   text,
@@ -196,7 +198,7 @@ impl RenderOnce for Card {
     let id = self.id.clone();
     let part = |name: &str| {
       let selector = format!("{id}-{name}");
-      div().debug_selector(move || selector)
+      div().selector(selector)
     };
     let name = self
       .label
@@ -209,7 +211,6 @@ impl RenderOnce for Card {
     let focused = focus.as_ref().is_some_and(|f| f.is_focused(window));
     let has_header = self.header.is_some();
     let has_body = !self.body.is_empty();
-    let selector = self.id.to_string();
 
     let header = self.header.map(|h| {
       part("header")
@@ -241,7 +242,7 @@ impl RenderOnce for Card {
         )
         .children(h.action)
     });
-    let body: Option<Div> = has_body.then(|| {
+    let body: Option<ObservedElement<gpui::Stateful<Div>>> = has_body.then(|| {
       part("body")
         .flex()
         .flex_col()
@@ -270,8 +271,7 @@ impl RenderOnce for Card {
     });
 
     div()
-      .id(self.id)
-      .debug_selector(move || selector)
+      .selector(self.id)
       .flex()
       .flex_col()
       .min_w_0()

@@ -1,10 +1,10 @@
 //! The header over a group of rows or content: a title in small capitals,
 //! an optional [`Count`] of what it holds and at most one action.
 
+use crate::SelectorExt as _;
 use std::rc::Rc;
 
 use gpui::{div, prelude::*, AnyElement, App, ClickEvent, SharedString, Window};
-use gpui_kit::base::TestSupportExt as _;
 
 use crate::{
   badge::caption,
@@ -112,15 +112,12 @@ fn display_title(title: &str) -> SharedString {
 impl RenderOnce for SectionHeader {
   fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
     let p = self.palette;
-    let selector = self.id.to_string();
     let count_selector = format!("{}-count", self.id);
     let muted = p.muted_foreground;
     let heading = caption(div(), cx)
-      .id(self.id.clone())
-      .debug_selector(move || selector)
+      .selector(self.id.clone())
       .role(gpui::Role::Heading)
       .aria_label(self.title.clone())
-      .test_support()
       .min_w_0()
       .truncate()
       .font_weight(gpui::FontWeight::SEMIBOLD)
@@ -128,15 +125,12 @@ impl RenderOnce for SectionHeader {
       .child(display_title(&self.title));
     let lead = match self.toggle {
       Some(toggle) => {
-        let toggle_selector = toggle.id.to_string();
         let on_toggle = toggle.on_toggle;
         let fg = p.foreground;
         div()
-          .id(toggle.id.clone())
-          .debug_selector(move || toggle_selector)
+          .selector(toggle.id.clone())
           .role(gpui::Role::Button)
           .aria_label(toggle_label(&self.title, toggle.collapsed))
-          .test_support()
           .flex()
           .items_center()
           .gap_1()
@@ -171,11 +165,7 @@ impl RenderOnce for SectionHeader {
         el.child(caption(div(), cx).truncate().text_color(muted).child(note))
       })
       .when_some(self.count, |el, count| {
-        el.child(
-          div()
-            .debug_selector(move || count_selector)
-            .child(Count::new(count, &p)),
-        )
+        el.child(div().selector(count_selector).child(Count::new(count, &p)))
       })
       .when_some(self.action, |el, action| {
         el.child(div().flex_1()).child(action)

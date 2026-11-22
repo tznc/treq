@@ -5,8 +5,10 @@
 use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use gpui_kit::base::ObservedElement;
 use gpui_kit::base::TestSupportExt as _;
 use std::time::Duration;
+use treq_ui::SelectorExt as _;
 
 use gpui::{AnyElement, StrikethroughStyle, StyledText, Task};
 
@@ -303,8 +305,7 @@ impl ChangesView {
       // Short label (['count']): 11px is fine.
       // ast-grep-ignore: gpui-text-xs-short-label-only
       ui::text(div(), TextSize::Xs)
-        .id("agent-review-comment-count")
-        .debug_selector(|| "agent-review-comment-count".into())
+        .selector("agent-review-comment-count")
         .role(gpui::Role::Label)
         .aria_label(count_label(open, "local review comment"))
         .text_color(Tone::GitMerged.color(p))
@@ -336,7 +337,7 @@ impl ChangesView {
       .get(&(path.to_string(), number, side))
     {
       let mut list = div()
-        .debug_selector(|| "agent-review-inline-list".into())
+        .selector("agent-review-inline-list")
         .border_y_1()
         .border_color(violet(p, 0.3))
         .bg(violet(p, 0.03))
@@ -379,10 +380,9 @@ impl ChangesView {
   ) -> Option<impl IntoElement> {
     let threads = self.threads.placed.unplaced.get(path)?;
     let mut section = div()
-      .id(SharedString::from(format!(
+      .selector(SharedString::from(format!(
         "github-outdated-threads-{path}"
       )))
-      .debug_selector(|| "github-outdated-threads".into())
       .role(gpui::Role::Group)
       .aria_label(format!("Outdated threads on {path}"))
       .border_b_1()
@@ -428,8 +428,7 @@ impl ChangesView {
     let muted = p.muted_foreground;
     let id = thread.id.clone();
     let mut toggle = div()
-      .id(SharedString::from(format!("github-thread-{}", thread.id)))
-      .debug_selector(|| "github-thread-toggle".into())
+      .selector(SharedString::from(format!("github-thread-{}", thread.id)))
       .role(gpui::Role::Button)
       .aria_label(if collapsed {
         "Show review thread"
@@ -509,8 +508,7 @@ impl ChangesView {
     if let (true, Some(first)) = (collapsed, first) {
       toggle = toggle.child(
         ui::text(div(), TextSize::Sm)
-          .id("github-thread-collapsed-preview")
-          .debug_selector(|| "github-thread-collapsed-preview".into())
+          .selector("github-thread-collapsed-preview")
           .role(gpui::Role::Paragraph)
           .aria_label(preview(&first.body))
           .min_w_0()
@@ -555,7 +553,7 @@ impl ChangesView {
     if !collapsed {
       // One card per thread; replies follow flush, split by a rule.
       let mut comments = div()
-        .debug_selector(|| "github-thread-comments".into())
+        .selector("github-thread-comments")
         .min_w_0()
         .flex()
         .flex_col()
@@ -567,7 +565,7 @@ impl ChangesView {
       for (i, comment) in thread.comments.iter().enumerate() {
         let id = comment.id.clone();
         let mut c = div()
-          .debug_selector(move || format!("github-comment-{id}"))
+          .selector(format!("github-comment-{id}"))
           .child(self.thread_comment(comment, lines, path, anchor.clone(), line, side, p, cx));
         if i > 0 {
           c = c.border_t_1().border_color(p.border.opacity(0.6));
@@ -582,7 +580,12 @@ impl ChangesView {
 
   /// A GitHub comment's text, its ```` ```suggestion ```` block drawn as a
   /// diff against the line it replaces rather than as a code block.
-  fn github_comment_body(&self, comment: &GhReviewComment, lines: usize, p: &Palette) -> Div {
+  fn github_comment_body(
+    &self,
+    comment: &GhReviewComment,
+    lines: usize,
+    p: &Palette,
+  ) -> ObservedElement<gpui::Stateful<Div>> {
     let md = |key: &str, text: &str| {
       super::super::code::markdown(
         format!("github-comment-{}{key}", comment.id),
@@ -591,7 +594,7 @@ impl ChangesView {
         self.dark,
       )
     };
-    let body = div().debug_selector(|| "github-comment-body".into());
+    let body = div().selector("github-comment-body");
     let Some(s) = crate::core::review::parse_suggestion(&comment.body) else {
       return body.child(md("", &comment.body));
     };
@@ -626,11 +629,10 @@ impl ChangesView {
     let quoted = comment.clone();
     let file = path.to_string();
     div()
-      .id(SharedString::from(format!(
+      .selector(SharedString::from(format!(
         "github-comment-card-{}",
         comment.id
       )))
-      .debug_selector(|| "github-comment-card".into())
       .role(gpui::Role::Group)
       .aria_label(format!("Comment by {}", comment.author.login))
       .min_w_0()
@@ -663,23 +665,21 @@ impl ChangesView {
           cx,
         )
         .child(
-          div()
-            .debug_selector(|| "github-comment-quote".into())
-            .child(
-              self.tip(
-                format!("quote-{}", comment.id),
-                "Quote this comment",
-                Button::new(SharedString::from(format!("quote-{}", comment.id)), p)
-                  .variant(Variant::Outline)
-                  .size(Size::Xs)
-                  .icon(theme::ICON_BOT, 12.)
-                  .label("Quote")
-                  .on_click(cx.listener(move |view, _, _, cx| {
-                    view.quote(&quoted, &file, anchor.clone(), line, side, cx)
-                  })),
-                cx,
-              ),
+          div().selector("github-comment-quote").child(
+            self.tip(
+              format!("quote-{}", comment.id),
+              "Quote this comment",
+              Button::new(SharedString::from(format!("quote-{}", comment.id)), p)
+                .variant(Variant::Outline)
+                .size(Size::Xs)
+                .icon(theme::ICON_BOT, 12.)
+                .label("Quote")
+                .on_click(cx.listener(move |view, _, _, cx| {
+                  view.quote(&quoted, &file, anchor.clone(), line, side, cx)
+                })),
+              cx,
             ),
+          ),
         ),
       )
       .test_support()
@@ -701,11 +701,10 @@ impl ChangesView {
       comment.start_line.to_string()
     };
     let mut card = div()
-      .id(SharedString::from(format!(
+      .selector(SharedString::from(format!(
         "agent-review-comment-card-{}",
         comment.id
       )))
-      .debug_selector(|| "agent-review-comment-card".into())
       .max_w(zpx(CARD_MAX_W))
       .role(gpui::Role::Group)
       .aria_label(format!(
@@ -896,8 +895,7 @@ pub(in crate::gpui_shell::screen) fn suggestion_box(
   let body = match suggestion_diff(original, suggested) {
     Some(rows) => {
       let mut el = ui::text(div(), TextSize::Sm)
-        .id("agent-review-suggestion")
-        .debug_selector(|| "agent-review-suggestion".into())
+        .selector("agent-review-suggestion")
         .role(gpui::Role::Group)
         .aria_label("Suggestion")
         .font_family(theme::MONO_FONT);
@@ -951,8 +949,7 @@ pub(in crate::gpui_shell::screen) fn suggestion_box(
       el.test_support().into_any_element()
     }
     None => ui::text(div(), TextSize::Sm)
-      .id("agent-review-suggestion")
-      .debug_selector(|| "agent-review-suggestion".into())
+      .selector("agent-review-suggestion")
       .role(gpui::Role::Group)
       .aria_label("Suggestion")
       .font_family(theme::MONO_FONT)

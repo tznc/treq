@@ -186,7 +186,10 @@ fn extreme_error_text_stays_inside_the_dialog(cx: &mut TestAppContext) {
     "word ".repeat(2_000),
   ] {
     h.set_account(cloud(serde_json::json!({ "provisioningError": error })));
-    let dialog = h.cx.debug_bounds("remote-setup-dialog").expect("dialog");
+    let dialog = h
+      .cx
+      .debug_bounds("remote-setup-dialog-panel")
+      .expect("dialog");
     let card = h.cx.debug_bounds("cloud-workspace-card").expect("card");
     assert!(
       card.right() <= dialog.right() + gpui::px(1.)

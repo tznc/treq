@@ -106,7 +106,7 @@ fn terminal_draws_output_and_types_into_the_pty(cx: &mut TestAppContext) {
   let (live, fresh) = terminal_data::attach(&host_dyn, &pty, 80, 24);
   assert!(!fresh);
   assert_eq!(live.screen_text(), "hello world\n$");
-  h.click("terminal-body");
+  click_terminal(&mut h);
   h.cx.simulate_input("ls");
   h.cx.simulate_keystrokes("enter ctrl-c");
   let writes: Vec<String> = host
@@ -130,7 +130,7 @@ fn pasting_text_into_a_terminal_types_the_text(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
   let pty = agent_pty();
-  h.click("terminal-body");
+  click_terminal(&mut h);
   h.cx
     .write_to_clipboard(gpui::ClipboardItem::new_string("hello agent".into()));
   h.cx.simulate_keystrokes("cmd-v");
@@ -149,7 +149,7 @@ fn pasting_a_clipboard_image_pastes_the_path_it_was_saved_to(cx: &mut TestAppCon
   let pty = agent_pty();
   host.output(&pty, "\x1b[?2004h");
   h.cx.run_until_parked();
-  h.click("terminal-body");
+  click_terminal(&mut h);
   let png = b"\x89PNG\r\n\x1a\n\0\0\0\0".to_vec();
   h.cx
     .write_to_clipboard(gpui::ClipboardItem::new_image(&gpui::Image::from_bytes(
@@ -269,8 +269,8 @@ fn terminal_pty_follows_a_resize_while_it_starts(cx: &mut TestAppContext) {
 fn terminal_search_keeps_what_is_typed_out_of_the_pty(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
-  h.click("terminal-body");
-  h.click("terminal-search-button");
+  click_terminal(&mut h);
+  click_named(&mut h, gpui::Role::Button, "Search terminal");
   assert!(h.shows(gpui::Role::Search, "Find in terminal"));
   h.cx.simulate_input("dark");
   h.cx.run_until_parked();
@@ -319,7 +319,7 @@ fn terminal_pane_picks_the_environment_new_terminals_run_in(cx: &mut TestAppCont
 fn terminal_pane_opens_and_closes_shells_by_shortcut(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
-  h.click("terminal-body");
+  click_terminal(&mut h);
   h.cx.simulate_keystrokes("cmd-\\");
   h.cx.run_until_parked();
   assert!(h.shows(gpui::Role::Group, "Shell terminal"));
@@ -353,7 +353,7 @@ fn terminal_pane_opens_and_closes_shells_by_shortcut(cx: &mut TestAppContext) {
 fn terminal_pane_keeps_its_terminals_across_settings(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
-  h.click("terminal-body");
+  click_terminal(&mut h);
   h.cx.simulate_keystrokes("cmd-\\");
   assert!(h.shows(gpui::Role::Group, "Shell terminal"));
   let workspace = h.screen.read_with(&h.cx, |s, _| s.snapshot().clone());
@@ -383,7 +383,7 @@ fn terminal_pane_keeps_its_terminals_across_settings(cx: &mut TestAppContext) {
 fn terminal_pane_shows_a_closed_windows_terminals_again(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
-  h.click("terminal-body");
+  click_terminal(&mut h);
   h.cx.simulate_keystrokes("cmd-\\");
   assert!(h.shows(gpui::Role::Group, "Shell terminal"));
   let spawns = |host: &FakeHost| {
@@ -418,7 +418,7 @@ fn terminal_pane_shows_a_closed_windows_terminals_again(cx: &mut TestAppContext)
 fn terminal_pane_asks_react_for_a_new_agent(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
-  h.click("terminal-body");
+  click_terminal(&mut h);
   h.cx.simulate_keystrokes("cmd-]");
   h.cx.run_until_parked();
   assert!(h.sent().contains(&field(
@@ -597,12 +597,10 @@ fn terminal_pane_undims_a_hovered_column(cx: &mut TestAppContext) {
     }),
   );
   assert!(column_is(&mut h, "Shell terminal", DIMMED));
-  let at = h
-    .cx
-    .debug_bounds("terminal-column-shell")
-    .expect("shell column")
-    .center();
-  h.cx.simulate_mouse_move(at, None, Modifiers::none());
+  let screen = h.rendered();
+  let column =
+    screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Group).name("Shell terminal"));
+  screen.user().hover(&column);
   h.cx.run_until_parked();
   assert!(
     !column_is(&mut h, "Shell terminal", DIMMED),
@@ -610,24 +608,10 @@ fn terminal_pane_undims_a_hovered_column(cx: &mut TestAppContext) {
   );
 }
 
-/// Double-clicks the element `selector` names.
-fn double_click(h: &mut Harness, selector: &'static str) {
-  let at = h.cx.debug_bounds(selector).expect(selector).center();
-  for click_count in [1, 2] {
-    h.cx.simulate_event(gpui::MouseDownEvent {
-      position: at,
-      modifiers: Modifiers::none(),
-      button: MouseButton::Left,
-      click_count,
-      first_mouse: false,
-    });
-    h.cx.simulate_event(gpui::MouseUpEvent {
-      position: at,
-      modifiers: Modifiers::none(),
-      button: MouseButton::Left,
-      click_count,
-    });
-  }
+/// Double-clicks the shown terminal's title, as the user renames it.
+fn double_click_title(h: &mut Harness) {
+  let title = by_id_prefix(h, "terminal-title-");
+  h.rendered().user().dbl_click(&title);
   h.cx.run_until_parked();
 }
 
@@ -646,7 +630,7 @@ fn terminal_names(h: &Harness) -> Vec<String> {
 fn an_agent_terminal_is_renamed_from_its_title(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
-  double_click(&mut h, "terminal-title");
+  double_click_title(&mut h);
   assert!(h.shows(gpui::Role::Group, "Rename terminal"));
   // The name starts selected, so typing replaces it.
   h.cx.simulate_input("Fix login");
@@ -658,7 +642,7 @@ fn an_agent_terminal_is_renamed_from_its_title(cx: &mut TestAppContext) {
     .contains(&"rename session 3 in /repo to Fix login".to_string()));
   assert_eq!(terminal_names(&h), ["Fix login"]);
   // Emptied, an agent keeps its name.
-  double_click(&mut h, "terminal-title");
+  double_click_title(&mut h);
   h.cx.simulate_keystrokes("backspace enter");
   h.cx.run_until_parked();
   assert_eq!(terminal_names(&h), ["Fix login"]);
@@ -672,19 +656,19 @@ fn a_shell_is_named_until_cleared_and_escape_keeps_its_name(cx: &mut TestAppCont
     serde_json::json!({ "commands": [{ "nonce": 1, "kind": "newShell", "dir": "/repo" }] }),
   );
   assert_eq!(terminal_names(&h), ["Shell"]);
-  double_click(&mut h, "terminal-title");
+  double_click_title(&mut h);
   h.cx.simulate_input("dev server");
   h.cx.simulate_keystrokes("enter");
   h.cx.run_until_parked();
   assert_eq!(terminal_names(&h), ["dev server"]);
-  double_click(&mut h, "terminal-title");
+  double_click_title(&mut h);
   h.cx.simulate_input("typo");
   h.cx.simulate_keystrokes("escape");
   h.cx.run_until_parked();
   assert!(!h.shows(gpui::Role::Group, "Rename terminal"));
   assert_eq!(terminal_names(&h), ["dev server"]);
   // An empty name shows "Shell" again.
-  double_click(&mut h, "terminal-title");
+  double_click_title(&mut h);
   h.cx.simulate_keystrokes("backspace enter");
   h.cx.run_until_parked();
   assert_eq!(terminal_names(&h), ["Shell"]);
@@ -698,7 +682,7 @@ fn a_remote_session_is_named_on_its_host(cx: &mut TestAppContext) {
   open["commands"][0]["remote"]["title"] = "deploy".into();
   set_terminal(&mut h, open);
   assert_eq!(terminal_names(&h), ["deploy"]);
-  double_click(&mut h, "terminal-title");
+  double_click_title(&mut h);
   h.cx.simulate_input("  tail logs  ");
   h.cx.simulate_keystrokes("enter");
   h.cx.run_until_parked();
@@ -925,9 +909,9 @@ fn files_dropped_on_a_shell_are_typed_but_not_on_a_remote_session(cx: &mut TestA
     serde_json::json!({ "commands": [{ "nonce": 1, "kind": "newShell", "dir": "/repo" }] }),
   );
   let at = h
-    .cx
-    .debug_bounds("terminal-column-shell")
-    .expect("shell")
+    .rendered()
+    .get_by_role(gpui_testing_library::by::role(gpui::Role::Group).name("Shell terminal"))
+    .bounds()
     .center();
   drop_files(&mut h, at);
   let writes = |host: &FakeHost| {
@@ -941,11 +925,7 @@ fn files_dropped_on_a_shell_are_typed_but_not_on_a_remote_session(cx: &mut TestA
 
   let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
   set_terminal(&mut h, open_remote_command(1));
-  let at = h
-    .cx
-    .debug_bounds("terminal-column-shell")
-    .expect("remote")
-    .center();
+  let at = by_id_prefix(&mut h, "terminal-column-").bounds().center();
   drop_files(&mut h, at);
   assert_eq!(writes(&host), 0, "{:?}", host.calls());
 }
@@ -959,10 +939,8 @@ fn files_dropped_on_an_agent_are_pasted(cx: &mut TestAppContext) {
   let pty = agent_pty();
   host.output(&pty, "\x1b[?2004h");
   h.cx.run_until_parked();
-  let at = h
-    .cx
-    .debug_bounds("terminal-column-agent")
-    .expect("agent")
+  let at = by_id_prefix(&mut h, "terminal-column-agent-")
+    .bounds()
     .center();
   drop_files(&mut h, at);
   assert_eq!(
@@ -1560,11 +1538,11 @@ fn terminal_reports_the_mouse_once_the_program_asks(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
   let pty = agent_pty();
-  h.click("terminal-body");
+  click_terminal(&mut h);
   assert!(pty_writes(&host).is_empty(), "no reports before asked");
   host.output(&pty, "\x1b[?1000h\x1b[?1006h");
   h.cx.run_until_parked();
-  h.click("terminal-body");
+  click_terminal(&mut h);
   let writes = pty_writes(&host);
   assert_eq!(writes.len(), 2, "{writes:?}");
   assert!(
@@ -1637,7 +1615,7 @@ fn typing_into_an_agent_terminal_notes_the_keystroke(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
   let pty = agent_pty();
-  h.click("terminal-body");
+  click_terminal(&mut h);
   h.cx.simulate_input("l");
   assert!(
     host.calls().contains(&format!("msg key {pty}")),
@@ -1773,7 +1751,8 @@ fn attaching(h: &mut Harness) -> bool {
 fn terminal_workspace_label_click_navigates(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
-  h.click("terminal-workspace-label");
+  let label = by_id_prefix(&mut h, "terminal-workspace-label-");
+  h.rendered().user().click(&label);
   let navigated = h
     .sent()
     .into_iter()
@@ -1799,7 +1778,8 @@ fn terminal_workspace_label_click_navigates_by_path(cx: &mut TestAppContext) {
   );
   let (mut h, _) = workspace_harness(cx, host, terminal_route(serde_json::json!({})));
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
-  h.click("terminal-workspace-label");
+  let label = by_id_prefix(&mut h, "terminal-workspace-label-");
+  h.rendered().user().click(&label);
   let value = h.sent().into_iter().find_map(|a| match a {
     ScreenAction::Field { field, value } if field == "terminal.navigate" => Some(value),
     _ => None,
@@ -1818,7 +1798,8 @@ fn terminal_agent_header_links_to_what_it_reviews(cx: &mut TestAppContext) {
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
   assert!(h.shows(gpui::Role::Button, "Go to Add login"));
   assert!(h.shows(gpui::Role::Link, "https://github.com/o/r/pull/4305"));
-  h.click("terminal-link-label");
+  let link = by_id_prefix(&mut h, "terminal-link-label-");
+  h.rendered().user().click(&link);
   assert!(
     host
       .calls()
@@ -1833,10 +1814,19 @@ fn terminal_agent_header_has_no_link_without_one(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
   assert!(h.shows(gpui::Role::Button, "Go to Add login"));
-  assert!(h
+  // The workspace header's issue link is not the terminal's.
+  let in_terminal = h
     .rendered()
     .query_all_by_role(gpui_testing_library::by::role(gpui::Role::Link))
-    .is_empty());
+    .into_iter()
+    .filter(|link| {
+      link
+        .path()
+        .iter()
+        .any(|id| matches!(id, gpui::ElementId::Name(n) if n.starts_with("terminal-column-")))
+    })
+    .count();
+  assert_eq!(in_terminal, 0);
 }
 
 #[test]
@@ -1857,7 +1847,7 @@ fn send_file_thumbnail_is_square_with_centered_name(cx: &mut TestAppContext) {
   let (mut h, _) = send_harness(cx);
   let chip = h.cx.debug_bounds("terminal-send-preview-t1").expect("chip");
   assert_eq!(chip.size.width, chip.size.height, "square chip");
-  let title = h.cx.debug_bounds("terminal-send-title-t1").expect("title");
+  let title = h.cx.debug_bounds("terminal-send-name-t1").expect("title");
   assert!(
     title.size.width < chip.size.width - gpui::px(8.),
     "title hugs its text"
@@ -1879,11 +1869,8 @@ fn terminal_workspace_label_truncates_before_actions(cx: &mut TestAppContext) {
   h.cx
     .simulate_resize(gpui::size(gpui::px(520.), gpui::px(800.)));
   h.cx.run_until_parked();
-  let label = h
-    .cx
-    .debug_bounds("terminal-workspace-label")
-    .expect("label");
-  let search = h.cx.debug_bounds("terminal-search-button").expect("search");
+  let label = by_id_prefix(&mut h, "terminal-workspace-label-").bounds();
+  let search = by_id_prefix(&mut h, "terminal-search-").bounds();
   assert!(
     label.right() <= search.left(),
     "label {label:?} overlaps search {search:?}"

@@ -2,7 +2,9 @@
 //! beside the control, Bootstrap's horizontal form), inline, or mixed with
 //! multi-column rows and titled sections.
 
+use crate::SelectorExt as _;
 use gpui::{div, prelude::*, AnyElement, App, Div, FontWeight, SharedString, Window};
+use gpui_kit::base::ObservedElement;
 
 use crate::{
   text,
@@ -137,9 +139,9 @@ impl ParentElement for Field {
   }
 }
 
-fn part(id: &SharedString, name: &str) -> Div {
+fn part(id: &SharedString, name: &str) -> ObservedElement<gpui::Stateful<Div>> {
   let selector = format!("{id}-{name}");
-  div().debug_selector(move || selector)
+  div().selector(selector)
 }
 
 impl RenderOnce for Field {
@@ -191,7 +193,7 @@ impl RenderOnce for Field {
       .min_w_0()
       .children(self.control);
     let selector = self.id.to_string();
-    let root = div().debug_selector(move || selector).min_w_0();
+    let root = div().selector(selector).min_w_0();
     match layout {
       FieldLayout::Vertical => root
         .flex()
@@ -520,7 +522,7 @@ impl RenderOnce for Form {
     });
     let items = render_items(self.items, field_layout, &p);
     div()
-      .debug_selector(move || selector)
+      .selector(selector)
       .flex()
       .when(inline, |el| el.flex_wrap().items_end())
       .when(!inline, |el| el.flex_col())

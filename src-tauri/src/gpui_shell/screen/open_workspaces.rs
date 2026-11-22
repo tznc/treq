@@ -14,6 +14,7 @@ use std::{
   sync::Arc,
   time::{Duration, Instant},
 };
+use treq_ui::SelectorExt as _;
 
 use gpui_kit::{
   base::TestSupportExt as _,
@@ -915,14 +916,10 @@ impl OpenWorkspacesDialog {
         .min_w_0()
         .gap_1p5()
         .child(field_label(label))
-        .child(
-          div()
-            .debug_selector(move || selector.into())
-            .child(ui::text(
-              Textarea::new(area).aria_label(label).disabled(self.pending),
-              TextSize::Sm,
-            )),
-        )
+        .child(div().selector(selector).child(ui::text(
+          Textarea::new(area).aria_label(label).disabled(self.pending),
+          TextSize::Sm,
+        )))
     };
     div()
       .flex()
@@ -941,8 +938,7 @@ impl OpenWorkspacesDialog {
           )
           .child(
             div()
-              .id("open-workspaces-stack-on")
-              .debug_selector(|| "open-workspaces-stack-on".into())
+              .selector("open-workspaces-stack-on")
               .w(zpx(240.))
               .map(|this| match select {
                 Some(state) => this.child(ui::text(
@@ -1025,7 +1021,7 @@ impl OpenWorkspacesDialog {
           .child(field_label("Workspaces"))
           .child(
             div()
-              .debug_selector(|| "open-workspaces-lines".into())
+              .selector("open-workspaces-lines")
               .child(ui::text(
                 Textarea::new(lines)
                   .aria_label("Workspaces")
@@ -1041,7 +1037,7 @@ impl OpenWorkspacesDialog {
       .when(!self.errors.is_empty(), |this| {
         this.child(
           ui::text(div(), TextSize::Sm)
-            .debug_selector(|| "open-workspaces-errors".into())
+            .selector("open-workspaces-errors")
             .flex()
             .flex_col()
             .gap_1()
@@ -1113,8 +1109,7 @@ impl OpenWorkspacesDialog {
       })
       .child(
         ui::text(div(), TextSize::Sm)
-          .id("open-workspaces-status")
-          .debug_selector(|| "open-workspaces-status".into())
+          .selector("open-workspaces-status")
           .role(gpui::Role::Status)
           .aria_label(SharedString::from(status.clone()))
           .aria_expanded(self.lines_open)
@@ -1199,8 +1194,7 @@ impl OpenWorkspacesDialog {
     deferred(
       anchored().anchor(gpui::Anchor::BottomLeft).child(
         div()
-          .id("open-workspaces-lines-popover")
-          .debug_selector(|| "open-workspaces-lines-popover".into())
+          .selector("open-workspaces-lines-popover")
           .role(gpui::Role::List)
           .aria_label("Workspaces to open")
           .mb_1()
@@ -1265,8 +1259,7 @@ impl OpenWorkspacesDialog {
     };
     // A rule so the tabs do not read as one of the list's filters.
     let divider = div()
-      .id("open-workspaces-integrations-divider")
-      .debug_selector(|| "open-workspaces-integrations-divider".into())
+      .selector("open-workspaces-integrations-divider")
       .h(zpx(1.))
       .w_full()
       .flex_none()
@@ -1597,7 +1590,7 @@ fn pane(
           div()
             .flex_1()
             .min_w_0()
-            .debug_selector(move || format!("{id}-search"))
+            .selector(format!("{id}-search"))
             .child(ui::text(
               Styled::h(
                 search.prefix(ui::icon(theme::ICON_SEARCH, 14., p.muted_foreground)),

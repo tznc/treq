@@ -8,6 +8,7 @@ use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
 use std::{sync::Arc, time::Duration};
+use treq_ui::SelectorExt as _;
 
 use gpui::{AnyElement, Task};
 
@@ -621,10 +622,9 @@ impl ChangesView {
         // Short label (['button label']): 11px is fine.
         // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
-          .id(SharedString::from(format!("reply-{id}")))
+          .selector(SharedString::from(format!("reply-{id}")))
           .role(gpui::Role::Button)
           .aria_label("Reply")
-          .debug_selector(|| "github-thread-reply".into())
           .font_family(theme::SANS_FONT)
           .text_color(muted)
           .cursor_pointer()
@@ -639,7 +639,7 @@ impl ChangesView {
     let (send, close, cancel) = (id.clone(), id.clone(), id.clone());
     Some(
       div()
-        .debug_selector(|| "github-thread-reply-box".into())
+        .selector("github-thread-reply-box")
         .flex()
         .flex_col()
         .gap_1p5()
@@ -690,10 +690,9 @@ impl ChangesView {
               // Short label (['button label']): 11px is fine.
               // ast-grep-ignore: gpui-text-xs-short-label-only
               ui::text(div(), TextSize::Xs)
-                .id(SharedString::from(format!("reply-send-{id}")))
+                .selector(SharedString::from(format!("reply-send-{id}")))
                 .role(gpui::Role::Button)
                 .aria_label("Send reply")
-                .debug_selector(|| "github-thread-reply-send".into())
                 .rounded(radius::SM)
                 .bg(p.primary)
                 .text_color(p.primary_foreground)

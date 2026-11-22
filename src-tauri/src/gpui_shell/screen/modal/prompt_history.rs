@@ -6,13 +6,14 @@ use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
-use gpui_kit::base::TestSupportExt as _;
+use gpui_kit::base::ObservedElement;
 use serde::Deserialize;
 use serde_json::json;
 use std::{ops::Range, rc::Rc};
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, uniform_list, ClipboardItem, Context, FontWeight, SharedString, Window,
 };
+use treq_ui::SelectorExt as _;
 
 use super::Env;
 use crate::{
@@ -265,10 +266,9 @@ impl PromptHistoryView {
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
     div()
-      .id("prompt-history-list")
+      .selector("prompt-history-list")
       .role(gpui::Role::List)
       .aria_label("Prompts")
-      .debug_selector(|| "prompt-history-list".into())
       .w(zpx(256.))
       .flex_none()
       .h_full()
@@ -283,7 +283,6 @@ impl PromptHistoryView {
         )
         .size_full(),
       )
-      .test_support()
   }
 
   fn rows(&mut self, range: Range<usize>, cx: &mut Context<Self>) -> Vec<gpui::AnyElement> {
@@ -349,9 +348,9 @@ impl PromptHistoryView {
     entries: &[PromptHistoryEntry],
     p: &Palette,
     cx: &mut Context<Self>,
-  ) -> gpui::Div {
+  ) -> ObservedElement<gpui::Stateful<gpui::Div>> {
     let pane = div()
-      .debug_selector(|| "prompt-history-detail".into())
+      .selector("prompt-history-detail")
       .flex_1()
       .min_w_0()
       .h_full();
@@ -427,12 +426,10 @@ impl PromptHistoryView {
         .child(header)
         .child(
           ui::text(div(), TextSize::Sm)
-            .id("prompt-history-detail-text")
+            .selector("prompt-history-detail-text")
             .role(gpui::Role::Paragraph)
             .aria_label(entry.prompt_text.clone())
-            .debug_selector(|| "prompt-history-detail-text".into())
-            .child(entry.prompt_text.clone())
-            .test_support(),
+            .child(entry.prompt_text.clone()),
         )
         .child(
           div().child(

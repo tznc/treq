@@ -32,7 +32,7 @@ fn commits_tab_loads_a_deferred_file_diff_on_request(cx: &mut TestAppContext) {
   h.click("commit-row-a");
   assert!(h.shows(gpui::Role::Button, "huge-diff.txt"));
   assert!(h.shows(gpui::Role::Button, "Load diff"));
-  h.click("load-deferred-diff");
+  click_named(&mut h, gpui::Role::Button, "Load diff");
   h.cx.run_until_parked();
   assert!(host
     .calls()

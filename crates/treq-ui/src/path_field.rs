@@ -1,5 +1,6 @@
 //! A path chosen with the system's file picker, never typed.
 
+use crate::SelectorExt as _;
 use std::{path::PathBuf, rc::Rc};
 
 use gpui::{div, prelude::*, App, ExternalPaths, PathPromptOptions, SharedString, Window};
@@ -128,7 +129,7 @@ impl RenderOnce for PathField {
       })
     };
     let value = div()
-      .debug_selector(move || selector)
+      .selector(selector)
       .flex_1()
       .min_w_0()
       .h_full()

@@ -134,7 +134,7 @@ fn terminal(cx: &mut TestAppContext) -> (Harness, Arc<FakeHost>, Rc<Cell<usize>>
   let (mut h, host, frames) = counted(cx, host, terminal_route(serde_json::json!({})));
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
   host.output(&agent_pty(), "$ ");
-  h.click("terminal-body");
+  click_terminal(&mut h);
   settle(&mut h, &host, &frames);
   (h, host, frames)
 }

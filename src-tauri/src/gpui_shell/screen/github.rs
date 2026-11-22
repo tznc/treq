@@ -19,6 +19,7 @@ use std::{
   sync::Arc,
   time::{Duration, Instant},
 };
+use treq_ui::SelectorExt as _;
 
 use gpui_kit::component::{input::Input, GlobalState};
 use tauri_plugin_gpui::gpui::{
@@ -1227,7 +1228,7 @@ impl Render for GithubView {
     let detail = show_detail.then(|| self.detail_panel(&p, window, cx));
     let dialogs = self.dialogs(&p, window, cx);
     div()
-      .debug_selector(|| "github-panel".into())
+      .selector("github-panel")
       .size_full()
       .flex()
       .bg(p.background)
@@ -1407,8 +1408,7 @@ impl GithubView {
         cx,
       );
       div()
-        .id("github-search")
-        .debug_selector(|| "github-search".into())
+        .selector("github-search")
         .flex_1()
         .min_w(zpx(160.))
         .max_w(zpx(320.))
