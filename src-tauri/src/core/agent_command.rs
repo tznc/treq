@@ -1205,7 +1205,7 @@ mod tests {
       .unwrap();
 
     crate::test_repo::wait_until(Duration::from_secs(10), || out.exists());
-    child.kill().ok();
+    child.kill().expect("kill the shell");
     std::fs::read(&out)
       .ok()
       .map(|b| String::from_utf8(b).unwrap())

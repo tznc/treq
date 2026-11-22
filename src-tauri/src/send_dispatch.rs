@@ -344,7 +344,9 @@ fn sweep_old_files(dir: &Path, max_age: std::time::Duration) {
       .and_then(|modified| modified.elapsed().ok())
       .is_some_and(|age| age > max_age);
     if old {
-      std::fs::remove_file(entry.path()).ok();
+      if let Err(e) = std::fs::remove_file(entry.path()) {
+        log::debug!("Failed to sweep old file {}: {e}", entry.path().display());
+      }
     }
   }
 }
@@ -359,7 +361,9 @@ pub fn remove_session_files(paths: &[String]) {
   for path in paths {
     let path_ref = Path::new(path);
     if path_ref.parent() == Some(pasted.as_path()) {
-      std::fs::remove_file(path_ref).ok();
+      if let Err(e) = std::fs::remove_file(path_ref) {
+        log::debug!("Failed to remove pasted image {path}: {e}");
+      }
     } else if path_ref.parent() == Some(temp.as_path())
       && path_ref
         .file_name()
@@ -613,7 +617,7 @@ mod tests {
     assert!(!mine.exists());
     assert!(other.exists());
     assert!(outside.path().exists());
-    std::fs::remove_file(other).ok();
+    std::fs::remove_file(other).expect("remove the other image");
   }
 
   #[test]

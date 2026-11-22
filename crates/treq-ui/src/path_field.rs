@@ -120,7 +120,9 @@ impl RenderOnce for PathField {
             .spawn(cx, async move |cx| {
               if let Ok(Ok(Some(paths))) = rx.await {
                 if let Some(path) = paths.into_iter().next() {
-                  cx.update(|window, cx| f(path, window, cx)).ok();
+                  if let Err(e) = cx.update(|window, cx| f(path, window, cx)) {
+                    log::debug!("Dropped the picked path: the window closed: {e}");
+                  }
                 }
               }
             })
@@ -272,6 +274,6 @@ mod tests {
       Some(file.clone())
     );
     assert_eq!(dropped(&[], true), None);
-    std::fs::remove_file(file).ok();
+    std::fs::remove_file(file).expect("remove the test file");
   }
 }

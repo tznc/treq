@@ -50,7 +50,9 @@ pub fn handler<V: 'static>(
 ) -> impl Fn(&mut Window, &mut App) + 'static {
   let view = cx.weak_entity();
   move |window, cx| {
-    view.update(cx, |view, cx| f(view, window, cx)).ok();
+    if let Err(e) = view.update(cx, |view, cx| f(view, window, cx)) {
+      log::debug!("Skipped a dialog handler: its view is gone: {e}");
+    }
   }
 }
 

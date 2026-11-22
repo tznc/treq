@@ -775,8 +775,14 @@ mod tests {
       .join(".treq")
       .join("workspaces")
       .join(&workspace.workspace_path);
-    fs::remove_dir_all(workspace_root.join("vendor/lib")).ok();
-    fs::remove_dir_all(Path::new(&superproject).join("vendor/lib")).ok();
+    for checkout in [
+      workspace_root.join("vendor/lib"),
+      Path::new(&superproject).join("vendor/lib"),
+    ] {
+      if checkout.exists() {
+        fs::remove_dir_all(&checkout).expect("remove the submodule checkout");
+      }
+    }
 
     set_submodule_synced(&superproject, "vendor/lib", true).unwrap();
     assert!(workspace_root.join("vendor/lib/.git").exists());

@@ -17,19 +17,7 @@ files:
   - "crates/**/*.rs"
 ignores:
   # Not fixed yet. The fix PRs stacked on this one remove these entries.
-  - "crates/treq-gateway/src/lib.rs"
-  - "crates/treq-ui/src/dialog.rs"
-  - "crates/treq-ui/src/path_field.rs"
-  - "crates/treq-ui/src/press.rs"
-  - "src-tauri/src/core/agent_command.rs"
-  - "src-tauri/src/core/checks.rs"
-  - "src-tauri/src/core/config_sync.rs"
-  - "src-tauri/src/core/pty_daemon.rs"
-  - "src-tauri/src/core/pty_remote_supervisor.rs"
-  - "src-tauri/src/core/submodules.rs"
-  - "src-tauri/src/gpui_shell/overlay/mod.rs"
   - "src-tauri/src/gpui_shell/screen/file_browser.rs"
-  - "src-tauri/src/gpui_shell/screen/github.rs"
   - "src-tauri/src/gpui_shell/screen/github/new_pr.rs"
   - "src-tauri/src/gpui_shell/screen/machines.rs"
   - "src-tauri/src/gpui_shell/screen/onboarding.rs"
@@ -37,7 +25,6 @@ ignores:
   - "src-tauri/src/gpui_shell/screen/workspace_dialog.rs"
   - "src-tauri/src/gpui_shell/screen/workspace_dialog_data.rs"
   - "src-tauri/src/gpui_shell/screen/workspace_title.rs"
-  - "src-tauri/src/mobile/ui/hold.rs"
   - "src-tauri/src/mobile/ui/home.rs"
   - "src-tauri/src/mobile/ui/load.rs"
   - "src-tauri/src/mobile/ui/mod.rs"
@@ -61,8 +48,6 @@ ignores:
   - "src-tauri/src/mobile/ui/screens/workspaces.rs"
   - "src-tauri/src/mobile/ui/sheet.rs"
   - "src-tauri/src/mobile/ui/terminal_view.rs"
-  - "src-tauri/src/send_dispatch.rs"
-  - "src-tauri/tests/it/core_app_test.rs"
 utils:
   ok-call:
     kind: call_expression

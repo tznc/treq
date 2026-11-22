@@ -6,8 +6,8 @@ use treq_lib::jj;
 #[test]
 fn test_repo_initialization() {
   let repo = TestRepo::new_without_init().expect("Failed to create test repo");
-  treq_lib::core::init(&repo.repo_path).ok();
-  treq_lib::core::init(&repo.repo_path).ok();
+  treq_lib::core::init(&repo.repo_path).expect("first init");
+  treq_lib::core::init(&repo.repo_path).expect("init again on an initialized repo");
 
   // --- JJ Initialization ---
   assert!(Path::new(&repo.repo_path).join(".git").exists());

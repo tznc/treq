@@ -251,7 +251,9 @@ fn write_one(root: &Path, rel: &str, bytes: &[u8]) -> Result<(), String> {
     std::fs::rename(&tmp, &path)
   })();
   if written.is_err() {
-    std::fs::remove_file(&tmp).ok();
+    if let Err(e) = std::fs::remove_file(&tmp) {
+      log::debug!("Failed to remove temp file {}: {e}", tmp.display());
+    }
   }
   written.map_err(|e| e.to_string())
 }

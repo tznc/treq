@@ -1303,9 +1303,16 @@ mod tests {
 
     impl Drop for Served {
       fn drop(&mut self) {
-        pty_daemon::request_if_running(&self.paths, &Request::Shutdown).ok();
+        // Drop also runs while a failed test unwinds, so report instead of panicking.
+        if let Err(e) = pty_daemon::request_if_running(&self.paths, &Request::Shutdown) {
+          tracing::warn!("Failed to stop the test daemon: {e}");
+        }
         if let Some(handle) = self.handle.take() {
-          handle.join().ok();
+          match handle.join() {
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => tracing::warn!("The test daemon failed: {e}"),
+            Err(_) => tracing::warn!("The test daemon thread panicked"),
+          }
         }
       }
     }
