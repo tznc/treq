@@ -263,6 +263,15 @@ fn fixture() -> Fixture {
   }
 }
 
+/// The harness's window, queried the way a user perceives it.
+fn screen(h: &mut Harness) -> gpui_testing_library::Screen {
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  screen
+}
+
 fn linear_harness(cx: &mut TestAppContext, host: FakeHost) -> (Harness, Arc<FakeHost>) {
   let host = Arc::new(host);
   let mut h = Harness::with_host(cx, linear_route(), host.clone());
@@ -636,7 +645,7 @@ fn linear_without_a_key_says_how_to_connect(cx: &mut TestAppContext) {
   host.linear.failing = true;
   let (mut h, _) = linear_harness(cx, host);
   assert!(!h.shows(Role::Status, "No issues"));
-  let page = h.rendered();
+  let page = screen(&mut h);
   expect(page.get_by_text(crate::linear::NOT_CONNECTED)).to_be_visible();
   page
     .user()
@@ -659,7 +668,7 @@ fn linear_not_connected_starts_oauth(cx: &mut TestAppContext) {
   let mut host = linear_host();
   host.linear.failing = true;
   let (mut h, host) = linear_harness(cx, host);
-  let page = h.rendered();
+  let page = screen(&mut h);
   page
     .user()
     .click(&page.get_by_role(by::role(Role::Button).name("Connect Linear")));
@@ -966,7 +975,7 @@ fn linear_comments_that_fail_to_load_offer_retry(cx: &mut TestAppContext) {
   host.linear.comments_failing = true;
   let (mut h, host) = linear_harness(cx, host);
   h.click("linear-issue-1");
-  let page = h.rendered();
+  let page = screen(&mut h);
   expect(page.get_by_role(by::role(Role::Status).name("Couldn't load comments"))).to_be_visible();
   let reads = || {
     host
@@ -989,7 +998,7 @@ fn linear_without_pro_offers_manage_account(cx: &mut TestAppContext) {
   host.linear.pro_required = true;
   let (mut h, _) = linear_harness(cx, host);
   h.cx.run_until_parked();
-  let page = h.rendered();
+  let page = screen(&mut h);
   assert!(page
     .query_by_role(by::role(Role::Button).name("Retry"))
     .is_none());

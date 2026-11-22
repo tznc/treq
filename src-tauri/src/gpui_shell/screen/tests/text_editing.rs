@@ -15,6 +15,17 @@ const SECONDARY: &str = if cfg!(target_os = "macos") {
   "Control"
 };
 
+fn screen(h: &mut Harness) -> gpui_testing_library::Screen {
+  h.cx
+    .background_executor
+    .advance_clock(std::time::Duration::from_millis(400));
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  screen
+}
+
 /// The text field holding keyboard focus.
 #[track_caller]
 fn focused(screen: &gpui_testing_library::Screen) -> Node {
@@ -98,7 +109,7 @@ fn open_workspaces(cx: &mut TestAppContext) -> Harness {
 #[gpui::test]
 fn new_workspaces_lines(cx: &mut TestAppContext) {
   let mut h = open_workspaces(cx);
-  let screen = h.rendered();
+  let screen = screen(&mut h);
   screen.user().click(&screen.get_by_label_text("Workspaces"));
   edits_with_shortcuts(&screen);
 }
@@ -106,7 +117,7 @@ fn new_workspaces_lines(cx: &mut TestAppContext) {
 #[gpui::test]
 fn new_workspaces_pull_request_search(cx: &mut TestAppContext) {
   let mut h = open_workspaces(cx);
-  let screen = h.rendered();
+  let screen = screen(&mut h);
   screen
     .user()
     .click(&screen.get_by_label_text("Search pull requests"));
@@ -117,15 +128,15 @@ fn new_workspaces_pull_request_search(cx: &mut TestAppContext) {
 fn agent_prompt(cx: &mut TestAppContext) {
   let (mut h, _) = modal_harness(cx, FakeHost::default(), agent_modal());
   // The prompt view is built on its first draw.
-  h.rendered();
-  let screen = h.rendered();
+  screen(&mut h);
+  let screen = screen(&mut h);
   edits_with_shortcuts(&screen);
 }
 
 #[gpui::test]
 fn commit_message(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
-  let screen = h.rendered();
+  let screen = screen(&mut h);
   h.click("commit-message");
   edits_with_shortcuts(&screen);
 }
@@ -133,7 +144,7 @@ fn commit_message(cx: &mut TestAppContext) {
 #[gpui::test]
 fn stack_dialog_title(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, workspace_dialogs::dialog(serde_json::json!({})));
-  let screen = h.rendered();
+  let screen = screen(&mut h);
   screen.user().click(&screen.get_by_label_text("Title"));
   edits_with_shortcuts(&screen);
 }
@@ -141,7 +152,7 @@ fn stack_dialog_title(cx: &mut TestAppContext) {
 #[gpui::test]
 fn settings_field(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, settings());
-  let screen = h.rendered();
+  let screen = screen(&mut h);
   h.click("settings-branch-pattern");
   edits_with_shortcuts(&screen);
 }
