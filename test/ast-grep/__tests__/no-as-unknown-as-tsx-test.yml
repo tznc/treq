@@ -1,0 +1,9 @@
+id: no-as-unknown-as-tsx
+valid:
+  - |
+    const rows = (data ?? []) satisfies readonly Row[];
+invalid:
+  - |
+    const rows = (data ?? []) as unknown as Row[];
+  - |
+    const el = <List rows={data as any as Row[]} />;
