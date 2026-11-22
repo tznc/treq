@@ -646,7 +646,7 @@ export function FileLoader({ onLoad }: FileLoaderProps) {
       const filename = parsed.rawUrl.split('/').pop() ?? 'file';
       onLoad(text, filename, parsed.displayUrl);
     } catch (e) {
-      setError(`Failed to fetch: ${e instanceof Error ? e.message : String(e)}`);
+      setError(e instanceof Error ? `Failed to fetch: ${e.message}` : 'Failed to fetch');
     } finally {
       setLoading(false);
     }

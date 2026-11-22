@@ -35,6 +35,7 @@ import {
 import { setPlacementState } from "./placement-store.ts";
 import type { ProviderKind, SandboxProvider } from "./provider.ts";
 import { must } from "./db.ts";
+import { errorMessage } from "../error-message.ts";
 
 export const DEFAULT_IDLE_TIMEOUT_MIN = 15;
 export const DEFAULT_MAX_PROBE_FAILURES = 3;
@@ -204,12 +205,12 @@ export async function enforceIdle(deps: IdleDeps): Promise<IdleResult> {
         }
         if (summary.active && provider.keepAlive) {
           await provider.keepAlive(c.provider_resource_id).catch((err) =>
-            deps.log({ event: "idle_keepalive_failed", instance_id: c.instance_id, error: (err as Error).message })
+            deps.log({ event: "idle_keepalive_failed", instance_id: c.instance_id, error: errorMessage(err) })
           );
         }
       } catch (err) {
         failures += 1;
-        deps.log({ event: "idle_probe_failed", instance_id: c.instance_id, failures, error: (err as Error).message });
+        deps.log({ event: "idle_probe_failed", instance_id: c.instance_id, failures, error: errorMessage(err) });
       }
       result.probed.push(c.instance_id);
 
@@ -234,7 +235,7 @@ export async function enforceIdle(deps: IdleDeps): Promise<IdleResult> {
         ...(summary ? { summary } : {}),
       });
     } catch (err) {
-      result.failed.push({ instanceId: c.instance_id, error: (err as Error).message });
+      result.failed.push({ instanceId: c.instance_id, error: errorMessage(err) });
     }
   }
   return result;

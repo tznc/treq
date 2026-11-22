@@ -44,6 +44,7 @@ import { createStripeClient } from "../_shared/billing/stripe-api.ts";
 import { reconcileStaleSubscriptions, reconcileStoreFor } from "../_shared/billing/reconcile.ts";
 import * as ops from "../_shared/remote/operator-controls.ts";
 import { isProviderStubEnabled } from "../_shared/remote/local-provider.ts";
+import { errorMessage } from "../_shared/error-message.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -165,7 +166,7 @@ Deno.serve(async (req) => {
     }, body));
   } catch (err) {
     if (err instanceof ops.OperatorInputError) return json({ error: err.message }, err.status);
-    logWithCorrelation(correlationId, "error", `remote-admin action=${action} failed: ${(err as Error).message}`);
+    logWithCorrelation(correlationId, "error", `remote-admin action=${action} failed: ${errorMessage(err)}`);
     return json({ error: "Internal error" }, 500);
   }
 });

@@ -12,6 +12,7 @@
 
 import { UUID_PATTERN } from "../_shared/billing/checkout.ts";
 import type { HandlerResult } from "../_shared/intent-state.ts";
+import { errorMessage } from "../_shared/error-message.ts";
 
 export type RpcError = {
   message: string;
@@ -276,7 +277,7 @@ export async function handleOrganizationsRequest(
           action: fields.action,
           message: "Team seat sync failed",
           organization_id: changedOrg,
-          error: err instanceof Error ? err.message : String(err),
+          error: errorMessage(err),
         }),
       );
     }
