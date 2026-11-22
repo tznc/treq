@@ -123,7 +123,8 @@ test.describe('Navbar navigation', () => {
       for (const width of [375, 900]) {
         await page.setViewportSize({ width, height: 800 });
         await page.goto('/');
-        const signIn = page.locator('.navbar__items--right').getByRole('link', { name: 'Sign in' });
+        // With the drawer closed its links are hidden, so this is the top-bar link.
+        const signIn = nav(page).getByRole('link', { name: 'Sign in' });
         await expect(signIn).toBeVisible();
         // The navbar re-renders when it hydrates for the mobile layout, so
         // measure once the link has settled: a 44px target on the right.
@@ -139,7 +140,10 @@ test.describe('Navbar navigation', () => {
     test('shows search, Sign in, and GitHub in the sidebar drawer', async ({ page }) => {
       await page.goto('/');
       await page.getByLabel('Toggle navigation bar').click();
-      const drawer = page.locator('.navbar-sidebar');
+      // The drawer lists its items; the top bar does not, and keeps its own Sign in.
+      const drawer = nav(page)
+        .getByRole('list')
+        .filter({ has: page.getByRole('link', { name: 'Sign in' }) });
       await expect(page.getByPlaceholder('Search...').filter({ visible: true })).toBeVisible();
       await expect(drawer.getByRole('link', { name: 'Sign in' })).toBeVisible();
       await expect(
