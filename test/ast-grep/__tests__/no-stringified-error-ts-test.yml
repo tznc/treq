@@ -1,0 +1,50 @@
+id: no-stringified-error-ts
+valid:
+  - |
+    try { run(); } catch (err) { throw new Error("run failed", { cause: err }); }
+  - |
+    try { run(); } catch (err) { console.error("run failed", err); }
+  - |
+    try { run(); } catch (err) { log(err instanceof Error ? err.message : "unknown error"); }
+  - |
+    try { run(); } catch (err) { log(errorMessage(err)); }
+  - |
+    p.catch((err: unknown) => report("load failed", err));
+  # Not an error binding: a plain value or another callback's parameter.
+  - |
+    const label = String(count);
+  - |
+    items.map((item) => `${item}`);
+  - |
+    try { run(); } catch (err) { log(String(attempt)); }
+  - |
+    p.then((value) => String(value));
+  - |
+    try { run(); } catch (err) { if (isAbort(err as unknown)) return; throw err; }
+  - |
+    function errorMessage(err: unknown): string {
+      return err instanceof Error ? err.message : String(err);
+    }
+invalid:
+  - |
+    try { run(); } catch (e) { log(`run failed: ${e}`); }
+  - |
+    try { run(); } catch (err: unknown) { log((err as Error).message); }
+  - |
+    try { run(); } catch (err) { log(err instanceof Error ? err.message : String(err)); }
+  - |
+    try { run(); } catch (err) { setTimeout(() => log(`late: ${err}`)); }
+  - |
+    try { run(); } catch (err) { log("run failed: " + err); }
+  - |
+    try { run(); } catch (err) { log(err.toString()); }
+  - |
+    try { run(); } catch (err) { log((<Error>err).message); }
+  - |
+    try { run(); } catch (e) { log((e as NodeJS.ErrnoException).code); }
+  - |
+    p.catch((e) => note(`continue: ${e}`));
+  - |
+    p.catch(e => String(e));
+  - |
+    p.catch(function (err: unknown) { log((err as Error).message); });
