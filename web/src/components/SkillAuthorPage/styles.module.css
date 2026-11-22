@@ -39,3 +39,7 @@
   font-size: 0.9rem;
   color: var(--ifm-color-emphasis-700);
 }
+
+.writeup {
+  margin-bottom: 3rem;
+}
