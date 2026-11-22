@@ -15,12 +15,12 @@ import { mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { createServer as netServer, type Server as NetServer, type Socket } from "node:net";
 import { join } from "node:path";
-import { chromium, errors, expect, test, type Browser, type Page } from "@playwright/test";
+import { errors, expect, test, type Browser, type Page } from "@playwright/test";
 import { appBinary, port } from "../env.ts";
 import { errorMessage } from "../error-message.ts";
-import { appEnv, makeFixture } from "../harness.ts";
+import { appEnv, connectApp, makeFixture, serverUp } from "../harness.ts";
 import { capture, theme } from "./capture.ts";
-import { noteMiss } from "./helpers.ts";
+import { eventually, loaded, noteMiss } from "./helpers.ts";
 
 const appPort = port + 6;
 const SUPABASE_PORT = 54321;
@@ -166,28 +166,8 @@ async function launch(): Promise<void> {
       RUST_LOG: process.env.RUST_LOG ?? "info",
     },
   });
-  const deadline = Date.now() + 120_000;
-  let lastError: unknown;
-  for (;;) {
-    try {
-      if ((await fetch(`http://127.0.0.1:${appPort}/`)).ok) break;
-    } catch (err) {
-      lastError = err;
-    }
-    if (Date.now() > deadline) throw new Error("machines app did not start", { cause: lastError });
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  for (let attempt = 1; ; attempt++) {
-    try {
-      browser = await chromium.connect(`ws://127.0.0.1:${appPort}/`);
-      page = await (await browser.newContext()).newPage();
-      break;
-    } catch (error) {
-      await browser?.close();
-      if (attempt >= 10) throw error;
-      await new Promise((r) => setTimeout(r, 1000));
-    }
-  }
+  await serverUp(app, appPort);
+  ({ browser, page } = await connectApp(appPort));
   await page.setViewportSize({ width: 1400, height: 900 });
 }
 
@@ -203,13 +183,9 @@ function appLog(): string {
 async function alive(what: string): Promise<void> {
   expect(app.exitCode, `app exited after: ${what}\ntrail: ${trail.join(" | ")}`).toBeNull();
   expect(app.signalCode, `app killed after: ${what}`).toBeNull();
-  const answered = await Promise.race([
-    page.ariaSnapshot().then(() => true, () => false),
-    new Promise<boolean>((r) => setTimeout(() => r(false), 15_000)),
-  ]);
-  expect(answered, `Playwright got no answer after: ${what}\ntrail: ${trail.join(" | ")}`).toBe(
-    true,
-  );
+  await expect(async () => {
+    await page.ariaSnapshot();
+  }, `Playwright got no answer after: ${what}\ntrail: ${trail.join(" | ")}`).toPass({ timeout: 15_000 });
   const log = appLog();
   const at = log.indexOf("panicked");
   expect(at, `panic after ${what}:\n${log.slice(Math.max(0, at - 400), at + 1500)}`).toBe(-1);
@@ -218,7 +194,6 @@ async function alive(what: string): Promise<void> {
 async function shot(what: string, title: string, expectations: string[]): Promise<void> {
   shotNo += 1;
   const name = `machines-chaos-${String(shotNo).padStart(2, "0")}-${what}`;
-  await page.waitForTimeout(800);
   await capture(page, { name, title, screen: true, rest: false, expectations });
   note(`shot ${name}-${theme}.png`);
 }
@@ -233,21 +208,28 @@ const cloudRow = () => page.getByRole("listitem", { name: "Cloud workspace", exa
 const create = () =>
   page.getByRole("button", { name: /^(Create cloud workspace|Retry cloud workspace creation)$/ });
 const creating = () => page.getByRole("button", { name: "Creating..." });
+/** The own-VM form's Continue while it checks the host. */
+const checking = () => page.getByRole("button", { name: /Checking|Resolving/ });
+/** The fake's calls whose action is `action`. */
+const callsOf = (action: string) => fake.calls.filter((c) => c.endsWith(` ${action}`)).length;
 
 /** The Treq Cloud setup dialog, opened from its row. */
 async function openCloud(): Promise<void> {
   if ((await create().count()) + (await creating().count()) > 0) return;
   await cloudRow().click();
-  await page.waitForTimeout(800);
+  await expect
+    .poll(async () => (await create().count()) + (await creating().count()), {
+      message: "the cloud setup dialog opens",
+    })
+    .toBeGreaterThan(0);
 }
 
 async function closeDialog(): Promise<void> {
+  // Each press and click resolves once the window has drawn its result.
   await page.keyboard.press("Escape");
-  await page.waitForTimeout(500);
   const close = page.getByRole("button", { name: "Close", exact: true });
   if ((await close.count()) > 0 && (await close.first().isVisible())) {
     await close.first().click().catch(noteMiss(note, "Close"));
-    await page.waitForTimeout(500);
   }
 }
 
@@ -318,7 +300,7 @@ test("machines-chaos: own-VM form names", async () => {
     ["10k", "x".repeat(10_000)],
   ];
   await page.getByRole("button", { name: "Add SSH host" }).click();
-  await page.waitForTimeout(1000);
+  await expect(page.getByRole("button", { name: "Continue" })).toBeVisible();
   const fields = page.getByRole("textbox");
   for (const [what, value] of names) {
     note(`form: display name and hostname = ${what}`);
@@ -340,7 +322,9 @@ test("machines-chaos: own-VM form names", async () => {
   }
   // A 10k hostname, submitted.
   await page.getByRole("button", { name: "Continue" }).click().catch((e) => note(`continue: ${errorMessage(e)}`));
-  await page.waitForTimeout(4000);
+  if (!(await eventually(async () => (await checking().count()) === 0, 30_000, 500))) {
+    note("10k hostname: still checking after 30s");
+  }
   await alive("continue with 10k hostname");
   note(`after 10k continue: ${(await texts()).slice(0, 600)}`);
   await shot("form-10k-continue", "Continue with a 10k-char hostname", [
@@ -351,23 +335,28 @@ test("machines-chaos: own-VM form names", async () => {
   await fields.nth(1).fill("127.0.0.1");
   await fields.nth(2).fill(String(blackHolePort));
   await fields.nth(3).fill("qa");
+  const t0 = Date.now();
   await page.getByRole("button", { name: "Continue" }).click().catch((e) => note(`continue: ${errorMessage(e)}`));
-  await page.waitForTimeout(3000);
+  if (!(await eventually(async () => (await checking().count()) > 0, 10_000, 500))) {
+    note("black hole: the form never showed it was checking");
+  }
   await alive("probe black hole");
   // Double-submit while probing.
   await page.getByRole("button", { name: /Continue|Checking|Resolving/ }).first().dblclick().catch(noteMiss(note, "double-submit"));
   await shot("form-blackhole-probing", "Probing a host that never answers", [
     "The form shows it is checking the host, Continue is disabled, the X still works",
   ]);
-  await page.waitForTimeout(30_000);
-  await alive("probe black hole +30s");
-  note(`blackhole +33s: ${(await texts()).slice(0, 800)}`);
-  await shot("form-blackhole-33s", "33 s into probing a host that never answers", [
+  // The probe gives up with a timeout, or is still checking 33 s in.
+  await eventually(async () => (await checking().count()) === 0, 33_000 - (Date.now() - t0), 1000);
+  const secs = Math.round((Date.now() - t0) / 1000);
+  await alive(`probe black hole +${secs}s`);
+  note(`blackhole +${secs}s: ${(await texts()).slice(0, 800)}`);
+  await shot("form-blackhole-33s", `${secs} s into probing a host that never answers`, [
     "Either a timeout error or still checking with a way out",
   ]);
   await page.getByRole("button", { name: "Close" }).first().click().catch((e) => note(`close: ${errorMessage(e)}`));
-  await page.waitForTimeout(1000);
   await closeDialog();
+  await expect(page.getByRole("button", { name: "Continue" })).toHaveCount(0);
   await alive("cancel probe");
   await shot("form-cancelled", "After cancelling the probe", [
     "Back on the Overview; no host added; no stray dialog",
@@ -390,7 +379,11 @@ test("machines-chaos: provision ok, double-click, close and navigate mid-provisi
   const cy = box.y + box.height / 2;
   await page.mouse.click(cx, cy, { clickCount: 2 });
   await page.mouse.click(cx, cy);
-  await page.waitForTimeout(4000);
+  // The provision request lands, then a status poll names the stage.
+  await expect(creating()).toBeVisible();
+  await expect.poll(() => callsOf("ensure") - before, { message: "the ensure call lands" }).toBeGreaterThan(0);
+  const polls = callsOf("status");
+  await expect.poll(() => callsOf("status"), { message: "a status poll after ensure" }).toBeGreaterThan(polls);
   await alive("triple-click create");
   const ensures = fake.calls.filter((c) => c.includes(" ensure")).length - before;
   const registers = fake.calls.filter((c) => c.includes("register_client_key")).length;
@@ -407,15 +400,13 @@ test("machines-chaos: provision ok, double-click, close and navigate mid-provisi
   ]);
   note("navigate to Settings > Account and back mid-provision");
   await page.getByRole("button", { name: "Settings", exact: true }).click().catch((e) => note(`settings: ${errorMessage(e)}`));
-  await page.waitForTimeout(1000);
   await page.getByRole("tab", { name: "Account" }).click().catch((e) => note(`account tab: ${errorMessage(e)}`));
-  await page.waitForTimeout(1500);
+  await loaded(page);
   await alive("settings account mid-provision");
   await shot("settings-account-mid", "Settings > Account while provisioning", [
     "The cloud card shows the same Creating... state as the dialog",
   ]);
   await page.getByRole("button", { name: "Close", exact: true }).click().catch((e) => note(`close settings: ${errorMessage(e)}`));
-  await page.waitForTimeout(1000);
   await openCloud();
   await alive("reopen mid-provision");
   note(`reopened: ${(await texts()).slice(0, 800)}`);
@@ -472,15 +463,17 @@ test("machines-chaos: provision against a black hole", async () => {
   note("create against black hole");
   const t0 = Date.now();
   await create().click();
-  await page.waitForTimeout(5000);
-  await alive("hang +5s");
-  await shot("hang-5s", "Create against a server that never answers, 5 s in", [
+  // The request reached the black hole and hangs there.
+  await expect.poll(() => fake.hung.length, { message: "the request hangs" }).toBeGreaterThan(0);
+  await expect(creating()).toBeVisible();
+  await alive("hang");
+  await shot("hang-5s", "Create against a server that never answers, while it hangs", [
     "Creating... with a stage; the dialog can still close",
   ]);
   note("navigate away and back during the hang");
   await closeDialog();
+  // A resize resolves once the window has drawn at the new size.
   await page.setViewportSize({ width: 400, height: 300 });
-  await page.waitForTimeout(800);
   await alive("tiny during hang");
   await shot("hang-tiny", "400x300 during the hang", ["Overview reflows; nothing overlaps unreadably"]);
   await page.setViewportSize({ width: 1400, height: 900 });
@@ -501,20 +494,18 @@ test("machines-chaos: sizes and zoom", async () => {
     [1900, 1180],
   ] as const) {
     await page.setViewportSize({ width: w, height: h });
-    await page.waitForTimeout(1000);
     await alive(`resize ${w}x${h}`);
     await shot(`size-${w}x${h}`, `Cloud dialog at ${w}x${h}`, [
       "The dialog fits or scrolls; its buttons stay reachable",
     ]);
   }
   await page.setViewportSize({ width: 1400, height: 900 });
+  // Each press resolves once the window has drawn at the new zoom.
   for (let i = 0; i < 12; i++) await page.keyboard.press("Control+=");
-  await page.waitForTimeout(1000);
   await alive("zoom max");
   await shot("zoom-max", "Cloud dialog at maximum zoom", ["Text large; dialog scrolls, not clipped"]);
   await page.keyboard.press("Control+0");
   for (let i = 0; i < 12; i++) await page.keyboard.press("Control+-");
-  await page.waitForTimeout(1000);
   await alive("zoom min");
   await shot("zoom-min", "Cloud dialog at minimum zoom", ["Small but laid out"]);
   await page.keyboard.press("Control+0");
@@ -603,13 +594,13 @@ test("machines-chaos: seeded monkey", async () => {
   for (let i = 0; i < STEPS; i++) {
     const did = await monkeyStep(i);
     note(`monkey ${i}: ${did}`);
-    await page.waitForTimeout(250);
+    // Now and then let the step's reads land before the next one.
+    if (random() < 0.5) await eventually(async () => (await page.getByRole("progressbar").count()) === 0, 10_000, 250);
     await alive(`monkey ${i}: ${did}`);
     if (i % 20 === 19) await shot(`monkey-${i + 1}`, `Monkey after ${i + 1} steps`, ["App drawn, not blank"]);
   }
   await setMode("ok");
   await page.setViewportSize({ width: 1400, height: 900 });
   await page.keyboard.press("Control+0");
-  await page.waitForTimeout(1000);
   await alive("monkey end");
 });

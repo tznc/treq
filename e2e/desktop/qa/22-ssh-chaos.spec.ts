@@ -13,12 +13,12 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { copyFileSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { chromium, expect, test, type Browser, type Page } from "@playwright/test";
+import { expect, test, type Browser, type Page } from "@playwright/test";
 import { appBinary, port } from "../env.ts";
 import { errorMessage } from "../error-message.ts";
-import { appEnv, makeFixture } from "../harness.ts";
+import { appEnv, connectApp, makeFixture, serverUp, stopApp } from "../harness.ts";
 import { capture, theme } from "./capture.ts";
-import { noteMiss, popupBox, xPointer } from "./helpers.ts";
+import { drawn, eventually, noteMiss, popupBox, TERMINAL, xPointer } from "./helpers.ts";
 
 const env = {
   host: process.env.QA_SSH_HOST ?? "",
@@ -85,16 +85,10 @@ function onServer(script: string): string {
 
 /** Waits until sshd answers again after a restart. */
 async function hostBack(): Promise<void> {
-  const deadline = Date.now() + 60_000;
-  for (;;) {
-    try {
-      onServer("true");
-      return;
-    } catch {
-      if (Date.now() > deadline) throw new Error("ssh host did not come back");
-      await new Promise((r) => setTimeout(r, 1000));
-    }
-  }
+  await expect(() => onServer("true"), "the ssh host comes back").toPass({
+    intervals: [1000],
+    timeout: 60_000,
+  });
 }
 
 /** `launchOnce`, again when wgpu panics on the first frame under Xvfb. */
@@ -103,10 +97,9 @@ async function launch(): Promise<void> {
     try {
       return await launchOnce();
     } catch (error) {
-      app?.kill("SIGKILL");
+      if (app) await stopApp(app, 0);
       if (attempt >= 3) throw error;
       note(`app start failed (${errorMessage(error)}); starting again`);
-      await new Promise((r) => setTimeout(r, 2000));
     }
   }
 }
@@ -123,29 +116,8 @@ async function launchOnce(): Promise<void> {
       RUST_LOG: process.env.RUST_LOG ?? "info",
     },
   });
-  const deadline = Date.now() + 120_000;
-  let lastError: unknown;
-  for (;;) {
-    try {
-      if ((await fetch(`http://127.0.0.1:${appPort}/`)).ok) break;
-    } catch (err) {
-      lastError = err;
-    }
-    if (app.exitCode !== null || app.signalCode) throw new Error("app exited on start");
-    if (Date.now() > deadline) throw new Error("ssh chaos app did not start", { cause: lastError });
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  for (let attempt = 1; ; attempt++) {
-    try {
-      browser = await chromium.connect(`ws://127.0.0.1:${appPort}/`);
-      page = await (await browser.newContext()).newPage();
-      break;
-    } catch (error) {
-      await browser?.close();
-      if (attempt >= 10) throw error;
-      await new Promise((r) => setTimeout(r, 1000));
-    }
-  }
+  await serverUp(app, appPort);
+  ({ browser, page } = await connectApp(appPort));
   await page.setViewportSize({ width: 1400, height: 900 });
 }
 
@@ -162,35 +134,41 @@ async function alive(what: string): Promise<void> {
   const ctx = `after: ${what}\nseed ${seed0} trail: ${trail.slice(-25).join(" | ")}`;
   expect(app.exitCode, `app exited ${ctx}`).toBeNull();
   expect(app.signalCode, `app killed ${ctx}`).toBeNull();
-  const answered = await Promise.race([
-    page.ariaSnapshot().then(() => true, () => false),
-    new Promise<boolean>((r) => setTimeout(() => r(false), 15_000)),
-  ]);
-  expect(answered, `Playwright got no answer ${ctx}`).toBe(true);
+  await expect(async () => {
+    await page.ariaSnapshot();
+  }, `Playwright got no answer ${ctx}`).toPass({ timeout: 15_000 });
   const log = appLog().slice(logStart);
   const at = log.indexOf("panicked");
   expect(at, `panic ${ctx}:\n${log.slice(Math.max(0, at - 400), at + 1500)}`).toBe(-1);
 }
 
+const busy = /Loading|Connecting…|Reconnecting…|Creating…|Opening…/;
+
+/** The window's text matches `pattern`. */
+async function shows(pattern: RegExp): Promise<boolean> {
+  return pattern.test(await page.ariaSnapshot());
+}
+
 /** After the host returns, nothing still reads "Loading"/"Connecting…". */
 async function recovered(what: string, ms = 60_000): Promise<void> {
-  const busy = /Loading|Connecting…|Reconnecting…|Creating…|Opening…/;
-  const deadline = Date.now() + ms;
-  let snap = "";
-  while (Date.now() < deadline) {
-    snap = await page.ariaSnapshot().catch(() => "");
-    if (!busy.test(snap)) return;
-    await page.waitForTimeout(2000);
-  }
-  const line = snap.split("\n").find((l) => busy.test(l));
+  if (await eventually(async () => !(await shows(busy)), ms)) return;
+  const line = (await page.ariaSnapshot()).split("\n").find((l) => busy.test(l));
   findings.push(`${what}: still busy after ${ms / 1000}s (${line?.trim()})`);
   note(`STUCK ${what}: ${line?.trim()}`);
+}
+
+/**
+ * Holds a host fault until the window shows it (a loading, connecting or
+ * offline state), for at most `ms`: with nothing reading from the host,
+ * the app has nothing to show.
+ */
+async function bitten(ms: number): Promise<void> {
+  await eventually(() => shows(/Loading|Connecting…|Reconnecting…|offline|unreachable/i), ms, 500);
 }
 
 async function shot(what: string, title: string, expectations: string[]): Promise<void> {
   shotNo += 1;
   const name = `22-ssh-chaos-s${seed0}-${String(shotNo).padStart(2, "0")}-${what}`;
-  await page.waitForTimeout(800);
   await capture(page, { name, title, screen: true, rest: false, expectations });
   note(`shot ${name}-${theme}.png`);
 }
@@ -203,7 +181,7 @@ async function addMachine(name: string, host: string, sshPort: string, user: str
   const other = page.getByRole("button", { name: "Add another machine" });
   if (await other.isVisible()) await other.click();
   await page.getByRole("button", { name: "Add SSH host" }).first().click();
-  await page.waitForTimeout(1200);
+  await expect(page.getByRole("button", { name: "Continue" })).toBeVisible();
   const fields = page.getByRole("textbox");
   await fields.nth(0).fill(name);
   await fields.nth(1).fill(host);
@@ -265,7 +243,6 @@ test("ssh chaos: wrong host, port and user on Add SSH host", async () => {
     // A wrong user is still asked to trust the (real) host key first.
     const trust = page.getByRole("button", { name: "Trust and connect" });
     if (await trust.isVisible({ timeout: 15_000 })) await trust.click();
-    await page.waitForTimeout(5000);
     await alive(`add machine ${what}`);
     await recovered(`add machine ${what}`, 45_000);
     await shot(`add-${what}`, `Add SSH host with a wrong ${what.slice(4)}`, [
@@ -273,9 +250,8 @@ test("ssh chaos: wrong host, port and user on Add SSH host", async () => {
       "Continue is usable again (the form can be corrected)",
     ]);
     await page.keyboard.press("Escape");
-    await page.waitForTimeout(800);
     await page.keyboard.press("Escape");
-    await page.waitForTimeout(800);
+    await expect(page.getByRole("button", { name: "Continue" })).toHaveCount(0);
   }
   note("add machine: the real one");
   await addMachine(MACHINE, env.host, env.port, env.user);
@@ -302,7 +278,9 @@ test("ssh chaos: double-submit New workspace", async () => {
   await create.click({ timeout: 1000 }).catch(noteMiss(note, "third Create workspace click"));
   await page.keyboard.press("Enter");
   await expect(workspaceRow("Chaos one")).toBeVisible({ timeout: 60_000 });
-  await page.waitForTimeout(4000);
+  // A second submit, if one went through, finishes creating too.
+  await expect(page.getByRole("heading", { name: "New workspace" })).toHaveCount(0);
+  await recovered("double-submit");
   await alive("double-submit");
   const dirs = onServer(`ls '${env.repo}/.treq/workspaces'`).trim().split(/\s+/);
   note(`server workspaces: ${dirs.join(",")}`);
@@ -319,7 +297,7 @@ test("ssh chaos: host paused and stopped mid-operation", async () => {
   note("docker pause during Refresh");
   docker("pause", CONTAINER);
   await page.getByRole("button", { name: "Refresh" }).first().click().catch(noteMiss(note, "Refresh"));
-  await page.waitForTimeout(8000);
+  await bitten(30_000);
   await alive("refresh while paused");
   await shot("paused", "Refresh while the host is paused", [
     "A loading, Reconnecting… or offline state; the window still responds",
@@ -336,7 +314,10 @@ test("ssh chaos: host paused and stopped mid-operation", async () => {
   await page.getByRole("button", { name: "Create workspace" }).click();
   note("docker stop during Create workspace");
   docker("stop", "-t", "0", CONTAINER);
-  await page.waitForTimeout(10_000);
+  // The create gives up on the stopped host: no "Creating…" left.
+  if (!(await eventually(async () => !(await shows(/Creating…/)), 60_000))) {
+    findings.push("create while stopped: still Creating… after 60s");
+  }
   await alive("create while stopped");
   await shot("stopped-create", "Create workspace when the host stops", [
     "An error says the host is unreachable (toast, dialog error or Offline banner); no endless Creating…",
@@ -358,11 +339,14 @@ test("ssh chaos: changes behind the app (tmux, deleted dir, new commit)", async 
   const row = workspaceRow("Chaos one");
   await row.click();
   await row.hover();
+  const empty = await page.screenshot({ clip: TERMINAL });
   await row.getByRole("button", { name: "Open shell" }).click().catch((e) => note(`open shell: ${errorMessage(e)}`));
-  await page.waitForTimeout(4000);
+  // The shell's prompt, drawn from the host.
+  const shell = await drawn(page, TERMINAL, empty);
   note("kill remote tmux and treq daemon");
   onServer("tmux kill-server 2>/dev/null; pkill -f '[t]req pty' 2>/dev/null; true");
-  await page.waitForTimeout(8000);
+  // The pane answers the lost session: an exit line or Reattach/Close.
+  await drawn(page, TERMINAL, shell);
   await alive("killed terminals");
   await shot("terminals-killed", "Remote terminal holder killed", [
     "The pane shows it ended (Reattach/Close or an exit line), not a frozen terminal",
@@ -375,7 +359,9 @@ test("ssh chaos: changes behind the app (tmux, deleted dir, new commit)", async 
   await page.getByRole("tab", { name: "Commits" }).click();
   await page.getByRole("button", { name: "Refresh" }).first().click().catch(noteMiss(note, "Refresh"));
   await recovered("refresh after remote commit");
-  await page.waitForTimeout(3000);
+  if (!(await eventually(() => shows(/Commit behind the app/), 30_000))) {
+    findings.push("refresh after remote commit: 'Commit behind the app' not listed after 30s");
+  }
   await alive("remote commit");
   await shot("remote-commit", "Commits after a commit on the server", [
     "'Commit behind the app' shows (on main / the home row's Commits)",
@@ -387,7 +373,6 @@ test("ssh chaos: changes behind the app (tmux, deleted dir, new commit)", async 
   await page.getByRole("tab", { name: "Changes" }).click().catch(noteMiss(note, "Changes tab"));
   await page.getByRole("button", { name: "Refresh" }).first().click().catch(noteMiss(note, "Refresh"));
   await recovered("deleted workspace dir");
-  await page.waitForTimeout(2000);
   await alive("deleted workspace dir");
   await shot("deleted-dir", "A remote workspace whose folder was deleted", [
     "An error says the workspace folder is missing (or the row goes away); no endless loading",
@@ -399,7 +384,9 @@ test("ssh chaos: changes behind the app (tmux, deleted dir, new commit)", async 
     note("archive deleted workspace");
     await archive.click();
     await page.getByRole("button", { name: /^Archive/ }).last().click({ timeout: 3000 }).catch(noteMiss(note, "confirm Archive"));
-    await page.waitForTimeout(4000);
+    if (!(await eventually(async () => (await row.count()) === 0, 30_000))) {
+      note("archived workspace row still listed after 30s");
+    }
     await alive("archive deleted workspace");
     await shot("archived", "After archiving the deleted workspace", ["The row is gone or an error explains why not"]);
   } else note("no Archive control visible");
@@ -424,16 +411,15 @@ test("ssh chaos: switch local and remote, save project", async () => {
   for (let i = 0; i < 4; i++) {
     note(`switch ${i}: open remote recent`);
     await remoteRecent.click({ timeout: 20_000 });
-    await page.waitForTimeout(i % 2 ? 300 : 3000);
+    // Every other switch waits for the repository's reads to land first.
+    if (i % 2 === 0) await recovered(`switch ${i} reads`);
     await alive(`switch ${i}`);
     // Back to the Overview without waiting for the reads.
     await page.keyboard.press("Control+k");
     await page.keyboard.type("Overview");
-    await page.waitForTimeout(400);
     await page.keyboard.press("Enter");
-    await page.waitForTimeout(800);
     await page.keyboard.press("Escape");
-    if (!(await remoteRecent.isVisible())) {
+    if (!(await eventually(() => remoteRecent.isVisible(), 10_000, 500))) {
       note("no way back to the Overview from the palette; stopping the switch loop");
       break;
     }
@@ -448,12 +434,12 @@ test("ssh chaos: switch local and remote, save project", async () => {
     return;
   }
   await button.click();
-  await page.waitForTimeout(1000);
   // The menu is a popup: "Save Project…" is its first row, clicked through X.
+  await expect.poll(popupBox, { message: "the project menu opens" }).not.toBeNull();
   const menu = popupBox();
   if (!menu) throw new Error("no project menu");
   xPointer(menu.x + 60, menu.y + 18, 1);
-  await page.waitForTimeout(1200);
+  await expect(page.getByRole("dialog", { name: "Save project" })).toBeVisible();
   await shot("save-project", "Save project with the remote repository", [
     "The Save project dialog lists the remote repository",
   ]);
@@ -461,10 +447,10 @@ test("ssh chaos: switch local and remote, save project", async () => {
   for (let i = 0; i < 40; i++) await page.keyboard.press("Backspace");
   await page.keyboard.type("Remote QA");
   await page.keyboard.press("Enter");
-  await page.waitForTimeout(6000);
+  const renamed = page.getByRole("button", { name: "Project: Remote QA" });
+  const saved = await eventually(async () => (await renamed.count()) > 0, 30_000, 500);
   await alive("save project");
-  if ((await page.getByRole("button", { name: "Project: Remote QA" }).count()) === 0)
-    findings.push("saving a project with the remote repository did not rename the Project button");
+  if (!saved) findings.push("saving a project with the remote repository did not rename the Project button");
   await shot("project-saved", "After saving the project", ["The Project button names the saved project; no error"]);
 });
 
@@ -479,11 +465,11 @@ test("ssh chaos: seeded monkey over the remote screens", async () => {
       note(`#${step} fault ${fault}`);
       if (fault === "pause") {
         docker("pause", CONTAINER);
-        await page.waitForTimeout(4000 + rand() * 4000);
+        await bitten(4000 + rand() * 4000);
         docker("unpause", CONTAINER);
       } else if (fault === "stop") {
         docker("stop", "-t", "0", CONTAINER);
-        await page.waitForTimeout(3000);
+        await bitten(3000);
         docker("start", CONTAINER);
         await hostBack();
       } else if (fault === "tmux") {
@@ -513,7 +499,8 @@ test("ssh chaos: seeded monkey over the remote screens", async () => {
       note(`#${step} type ${JSON.stringify(t.slice(0, 20))}`);
       await page.keyboard.type(t);
     }
-    await page.waitForTimeout(300 + rand() * 900);
+    // Now and then let the step's reads land before the next one.
+    if (rand() < 0.5) await eventually(async () => (await page.getByRole("progressbar").count()) === 0, 10_000, 300);
     await alive(`monkey #${step}`);
     if (step % 10 === 9) await shot(`monkey-${step + 1}`, `Monkey after ${step + 1} steps`, ["The window renders; no blank or frozen screen"]);
   }
