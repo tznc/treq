@@ -3448,7 +3448,7 @@ mod tests {
 
   #[tokio::test]
   async fn retry_after_reconnect_treats_mutation_as_complete_when_state_already_shows_it_applied() {
-    // Mode 4: the mutation's own exec sleeps past the deadline (a genuine
+    // Mode 4: the mutation's own exec never replies before the deadline (a genuine
     // transport failure - the client cannot tell whether it landed), and the
     // verification read that follows reports the branch already exists.
     let (addr, host_key) = start_mock_server(4).await;
