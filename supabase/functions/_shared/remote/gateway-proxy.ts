@@ -38,12 +38,6 @@ export type UpstreamSocketFactory = (
   headers: Record<string, string>,
 ) => RelaySocket;
 
-// Deno accepts a non-standard `headers` option on the WebSocket client
-// constructor, which is how provider auth reaches the ingress without being
-// placed in the URL.
-export const denoUpstreamSocket: UpstreamSocketFactory = (url, headers) =>
-  new WebSocket(url, { headers });
-
 /**
  * An open gateway socket plus any bytes that arrived after the handshake but
  * before the client side was ready. sshd sends its identification line as

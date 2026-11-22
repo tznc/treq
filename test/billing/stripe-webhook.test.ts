@@ -22,6 +22,12 @@ function copy<T>(value: T): T {
   return structuredClone(value);
 }
 
+function firstPrice(event: typeof subscriptionCreated) {
+  const item = event.data.object.items.data[0];
+  if (!item) throw new Error("the fixture has no subscription item");
+  return item.price;
+}
+
 // A copy whose data.object takes any value, for edits the fixture JSON's
 // inferred types refuse (a number where the fixture has null).
 type EditableEvent = { data: { object: Record<string, unknown> } };
@@ -101,7 +107,7 @@ describe("actionForEvent: subscriptions", () => {
 
   it("maps the Team lookup key to team", () => {
     const event = copy(subscriptionCreated);
-    event.data.object.items.data[0].price.lookup_key = "treq_team_monthly";
+    firstPrice(event).lookup_key = "treq_team_monthly";
     expect(actionForEvent(event)).toMatchObject({ args: { p_plan: "team" } });
   });
 
@@ -115,7 +121,7 @@ describe("actionForEvent: subscriptions", () => {
 
   it("ignores a subscription with no Treq price", () => {
     const event = copy(subscriptionCreated);
-    event.data.object.items.data[0].price.lookup_key = "someone_elses_price";
+    firstPrice(event).lookup_key = "someone_elses_price";
     expect(actionForEvent(event)).toEqual({
       action: "ignore",
       reason: "no Treq price on subscription",

@@ -83,8 +83,8 @@ it("runs an organization: invites by token, no member cap and Team for every mem
     expect(invited.body).not.toHaveProperty("token");
     const token = tokenOf(invited.body.accept_url);
     // An invite link works for 24 hours.
-    const lifetimeMs =
-      new Date(invited.body.invite.expires_at).getTime() - Date.now();
+    const invite = invited.body.invite as { expires_at: string };
+    const lifetimeMs = new Date(invite.expires_at).getTime() - Date.now();
     expect(lifetimeMs).toBeGreaterThan(23 * 60 * 60 * 1000);
     expect(lifetimeMs).toBeLessThanOrEqual(24 * 60 * 60 * 1000);
 
@@ -173,7 +173,7 @@ it("runs an organization: invites by token, no member cap and Team for every mem
     // Team has no member cap: seats beyond 5 are billed, not refused.
     expect(eleventh.status).toBe(200);
 
-    const raceToken = tokenOf(seatInvites[0].body.accept_url);
+    const raceToken = tokenOf(seatInvites[0]?.body.accept_url);
     const race = await Promise.all(
       racers.map((racer) =>
         organizations(admin, racer)({ action: "accept", token: raceToken }),

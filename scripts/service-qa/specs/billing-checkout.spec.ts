@@ -27,7 +27,7 @@ import { postStripeEvent } from "../stripe";
 
 const WEB_URL = "http://localhost:3001";
 
-type StripeCall = { method: string; path: string; params?: StripeParams };
+type StripeCall = { method: string; path: string; params: StripeParams | undefined };
 
 function stubStripe(customerId: string): {
   stripe: StripeClient;

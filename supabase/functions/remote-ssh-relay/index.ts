@@ -23,12 +23,12 @@ import {
 } from "../_shared/remote/correlation.ts";
 import {
   authorizeRelayRequest,
-  denoUpstreamSocket,
   pipeSockets,
   RelayError,
   type RelayStore,
   type UpstreamConnection,
   UpstreamError,
+  type UpstreamSocketFactory,
   wakeBeforeConnect,
 } from "../_shared/remote/ssh-relay.ts";
 import { placementProviders } from "../_shared/remote/byos.ts";
@@ -38,6 +38,12 @@ import { setPlacementState } from "../_shared/remote/placement-store.ts";
 import { wakeRecorded } from "../_shared/remote/wake.ts";
 import { must } from "../_shared/remote/db.ts";
 import { errorMessage } from "../_shared/error-message.ts";
+
+// Deno accepts a non-standard `headers` option on the WebSocket client
+// constructor, which is how provider auth reaches the ingress without being
+// placed in the URL. Deno-only, so it lives here rather than in the shared
+// modules the Node tests import.
+const denoUpstreamSocket: UpstreamSocketFactory = (url, headers) => new WebSocket(url, { headers });
 
 declare const EdgeRuntime:
   | { waitUntil(promise: Promise<unknown>): void }

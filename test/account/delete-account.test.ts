@@ -4,6 +4,7 @@ import {
   StripeApiError,
   type StripeClient,
 } from "../../supabase/functions/_shared/billing/stripe-api.ts";
+import type { PendingUsageReport } from "../../supabase/functions/_shared/billing/usage-report.ts";
 import type { ManagedComputeProvider } from "../../supabase/functions/_shared/remote/provider.ts";
 import {
   type DeleteAccountDeps,
@@ -26,14 +27,7 @@ function fakeStore(
     instances?: Instance[];
     linearToken?: string | null;
     lastOwnerOf?: { id: string; name: string }[];
-    usage?: {
-      identifier: string;
-      owner_user_id: string;
-      hour: string;
-      billed_nanousd: number;
-      stripe_customer_id: string | null;
-      attempts: number;
-    }[];
+    usage?: PendingUsageReport[];
     placements?: Record<
       string,
       {
@@ -493,6 +487,7 @@ describe("deleteAccount final usage", () => {
       hour: "2026-11-02T10:00:00Z",
       billed_nanousd: 2_500_000_000,
       stripe_customer_id: "cus_me",
+      created_at: "2026-11-02T11:00:00Z",
       attempts: 0,
     },
   ];
@@ -568,8 +563,8 @@ describe("createStripeClient DELETE", () => {
     };
     const client = createStripeClient("sk_test", fetchImpl);
     await client.request("DELETE", "/v1/subscriptions/sub_a");
-    expect(seen[0].url).toBe("https://api.stripe.com/v1/subscriptions/sub_a");
-    expect(seen[0].init.method).toBe("DELETE");
-    expect(seen[0].init.body).toBeUndefined();
+    expect(seen[0]?.url).toBe("https://api.stripe.com/v1/subscriptions/sub_a");
+    expect(seen[0]?.init.method).toBe("DELETE");
+    expect(seen[0]?.init.body).toBeUndefined();
   });
 });

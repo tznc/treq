@@ -604,7 +604,7 @@ it("sends an account's remaining usage, then cancels with a final invoice, befor
     const calls: Array<{
       method: string;
       path: string;
-      params?: Record<string, unknown>;
+      params: Record<string, unknown> | undefined;
     }> = [];
     const result = await deleteAccount({
       method: "POST",
@@ -644,7 +644,7 @@ it("sends an account's remaining usage, then cancels with a final invoice, befor
     expect(meter.map((m) => m.params?.identifier)).toContain(currentId);
     expect(meter.length).toBeGreaterThanOrEqual(2);
     expect(meterIndex).toBeLessThan(cancelIndex);
-    expect(calls[cancelIndex].params).toEqual({ invoice_now: true });
+    expect(calls[cancelIndex]?.params).toEqual({ invoice_now: true });
     expect(gone.user).toBeNull();
 
     await recordOutcome("billing-abuse-07-delete-account-usage", {

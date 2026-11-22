@@ -32,7 +32,6 @@ import {
 // Lives in gateway-proxy.ts so adapters can open the gateway without
 // importing the relay; re-exported for existing callers.
 export {
-  denoUpstreamSocket,
   type RelaySocket,
   type UpstreamConnection,
   UpstreamError,
