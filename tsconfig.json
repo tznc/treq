@@ -1,0 +1,31 @@
+{
+  // Type-checks test/ and scripts/: vitest (esbuild) and jest (babel) strip
+  // types without checking them. Imports reach into supabase/functions (Deno)
+  // and web/src (browser), so the DOM lib is on and test/deno.d.ts declares
+  // the Deno globals and `npm:` specifiers that code uses.
+  "compilerOptions": {
+    "target": "ES2024",
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    // esbuild and babel resolve like a bundler and compile one file at a time.
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noEmit": true,
+    "skipLibCheck": true
+  },
+  "include": ["test/**/*.ts", "scripts/**/*.ts"],
+  // Imports web/src/utils/searchDb.ts, which needs sql.js: only web/ installs
+  // it, and web/'s own `npm run typecheck` checks that file.
+  "exclude": ["test/web/search-db.test.ts"]
+}
