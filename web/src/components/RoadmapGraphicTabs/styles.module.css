@@ -76,9 +76,9 @@
 .rowQuarter {
   display: block;
   margin-bottom: 0.15rem;
-  color: var(--ifm-color-primary);
+  color: var(--treq-link);
   font-size: 0.68rem;
-  font-weight: 700;
+  font-weight: 500;
   letter-spacing: 0.04em;
 }
 
@@ -86,7 +86,7 @@
   display: block;
   color: #0f172a;
   font-size: 0.82rem;
-  font-weight: 700;
+  font-weight: 500;
   line-height: 1.25;
 }
 
@@ -125,14 +125,14 @@
 .outcomeTitleText {
   color: #0f172a;
   font-size: 0.95rem;
-  font-weight: 700;
+  font-weight: 500;
   line-height: 1.3;
   text-decoration: none;
   margin: 0;
 }
 
 .outcomeTitle:hover {
-  color: var(--ifm-color-primary);
+  color: var(--treq-link);
   text-decoration: none;
 }
 
