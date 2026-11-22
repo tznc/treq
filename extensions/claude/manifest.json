@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Treq Enhancements for Claude",
+  "version": "0.1.0",
+  "description": "Session titles in browser tabs and Open in Treq for Claude Code on the web.",
+  "content_scripts": [
+    {
+      "matches": ["https://claude.ai/*"],
+      "js": ["dist/content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
