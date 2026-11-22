@@ -37,14 +37,12 @@ fn landing_split(width: gpui_kit::Pixels) -> bool {
   width >= super::SPLIT_MIN_WIDTH
 }
 
-/// Whether Home lays out like the desktop Overview: machines in a sidebar,
-/// repositories beside them. Only at tablet width with nothing open beside.
-fn overview_layout(width: gpui_kit::Pixels, beside: bool) -> bool {
-  landing_split(width) && !beside
+/// Whether the projects page also lists recent repositories, as the desktop
+/// Overview does: at tablet width, so Settings beside it keeps one column.
+fn recents_with_projects(width: gpui_kit::Pixels) -> bool {
+  landing_split(width)
 }
 
-/// The machines sidebar on a tablet: the desktop's 288px, widened for touch.
-const MACHINES_W: f32 = 320.;
 /// Recent repositories shown per machine.
 const RECENTS_PER_MACHINE: usize = 5;
 
@@ -186,8 +184,9 @@ impl HomeScreen {
     );
   }
 
-  /// The home page: projects by owner, or why there are none.
-  fn projects(&self, cx: &mut Context<Self>) -> AnyElement {
+  /// The home page: projects by owner, or why there are none, and with
+  /// `recents` the recent repositories under them.
+  fn projects(&self, recents: bool, cx: &mut Context<Self>) -> AnyElement {
     let signed_in = model(cx).read(cx).user.is_some();
     let body: AnyElement = match &self.projects {
       _ if !signed_in => widgets::muted("Sign in to see your projects.", cx).into_any_element(),
@@ -217,6 +216,7 @@ impl HomeScreen {
       .gap_4()
       .child(body)
       .children(self.open_error.clone().map(|e| widgets::error_text(e, cx)))
+      .when(recents, |col| col.child(self.recents(cx)))
       .child(
         Button::new("settings")
           .outline()
@@ -361,11 +361,8 @@ impl HomeScreen {
       })
   }
 
-  /// `stacked`: sign-in buttons one above the other, for the narrow
-  /// tablet sidebar.
   /// Every machine in one list, each row alike: Treq Cloud and SSH hosts.
-  /// `stacked` puts the sign-in buttons under one another (the sidebar).
-  fn machines(&self, stacked: bool, cx: &mut Context<Self>) -> impl IntoElement {
+  fn machines(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let machines = super::machines(cx);
     let model = model(cx).read(cx);
     let (busy, error, notice) = (
@@ -472,13 +469,7 @@ impl HomeScreen {
             "Sign in to add your Treq Cloud machine.",
             cx,
           ))
-          .map(|this| {
-            if stacked {
-              this.child(v_flex().gap_2().children(provider_buttons(busy, true)))
-            } else {
-              this.child(h_flex().gap_2().children(provider_buttons(busy, false)))
-            }
-          })
+          .child(h_flex().gap_2().children(provider_buttons(busy, false)))
           .children(error.map(|e| widgets::error_text(e, cx)))
       })
   }
@@ -552,7 +543,7 @@ impl HomeScreen {
 }
 
 impl HomeScreen {
-  /// The right side of the tablet Overview: recent repositories grouped by
+  /// Under the projects on a tablet: recent repositories grouped by
   /// machine; tapping one opens its machine.
   fn recents(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let signed_in = model(cx).read(cx).user.is_some();
@@ -603,9 +594,6 @@ impl HomeScreen {
       ))
     });
     v_flex()
-      .flex_1()
-      .min_w_0()
-      .p_6()
       .gap_5()
       .child(
         v_flex()
@@ -634,41 +622,12 @@ impl Render for HomeScreen {
       let split = landing_split(window.viewport_size().width);
       self.landing(split, cx).into_any_element()
     } else if !self.settings {
-      widgets::page().child(self.projects(cx)).into_any_element()
-    } else if overview_layout(
-      window.viewport_size().width,
-      super::nav::beside(cx.entity_id(), cx).is_some(),
-    ) {
-      let palette = treq_ui::theme::current(cx);
-      let sidebar = div()
-        .id("home-machines")
-        .flex_none()
-        .w(px(MACHINES_W))
-        .h_full()
-        .overflow_y_scroll()
-        .border_r_1()
-        .border_color(cx.theme().border)
-        .bg(palette.sidebar)
-        .child(
-          widgets::page()
-            .child(self.machines(true, cx))
-            .children(self.account(cx)),
-        );
-      let recents = div()
-        .id("home-recents")
-        .flex_1()
-        .min_w_0()
-        .h_full()
-        .overflow_y_scroll()
-        .child(self.recents(cx));
-      return h_flex()
-        .size_full()
-        .bg(cx.theme().background)
-        .child(sidebar)
-        .child(recents)
-        .into_any_element();
+      let recents = recents_with_projects(window.viewport_size().width);
+      widgets::page()
+        .child(self.projects(recents, cx))
+        .into_any_element()
     } else {
-      let machines = self.machines(false, cx);
+      let machines = self.machines(cx);
       let account = self.account(cx);
       widgets::page()
         .child(machines)
@@ -804,13 +763,14 @@ mod tests {
     assert!(landing_split(px(1024.)));
   }
 
-  /// A full-width tablet Home takes the desktop Overview layout; beside
-  /// an open machine, or on a phone, it stays a single list.
+  /// On a tablet, in portrait as in landscape, recent repositories list in
+  /// the projects pane, so one pane picks what to open; a phone keeps the
+  /// projects alone.
   #[core::prelude::v1::test]
-  fn home_takes_the_overview_layout_on_a_tablet() {
-    assert!(overview_layout(px(1024.), false));
-    assert!(!overview_layout(px(1024.), true));
-    assert!(!overview_layout(px(390.), false));
+  fn a_tablet_lists_recents_with_the_projects() {
+    assert!(!recents_with_projects(px(390.)));
+    assert!(recents_with_projects(px(820.)));
+    assert!(recents_with_projects(px(1180.)));
   }
 
   fn instance(status: &str) -> ManagedInstance {
