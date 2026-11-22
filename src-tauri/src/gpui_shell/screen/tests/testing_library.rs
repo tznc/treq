@@ -451,7 +451,7 @@ fn the_view_pr_button_reads_the_pull_requests_status(cx: &mut TestAppContext) {
 fn a_new_shell_takes_focus_fully_in_view(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
-  h.click("terminal-body");
+  click_terminal(&mut h);
   // Each column keeps 40% of the row: two shells beside the agent overflow it.
   h.cx.simulate_keystrokes("cmd-\\");
   h.cx.run_until_parked();

@@ -9,9 +9,10 @@
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
+use gpui_kit::base::ObservedElement;
 use std::{collections::HashMap, sync::Arc, time::Duration};
+use treq_ui::SelectorExt as _;
 
-use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::{
   input::{Escape, Input, InputEvent, InputState, MoveDown, MoveUp, Textarea, TextareaState},
   select::{Select, SelectEvent, SelectState},
@@ -950,13 +951,16 @@ impl WorkspaceDialog {
 
 /// `text-xs text-muted-foreground hover:text-foreground`, as the dialog's
 /// small text buttons.
-fn text_button(id: &'static str, label: &'static str, p: &Palette) -> Stateful<Div> {
+fn text_button(
+  id: &'static str,
+  label: &'static str,
+  p: &Palette,
+) -> ObservedElement<Stateful<Div>> {
   let fg = p.foreground;
   // Short label (['button label']): 11px is fine.
   // ast-grep-ignore: gpui-text-xs-short-label-only
   ui::text(div(), TextSize::Xs)
-    .id(id)
-    .debug_selector(move || id.into())
+    .selector(id)
     .flex()
     .items_center()
     .gap_1()
@@ -980,8 +984,7 @@ pub(super) fn disclosure(
   // Short label (['disclosure label']): 11px is fine.
   // ast-grep-ignore: gpui-text-xs-short-label-only
   ui::text(div(), TextSize::Xs)
-    .id(id)
-    .debug_selector(move || id.into())
+    .selector(id)
     .role(gpui::Role::Button)
     .aria_label(label.clone())
     .on_click(on_click)
@@ -1001,7 +1004,6 @@ pub(super) fn disclosure(
       p.muted_foreground,
     ))
     .child(label)
-    .test_support()
 }
 
 /// `StackDot`: a 14px dot with a background ring.
@@ -1055,11 +1057,9 @@ impl WorkspaceDialog {
         };
         // A disabled `<Input className="text-xs text-muted-foreground h-8">`.
         ui::text(div(), TextSize::Sm)
-          .id("workspace-dialog-stacking-on")
-          .debug_selector(|| "workspace-dialog-stacking-on".into())
+          .selector("workspace-dialog-stacking-on")
           .role(gpui::Role::Label)
           .aria_label(format!("Stacking on {shown}"))
-          .test_support()
           .h(zpx(32.))
           .px_3()
           .flex()
@@ -1092,8 +1092,7 @@ impl WorkspaceDialog {
         // Short label (['segment label']): 11px is fine.
         // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
-          .id(id)
-          .debug_selector(move || id.into())
+          .selector(id)
           .px_2p5()
           .py_1()
           .rounded(radius::SM)
@@ -1178,8 +1177,7 @@ impl WorkspaceDialog {
               .message("Create another workspace to move changes into.")
               .into_any_element(),
             Some(state) => div()
-              .id("target-workspace")
-              .debug_selector(|| "target-workspace".into())
+              .selector("target-workspace")
               .w_full()
               .child(
                 ui::text(
@@ -1201,8 +1199,7 @@ impl WorkspaceDialog {
             .child(field_label("Title (optional)"))
             .child(
               div()
-                .id("workspace-dialog-title")
-                .debug_selector(|| "workspace-dialog-title".into())
+                .selector("workspace-dialog-title")
                 .w_full()
                 .child(ui::text(
                   Styled::h(Input::new(&title).aria_label("Title"), zpx(32.)),
@@ -1218,7 +1215,7 @@ impl WorkspaceDialog {
             .child(field_label("Description (optional)"))
             .child(
               div()
-                .debug_selector(|| "workspace-dialog-description".into())
+                .selector("workspace-dialog-description")
                 .min_h(zpx(58.))
                 .child(ui::text(Textarea::new(&description), TextSize::Sm)),
             ),
@@ -1253,7 +1250,7 @@ impl WorkspaceDialog {
                 .child(field_label("Sparse paths (optional, one per line)"))
                 .child(
                   div()
-                    .debug_selector(|| "workspace-dialog-sparse".into())
+                    .selector("workspace-dialog-sparse")
                     .min_h(zpx(58.))
                     .child(ui::text(Textarea::new(&sparse), TextSize::Sm)),
                 ),
@@ -1268,7 +1265,7 @@ impl WorkspaceDialog {
                 ))
                 .child(
                   div()
-                    .debug_selector(|| "workspace-dialog-symlinks".into())
+                    .selector("workspace-dialog-symlinks")
                     .min_h(zpx(58.))
                     .child(ui::text(Textarea::new(&symlinks), TextSize::Sm)),
                 )
@@ -1372,8 +1369,7 @@ impl WorkspaceDialog {
       deferred(
         anchored().child(
           div()
-            .id("branch-picker")
-            .debug_selector(|| "branch-picker".into())
+            .selector("branch-picker")
             .mt_1()
             .w(zpx(300.))
             .rounded(radius::MD)
@@ -1467,7 +1463,7 @@ impl WorkspaceDialog {
     };
     let mut new_row = Some(
       div()
-        .debug_selector(|| "new-workspace-stack-item".into())
+        .selector("new-workspace-stack-item")
         .relative()
         .flex()
         .w_full()
@@ -1492,27 +1488,21 @@ impl WorkspaceDialog {
             .flex_col()
             .gap_1()
             .child(
-              div()
-                .id("workspace-dialog-branch")
-                .debug_selector(|| "workspace-dialog-branch".into())
-                .w_full()
-                .child(
-                  ui::text(
-                    Styled::h(Input::new(branch).aria_label("Branch name"), zpx(32.)),
-                    TextSize::Sm,
-                  )
-                  .font_family(theme::MONO_FONT)
-                  .when_some(status_icon, |this, icon| this.suffix(icon)),
-                ),
+              div().selector("workspace-dialog-branch").w_full().child(
+                ui::text(
+                  Styled::h(Input::new(branch).aria_label("Branch name"), zpx(32.)),
+                  TextSize::Sm,
+                )
+                .font_family(theme::MONO_FONT)
+                .when_some(status_icon, |this, icon| this.suffix(icon)),
+              ),
             )
             .when_some(hint, |this, (text, color, id)| {
               this.child(
                 ui::text(div(), TextSize::Sm)
-                  .id(id)
-                  .debug_selector(move || id.into())
+                  .selector(id)
                   .role(gpui::Role::Status)
                   .aria_label(text.clone())
-                  .test_support()
                   .text_color(color)
                   .child(text),
               )
@@ -1548,11 +1538,9 @@ impl WorkspaceDialog {
     });
     let rows: Vec<_> = rows.collect();
     div()
-      .id("new-workspace-stack-card")
-      .debug_selector(|| "new-workspace-stack-card".into())
+      .selector("new-workspace-stack-card")
       .role(gpui::Role::Group)
       .aria_label("New workspace stack")
-      .test_support()
       .border_1()
       .border_color(p.border)
       .rounded(radius::MD)
@@ -1688,7 +1676,6 @@ impl WorkspaceDialog {
           let is_locked = locked.is_some_and(|s| s.hash == commit.hash);
           let checked = is_locked || self.selected_commits.contains(&commit.hash);
           let id = SharedString::from(format!("dialog-commit-{i}"));
-          let selector = id.to_string();
           let hash = commit.hash.clone();
           let short: String = commit.hash.chars().take(8).collect();
           let message = if commit.message.is_empty() {
@@ -1697,11 +1684,9 @@ impl WorkspaceDialog {
             commit.message
           };
           div()
-            .id(id)
+            .selector(id)
             .role(gpui::Role::CheckBox)
             .aria_label(message.clone())
-            .debug_selector(move || selector)
-            .test_support()
             .flex()
             .items_center()
             .gap_2()
@@ -1871,13 +1856,9 @@ impl WorkspaceDialog {
             )
             .child(
               ui::text(div(), TextSize::Sm)
-                .id(SharedString::from(format!("dialog-file-path-{i}")))
+                .selector(SharedString::from(format!("dialog-file-path-{i}")))
                 .role(gpui::Role::Button)
                 .aria_label(path.clone())
-                .debug_selector({
-                  let selector = format!("dialog-file-path-{i}");
-                  move || selector
-                })
                 .flex_1()
                 .min_w_0()
                 .truncate()
@@ -1955,11 +1936,9 @@ impl WorkspaceDialog {
           let checked = self.selected_hunks.contains(&key);
           let selector = format!("dialog-hunk-{file}-{i}");
           div()
-            .id(SharedString::from(selector.clone()))
+            .selector(SharedString::from(selector))
             .role(gpui::Role::CheckBox)
             .aria_label(hunk.header.clone())
-            .debug_selector(move || selector)
-            .test_support()
             .flex()
             .items_start()
             .gap_2()
@@ -2105,7 +2084,7 @@ impl Render for WorkspaceDialog {
       .when(!self.error.is_empty(), |this| {
         this.child(
           ui::text(div(), TextSize::Sm)
-            .debug_selector(|| "workspace-dialog-error".into())
+            .selector("workspace-dialog-error")
             .mt_2()
             .text_color(p.destructive)
             .child(self.error.clone()),
