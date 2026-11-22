@@ -69,7 +69,7 @@ async function shot(page: Page, name: string, clip?: Clip): Promise<void> {
     name,
   );
   await rest(page);
-  await page.screenshot({ path: join(outDir, name), clip });
+  await page.screenshot({ path: join(outDir, name), ...(clip ? { clip } : {}) });
   written.add(name);
   mark(name);
 }
@@ -85,7 +85,7 @@ const SHELL: Clip = { x: 280, y: 603, width: 1120, height: 297 };
 async function settle(page: Page, clip?: Clip, before?: Buffer): Promise<void> {
   let last: Buffer | undefined;
   await expect(async () => {
-    const now = await page.screenshot({ clip });
+    const now = await page.screenshot(clip ? { clip } : {});
     const prev = last;
     last = now;
     if (before) expect(now.equals(before), "still unchanged").toBe(false);

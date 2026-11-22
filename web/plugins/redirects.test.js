@@ -25,7 +25,7 @@ const moved = rules.filter(([, , status]) => status === '301');
 // static rules first. In production, only the first 100 rules applied while a
 // dynamic rule sat at the top of the file.
 /** @param {string[]} rule */
-const isDynamic = ([from]) => /[*:]/.test(from);
+const isDynamic = ([from]) => /[*:]/.test(from ?? '');
 
 test('static rules come before dynamic ones', () => {
   const firstDynamic = rules.findIndex(isDynamic);

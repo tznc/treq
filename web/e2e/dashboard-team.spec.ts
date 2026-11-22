@@ -13,10 +13,8 @@ const ME = '6f1c1f4e-6a8f-4a39-9d55-2b1f0b3f9a10';
 const MIA = '7a2d2e5f-7b9a-4b4a-8e66-3c2a1c4f0b21';
 const ORG = '0b8d3f0e-2c1a-4f5e-9d7b-6a4c3e2f1a00';
 const TOKEN = '0123456789abcdef'.repeat(4);
-// Invite links carry the token in the fragment. Links in the older query
-// form are still accepted when pasted.
+// Invite links carry the token in the fragment.
 const ACCEPT_URL = `https://treq.dev/dashboard?tab=team#invite=${TOKEN}`;
-const OLD_ACCEPT_URL = `https://treq.dev/dashboard?tab=team&invite=${TOKEN}`;
 
 const user = {
   id: ME,
@@ -85,7 +83,7 @@ const emptyTeam = (): Team => ({
   installations: [],
 });
 
-function acmeTeam(role: 'owner' | 'member' = 'owner'): Team {
+function acmeTeam(role: 'owner' | 'admin' | 'member' = 'owner'): Team {
   const team = emptyTeam();
   team.organizations = [{ id: ORG, name: 'Acme' }];
   team.memberships = [
@@ -549,8 +547,7 @@ test.describe('Dashboard team tab', () => {
   test('an admin invites and manages billing but cannot remove, delete or change owners', async ({
     browser,
   }) => {
-    const team = acmeTeam('member');
-    team.memberships[0].role = 'admin';
+    const team = acmeTeam('admin');
     const { page, close } = await openTeamTab(browser, team);
     const acme = orgCard(page, 'Acme');
     await expect(acme.getByRole('group', { name: 'Your role' })).toContainText('Admin');

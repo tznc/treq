@@ -3758,7 +3758,6 @@ fn merge_workspace_landing(
   // Deferring the cleanup also defers moving the home checkout.
   let defer_home_edit = defer_removal;
 
-  // Get the workspace from the database
   let workspace = local_db::get_workspace_by_id(repo_path, workspace_id)
     .map_err(|e| format!("Failed to get workspace from db: {}", e))?
     .ok_or("Workspace not found in database")?;

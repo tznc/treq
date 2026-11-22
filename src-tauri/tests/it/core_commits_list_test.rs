@@ -53,7 +53,7 @@ fn test_list_commits_working_copy_diff_stats() {
 fn test_list_commits_home_repo() {
   let repo = TestRepo::new().expect("Failed to create test repo");
 
-  // Create a file in the home repo to ensure there's a change
+  // The home repo needs an uncommitted change for the listing to show.
   repo
     .create_file("home_file.txt", "home content\n")
     .expect("Failed to write file");
@@ -375,7 +375,6 @@ fn test_list_commits_with_target_branch_history() {
     .commit_file("base_file_2.txt", "base content 2\n", "Base commit 2")
     .expect("Failed to create base commit 2");
 
-  // Create a workspace branching off current main
   let workspace = treq_lib::core::create_workspace(
     &repo.repo_path,
     "feat/target-history",

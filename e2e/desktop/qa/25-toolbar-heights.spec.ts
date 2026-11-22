@@ -45,7 +45,9 @@ function repoDir(): string {
       }
     })
     .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
-  return JSON.parse(readFileSync(join(roots[0], "qa-extra.json"), "utf8")).repo;
+  const root = roots[0];
+  if (!root) throw new Error("no QA fixture");
+  return JSON.parse(readFileSync(join(root, "qa-extra.json"), "utf8")).repo;
 }
 
 // The seed has no remote branches: give the cache workspace a remote ref at

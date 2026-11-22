@@ -15,8 +15,8 @@ fn test_create_workspace_recovers_orphaned_jj_dir() {
 
   let workspace_dir = repo.workspaces_dir().join("feat-orphan-recovery");
   let jj_dir = workspace_dir.join(".jj");
-  std::fs::create_dir_all(&jj_dir).expect("create partial .jj directory");
-  std::fs::write(workspace_dir.join("partial"), "incomplete").expect("write partial marker");
+  TestRepo::ensure_dir(&jj_dir).expect("create partial .jj directory");
+  TestRepo::write_path(workspace_dir.join("partial"), "incomplete").expect("write partial marker");
 
   // A second create for the same branch must succeed even though .jj is present.
   let ws2 = treq_lib::core::create_workspace(
@@ -85,7 +85,7 @@ fn test_create_workspace_rejects_fully_tracked_workspace() {
   let jj_dir = repo.workspaces_dir().join(&ws1.workspace_path).join(".jj");
   assert!(jj_dir.exists(), ".jj must exist after first creation");
   let marker = jj_dir.parent().unwrap().join("keep-me.txt");
-  std::fs::write(&marker, "existing work").expect("write marker");
+  TestRepo::write_path(&marker, "existing work").expect("write marker");
   let before = crate::common::JjVerifier::get_commit_id_for_rev(&repo.repo_path, branch)
     .expect("read bookmark target")
     .expect("bookmark should resolve");
