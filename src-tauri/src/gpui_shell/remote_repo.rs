@@ -1191,9 +1191,9 @@ pub(crate) mod tests {
     pub reported: Mutex<Vec<&'static str>>,
     pub cutoffs: Mutex<Vec<(String, Cutoff)>>,
     pub reachability: Mutex<Vec<(String, bool)>>,
-    /// Reads of this kind stay in flight until [`FakeTransport::release`],
+    /// Reads of these kinds stay in flight until [`FakeTransport::release`],
     /// to overlap reads in a test.
-    held: Mutex<Option<&'static str>>,
+    held: Mutex<Vec<&'static str>>,
     released: Condvar,
     pub reading: std::sync::atomic::AtomicUsize,
     pub most_reading: std::sync::atomic::AtomicUsize,
@@ -1211,11 +1211,11 @@ pub(crate) mod tests {
 
     /// Keeps reads of `kind` in flight until [`Self::release`].
     pub fn hold(&self, kind: &'static str) {
-      *self.held.lock().unwrap() = Some(kind);
+      self.held.lock().unwrap().push(kind);
     }
 
     pub fn release(&self) {
-      *self.held.lock().unwrap() = None;
+      self.held.lock().unwrap().clear();
       self.released.notify_all();
     }
 
@@ -1239,7 +1239,7 @@ pub(crate) mod tests {
       drop(
         self
           .released
-          .wait_timeout_while(held, Duration::from_secs(10), |held| *held == Some(kind))
+          .wait_timeout_while(held, Duration::from_secs(10), |held| held.contains(&kind))
           .unwrap(),
       );
       self.reading.fetch_sub(1, SeqCst);

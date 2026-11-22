@@ -930,8 +930,9 @@ mod remote_header_tests {
   #[test]
   fn a_workspace_header_reads_everything_side_by_side() {
     let (remote, transport) = answered();
-    // One read stays in flight until another has started beside it.
+    // Two reads stay in flight until released, so they overlap if the reads run side by side.
     transport.hold("GitRemoteInfo");
+    transport.hold("WorkspaceDiff");
     let header = std::thread::scope(|scope| {
       let header = scope.spawn(|| read_remote_header(&remote, &route(Some(3))));
       crate::test_repo::wait_until(Duration::from_secs(5), || {
