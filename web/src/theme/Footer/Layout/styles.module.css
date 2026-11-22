@@ -16,13 +16,12 @@
 }
 
 .footerBrand img {
-  width: 120px;
+  width: 96px;
   height: auto;
-  filter: brightness(0) invert(1);
 }
 
 .footerIntro p {
-  color: #a3a3a3;
+  color: var(--treq-mute);
   line-height: 1.6;
   margin: 0;
 }
@@ -31,8 +30,14 @@
   margin-bottom: 0;
 }
 
+:global(.footer__bottom) {
+  margin-top: 2.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--treq-line);
+}
+
 :global(.footer__copyright) {
-  text-align: center;
+  text-align: left;
 }
 
 @media screen and (max-width: 996px) {
