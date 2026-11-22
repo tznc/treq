@@ -406,15 +406,9 @@ fn background_loop(inner: Arc<Inner>) {
     let now = Instant::now();
     let wake_requested = inner.pending_wake.swap(false, Ordering::SeqCst);
     inner.recheck.store(false, Ordering::SeqCst);
-    let (poll_interval, ci_poll_interval) = inner.intervals();
-    let pr_due = wake_requested
-      || last_pr
-        .map(|t| now.duration_since(t) >= poll_interval)
-        .unwrap_or(true);
-    let ci_due = wake_requested
-      || last_ci
-        .map(|t| now.duration_since(t) >= ci_poll_interval)
-        .unwrap_or(true);
+    let (pr_due, ci_due) = polls_due(now, last_pr, last_ci, inner.intervals());
+    let pr_due = wake_requested || pr_due;
+    let ci_due = wake_requested || ci_due;
 
     if pr_due || ci_due {
       let repos: Vec<String> = inner.watched.lock_or_recover().iter().cloned().collect();
@@ -463,6 +457,20 @@ fn background_loop(inner: Arc<Inner>) {
       })
       .unwrap_or_else(|poisoned| poisoned.into_inner());
   }
+}
+
+/// Whether the PR and the CI poll are due at `now`, given when each last ran
+/// and their `(pr, ci)` intervals.
+fn polls_due(
+  now: std::time::Instant,
+  last_pr: Option<std::time::Instant>,
+  last_ci: Option<std::time::Instant>,
+  (poll_interval, ci_poll_interval): (Duration, Duration),
+) -> (bool, bool) {
+  let due = |last: Option<std::time::Instant>, interval| {
+    last.is_none_or(|t| now.duration_since(t) >= interval)
+  };
+  (due(last_pr, poll_interval), due(last_ci, ci_poll_interval))
 }
 
 fn poll_one_repo(inner: &Inner, repo_path: &str) {
@@ -944,15 +952,10 @@ mod tests {
 
     mgr.queue_branch_refresh("/tmp/repo".into(), "feat".into());
 
-    let deadline = std::time::Instant::now() + Duration::from_secs(2);
-    while std::time::Instant::now() < deadline {
-      if mgr.get_cached("/tmp/repo", "feat").is_some()
+    crate::test_repo::wait_until(Duration::from_secs(2), || {
+      mgr.get_cached("/tmp/repo", "feat").is_some()
         && mgr.get_cached_ci("/tmp/repo", "feat").is_some()
-      {
-        break;
-      }
-      thread::sleep(Duration::from_millis(10));
-    }
+    });
 
     assert_eq!(
       mgr.get_cached("/tmp/repo", "feat").unwrap().unwrap().number,
@@ -992,13 +995,9 @@ mod tests {
     mgr.queue_branch_refresh("/tmp/repo".into(), "feat".into());
     release.wait();
 
-    let deadline = std::time::Instant::now() + Duration::from_secs(2);
-    while std::time::Instant::now() < deadline {
-      if mgr.get_cached("/tmp/repo", "feat").is_some() {
-        break;
-      }
-      thread::sleep(Duration::from_millis(10));
-    }
+    crate::test_repo::wait_until(Duration::from_secs(2), || {
+      mgr.get_cached("/tmp/repo", "feat").is_some()
+    });
 
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert!(mgr.get_cached("/tmp/repo", "feat").unwrap().is_some());
@@ -1414,55 +1413,43 @@ esac
     let mgr = PrStatusManager::new(fetch, list).with_intervals(hour, hour);
 
     mgr.watch_repo("/tmp/rewatch");
-    let deadline = std::time::Instant::now() + Duration::from_secs(2);
-    while calls.load(Ordering::SeqCst) == 0 {
-      assert!(std::time::Instant::now() < deadline, "first poll never ran");
-      thread::sleep(Duration::from_millis(10));
-    }
+    assert!(
+      crate::test_repo::wait_until(Duration::from_secs(2), || calls.load(Ordering::SeqCst) > 0),
+      "first poll never ran"
+    );
+    // With the loop stopped, a wake a re-watch asked for stays pending.
+    mgr.shutdown();
 
     // GPUI reads re-watch on every render.
     for _ in 0..50 {
       mgr.watch_repo("/tmp/rewatch");
     }
-    thread::sleep(Duration::from_millis(200));
+    assert!(!mgr.inner.pending_wake.load(Ordering::SeqCst));
     assert_eq!(calls.load(Ordering::SeqCst), 1);
-    mgr.shutdown();
   }
 
   #[test]
   fn polls_slow_down_in_the_background_and_catch_up_in_front() {
-    use std::sync::atomic::AtomicUsize;
-    let calls = Arc::new(AtomicUsize::new(0));
-    let calls_fetch = Arc::clone(&calls);
-    let fetch: PrFetchFn = Arc::new(move |_, _| {
-      calls_fetch.fetch_add(1, Ordering::SeqCst);
-      Ok(None)
-    });
+    let fetch: PrFetchFn = Arc::new(|_, _| Ok(None));
     let list: BranchListFn = Arc::new(|_| Ok(vec!["feat".into()]));
-    let every = Duration::from_millis(100);
+    let every = Duration::from_secs(60);
     let mgr = PrStatusManager::new(fetch, list).with_intervals(every, every);
-    mgr.set_background(true);
-
-    mgr.watch_repo("/tmp/background");
-    let deadline = std::time::Instant::now() + Duration::from_secs(2);
-    while calls.load(Ordering::SeqCst) == 0 {
-      assert!(std::time::Instant::now() < deadline, "first poll never ran");
-      thread::sleep(Duration::from_millis(10));
-    }
+    let polled = std::time::Instant::now();
     // Several foreground intervals, well inside one background interval.
-    thread::sleep(every * 3);
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    let later = polled + every * 3;
+    mgr.set_background(true);
+    let due =
+      |mgr: &PrStatusManager| polls_due(later, Some(polled), Some(polled), mgr.inner.intervals());
+    assert_eq!(due(&mgr), (false, false));
 
     mgr.set_background(false);
-    let deadline = std::time::Instant::now() + every;
-    while calls.load(Ordering::SeqCst) == 1 {
-      assert!(
-        std::time::Instant::now() < deadline,
-        "coming to the front polls what is due"
-      );
-      thread::sleep(Duration::from_millis(5));
-    }
-    mgr.shutdown();
+    assert_eq!(
+      due(&mgr),
+      (true, true),
+      "coming to the front polls what is due"
+    );
+    // And wakes the loop to work that out at once.
+    assert!(mgr.inner.recheck.load(Ordering::SeqCst));
   }
 
   #[test]
@@ -1503,21 +1490,16 @@ esac
 
     mgr.watch_repo("/tmp/bg");
     // watch_repo wakes the loop; wait until cache is populated.
-    let deadline = std::time::Instant::now() + Duration::from_secs(2);
-    loop {
-      if mgr
-        .list_cached("/tmp/bg")
-        .get("feat")
-        .and_then(|v| v.as_ref())
-        .is_some()
-      {
-        break;
-      }
-      if std::time::Instant::now() > deadline {
-        panic!("background poll did not populate cache");
-      }
-      thread::sleep(Duration::from_millis(20));
-    }
+    assert!(
+      crate::test_repo::wait_until(Duration::from_secs(2), || {
+        mgr
+          .list_cached("/tmp/bg")
+          .get("feat")
+          .and_then(|v| v.as_ref())
+          .is_some()
+      }),
+      "background poll did not populate cache"
+    );
 
     assert_eq!(
       mgr

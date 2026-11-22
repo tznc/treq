@@ -894,9 +894,8 @@ mod remote_header_tests {
     .unwrap()
   }
 
-  fn answered(latency: Duration) -> (Remote, Arc<FakeTransport>) {
+  fn answered() -> (Remote, Arc<FakeTransport>) {
     let transport = Arc::new(FakeTransport::default());
-    *transport.latency.lock().unwrap() = latency;
     transport.answer(
       "ListWorkspaces",
       serde_json::json!([workspace_json(3, "feat", "feat/x")]),
@@ -930,8 +929,20 @@ mod remote_header_tests {
 
   #[test]
   fn a_workspace_header_reads_everything_side_by_side() {
-    let (remote, transport) = answered(Duration::from_millis(40));
-    let header = read_remote_header(&remote, &route(Some(3)));
+    let (remote, transport) = answered();
+    // One read stays in flight until another has started beside it.
+    transport.hold("GitRemoteInfo");
+    let header = std::thread::scope(|scope| {
+      let header = scope.spawn(|| read_remote_header(&remote, &route(Some(3))));
+      crate::test_repo::wait_until(Duration::from_secs(5), || {
+        transport
+          .most_reading
+          .load(std::sync::atomic::Ordering::SeqCst)
+          > 1
+      });
+      transport.release();
+      header.join().unwrap()
+    });
     assert_eq!(header.workspace.map(|w| w.id), Some(3));
     assert_eq!(
       kinds(&transport),
@@ -953,7 +964,7 @@ mod remote_header_tests {
 
   #[test]
   fn a_workspace_on_the_default_branch_counts_changed_files_instead() {
-    let (remote, transport) = answered(Duration::ZERO);
+    let (remote, transport) = answered();
     transport.answer(
       "ListWorkspaces",
       serde_json::json!([workspace_json(3, "main", "main")]),
@@ -965,7 +976,7 @@ mod remote_header_tests {
 
   #[test]
   fn the_home_header_reads_the_changed_files_with_the_rest() {
-    let (remote, transport) = answered(Duration::ZERO);
+    let (remote, transport) = answered();
     transport.answer("ListChanges", serde_json::json!([]));
     read_remote_header(&remote, &route(None));
     assert_eq!(
