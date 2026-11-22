@@ -828,9 +828,7 @@ async fn pty_round_trips_input_output_resize_and_close() {
   );
 }
 
-// ---------------------------------------------------------------------------
 // WebSocket relay transport
-// ---------------------------------------------------------------------------
 
 const RELAY_IT_TOKEN: &str = "relay-it-session-token";
 
