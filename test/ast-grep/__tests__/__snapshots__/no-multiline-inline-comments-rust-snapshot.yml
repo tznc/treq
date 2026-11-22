@@ -1,0 +1,34 @@
+id: no-multiline-inline-comments-rust
+snapshots:
+  ? |
+    fn block() {
+      /* First line
+         second line */
+      run();
+    }
+  : labels:
+    - source: |
+        fn block() {
+          /* First line
+             second line */
+          run();
+        }
+      style: primary
+      start: 0
+      end: 60
+  ? |
+    fn two_lines() {
+      // First line of context
+      // continues here.
+      run();
+    }
+  : labels:
+    - source: |
+        fn two_lines() {
+          // First line of context
+          // continues here.
+          run();
+        }
+      style: primary
+      start: 0
+      end: 76
