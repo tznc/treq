@@ -99,7 +99,7 @@ function pickerWindow(): string {
   const found = spawnSync("xdotool", ["search", "--onlyvisible", "--name", "Select folder"], {
     encoding: "utf8",
   });
-  return found.status === 0 ? found.stdout.trim().split("\n")[0] : "";
+  return found.status === 0 ? (found.stdout.trim().split("\n")[0] ?? "") : "";
 }
 
 /**
@@ -122,9 +122,9 @@ async function pickFolder(folder: string): Promise<void> {
     w: Number(geo.WIDTH) / scale,
     h: Number(geo.HEIGHT) / scale,
   };
-  const keys = async (...args: string[]) => {
+  const keys = async (command: string, ...args: string[]) => {
     const before = screenPixels(box);
-    execFileSync("xdotool", [args[0], "--window", dialog, ...args.slice(1)]);
+    execFileSync("xdotool", [command, "--window", dialog, ...args]);
     await screenChanged(box, before);
   };
   // It opens on Recent, where a typed path only searches: Home first.

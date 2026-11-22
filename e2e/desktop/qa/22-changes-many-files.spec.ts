@@ -5,7 +5,7 @@
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { CACHE, workspaceDir } from "../landing/seed.ts";
 import { capture } from "./capture.ts";
 import { openTab, openWorkspace, settle } from "./helpers.ts";
