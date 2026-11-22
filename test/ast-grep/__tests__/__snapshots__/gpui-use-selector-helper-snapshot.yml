@@ -1,4 +1,4 @@
-id: gpui-debug-selector-needs-test-node
+id: gpui-use-selector-helper
 snapshots:
   ? |
     fn v() -> impl IntoElement {
@@ -25,6 +25,31 @@ snapshots:
       style: secondary
       start: 31
       end: 72
+  ? |
+    fn v() -> impl IntoElement {
+      div().id("send").role(Role::Button).test_support().debug_selector(|| "send".into())
+    }
+  : labels:
+    - source: div().id("send").role(Role::Button).test_support().debug_selector(|| "send".into())
+      style: primary
+      start: 31
+      end: 114
+    - source: div()
+      style: secondary
+      start: 31
+      end: 36
+    - source: div()
+      style: secondary
+      start: 31
+      end: 36
+    - source: debug_selector
+      style: secondary
+      start: 82
+      end: 96
+    - source: div().id("send").role(Role::Button).test_support().debug_selector
+      style: secondary
+      start: 31
+      end: 96
   ? |
     fn v() -> impl IntoElement {
       ui::text(div().debug_selector(|| "title".into()), TextSize::Sm)
