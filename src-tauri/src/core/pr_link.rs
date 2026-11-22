@@ -1,5 +1,10 @@
 //! Links to a pull request in Treq: `treq://pr/open?repo={owner}/{repo}&number={n}`.
 //! treq.dev/open/pr/{owner}/{repo}/{n} redirects to it in the browser.
+//! `treq://repo/open?repo={owner}/{repo}` shows the repository's window, and
+//! `treq://agent/kickoff?repo={owner}/{repo}&branch={b}&prompt={p}` starts an
+//! agent in it: the links a browser can make, knowing only the GitHub names.
+//! `treq://claude/session?id={session}[&repo={owner}/{repo}&pr={n}]` runs a
+//! Claude Code on the web session as a terminal agent.
 
 /// The PR a `treq://pr/open` link names.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -11,23 +16,91 @@ pub struct PrLink {
 
 /// The PR a `treq://pr/open` link names, or `None` for any other link.
 pub fn parse_pr_open_link(url: &str) -> Option<PrLink> {
-  let parsed = url::Url::parse(url).ok()?;
-  if parsed.scheme() != "treq" || parsed.host_str() != Some("pr") || parsed.path() != "/open" {
-    return None;
-  }
-  let param = |name: &str| {
-    parsed
-      .query_pairs()
-      .find(|(key, _)| key == name)
-      .map(|(_, value)| value.into_owned())
-  };
-  let repo = param("repo")?;
-  let (owner, name) = repo.split_once('/')?;
-  if !is_github_name(owner) || !is_github_name(name) {
-    return None;
-  }
-  let number = param("number")?.parse::<u64>().ok().filter(|n| *n > 0)?;
+  let parsed = treq_link(url, "pr", "/open")?;
+  let repo = github_repo(&parsed)?;
+  let number = param(&parsed, "number")?
+    .parse::<u64>()
+    .ok()
+    .filter(|n| *n > 0)?;
   Some(PrLink { repo, number })
+}
+
+/// The GitHub `owner/repo` a `treq://repo/open` link names, or `None` for
+/// any other link.
+pub fn parse_repo_open_link(url: &str) -> Option<String> {
+  github_repo(&treq_link(url, "repo", "/open")?)
+}
+
+/// What a `treq://agent/kickoff` link asks: an agent with `prompt` on
+/// `branch` of GitHub repository `repo`, wherever a window has it open.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KickoffLink {
+  pub repo: String,
+  pub branch: String,
+  pub prompt: String,
+}
+
+/// The agent a `treq://agent/kickoff` link asks for, or `None` for any other
+/// link.
+pub fn parse_agent_kickoff_link(url: &str) -> Option<KickoffLink> {
+  let parsed = treq_link(url, "agent", "/kickoff")?;
+  let filled = |name: &str| param(&parsed, name).filter(|v| !v.trim().is_empty());
+  Some(KickoffLink {
+    repo: github_repo(&parsed)?,
+    branch: filled("branch")?,
+    prompt: filled("prompt")?,
+  })
+}
+
+/// What a `treq://claude/session` link asks: Claude Code on the web session
+/// `session` as a terminal agent, in the window open on `repo` when given.
+/// `pr` is the pull request it was opened from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClaudeSessionLink {
+  pub session: String,
+  pub repo: Option<String>,
+  pub pr: Option<u64>,
+}
+
+/// The session a `treq://claude/session` link names, or `None` for any other
+/// link or a malformed value. The session id reaches a shell command, so it
+/// is `session_` and letters or digits only.
+pub fn parse_claude_session_link(url: &str) -> Option<ClaudeSessionLink> {
+  let parsed = treq_link(url, "claude", "/session")?;
+  let session = param(&parsed, "id").filter(|id| {
+    id.strip_prefix("session_")
+      .is_some_and(|rest| !rest.is_empty() && rest.chars().all(|c| c.is_ascii_alphanumeric()))
+  })?;
+  let repo = match param(&parsed, "repo") {
+    Some(_) => Some(github_repo(&parsed)?),
+    None => None,
+  };
+  let pr = match param(&parsed, "pr") {
+    Some(n) => Some(n.parse::<u64>().ok().filter(|n| *n > 0)?),
+    None => None,
+  };
+  Some(ClaudeSessionLink { session, repo, pr })
+}
+
+/// `url` when it is a `treq://{host}{path}` link.
+fn treq_link(url: &str, host: &str, path: &str) -> Option<url::Url> {
+  let parsed = url::Url::parse(url).ok()?;
+  (parsed.scheme() == "treq" && parsed.host_str() == Some(host) && parsed.path() == path)
+    .then_some(parsed)
+}
+
+fn param(parsed: &url::Url, name: &str) -> Option<String> {
+  parsed
+    .query_pairs()
+    .find(|(key, _)| key == name)
+    .map(|(_, value)| value.into_owned())
+}
+
+/// A link's `repo` parameter, when it is a GitHub `owner/repo`.
+fn github_repo(parsed: &url::Url) -> Option<String> {
+  let repo = param(parsed, "repo")?;
+  let (owner, name) = repo.split_once('/')?;
+  (is_github_name(owner) && is_github_name(name)).then_some(repo)
 }
 
 static PENDING: std::sync::Mutex<Option<PrLink>> = std::sync::Mutex::new(None);
@@ -146,6 +219,77 @@ mod tests {
       "https://treq.dev/pr/open?repo=tznc%2Ftreq&number=42",
     ] {
       assert_eq!(parse_pr_open_link(url), None, "{url}");
+    }
+  }
+
+  #[test]
+  fn reads_the_repo_of_a_repo_open_link() {
+    assert_eq!(
+      parse_repo_open_link("treq://repo/open?repo=tznc%2Ftreq").as_deref(),
+      Some("tznc/treq")
+    );
+    for url in [
+      "treq://repo/open",
+      "treq://repo/open?repo=tznc",
+      "treq://repo/open?repo=..%2Ftreq",
+      "treq://repo/close?repo=tznc%2Ftreq",
+      "treq://pr/open?repo=tznc%2Ftreq&number=42",
+    ] {
+      assert_eq!(parse_repo_open_link(url), None, "{url}");
+    }
+  }
+
+  #[test]
+  fn reads_an_agent_kickoff_link() {
+    assert_eq!(
+      parse_agent_kickoff_link(
+        "treq://agent/kickoff?repo=tznc%2Ftreq&branch=claude%2Fx&prompt=src%2Fa.rs%3A4%0A%0Awhy%3F"
+      ),
+      Some(KickoffLink {
+        repo: "tznc/treq".into(),
+        branch: "claude/x".into(),
+        prompt: "src/a.rs:4\n\nwhy?".into(),
+      })
+    );
+    for url in [
+      "treq://agent/kickoff?repo=tznc%2Ftreq&branch=main",
+      "treq://agent/kickoff?repo=tznc%2Ftreq&prompt=why",
+      "treq://agent/kickoff?repo=tznc%2Ftreq&branch=main&prompt=%20",
+      "treq://agent/kickoff?repo=tznc&branch=main&prompt=why",
+      "treq://agent/start?repo=tznc%2Ftreq&branch=main&prompt=why",
+    ] {
+      assert_eq!(parse_agent_kickoff_link(url), None, "{url}");
+    }
+  }
+
+  #[test]
+  fn reads_a_claude_session_link() {
+    assert_eq!(
+      parse_claude_session_link("treq://claude/session?id=session_01AbC"),
+      Some(ClaudeSessionLink {
+        session: "session_01AbC".into(),
+        repo: None,
+        pr: None,
+      })
+    );
+    assert_eq!(
+      parse_claude_session_link("treq://claude/session?id=session_1&repo=tznc%2Ftreq&pr=7"),
+      Some(ClaudeSessionLink {
+        session: "session_1".into(),
+        repo: Some("tznc/treq".into()),
+        pr: Some(7),
+      })
+    );
+    for url in [
+      "treq://claude/session",
+      "treq://claude/session?id=abc",
+      "treq://claude/session?id=session_",
+      "treq://claude/session?id=session_1%20%3B%20rm",
+      "treq://claude/session?id=session_1&repo=tznc",
+      "treq://claude/session?id=session_1&repo=tznc%2Ftreq&pr=0",
+      "treq://claude/other?id=session_1",
+    ] {
+      assert_eq!(parse_claude_session_link(url), None, "{url}");
     }
   }
 }

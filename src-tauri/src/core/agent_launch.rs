@@ -116,6 +116,9 @@ pub struct SessionStart {
   /// `plan` or `acceptEdits`.
   pub permission_mode: Option<String>,
   pub agent: Option<String>,
+  /// A Claude Code on the web session (`session_…`) the agent pulls in with
+  /// `claude --teleport`, instead of a prompt.
+  pub teleport: Option<String>,
 }
 
 impl SessionStart {
@@ -125,6 +128,7 @@ impl SessionStart {
       permission_mode: self.permission_mode.clone(),
       agent: self.agent.clone(),
       workspace_path: self.workspace_path.clone(),
+      teleport: self.teleport.clone(),
     }
   }
 }
@@ -137,6 +141,9 @@ pub struct PendingSession {
   pub permission_mode: Option<String>,
   pub agent: Option<String>,
   pub workspace_path: Option<String>,
+  /// A Claude Code on the web session (`session_…`) the agent pulls in with
+  /// `claude --teleport`, instead of a prompt.
+  pub teleport: Option<String>,
 }
 
 impl PendingSession {
@@ -315,6 +322,7 @@ pub fn start_agent_task(
       pending_prompt: Some(prompt),
       permission_mode: Some(task.mode.clone()),
       agent: Some(task.agent.clone()),
+      teleport: None,
     },
     toasts,
   )))
@@ -334,6 +342,9 @@ pub struct LaunchRequest {
   pub session_name: Option<String>,
   /// What the session works on (a reviewed PR's URL), linked from its header.
   pub link: Option<String>,
+  /// A Claude Code on the web session (`session_…`) the agent pulls in with
+  /// `claude --teleport`, instead of a prompt.
+  pub teleport: Option<String>,
 }
 
 /// Creates the session `request` asks for.
@@ -367,6 +378,7 @@ pub fn launch_session(
     pending_prompt: request.prompt.clone(),
     permission_mode: request.mode.clone(),
     agent: request.agent.clone(),
+    teleport: request.teleport.clone(),
   })
 }
 
@@ -1116,6 +1128,21 @@ mod tests {
     record_prompt(&store, &start).unwrap();
     // No prompt: nothing recorded.
     assert_eq!(store.calls.borrow().len(), 1);
+  }
+
+  #[test]
+  fn a_teleport_reaches_the_sessions_terminal() {
+    let start = launch_session(
+      &FakeStore::default(),
+      &LaunchRequest {
+        repo_path: "/repo".into(),
+        agent: Some("claude".into()),
+        teleport: Some("session_1".into()),
+        ..Default::default()
+      },
+    )
+    .unwrap();
+    assert_eq!(start.pending().teleport.as_deref(), Some("session_1"));
   }
 
   #[test]

@@ -47,6 +47,8 @@ pub struct AgentStart {
   pub session_id: i64,
   pub pending_prompt: Option<String>,
   pub permission_mode: Option<String>,
+  /// A Claude Code on the web session the agent pulls in.
+  pub teleport: Option<String>,
 }
 
 /// Where a persistent remote shell or agent runs (`RemoteTerminalTarget`).
@@ -625,6 +627,7 @@ impl TerminalHost for Backend {
         session_model: model.as_deref(),
         pending_prompt: start.pending_prompt.as_deref(),
         treq_bin_dir: bin_dir.as_deref(),
+        teleport: start.teleport.as_deref(),
       },
     )?;
     Ok(Prepared {

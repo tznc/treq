@@ -26,6 +26,7 @@ fn terminal_pane_opens_the_active_agent_session(cx: &mut TestAppContext) {
       permission_mode: Some("plan".into()),
       agent: Some("codex".into()),
       workspace_path: None,
+      teleport: None,
     },
   );
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
@@ -1795,6 +1796,7 @@ fn terminal_workspace_label_click_navigates_by_path(cx: &mut TestAppContext) {
       permission_mode: None,
       agent: None,
       workspace_path: Some("/repo/.treq/workspaces/b".into()),
+      teleport: None,
     },
   );
   let (mut h, _) = workspace_harness(cx, host, terminal_route(serde_json::json!({})));

@@ -257,6 +257,14 @@ enum DeepLinkKind {
   SkillInstall,
   /// `treq://pr/open?repo=owner/repo&number=N`: show a pull request.
   PrOpen,
+  /// `treq://repo/open?repo=owner/repo`: show a repository's window.
+  RepoOpen,
+  /// `treq://agent/kickoff?repo=owner/repo&branch=b&prompt=p`: start an agent
+  /// from a browser, which knows the GitHub repository but not its checkout.
+  AgentKickoff,
+  /// `treq://claude/session?id=session_…`: run a Claude Code on the web
+  /// session as a terminal agent.
+  ClaudeSession,
   Unknown,
 }
 
@@ -288,6 +296,27 @@ fn classify_deep_link(url: &str) -> DeepLinkKind {
         && parsed.path() == "/open" =>
     {
       DeepLinkKind::PrOpen
+    }
+    Ok(parsed)
+      if parsed.scheme() == "treq"
+        && parsed.host_str() == Some("repo")
+        && parsed.path() == "/open" =>
+    {
+      DeepLinkKind::RepoOpen
+    }
+    Ok(parsed)
+      if parsed.scheme() == "treq"
+        && parsed.host_str() == Some("agent")
+        && parsed.path() == "/kickoff" =>
+    {
+      DeepLinkKind::AgentKickoff
+    }
+    Ok(parsed)
+      if parsed.scheme() == "treq"
+        && parsed.host_str() == Some("claude")
+        && parsed.path() == "/session" =>
+    {
+      DeepLinkKind::ClaudeSession
     }
     _ => DeepLinkKind::Unknown,
   }
@@ -399,6 +428,91 @@ pub(crate) fn pr_launch_link_window(app: &AppHandle, label: &str, path: &str) {
   gpui_shell::pr_open_link(app, label, link.number);
   #[cfg(not(feature = "gpui-shell"))]
   let _ = (app, label, link);
+}
+
+/// `treq://repo/open?repo=owner/repo`: brings the window open on that GitHub
+/// repository to the front, or the last focused window when none is.
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+fn repo_open_deep_link(app: &AppHandle, url: &str) {
+  let Some(repo) = crate::core::pr_link::parse_repo_open_link(url) else {
+    log::info!("repo deep link ignored (malformed)");
+    return;
+  };
+  match window_label_for_github_repo(app, &repo).and_then(|l| app.get_window(&l)) {
+    Some(window) => {
+      window.unminimize().ignore_closed();
+      window.show().ignore_closed();
+      window.set_focus().ignore_closed();
+    }
+    None => focus_target_window(app),
+  }
+}
+
+/// `treq://agent/kickoff?repo=owner/repo&branch=b&prompt=p`: the window open
+/// on that GitHub repository starts the agent; with none, the last focused
+/// window says so.
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+fn agent_kickoff_deep_link(app: &AppHandle, url: &str) {
+  let Some(link) = crate::core::pr_link::parse_agent_kickoff_link(url) else {
+    log::info!("agent kickoff deep link ignored (malformed)");
+    return;
+  };
+  let found = window_label_for_github_repo(app, &link.repo);
+  let repo_path = found.as_ref().and_then(|label| {
+    let state = app.state::<AppState>();
+    let paths = state.window_repo_paths.lock_or_recover();
+    paths.get(label).cloned()
+  });
+  let Some(label) = found.or_else(|| resolve_menu_target_label(app)) else {
+    log::info!("agent kickoff deep link ignored (no window)");
+    return;
+  };
+  if let Some(window) = app.get_window(&label) {
+    window.unminimize().ignore_closed();
+    window.show().ignore_closed();
+    window.set_focus().ignore_closed();
+  }
+  #[cfg(feature = "gpui-shell")]
+  gpui_shell::launch::agent_kickoff(app, label, repo_path, link);
+  #[cfg(not(feature = "gpui-shell"))]
+  let _ = (repo_path, link);
+}
+
+/// `treq://claude/session?id=session_…[&repo=owner/repo&pr=N]`: the window
+/// open on that GitHub repository, else the last focused one, runs the
+/// Claude Code on the web session as a terminal agent and offers workspaces
+/// for open pull requests.
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+fn claude_session_deep_link(app: &AppHandle, url: &str) {
+  let Some(link) = crate::core::pr_link::parse_claude_session_link(url) else {
+    log::info!("claude session deep link ignored (malformed)");
+    return;
+  };
+  let found = link
+    .repo
+    .as_deref()
+    .and_then(|repo| window_label_for_github_repo(app, repo));
+  let Some(label) = found.or_else(|| resolve_menu_target_label(app)) else {
+    log::info!("claude session deep link ignored (no window)");
+    return;
+  };
+  let repo_path = {
+    let state = app.state::<AppState>();
+    let paths = state.window_repo_paths.lock_or_recover();
+    paths.get(&label).cloned()
+  };
+  if let Some(window) = app.get_window(&label) {
+    window.unminimize().ignore_closed();
+    window.show().ignore_closed();
+    window.set_focus().ignore_closed();
+  }
+  #[cfg(feature = "gpui-shell")]
+  gpui_shell::launch::claude_session(app, label, repo_path, link);
+  #[cfg(not(feature = "gpui-shell"))]
+  let _ = (repo_path, link);
 }
 
 /// The window open on GitHub repository `repo` (`owner/repo`), the focused
@@ -974,6 +1088,9 @@ pub fn run() {
               // One window asks: installing is app-wide, not per repository.
               DeepLinkKind::SkillInstall => skill_install_deep_link(&handle, &url),
               DeepLinkKind::PrOpen => pr_open_deep_link(&handle, &url),
+              DeepLinkKind::RepoOpen => repo_open_deep_link(&handle, &url),
+              DeepLinkKind::AgentKickoff => agent_kickoff_deep_link(&handle, &url),
+              DeepLinkKind::ClaudeSession => claude_session_deep_link(&handle, &url),
               DeepLinkKind::Unknown => log::info!("deep link ignored (unrecognized url)"),
             }
           }
@@ -1399,6 +1516,33 @@ mod tests {
   fn classifies_pr_open_link_as_pr_open() {
     let url = "treq://pr/open?repo=tznc%2Ftreq&number=42";
     assert_eq!(super::classify_deep_link(url), super::DeepLinkKind::PrOpen);
+  }
+
+  #[test]
+  fn classifies_repo_open_link_as_repo_open() {
+    let url = "treq://repo/open?repo=tznc%2Ftreq";
+    assert_eq!(
+      super::classify_deep_link(url),
+      super::DeepLinkKind::RepoOpen
+    );
+  }
+
+  #[test]
+  fn classifies_agent_kickoff_link_as_agent_kickoff() {
+    let url = "treq://agent/kickoff?repo=tznc%2Ftreq&branch=main&prompt=why";
+    assert_eq!(
+      super::classify_deep_link(url),
+      super::DeepLinkKind::AgentKickoff
+    );
+  }
+
+  #[test]
+  fn classifies_claude_session_link_as_claude_session() {
+    let url = "treq://claude/session?id=session_1";
+    assert_eq!(
+      super::classify_deep_link(url),
+      super::DeepLinkKind::ClaudeSession
+    );
   }
 
   #[test]
