@@ -162,6 +162,7 @@ const config: Config = {
             '/sign-in/**',
             '/auth/**',
             '/integrations/**',
+            '/search/**',
           ],
         },
       } satisfies Preset.Options,
@@ -251,7 +252,7 @@ const config: Config = {
       ],
     },
     footer: {
-      style: 'dark',
+      style: 'light',
       links: [
         {
           title: 'Product',

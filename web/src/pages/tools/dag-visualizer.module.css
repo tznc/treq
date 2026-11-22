@@ -22,7 +22,7 @@
 }
 
 .breadcrumb a {
-  color: var(--ifm-color-primary);
+  color: var(--treq-link);
   text-decoration: none;
 }
 
@@ -32,7 +32,7 @@
 
 .pageTitle {
   font-size: 1.5rem;
-  font-weight: 700;
+  font-weight: 500;
   margin: 0 0 0.2rem;
 }
 
@@ -85,7 +85,7 @@
 
 .toolbarBtn:hover {
   background: var(--ifm-color-primary);
-  color: white;
+  color: var(--treq-on-brand);
   border-color: var(--ifm-color-primary);
 }
 
@@ -121,7 +121,7 @@
 .nodeName {
   color: #ffffff;
   font-size: 0.82rem;
-  font-weight: 600;
+  font-weight: 500;
   display: block;
 }
 
@@ -209,8 +209,8 @@
   top: 8px;
   left: 14px;
   font-size: 0.7rem;
-  font-weight: 700;
-  text-transform: uppercase;
+  font-weight: 500;
+  text-transform: none;
   letter-spacing: 0.07em;
   color: #6366f1;
   pointer-events: none;
@@ -261,7 +261,7 @@
 }
 
 .panelTitle {
-  font-weight: 600;
+  font-weight: 500;
   font-size: 0.9rem;
 }
 
@@ -298,8 +298,8 @@
 
 .fieldLabel {
   font-size: 0.72rem;
-  font-weight: 600;
-  text-transform: uppercase;
+  font-weight: 500;
+  text-transform: none;
   letter-spacing: 0.05em;
   color: var(--ifm-color-emphasis-700);
   display: block;
@@ -499,7 +499,7 @@
   border: 1px solid var(--ifm-color-primary);
   border-radius: 6px;
   background: transparent;
-  color: var(--ifm-color-primary);
+  color: var(--treq-link);
   cursor: pointer;
   white-space: nowrap;
   font-family: inherit;
@@ -507,7 +507,7 @@
 
 .addSkillBtn:hover {
   background: var(--ifm-color-primary);
-  color: white;
+  color: var(--treq-on-brand);
 }
 
 .skillDropdown {

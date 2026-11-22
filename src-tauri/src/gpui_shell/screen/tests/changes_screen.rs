@@ -1280,6 +1280,49 @@ fn changes_tab_shows_review_threads_on_their_line(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_review_thread_draws_its_replies_as_one_card(cx: &mut TestAppContext) {
+  let mut host = changes_host();
+  let mut thread = gh_thread("t1", 2, false);
+  let mut reply = thread.comments[0].clone();
+  reply.id = "t1-r".into();
+  reply.body = "Non blocking.".into();
+  thread.comments.push(reply);
+  host.threads = vec![thread];
+  let (mut h, _) = workspace_harness(cx, host, changes_route());
+  let first = h.cx.debug_bounds("github-comment-t1-c").expect("first");
+  let second = h.cx.debug_bounds("github-comment-t1-r").expect("reply");
+  // Replies stack flush inside one card, split by a rule, not a gap.
+  assert_eq!(first.bottom(), second.top());
+}
+
+#[gpui::test]
+fn review_thread_quote_button_sits_in_the_card_bottom_row(cx: &mut TestAppContext) {
+  let mut host = changes_host();
+  host.threads = vec![gh_thread("t1", 2, false)];
+  let (mut h, _host) = workspace_harness(cx, host, changes_route());
+  h.cx.run_until_parked();
+  let card = h.cx.debug_bounds("github-comment-card").expect("card");
+  let quote = h.cx.debug_bounds("github-comment-quote").expect("quote");
+  let body = h.cx.debug_bounds("github-comment-body").expect("body");
+  assert!(
+    card.contains(&quote.origin) && card.contains(&quote.bottom_right()),
+    "{quote:?} outside {card:?}"
+  );
+  assert!(quote.top() >= body.bottom(), "{quote:?} not below {body:?}");
+  // A "Quote" button inside the comment, reading "Quote".
+  use gpui_testing_library::prelude::*;
+  let screen = a11y_screen(&mut h);
+  let comment = screen.get_by_role(by::role(gpui::Role::Group).name("Comment by octo"));
+  let button = within(&comment).get_by_role(by::role(gpui::Role::Button).name("Quote"));
+  expect(&button).to_be_visible();
+  expect(&button).to_have_text_content("Quote");
+  // The library reads a button's text from its accessible name, so an
+  // icon-only button with aria_label "Quote" would pass the above; its
+  // width shows the label is drawn.
+  assert!(quote.size.width > gpui::px(40.), "{quote:?} draws no label");
+}
+
+#[gpui::test]
 fn changes_tab_quotes_a_review_thread(cx: &mut TestAppContext) {
   let mut host = changes_host();
   host.threads = vec![gh_thread("t1", 2, false)];
@@ -1300,6 +1343,17 @@ fn changes_tab_quotes_a_review_thread(cx: &mut TestAppContext) {
     serde_json::json!(["Why two lines?"])
   );
   assert_eq!(saved[0]["start_line"], 2);
+}
+
+#[gpui::test]
+fn changes_tab_draws_a_github_suggestion_as_a_diff(cx: &mut TestAppContext) {
+  let mut host = changes_host();
+  let mut thread = gh_thread("t1", 2, false);
+  thread.comments[0].body = "Drop it.\n\n```suggestion\n```".into();
+  thread.comments[0].diff_hunk = "@@ -1,2 +1,2 @@\n a\n+b".into();
+  host.threads = vec![thread];
+  let (mut h, _host) = workspace_harness(cx, host, changes_route());
+  assert!(h.shows(gpui::Role::Heading, "Suggested change"));
 }
 
 #[gpui::test]

@@ -15,17 +15,34 @@ async function clickNavDropdownItem(
   await main.getByRole('link', { name: item, exact: true }).click();
 }
 
-test.describe('Homepage Features layout', () => {
-  test('review screenshot keeps aspect ratio and takes most of the row', async ({ page }) => {
+test.describe('Homepage layout', () => {
+  test('rebase diagram shows the workspaces that follow main', async ({ page }) => {
+    await page.goto('/');
+    const rebase = page.getByRole('region', {
+      name: 'When the target branch moves, dependent workspaces rebase',
+    });
+    const diagram = rebase.getByRole('img', { name: /three workspaces that target main/i });
+    await expect(diagram).toBeVisible();
+    for (const name of ['feat/event-ingest', 'feat/keyvalues-cache', 'feat/alerting-logs']) {
+      await expect(diagram.getByText(name, { exact: true })).toBeVisible();
+    }
+    await expect(rebase.getByRole('button', { name: 'Replay' })).toBeVisible();
+  });
+
+  test('review screenshot keeps aspect ratio and spans the row', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto('/');
-    const features = page.getByRole('region', { name: 'Features' });
-    await expect(features.getByRole('heading', { name: 'Features', level: 2 })).toBeVisible();
+    const features = page.getByRole('region', {
+      name: 'Read the whole change, or one commit, on the same screen',
+    });
+    await expect(
+      features.getByRole('heading', { name: 'Read the whole change, or one commit, on the same screen', level: 2 }),
+    ).toBeVisible();
     await page.waitForLoadState('networkidle');
     await features.scrollIntoViewIfNeeded();
 
     const screenshot = features.getByRole('img', {
-      name: 'Treq code review screenshot showing comments sent to Claude',
+      name: 'Treq Changes tab with a resolved GitHub review thread and a local comment that says remove this',
     });
     await expect(screenshot).toBeVisible();
 
@@ -45,10 +62,10 @@ test.describe('Homepage Features layout', () => {
     expect(Math.abs(renderedAspect - naturalAspect)).toBeLessThan(0.05);
     expect(box!.height).toBeLessThan(naturalHeight * 0.5);
 
-    // Screenshot is 2fr of a 1fr/2fr row inside the Features section (~2/3 width).
+    // The screenshot spans the section's content row inside its frame.
     const featuresBox = await features.boundingBox();
     expect(featuresBox).not.toBeNull();
-    expect(box!.width / featuresBox!.width).toBeGreaterThanOrEqual(0.55);
+    expect(box!.width / featuresBox!.width).toBeGreaterThanOrEqual(0.75);
   });
 });
 
@@ -90,24 +107,45 @@ test.describe('Navbar navigation', () => {
     await page.goto('/');
     await clickNavDropdownItem(page, 'Discover', 'Learn');
     await nav(page).getByRole('link', { name: 'Treq Logo' }).click();
-    await expect(page.getByRole('heading', { name: /Stacking Agent Development Environment/, level: 1 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /One workspace per agent/, level: 1 })).toBeVisible();
   });
 
   test.describe('on mobile', () => {
     test.use({ viewport: { width: 375, height: 667 } });
 
-    test('hides search, Sign in, and GitHub from the top bar', async ({ page }) => {
+    test('hides search and GitHub from the top bar', async ({ page }) => {
       await page.goto('/');
       await expect(page.getByPlaceholder('Search...')).not.toBeVisible();
-      await expect(page.getByRole('link', { name: 'Sign in' })).not.toBeVisible();
       await expect(page.getByRole('link', { name: 'GitHub repository' })).not.toBeVisible();
+    });
+
+    test('keeps Sign in at the right of the collapsed top bar', async ({ page }) => {
+      for (const width of [375, 900]) {
+        await page.setViewportSize({ width, height: 800 });
+        await page.goto('/');
+        // With the drawer closed its links are hidden, so this is the top-bar link.
+        const signIn = nav(page).getByRole('link', { name: 'Sign in' });
+        await expect(signIn).toBeVisible();
+        // The navbar re-renders when it hydrates for the mobile layout, so
+        // measure once the link has settled: a 44px target on the right.
+        await expect
+          .poll(async () => {
+            const box = await signIn.boundingBox();
+            return box !== null && box.height >= 44 && box.x > width / 2 && box.x + box.width <= width;
+          })
+          .toBe(true);
+      }
     });
 
     test('shows search, Sign in, and GitHub in the sidebar drawer', async ({ page }) => {
       await page.goto('/');
       await page.getByLabel('Toggle navigation bar').click();
+      // The drawer lists its items; the top bar does not, and keeps its own Sign in.
+      const drawer = nav(page)
+        .getByRole('list')
+        .filter({ has: page.getByRole('link', { name: 'Sign in' }) });
       await expect(page.getByPlaceholder('Search...').filter({ visible: true })).toBeVisible();
-      await expect(page.getByRole('link', { name: 'Sign in' }).filter({ visible: true })).toBeVisible();
+      await expect(drawer.getByRole('link', { name: 'Sign in' })).toBeVisible();
       await expect(
         page.getByRole('link', { name: 'GitHub repository' }).filter({ visible: true }),
       ).toBeVisible();
@@ -380,7 +418,7 @@ test.describe('Cross-section navigation', () => {
     await clickNavDropdownItem(page, 'Product', 'Documentation');
     await sidebar(page).getByRole('link', { name: 'Installation' }).click();
     await nav(page).getByRole('link', { name: 'Treq Logo' }).click();
-    await expect(page.getByRole('heading', { name: /Stacking Agent Development Environment/, level: 1 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /One workspace per agent/, level: 1 })).toBeVisible();
   });
 });
 

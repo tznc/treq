@@ -25,6 +25,24 @@ pub fn timeline<'a>(
   items.into_iter().map(|(_, item)| item).collect()
 }
 
+/// Who `@query` can mention, in the order given,
+/// those whose login starts with the query before those that contain it.
+pub fn mention_candidates<'a>(
+  logins: impl IntoIterator<Item = &'a str>,
+  query: &str,
+  limit: usize,
+) -> Vec<String> {
+  let query = query.to_lowercase();
+  let mut seen = std::collections::HashSet::new();
+  let mut logins: Vec<&str> = logins
+    .into_iter()
+    .filter(|login| !login.is_empty() && seen.insert(login.to_lowercase()))
+    .filter(|login| login.to_lowercase().contains(&query))
+    .collect();
+  logins.sort_by_key(|login| !login.to_lowercase().starts_with(&query));
+  logins.into_iter().take(limit).map(str::to_string).collect()
+}
+
 /// `author`'s avatar: the one GitHub reported, else their profile image.
 pub fn avatar_url(author: &GhAuthor) -> String {
   author
@@ -113,6 +131,26 @@ pub fn collapsed_checks(checks: &[PrCheckEntry]) -> Vec<&PrCheckEntry> {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn mention_candidates_dedupe_and_rank_prefix_matches_first() {
+    let people = ["bob", "ziinc", "CodingFabian", "Ziinc"];
+    assert_eq!(
+      mention_candidates(people, "", 5),
+      vec!["bob", "ziinc", "CodingFabian"]
+    );
+    assert_eq!(
+      mention_candidates(people, "in", 5),
+      vec!["ziinc", "CodingFabian"]
+    );
+    assert_eq!(mention_candidates(people, "co", 5), vec!["CodingFabian"]);
+    assert_eq!(
+      mention_candidates(["ann_b", "bob"], "B", 5),
+      vec!["bob", "ann_b"]
+    );
+    assert_eq!(mention_candidates(people, "", 1), vec!["bob"]);
+    assert!(mention_candidates(people, "x", 5).is_empty());
+  }
 
   fn reviewed(draft: bool, decision: Option<&str>, reviews: &[&str]) -> GhPullRequest {
     serde_json::from_value(serde_json::json!({

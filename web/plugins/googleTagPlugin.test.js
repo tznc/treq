@@ -3,17 +3,24 @@ const vm = require('vm');
 const {buildGoogleTagHeadTags, CONSENT_REGIONS} = require('./googleTagPlugin');
 
 /**
- * Runs the inline head script the way a browser would and returns every
- * gtag() call it queued, e.g. ['consent', 'default', {...}].
+ * Runs the inline head script the way a browser would and returns its window.
+ * @returns {any}
+ */
+function runHeadScript(navigator = {userAgent: 'Mozilla/5.0 Chrome/131.0', webdriver: false}) {
+  const script = buildGoogleTagHeadTags('G-TEST').find((t) => t.innerHTML)?.innerHTML ?? '';
+  /** @type {any} */
+  const page = {localStorage: {getItem: () => null}, navigator};
+  page.window = page;
+  vm.runInNewContext(script, page);
+  return page;
+}
+
+/**
+ * Every gtag() call the head script queued, e.g. ['consent', 'default', {...}].
  * @returns {any[][]}
  */
 function gtagCalls() {
-  const script = buildGoogleTagHeadTags('G-TEST').find((t) => t.innerHTML)?.innerHTML ?? '';
-  /** @type {any} */
-  const page = {localStorage: {getItem: () => null}};
-  page.window = page;
-  vm.runInNewContext(script, page);
-  return page.dataLayer.map((/** @type {IArguments} */ args) => Array.from(args));
+  return runHeadScript().dataLayer.map((/** @type {IArguments} */ args) => Array.from(args));
 }
 
 const consentDefaults = () =>
@@ -41,4 +48,17 @@ test('covers EEA, UK and Switzerland', () => {
 test('loads gtag.js for the tracking id', () => {
   const src = buildGoogleTagHeadTags('G-TEST').find((t) => t.attributes?.src)?.attributes?.src;
   expect(src).toBe('https://www.googletagmanager.com/gtag/js?id=G-TEST');
+});
+
+test('keeps analytics on for real browsers', () => {
+  expect(runHeadScript()['ga-disable-G-TEST']).toBeUndefined();
+});
+
+test.each([
+  ['automated browsers', {userAgent: 'Mozilla/5.0 Chrome/131.0', webdriver: true}],
+  ['headless Chrome', {userAgent: 'Mozilla/5.0 HeadlessChrome/131.0', webdriver: false}],
+  ['crawlers', {userAgent: 'Mozilla/5.0 (compatible; AhrefsBot/7.0)', webdriver: false}],
+  ['Lighthouse', {userAgent: 'Mozilla/5.0 Chrome-Lighthouse', webdriver: false}],
+])('disables analytics for %s', (_name, navigator) => {
+  expect(runHeadScript(navigator)['ga-disable-G-TEST']).toBe(true);
 });

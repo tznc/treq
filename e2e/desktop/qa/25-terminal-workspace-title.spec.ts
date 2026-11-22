@@ -10,7 +10,9 @@ const TITLE = "Handle empty event messages without dropping the whole batch";
 
 test.describe.configure({ mode: "serial" });
 
-test("terminal workspace title: the agent chip names the workspace's title", async ({ page }) => {
+test("terminal workspace title: the agent chip names the workspace's title", async ({
+  page,
+}) => {
   await openWorkspace(page, BRANCH);
   await row(page, BRANCH).hover();
   await row(page, BRANCH).getByRole("button", { name: "Start agent" }).click();
@@ -19,7 +21,9 @@ test("terminal workspace title: the agent chip names the workspace's title", asy
     name: "25-terminal-workspace-title-branch",
     title: "Agent header before the workspace has a title",
     clip: { x: 0, y: 560, width: 1400, height: 110 },
-    expectations: ["The agent header's chip reads the branch, feat/empty-event-message"],
+    expectations: [
+      "The agent header's chip reads the branch, feat/empty-event-message",
+    ],
   });
 
   // Title the workspace on the Code tab, with the pane collapsed so the
@@ -31,12 +35,14 @@ test("terminal workspace title: the agent chip names the workspace's title", asy
   await settle(page, 400);
   await page.keyboard.press(`${mod}+a`);
   await page.keyboard.type(TITLE);
-  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await page.getByRole("button", { name: "Save title" }).click();
   await settle(page, 2000);
   await page.getByRole("button", { name: "Expand" }).click();
   await settle(page, 1000);
 
-  await expect(page.getByRole("group", { name: "Claude 1 terminal" })).toBeVisible();
+  await expect(
+    page.getByRole("group", { name: "Claude 1 terminal" }),
+  ).toBeVisible();
   await capture(page, {
     name: "25-terminal-workspace-title-chip",
     title: "Agent header after the workspace is titled",
@@ -57,4 +63,33 @@ test("terminal workspace title: the agent chip names the workspace's title", asy
     rest: false,
     expectations: ["A tooltip by the chip shows the full workspace title"],
   });
+});
+
+test("terminal workspace title: a narrow header truncates the chip before its buttons", async ({
+  page,
+}) => {
+  // A second agent splits the pane, so each header gets half the width.
+  await row(page, TITLE).hover();
+  await row(page, TITLE).getByRole("button", { name: "Start agent" }).click();
+  await settle(page, 3000);
+  await page.mouse.move(5, 5);
+  await settle(page, 500);
+  await capture(page, {
+    name: "25-terminal-workspace-title-narrow",
+    title: "Two agent columns: each header is narrow",
+    expectations: [
+      "Each agent header's workspace chip ends in an ellipsis",
+      "The chip stops before the header's search and close buttons; nothing overlaps them",
+    ],
+  });
+  const group = await page
+    .getByRole("group", { name: "Claude 1 terminal" })
+    .boundingBox();
+  const chip = await page
+    .getByRole("group", { name: "Claude 1 terminal" })
+    .getByRole("button", { name: `Go to ${TITLE}` })
+    .boundingBox();
+  expect(group && chip).toBeTruthy();
+  // The search and close buttons take the header's last ~80px.
+  expect(chip!.x + chip!.width).toBeLessThan(group!.x + group!.width - 80);
 });

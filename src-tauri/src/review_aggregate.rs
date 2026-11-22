@@ -311,6 +311,7 @@ mod tests {
       is_outdated: false,
       path: "src/main.rs".to_string(),
       line: Some(10),
+      start_line: None,
       diff_side: "RIGHT".to_string(),
       comments: vec![GhReviewComment {
         id: "C1".to_string(),
@@ -344,6 +345,7 @@ mod tests {
       is_outdated: false,
       path: "a.ts".to_string(),
       line: None,
+      start_line: None,
       diff_side: "LEFT".to_string(),
       comments: vec![],
     };

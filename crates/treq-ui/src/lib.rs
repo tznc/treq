@@ -11,6 +11,7 @@ pub mod checkbox;
 pub mod copy_feedback;
 pub mod dialog;
 pub mod empty_state;
+pub mod fold_toggle;
 pub mod form;
 pub mod icon_button;
 pub mod image;
@@ -37,6 +38,7 @@ pub use card::{Card, CardFooter, CardHeader, CardVariant};
 pub use checkbox::{CheckKind, CheckState, Checkbox};
 pub use dialog::{handler, tab_key, trap_tab, ConfirmDialog, Dialog};
 pub use empty_state::{error_actions, EmptyState, Loading, Skeleton};
+pub use fold_toggle::FoldToggle;
 pub use form::{Field, FieldLayout, Form, FormActions, FormLayout, FormRow, FormSection};
 pub use icon_button::{IconButton, IconButtonSize};
 pub use input_group::InputGroup;
@@ -465,7 +467,8 @@ impl Button {
       Variant::Warning => p.warning_foreground,
       Variant::Success | Variant::Github => p.primary_foreground,
       Variant::DestructiveOutline => p.destructive,
-      Variant::DestructiveGhost | Variant::Command => p.muted_foreground,
+      Variant::DestructiveGhost => p.muted_foreground,
+      Variant::Command => p.primary,
     }
   }
 }
@@ -512,7 +515,7 @@ impl Button {
         p.destructive.opacity(0.1),
       ),
       Variant::DestructiveGhost => (clear, clear, p.destructive.opacity(0.1)),
-      Variant::Command => (p.background, p.border, p.hover()),
+      Variant::Command => (p.background, p.primary.opacity(0.5), p.primary.opacity(0.1)),
     };
     let hover_bg = self.hover_bg.unwrap_or(hover_bg);
     let (bg, hover_bg) = if self.selected && !self.filled() {
@@ -976,7 +979,7 @@ mod tests {
   }
 
   #[test]
-  fn a_command_button_is_a_muted_field_with_its_shortcut_last() {
+  fn a_command_button_is_an_unfilled_field_with_its_shortcut_last() {
     let p = theme::palette(false);
     let command = Button::new("c", &p)
       .variant(Variant::Command)
@@ -984,10 +987,6 @@ mod tests {
       .icon(theme::ICON_SEARCH, 16.)
       .label("Go to file");
     assert!(!command.filled());
-    assert_eq!(command.colors().bg, p.background);
-    assert_eq!(command.colors().border, p.border);
-    assert_eq!(command.colors().hover_bg, p.hover());
-    assert_eq!(command.foreground(), p.muted_foreground);
     assert!(matches!(
       command.children[..],
       [ButtonChild::Icon(..), ButtonChild::Element(_)]

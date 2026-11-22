@@ -6,7 +6,7 @@
 // role on a Supabase user; like every other privileged path here, the gate
 // is a server-side secret: the `x-admin-api-key` header must match the
 // `REMOTE_ADMIN_API_KEY` secret, held only by operators and the scheduler
-// (.github/workflows/remote-maintenance.yml).
+// (pg_cron, 082_remote_maintenance_cron.sql).
 //
 // POST body: { action, operator_id?, ...action-specific fields }
 //   "revoke_client_key" {key_id, reason?}      - revoke any user's client key

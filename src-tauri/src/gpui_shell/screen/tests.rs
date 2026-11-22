@@ -2528,6 +2528,7 @@ fn gh_thread(id: &str, line: i64, resolved: bool) -> crate::github::GhReviewThre
     is_outdated: false,
     path: "a.rs".into(),
     line: Some(line),
+    start_line: None,
     diff_side: "RIGHT".into(),
     comments: vec![crate::github::GhReviewComment {
       id: format!("{id}-c"),

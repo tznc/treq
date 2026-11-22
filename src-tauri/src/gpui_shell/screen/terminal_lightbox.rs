@@ -146,6 +146,10 @@ fn comment_card(comment: &LineComment, palette: &Palette) -> gpui::AnyElement {
     format!("Lines {}–{}", comment.start, comment.end)
   };
   ui::text(div(), TextSize::Sm)
+    .id(SharedString::from(format!("treq-send-line-comment-{id}")))
+    .role(gpui::Role::Group)
+    .aria_label(format!("Comment on {}", range.to_lowercase()))
+    .test_support()
     .debug_selector(move || format!("treq-send-line-comment-{id}"))
     .flex()
     .flex_col()
@@ -874,17 +878,25 @@ fn content<E: InteractiveElement>(el: E) -> E {
 
 /// `Button variant="ghost" size="icon-xs" className="h-8 w-8 text-white
 /// hover:bg-white/15"`.
-fn tool(id: &'static str, icon: &'static str, disabled: bool) -> Stateful<Div> {
+fn tool(id: &'static str, name: &'static str, icon: &'static str, disabled: bool) -> Stateful<Div> {
   tool_with(
     id,
+    name,
     ui::icon(icon, 16., chrome(1.)).into_any_element(),
     disabled,
   )
 }
 
-fn tool_with(id: &'static str, icon: gpui::AnyElement, disabled: bool) -> Stateful<Div> {
+fn tool_with(
+  id: &'static str,
+  name: &'static str,
+  icon: gpui::AnyElement,
+  disabled: bool,
+) -> Stateful<Div> {
   div()
     .id(id)
+    .role(gpui::Role::Button)
+    .aria_label(name)
     .debug_selector(move || id.into())
     .size_8()
     .flex()
@@ -918,9 +930,11 @@ impl Lightbox {
       let zoom = self.zoom;
       pill = pill
         .child(
-          tool("treq-send-zoom-out", theme::ICON_ZOOM_OUT, out).when(!out, |b| {
-            b.on_click(cx.listener(move |view, _, _, cx| view.set_zoom(zoom - 1., cx)))
-          }),
+          tool("treq-send-zoom-out", "Zoom out", theme::ICON_ZOOM_OUT, out)
+            .when(!out, |b| {
+              b.on_click(cx.listener(move |view, _, _, cx| view.set_zoom(zoom - 1., cx)))
+            })
+            .test_support(),
         )
         .child(
           // Short label (['zoom level']): 11px is fine.
@@ -935,9 +949,11 @@ impl Lightbox {
             .child(format!("{}%", (self.zoom * 100.).round())),
         )
         .child(
-          tool("treq-send-zoom-in", theme::ICON_ZOOM_IN, into).when(!into, |b| {
-            b.on_click(cx.listener(move |view, _, _, cx| view.set_zoom(zoom + 1., cx)))
-          }),
+          tool("treq-send-zoom-in", "Zoom in", theme::ICON_ZOOM_IN, into)
+            .when(!into, |b| {
+              b.on_click(cx.listener(move |view, _, _, cx| view.set_zoom(zoom + 1., cx)))
+            })
+            .test_support(),
         )
         .child(div().mx_0p5().h_4().w_px().bg(chrome(0.2)));
     }
@@ -949,17 +965,22 @@ impl Lightbox {
             let success = theme::palette(true).success;
             let icon =
               ui::copy_feedback::copy_icon("treq-send-copy", copied, 16., chrome(1.), success);
-            tool_with("treq-send-copy", icon, false)
+            tool_with("treq-send-copy", "Copy path", icon, false)
               .on_click(copy)
               .into_any_element()
           }
         }))
         .child(
-          tool("treq-send-reveal", theme::ICON_FOLDER_OPEN, false)
-            .on_click(cx.listener(|view, _, _, _| view.reveal())),
+          tool(
+            "treq-send-reveal",
+            "Reveal file",
+            theme::ICON_FOLDER_OPEN,
+            false,
+          )
+          .on_click(cx.listener(|view, _, _, _| view.reveal())),
         )
         .child(
-          tool("treq-send-close", theme::ICON_X, false)
+          tool("treq-send-close", "Close preview", theme::ICON_X, false)
             .on_click(cx.listener(|view, _, _, cx| view.request_close(cx))),
         ),
     );
@@ -1024,6 +1045,8 @@ impl Lightbox {
     };
     let mut layer = div()
       .id("treq-send-highlight-layer")
+      .role(gpui::Role::Group)
+      .aria_label(format!("Image at {}%", (self.zoom * 100.).round()))
       .debug_selector(|| "treq-send-highlight-layer".into())
       .relative()
       .flex_none()
@@ -1037,6 +1060,9 @@ impl Lightbox {
       .child(
         div()
           .id("treq-send-highlight-surface")
+          .role(gpui::Role::Image)
+          .aria_label("Drag to highlight a region")
+          .test_support()
           .debug_selector(|| "treq-send-highlight-surface".into())
           .absolute()
           .inset_0()
@@ -1064,6 +1090,9 @@ impl Lightbox {
           .id(SharedString::from(format!(
             "treq-send-highlight-comment-{id}"
           )))
+          .role(gpui::Role::Group)
+          .aria_label(format!("Comment on region {id}"))
+          .test_support()
           .debug_selector(move || format!("treq-send-highlight-comment-{id}"))
           .absolute()
           .left_full()
@@ -1112,6 +1141,9 @@ impl Lightbox {
       layer = layer.child(
         box_at(highlight.rect)
           .id(SharedString::from(format!("treq-send-highlight-{id}")))
+          .role(gpui::Role::Group)
+          .aria_label(format!("Region {id}"))
+          .test_support()
           .debug_selector(move || format!("treq-send-highlight-{id}"))
           .border_color(ui::Tone::Danger.color(&d))
           .on_mouse_down(
@@ -1125,7 +1157,7 @@ impl Lightbox {
           .children(panel),
       );
     }
-    let layer = content(layer);
+    let layer = content(layer).test_support();
     let scroll = div()
       .id("treq-send-image-scroll")
       .debug_selector(|| "treq-send-image-scroll".into())
@@ -1251,6 +1283,10 @@ impl Lightbox {
     };
     let blank = self.composer_text.trim().is_empty();
     div()
+      .id("treq-send-line-comment-composer")
+      .role(gpui::Role::Group)
+      .aria_label("New comment")
+      .test_support()
       .debug_selector(|| "treq-send-line-comment-composer".into())
       .bg(palette.background)
       .map(|this| {
@@ -1353,6 +1389,10 @@ impl Lightbox {
         // The cards hang from the row without growing it, so the text keeps
         // its spacing; the margin's empty rows let them show through.
         div()
+          .id("treq-send-margin")
+          .role(gpui::Role::Group)
+          .aria_label("Comments")
+          .test_support()
           .debug_selector(|| "treq-send-margin".into())
           .w(zpx(MARGIN_WIDTH))
           .flex_none()
@@ -1438,6 +1478,9 @@ impl Lightbox {
     let max_h = f32::from(window.viewport_size().height) * 0.8;
     let panel = div()
       .id("treq-send-text-preview")
+      .role(gpui::Role::Group)
+      .aria_label("Text preview")
+      .test_support()
       .debug_selector(|| "treq-send-text-preview".into())
       .w_full()
       .max_w(zpx(1152.))
@@ -1453,6 +1496,12 @@ impl Lightbox {
       .child(
         ui::text(div(), TextSize::Code)
           .id("treq-send-text-scroll")
+          .when(rendered, |this| {
+            this
+              .role(gpui::Role::Document)
+              .aria_label("Rendered markdown")
+          })
+          .test_support()
           .min_h_0()
           .flex_shrink(1.)
           .when(rendered, |this| {

@@ -274,6 +274,7 @@ deleted file mode 100644
       is_outdated: outdated,
       path: path.into(),
       line,
+      start_line: None,
       diff_side: side.into(),
       comments: vec![GhReviewComment {
         id: "c".into(),

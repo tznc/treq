@@ -16,6 +16,7 @@ files:
 ignores:
   - "crates/treq-ui/src/copy_feedback.rs"
   - "crates/treq-ui/src/dialog.rs"
+  - "crates/treq-ui/src/fold_toggle.rs"
   - "crates/treq-ui/src/keyboard_tests.rs"
   - "crates/treq-ui/src/row.rs"
   - "crates/treq-ui/src/touch.rs"
