@@ -104,7 +104,10 @@ struct SourcedLine {
 /// sequence of lines, exactly as OpenSSH conceptually inlines Include at the
 /// point it appears. `seen` guards against Include cycles by canonical path.
 fn load_lines(path: &Path, seen: &mut HashSet<PathBuf>) -> Vec<SourcedLine> {
-  let canonical = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+  let canonical = fs::canonicalize(path).unwrap_or_else(|error| {
+    tracing::debug!(%error, path = %path.display(), "Include cycle check uses the path as written");
+    path.to_path_buf()
+  });
   if !seen.insert(canonical) {
     return Vec::new();
   }

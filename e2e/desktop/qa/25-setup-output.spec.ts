@@ -9,7 +9,7 @@ import { mod, openTab, openWorkspace, settle } from "./helpers.ts";
 
 const BRANCH = "feat/empty-event-message";
 
-test("setup-output: Code tab setup alert", async ({ page, context }) => {
+test("setup-output: Code tab setup alert", async ({ page }) => {
   const config = join(fixture().repo, ".treq", "config.yaml");
   writeFileSync(
     config,

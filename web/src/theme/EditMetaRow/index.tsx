@@ -162,8 +162,8 @@ export default function EditMetaRow({
       <div className={clsx('col', styles.lastUpdated)}>
         {(lastUpdatedAt || lastUpdatedBy) && (
           <LastUpdated
-            lastUpdatedAt={lastUpdatedAt}
-            lastUpdatedBy={lastUpdatedBy}
+            lastUpdatedAt={lastUpdatedAt ?? null}
+            lastUpdatedBy={lastUpdatedBy ?? null}
           />
         )}
       </div>

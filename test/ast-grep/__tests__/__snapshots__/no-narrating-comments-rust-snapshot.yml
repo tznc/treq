@@ -1,0 +1,41 @@
+id: no-narrating-comments-rust
+snapshots:
+  ? |
+    // Create a workspace
+    fn f() {}
+  : labels:
+    - source: // Create a workspace
+      style: primary
+      start: 0
+      end: 21
+  ? |
+    fn f() {
+      // Check if the file exists
+      // Loop through the rows
+      // Iterate over an index
+      // Increment the counter
+    }
+  : labels:
+    - source: // Check if the file exists
+      style: primary
+      start: 11
+      end: 38
+  ? |
+    fn f() {
+      // Get the workspace ID
+      let id = ws.id;
+    }
+  : labels:
+    - source: // Get the workspace ID
+      style: primary
+      start: 11
+      end: 34
+  ? |
+    fn f() {
+      let x = 1; // Set the flag
+    }
+  : labels:
+    - source: // Set the flag
+      style: primary
+      start: 22
+      end: 37

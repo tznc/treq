@@ -7,7 +7,7 @@
 // fixed points (for this seed and the 1400x900 window); each then settles.
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
-import { expect, test } from "@playwright/test";
+import { test } from "@playwright/test";
 import { capture } from "./capture.ts";
 import { fixture } from "../fixture.ts";
 import { workspaceDir } from "../landing/seed.ts";

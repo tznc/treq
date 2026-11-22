@@ -244,7 +244,6 @@ mod tests {
     )
     .unwrap();
 
-    // Get the workspace ID
     let workspaces = local_db::get_workspaces(repo_path).unwrap();
     assert_eq!(workspaces.len(), 1);
     let workspace_id = workspaces[0].id;
