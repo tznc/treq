@@ -53,6 +53,7 @@ use crate::{
 };
 
 mod detail;
+mod mention;
 mod new_pr;
 pub(super) mod parts;
 
@@ -260,6 +261,12 @@ pub struct GithubView {
   pub(super) detail: Detail,
   /// The comment being written, kept across items of the same kind.
   pub(super) comment: String,
+  /// The highlighted `@` suggestion under the comment box.
+  pub(super) mention_index: usize,
+  /// The `@` whose suggestions Escape closed.
+  pub(super) mention_dismissed: Option<usize>,
+  /// The repository's collaborators and PR authors, and whose they are.
+  pub(super) mentionable: (String, Vec<String>),
   /// Fields whose control must show their state again although focused.
   reset: HashSet<&'static str>,
   pub(super) new_issue: NewIssue,
@@ -324,6 +331,9 @@ impl GithubView {
       filters: PrFilters::default(),
       detail: Detail::default(),
       comment: String::new(),
+      mention_index: 0,
+      mention_dismissed: None,
+      mentionable: Default::default(),
       reset: HashSet::new(),
       new_issue: NewIssue::default(),
       new_pr: None,
@@ -651,6 +661,20 @@ impl GithubView {
     let shown = self.detail.issue.is_some() || self.detail.pr.is_some();
     self.detail.loading = !shown;
     let generation = self.detail.generation;
+    if self.mentionable.0 != key.repo {
+      let repo = key.repo.clone();
+      let for_repo = repo.clone();
+      self.mentionable = (repo.clone(), Vec::new());
+      self.run(
+        cx,
+        move |host| host.mentionable_users(&repo).unwrap_or_default(),
+        move |view, users, _| {
+          if view.mentionable.0 == for_repo {
+            view.mentionable.1 = users;
+          }
+        },
+      );
+    }
     let k = key.clone();
     self.run(
       cx,
@@ -1008,7 +1032,10 @@ impl GithubView {
       "github.filter.stackLevel" => self.filters.stack_level = text.parse().ok(),
       "github.filter.opened" => self.filters.opened_within_days = text.parse().ok(),
       "github.filter.conflict" => self.filters.conflict = some(&text),
-      "github.comment" => self.comment = text,
+      "github.comment" => {
+        self.comment = text;
+        self.mention_index = 0;
+      }
       "github.newIssue.title" => self.new_issue.title = text,
       "github.newIssue.body" => self.new_issue.body = text,
       "github.edit.title" => {

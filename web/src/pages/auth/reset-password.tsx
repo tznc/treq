@@ -153,7 +153,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   title: {
     fontSize: "1.5rem",
-    fontWeight: 700,
+    fontWeight: 500,
     marginBottom: "0.5rem",
   },
   subtitle: {
@@ -170,7 +170,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "0.75rem",
     borderRadius: "8px",
     backgroundColor: "rgba(239, 68, 68, 0.1)",
-    color: "#ef4444",
+    color: "var(--treq-danger)",
     fontSize: "0.85rem",
     marginBottom: "1rem",
   },
@@ -190,10 +190,10 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "0.75rem 1rem",
     borderRadius: "8px",
     border: "none",
-    background: "linear-gradient(135deg, var(--ifm-color-primary) 0%, var(--ifm-color-primary-dark) 100%)",
-    color: "#fff",
+    background: "var(--treq-brand)",
+    color: "var(--treq-on-brand)",
     fontSize: "0.9rem",
-    fontWeight: 600,
+    fontWeight: 500,
     cursor: "pointer",
     transition: "all 0.2s",
   },
@@ -209,7 +209,7 @@ const styles: Record<string, React.CSSProperties> = {
   link: {
     display: "inline-block",
     marginTop: "1rem",
-    color: "var(--ifm-color-primary)",
+    color: "var(--treq-link)",
     fontWeight: 500,
   },
   primaryLink: {
@@ -217,9 +217,9 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: "1rem",
     padding: "0.6rem 1.5rem",
     borderRadius: "8px",
-    background: "linear-gradient(135deg, var(--ifm-color-primary) 0%, var(--ifm-color-primary-dark) 100%)",
-    color: "#fff",
-    fontWeight: 600,
+    background: "var(--treq-brand)",
+    color: "var(--treq-on-brand)",
+    fontWeight: 500,
     textDecoration: "none",
   },
 };

@@ -142,6 +142,7 @@ test("changes: diff, inline comment add/edit, review bar", async ({ page }) => {
       "Thread shows author, body and Resolved state; actions aligned",
       "hubot's reply renders markdown: bold, inline code, a bulleted list and a link",
       "':robot:' shows as the robot emoji",
+      "octocat's comment and hubot's reply share one card, split by a rule",
     ],
   });
 

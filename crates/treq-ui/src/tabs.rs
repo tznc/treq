@@ -28,6 +28,8 @@ pub struct Tab {
   label: SharedString,
   badge: Option<(SharedString, Tone)>,
   count: Option<usize>,
+  /// The count's tone and the state it names.
+  count_tone: Option<(Tone, SharedString)>,
   dot: Option<(Tone, SharedString)>,
   icon: Option<&'static str>,
   disabled: bool,
@@ -40,6 +42,7 @@ impl Tab {
       label: label.into(),
       badge: None,
       count: None,
+      count_tone: None,
       dot: None,
       icon: None,
       disabled: false,
@@ -61,6 +64,13 @@ impl Tab {
   /// How many things the tab holds, as a neutral count.
   pub fn count(mut self, count: usize) -> Self {
     self.count = Some(count);
+    self
+  }
+
+  /// Tints the count with `tone`, for things that share a state, such as
+  /// uncommitted changes; `label` names that state for screen readers.
+  pub fn count_tone(mut self, tone: Tone, label: impl Into<SharedString>) -> Self {
+    self.count_tone = Some((tone, label.into()));
     self
   }
 
@@ -332,19 +342,23 @@ impl RenderOnce for Tabs {
           })
           .when_some(tab.count, |el, count| {
             let id = format!("{id}-count");
+            let (tone, aria) = match tab.count_tone {
+              Some((tone, state)) => (tone, format!("{count}, {state}")),
+              None => (Tone::Neutral, count.to_string()),
+            };
             el.child(
               div()
                 .id(SharedString::from(id.clone()))
                 .debug_selector(move || id)
                 .role(gpui::Role::Image)
-                .aria_label(count.to_string())
+                .aria_label(aria)
                 .when(bar, |el| {
                   el.absolute().top(zpx(4.)).left(gpui::relative(0.55))
                 })
                 .child(if on_fill {
-                  Count::new(count, &p).on_selected(fg)
+                  Count::new(count, &p).tone(tone).on_selected(fg)
                 } else {
-                  Count::new(count, &p)
+                  Count::new(count, &p).tone(tone)
                 })
                 .test_support(),
             )

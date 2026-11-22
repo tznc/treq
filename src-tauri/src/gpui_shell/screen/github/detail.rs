@@ -476,6 +476,10 @@ impl GithubView {
       cx,
     );
     let busy = self.detail.busy.contains(&Busy::Comment);
+    let cursor = state.read(cx).cursor();
+    let mention = self.comment_mention(cursor);
+    let mentions = mention.map(|m| self.mention_list(m, p, cx));
+    let keys = self.mention_keys(div(), cursor, cx);
     div()
       .flex()
       .flex_col()
@@ -486,7 +490,7 @@ impl GithubView {
         p,
       ))
       .child(
-        ui::text(div().id("github-comment-box"), TextSize::Sm)
+        ui::text(keys.id("github-comment-box"), TextSize::Sm)
           .debug_selector(|| "github-comment-box".into())
           .when(submit_on_enter, |d| {
             d.capture_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
@@ -502,6 +506,7 @@ impl GithubView {
           })
           .child(form::textarea_field(&state, false, false)),
       )
+      .children(mentions)
       .child(
         div()
           .flex()

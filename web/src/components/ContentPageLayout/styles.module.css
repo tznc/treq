@@ -58,11 +58,11 @@
   position: absolute;
   top: 0.9rem;
   left: 1rem;
-  color: var(--ifm-color-primary);
+  color: var(--treq-link);
   font-size: 0.72rem;
-  font-weight: 700;
+  font-weight: 500;
   letter-spacing: 0.08em;
-  text-transform: uppercase;
+  text-transform: none;
 }
 
 :global([data-theme='dark']) .tocContainer {
@@ -91,13 +91,13 @@
 }
 
 .tocLink:hover {
-  color: var(--ifm-color-primary);
+  color: var(--treq-link);
   text-decoration: none;
 }
 
 .tocLinkActive {
-  color: var(--ifm-color-primary);
-  font-weight: 700;
+  color: var(--treq-link);
+  font-weight: 500;
 }
 
 @media screen and (max-width: 996px) {

@@ -1,6 +1,6 @@
 // Stops idle cloud workspaces, and keeps placement state in step with what
 // the provider reports. Run by remote-admin's `enforce_idle` action every
-// 5 minutes (.github/workflows/remote-maintenance.yml).
+// 5 minutes (pg_cron, 082_remote_maintenance_cron.sql).
 //
 // Billing is wall-clock while a machine runs, so a workspace nobody uses
 // must stop. Only human or agent activity keeps one awake (owner decision,

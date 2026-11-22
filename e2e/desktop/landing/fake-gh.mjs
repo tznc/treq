@@ -267,6 +267,15 @@ const reviewThreads = {
   ],
 };
 
+// QA specs add review threads by writing `$HOME/fake-gh-review-threads.json`:
+// threads by PR number, after the fixture's.
+const threadOverrides = join(process.env.HOME ?? "", "fake-gh-review-threads.json");
+if (existsSync(threadOverrides)) {
+  for (const [n, extra] of Object.entries(JSON.parse(readFileSync(threadOverrides, "utf8")))) {
+    reviewThreads[n] = [...(reviewThreads[n] ?? []), ...extra];
+  }
+}
+
 // Issue #77's conversation, with reactions as `gh issue view` reports them
 // and whether octocat reacted, as GraphQL `nodes` reports it.
 const issueComments = {

@@ -984,8 +984,10 @@ fn rows_of_another_repository_have_no_actions(cx: &mut TestAppContext) {
 #[gpui::test]
 fn group_labels_fold_their_repository(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, two_repos());
-  assert!(h.bounds("group-lib").is_some());
-  assert!(h.bounds("home-lib").is_some());
+  let fold = h.bounds("group-lib").expect("fold chevron");
+  let home = h.bounds("home-lib").expect("home row");
+  // The chevron trails the name, inside the header row.
+  assert!(fold.left() > home.left() && fold.right() <= home.right());
   h.click("group-lib");
   assert_eq!(
     h.sent(),
@@ -1349,5 +1351,75 @@ fn pr_pills_name_the_state_as_github_does() {
   assert_eq!(
     PrState::Draft.pill(),
     ("Draft", theme::ICON_PR_DRAFT, Tone::Neutral)
+  );
+}
+
+#[gpui::test]
+fn a_long_group_name_truncates_before_its_fold_chevron(cx: &mut TestAppContext) {
+  const NAME: &str = "an-organisation-with-a-long-name/a-repository-with-an-even-longer-name";
+  let mut snapshot = two_repos();
+  snapshot.repos[1].label = Some(NAME.into());
+  let mut h = Harness::new(cx, snapshot);
+  let fold = h
+    .bounds(concat!(
+      "group-",
+      "an-organisation-with-a-long-name/a-repository-with-an-even-longer-name"
+    ))
+    .expect("fold chevron");
+  let home = h
+    .bounds(concat!(
+      "home-",
+      "an-organisation-with-a-long-name/a-repository-with-an-even-longer-name"
+    ))
+    .expect("home row");
+  // The name gives way; the chevron keeps its full size inside the row.
+  assert!(fold.right() <= home.right());
+  assert!(fold.size.width > gpui::px(0.));
+}
+
+#[gpui::test]
+fn a_truncated_group_chevron_lines_up_with_its_rows_status_dots(cx: &mut TestAppContext) {
+  const NAME: &str = "an-organisation-with-a-long-name/a-repository-with-an-even-longer-name";
+  let mut snapshot = two_repos();
+  snapshot.repos[0].label = Some(NAME.into());
+  snapshot.repos[0].workspaces[0].status = Some(RowStatus {
+    color: StatusColor::Yellow,
+    spin: false,
+  });
+  let mut h = Harness::new(cx, snapshot);
+  let fold = h
+    .bounds(concat!(
+      "group-",
+      "an-organisation-with-a-long-name/a-repository-with-an-even-longer-name"
+    ))
+    .expect("fold chevron");
+  let dot = h.bounds("status-7").expect("status dot");
+  // One right edge for the group: the chevron ends where the dots end.
+  assert!(
+    (fold.right() - dot.right()).abs() <= gpui::px(1.),
+    "chevron ends at {:?}, dot at {:?}",
+    fold.right(),
+    dot.right()
+  );
+}
+
+#[gpui::test]
+fn a_stacked_rows_elbow_reaches_up_to_its_parents_icon(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![row(7, "parent", 0), row(8, "child", 1)]));
+  let parent = h.bounds("workspace-7").expect("parent row");
+  let child = h.bounds("workspace-8").expect("child row");
+  let parent_icon = h.bounds("workspace-7-icon").expect("parent icon");
+  let child_icon = h.bounds("workspace-8-icon").expect("child icon");
+  let elbow = h.bounds("workspace-8-elbow").expect("elbow");
+  // Rows are 28px tall and sit flush.
+  assert_eq!(parent.size.height, gpui::px(28.));
+  assert_eq!(child.top() - parent.bottom(), gpui::px(0.));
+  // The elbow leaves the parent's icon about as close as it meets the
+  // child's, so the two ends of the elbow look alike.
+  let above = elbow.top() - parent_icon.bottom();
+  let beside = child_icon.left() - elbow.right();
+  assert!(
+    above >= gpui::px(0.) && above <= beside + gpui::px(2.),
+    "above {above:?}, beside {beside:?}"
   );
 }

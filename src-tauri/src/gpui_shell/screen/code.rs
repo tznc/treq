@@ -2156,7 +2156,11 @@ impl CodeView {
       "code.filePicker",
       p,
     );
-    div().flex_none().w(zpx(280.)).child(button.w_full())
+    div()
+      .flex_shrink(1.)
+      .min_w(zpx(160.))
+      .w(zpx(280.))
+      .child(button.w_full())
   }
 
   /// Opens the "Start a new agent session" modal.

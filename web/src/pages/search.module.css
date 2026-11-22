@@ -11,7 +11,7 @@
 .heading {
   font-size: 1.5rem;
   margin-bottom: 1.5rem;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .status {
@@ -38,9 +38,9 @@
 
 .resultTitle {
   font-size: 1.05rem;
-  font-weight: 600;
+  font-weight: 500;
   text-decoration: none;
-  color: var(--ifm-color-primary);
+  color: var(--treq-link);
 }
 
 .resultTitle:hover {
@@ -63,6 +63,6 @@
 .resultTitle mark,
 .resultExcerpt mark {
   background: none;
-  color: var(--ifm-color-primary);
-  font-weight: 600;
+  color: var(--treq-link);
+  font-weight: 500;
 }

@@ -312,7 +312,7 @@ async function capture(page: Page): Promise<void> {
   // temp dir out of the shot. The shell runs the two lines in order.
   await page.keyboard.type("PS1='event-bus $ '; clear\n");
   await page.keyboard.type("treq send ~/research-draft.svg >/dev/null\n");
-  const preview = page.getByRole("button", { name: "Open preview" });
+  const preview = page.getByRole("button", { name: "Open research-draft.svg" });
   await expect(preview).toBeVisible();
   await shot(page, "send-thumb.png", SHELL);
   const lightbox = page.getByRole("dialog", { name: "Preview" });

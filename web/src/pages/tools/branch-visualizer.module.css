@@ -23,7 +23,7 @@
 }
 
 .breadcrumb a {
-  color: var(--ifm-color-primary);
+  color: var(--treq-link);
   text-decoration: none;
 }
 
@@ -33,7 +33,7 @@
 
 .pageTitle {
   font-size: 2rem;
-  font-weight: 700;
+  font-weight: 500;
   margin: 0 0 0.4rem;
 }
 
@@ -87,8 +87,8 @@
 
 .sectionTitle {
   font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
+  font-weight: 500;
+  text-transform: none;
   letter-spacing: 0.06em;
   color: var(--ifm-color-emphasis-700);
 }
@@ -155,15 +155,15 @@
   border: 1px solid var(--ifm-color-primary);
   border-radius: 5px;
   background: transparent;
-  color: var(--ifm-color-primary);
+  color: var(--treq-link);
   cursor: pointer;
-  font-weight: 600;
+  font-weight: 500;
   white-space: nowrap;
 }
 
 .addBtn:hover {
   background: var(--ifm-color-primary);
-  color: white;
+  color: var(--treq-on-brand);
 }
 
 .removeBtn {
@@ -230,7 +230,7 @@
 }
 
 .previewTitle {
-  font-weight: 600;
+  font-weight: 500;
   font-size: 0.9rem;
   color: var(--ifm-font-color-base);
 }
@@ -255,7 +255,7 @@
 
 .actionBtn:hover {
   background: var(--ifm-color-primary);
-  color: white;
+  color: var(--treq-on-brand);
   border-color: var(--ifm-color-primary);
 }
 
