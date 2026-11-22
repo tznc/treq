@@ -22,6 +22,10 @@ valid:
         div().h(px(20.)).debug_selector(|| "padded-content".into())
       }
     }
+  - |
+    fn new(id: &'static str) -> Checkbox {
+      Checkbox { base: div().id(id).debug_selector(move || id.into()), on: false }
+    }
 invalid:
   - |
     fn v() -> impl IntoElement {

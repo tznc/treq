@@ -8,8 +8,9 @@ message: >
   control, or build it from a `ui::` component that does.
 note: >
   Checked: a `div()` chain that takes `.debug_selector(..)`. A chain that
-  starts from a helper's result is not checked, so a helper that builds the
-  element calls `.test_support()` itself.
+  starts from a helper's result, or that sets a struct field (a component's
+  `base`), is not checked, so the helper or the component's render calls
+  `.test_support()` itself.
 files:
   - "src-tauri/src/gpui_shell/**/*.rs"
   - "crates/treq-ui/**/*.rs"
@@ -19,39 +20,26 @@ ignores:
   - "crates/treq-ui/**/*_tests.rs"
   # Baseline: files with selectors that have no test node. Do not add to it;
   # give each selector a node and drop the file from this list instead.
-  - "crates/treq-ui/src/badge.rs"
   - "crates/treq-ui/src/card.rs"
-  - "crates/treq-ui/src/checkbox.rs"
   - "crates/treq-ui/src/dialog.rs"
   - "crates/treq-ui/src/form.rs"
   - "crates/treq-ui/src/input_group.rs"
-  - "crates/treq-ui/src/kbd.rs"
-  - "crates/treq-ui/src/lib.rs"
-  - "crates/treq-ui/src/menu.rs"
   - "crates/treq-ui/src/path_field.rs"
-  - "crates/treq-ui/src/popover.rs"
-  - "crates/treq-ui/src/row.rs"
   - "crates/treq-ui/src/section_header.rs"
   - "crates/treq-ui/src/tabs.rs"
-  - "crates/treq-ui/src/theme.rs"
   - "src-tauri/src/gpui_shell/form.rs"
   - "src-tauri/src/gpui_shell/overlay/mod.rs"
-  - "src-tauri/src/gpui_shell/overlay/shortcuts.rs"
   - "src-tauri/src/gpui_shell/popover/checks.rs"
-  - "src-tauri/src/gpui_shell/popover/details.rs"
   - "src-tauri/src/gpui_shell/popover/mod.rs"
   - "src-tauri/src/gpui_shell/popup.rs"
-  - "src-tauri/src/gpui_shell/screen/agent_card.rs"
   - "src-tauri/src/gpui_shell/screen/changes.rs"
   - "src-tauri/src/gpui_shell/screen/changes/pr.rs"
   - "src-tauri/src/gpui_shell/screen/changes/review.rs"
   - "src-tauri/src/gpui_shell/screen/changes/rows.rs"
   - "src-tauri/src/gpui_shell/screen/changes/threads.rs"
-  - "src-tauri/src/gpui_shell/screen/checklist.rs"
   - "src-tauri/src/gpui_shell/screen/code.rs"
   - "src-tauri/src/gpui_shell/screen/commits.rs"
   - "src-tauri/src/gpui_shell/screen/commits/rows.rs"
-  - "src-tauri/src/gpui_shell/screen/environment.rs"
   - "src-tauri/src/gpui_shell/screen/file_browser.rs"
   - "src-tauri/src/gpui_shell/screen/file_browser/review.rs"
   - "src-tauri/src/gpui_shell/screen/file_picker.rs"
@@ -59,7 +47,6 @@ ignores:
   - "src-tauri/src/gpui_shell/screen/github.rs"
   - "src-tauri/src/gpui_shell/screen/github/detail.rs"
   - "src-tauri/src/gpui_shell/screen/github/mention.rs"
-  - "src-tauri/src/gpui_shell/screen/github/parts.rs"
   - "src-tauri/src/gpui_shell/screen/linear.rs"
   - "src-tauri/src/gpui_shell/screen/logs.rs"
   - "src-tauri/src/gpui_shell/screen/merge.rs"
@@ -150,6 +137,12 @@ rule:
             not:
               matches: in-chain
           matches: test-support
+      # A component's `base` field: checked where the component renders it.
+      - inside:
+          stopBy:
+            not:
+              matches: in-chain
+          kind: field_initializer
       - inside:
           kind: mod_item
           has:
