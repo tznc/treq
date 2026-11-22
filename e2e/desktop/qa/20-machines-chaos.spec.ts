@@ -490,7 +490,7 @@ test("machines-chaos: sizes and zoom", async () => {
   for (const [w, h] of [
     [400, 300],
     [1900, 1180],
-  ]) {
+  ] as const) {
     await page.setViewportSize({ width: w, height: h });
     await page.waitForTimeout(1000);
     await alive(`resize ${w}x${h}`);
@@ -521,7 +521,11 @@ function random(): number {
   t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 }
-const pick = <T>(items: T[]): T => items[Math.floor(random() * items.length)];
+const pick = <T>(items: T[]): T => {
+  const item = items[Math.floor(random() * items.length)];
+  if (item === undefined) throw new Error("pick from an empty list");
+  return item;
+};
 
 /** Buttons that leave the machines screens or block on a native dialog. */
 const AVOID = /Open repository|Sign in|Upgrade|Settings|Command palette|Delete|Remove host|Reset terminals|Use tmux|Learn|Docs|Open in/i;

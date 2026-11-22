@@ -29,7 +29,9 @@ function alertingDir(): string {
       }
     })
     .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
-  const { repo } = JSON.parse(readFileSync(join(roots[0], "qa-extra.json"), "utf8"));
+  const root = roots[0];
+  if (!root) throw new Error("no QA fixture");
+  const { repo } = JSON.parse(readFileSync(join(root, "qa-extra.json"), "utf8"));
   return workspaceDir(repo, ALERTING);
 }
 
