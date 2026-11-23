@@ -349,7 +349,7 @@ test("changes: empty state wraps inside the file list", async ({ page }) => {
   });
   await settle(page, 1500);
   await openTab(page, "Changes");
-  await expect(page.getByRole("status", { name: "No changes" })).toBeVisible();
+  await expect(page.getByRole("status", { name: "No changes", exact: true })).toBeVisible();
   await capture(page, {
     name: "05-changes-empty",
     title: "Changes tab: a workspace with no changes",
