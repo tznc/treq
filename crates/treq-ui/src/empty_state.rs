@@ -95,6 +95,8 @@ impl RenderOnce for EmptyState {
       .flex_col()
       .items_center()
       .justify_center()
+      // No wider than the pane, so the message wraps inside it.
+      .max_w_full()
       .gap_2()
       .py_8()
       .px_6()
@@ -287,6 +289,36 @@ mod tests {
       .label
       .is_some());
     assert_eq!(Skeleton::new("rows", 3, &p).rows, 3);
+  }
+
+  struct NarrowPane;
+
+  impl gpui::Render for NarrowPane {
+    fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+      let p = theme::palette(false);
+      div()
+        .w(gpui::px(200.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(
+          EmptyState::new("narrow", "No changes", &p)
+            .message("The working copy matches the last commit. Edit a file to see it here."),
+        )
+    }
+  }
+
+  /// In a pane narrower than the message, the message wraps inside the
+  /// pane instead of overflowing both edges.
+  #[gpui::test]
+  fn test_empty_state_fits_a_narrow_pane(cx: &mut gpui::TestAppContext) {
+    let (_, cx) = cx.add_window_view(|_, _| NarrowPane);
+    cx.run_until_parked();
+    let b = cx.debug_bounds("narrow").expect("empty state drawn");
+    assert!(
+      b.left() >= gpui::px(0.) && b.right() <= gpui::px(200.),
+      "{b:?} overflows a 200px pane"
+    );
   }
 
   #[test]

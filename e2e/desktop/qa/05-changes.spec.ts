@@ -8,7 +8,7 @@
 // 1400x900 window); each then waits on an observable result.
 import { expect, test, type Page } from "@playwright/test";
 import { capture } from "./capture.ts";
-import { mod, openTab, openWorkspace, settle } from "./helpers.ts";
+import { home, mod, openTab, openWorkspace, settle } from "./helpers.ts";
 
 /** alerting.ts in feat/alerting-logs's Uncommitted list. */
 const SELECTED_ROW = { x: 330, y: 297 };
@@ -335,4 +335,27 @@ test("changes: filter menu picks what the lists show", async ({ page }) => {
   });
   await page.mouse.click(463, 423);
   await settle(page, 500);
+});
+
+test("changes: empty state wraps inside the file list", async ({ page }) => {
+  await home(page);
+  await page.keyboard.press(`${mod}+n`);
+  await expect(page.getByRole("heading", { name: "New workspace" })).toBeVisible();
+  await page.getByLabel("Workspaces", { exact: true }).fill("QA empty changes");
+  await settle(page, 1200); // the line check is debounced
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  await expect(page.getByRole("heading", { name: "New workspace" })).toHaveCount(0, {
+    timeout: 30_000,
+  });
+  await settle(page, 1500);
+  await openTab(page, "Changes");
+  await expect(page.getByRole("status", { name: "No changes" })).toBeVisible();
+  await capture(page, {
+    name: "05-changes-empty",
+    title: "Changes tab: a workspace with no changes",
+    expectations: [
+      "'No changes' and its check icon centered in the file list",
+      "The message wraps onto several lines inside the file list, clipped at neither edge",
+    ],
+  });
 });
