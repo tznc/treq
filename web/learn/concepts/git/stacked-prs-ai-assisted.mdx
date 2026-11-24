@@ -103,7 +103,7 @@ Use a stack when later work depends on earlier work and one combined PR would be
 
 Stack tools automate bookkeeping. They do not choose sound boundaries or resolve semantic conflicts. An agent that rewrites the lower layer during upper-layer work creates churn for every dependent branch.
 
-Squash merges change commit identity on `main`. Expect to restack remaining layers onto the updated target after a squash. Verify the PR base and displayed diff instead of assuming the hosting platform kept the chain correct.
+Squash merges change commit identity on `main`. Expect to [restack remaining layers onto the updated target after a squash](/learn/answers/rebasing-and-stacks/rebase-stack-after-squash-merge). Verify the PR base and displayed diff instead of assuming the hosting platform kept the chain correct.
 
 ## Scaling and Operational Considerations
 

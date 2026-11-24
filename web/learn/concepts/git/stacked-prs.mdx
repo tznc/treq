@@ -89,6 +89,8 @@ git rebase auth/service
 git push --force-with-lease origin auth/service auth/api
 ```
 
+Since Git 2.38, running [`git rebase --update-refs`](/learn/answers/rebasing-and-stacks/git-rebase-update-refs) from the top branch moves every branch in the stack at once.
+
 Before pushing, inspect each layer against its intended base:
 
 ```bash
@@ -96,7 +98,7 @@ git log --oneline auth/schema..auth/service
 git diff auth/schema...auth/service
 ```
 
-After the bottom pull request merges, retarget the next pull request to `main` if the hosting platform or stack tool does not do it. The exact diff can change when the platform squash-merges or rebases the lower layer because the merged commits have different identities. Restacking the remaining branches onto updated `main` restores a clear chain.
+After the bottom pull request merges, retarget the next pull request to `main` if the hosting platform or stack tool does not do it. The exact diff can change when the platform squash-merges or rebases the lower layer because the merged commits have different identities. [Restacking the remaining branches onto updated `main`](/learn/answers/rebasing-and-stacks/rebase-stack-after-squash-merge) restores a clear chain.
 
 ## Engineering Considerations
 

@@ -104,4 +104,5 @@ Pending working-copy edits can block or complicate synchronization. Commit, move
 - [How to Fix Merge Conflicts Created by Coding Agents](/learn/how-to/merge-conflicts-with-coding-agents)
 - [Merge vs Rebase](/learn/concepts/git/merge-vs-rebase)
 - [What is Git Rerere?](/learn/concepts/git/git-rerere)
+- [Rebasing and Stacked Branch Answers](/learn/answers/rebasing-and-stacks)
 - [Workspaces](/docs/concepts/workspaces)
