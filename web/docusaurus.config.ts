@@ -162,6 +162,7 @@ const config: Config = {
             '/integrations/**',
             '/search/**',
           ],
+          createSitemapItems: require('./plugins/sitemapSkills').createSitemapItems,
         },
       } satisfies Preset.Options,
     ],

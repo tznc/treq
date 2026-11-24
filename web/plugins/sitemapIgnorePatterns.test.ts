@@ -16,3 +16,8 @@ test.each(['/dashboard/', '/login/', '/sign-in/', '/auth/callback/', '/integrati
 test('keeps content pages in the sitemap', () => {
   expect(isIgnored('/learn/concepts/git/zdiff3/')).toBe(false);
 });
+
+test('lists only skill pages with search impressions', () => {
+  const sitemap = (config.presets?.[0] as [string, {sitemap: {createSitemapItems?: unknown}}])[1].sitemap;
+  expect(sitemap.createSitemapItems).toBe(require('./sitemapSkills').createSitemapItems);
+});
