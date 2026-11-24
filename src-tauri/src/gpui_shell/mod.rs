@@ -785,6 +785,12 @@ pub fn pr_open_link(app: &AppHandle, label: &str, number: u64) {
   window::pr_open_link(app, label, number);
 }
 
+/// A `treq://claude/session` link for window `label`: it opens the New
+/// Workspaces dialog. Any thread.
+pub fn open_workspaces_link(app: &AppHandle, label: &str) {
+  window::open_workspaces_link(app, label);
+}
+
 /// Types `keystroke` (GPUI's notation, e.g. "cmd-v") into the focused GPUI
 /// window, as if pressed there. On macOS a menu item's key equivalent takes
 /// the key press before the window sees it, so the Edit menu hands its keys

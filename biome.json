@@ -3,7 +3,8 @@
 	"files": {
 		"includes": [
 			"**",
-			"!**/*.generated.ts"
+			"!**/*.generated.ts",
+			"!extensions/*/dist"
 		]
 	},
 	"formatter": {
