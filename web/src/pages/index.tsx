@@ -476,7 +476,7 @@ export default function Home(): ReactNode {
       description="Stacking Agent Development Environment that isolates each agent and rebases stacked PRs when the base moves.">
       <Head>
         {/* Brand first: "treq" also names a Python library, and "treq ai" is the query that gets clicks. */}
-        <title>Treq: isolated workspaces and stacked PRs for AI coding agents</title>
+        <title>Treq: run AI agents in isolated workspaces, with stacked PRs</title>
         <script type="application/ld+json">{JSON.stringify(SOFTWARE_APP_SCHEMA)}</script>
       </Head>
       <Hero />
