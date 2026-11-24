@@ -82,6 +82,8 @@ git merge --squash feature/my-work
 git commit -m "Add user authentication"
 ```
 
+A branch stacked on the squashed one still carries its original commits, so [rebase it after the squash merge](/learn/answers/rebasing-and-stacks/rebase-stack-after-squash-merge) with `git rebase --onto`.
+
 Hosting platforms also offer rebase-and-merge. That option [replays](./cherry-pick-vs-rebase.mdx) pull-request commits onto the target branch and usually creates new object IDs. Check the platform's exact behavior before making policy depend on it.
 
 ## Engineering Considerations

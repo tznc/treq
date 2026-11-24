@@ -24,4 +24,18 @@ These guides answer specific workflow questions:
 - [Fix Merge Conflicts from Coding Agents](/learn/how-to/merge-conflicts-with-coding-agents)
 - [Git Worktrees vs Clones](/learn/concepts/git/git-worktrees-vs-clones)
 
+These [answers](/learn/answers) give short fixes for specific Git errors and setup questions:
+
+- [Git Worktree Answers](/learn/answers/worktrees)
+  - [Fix "fatal: branch is already used by worktree"](/learn/answers/worktrees/branch-already-used-by-worktree)
+  - [Remove a Locked Git Worktree](/learn/answers/worktrees/remove-locked-worktree)
+  - [Worktree or Clone to Review a Pull Request?](/learn/answers/worktrees/worktree-or-clone-to-review-a-pr)
+  - [Should Git Worktrees Go Inside the Repo or Next to It?](/learn/answers/worktrees/nested-or-sibling-worktrees)
+- [Rebasing and Stacked Branch Answers](/learn/answers/rebasing-and-stacks)
+  - [Rebase a Stacked Branch After a Squash Merge](/learn/answers/rebasing-and-stacks/rebase-stack-after-squash-merge)
+  - [Rebase a Whole Stack With `--update-refs`](/learn/answers/rebasing-and-stacks/git-rebase-update-refs)
+- [Coding Agents and Git Answers](/learn/answers/agents-and-git)
+  - [Stop Two Coding Agents From Overwriting Each Other](/learn/answers/agents-and-git/agents-overwriting-each-other)
+  - [Share `node_modules` Across Git Worktrees](/learn/answers/agents-and-git/node-modules-in-worktrees)
+
 For the Treq product, see the [Product Documentation overview](/docs/).

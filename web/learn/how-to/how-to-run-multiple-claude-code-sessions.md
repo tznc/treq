@@ -30,7 +30,7 @@ git worktree add -b agent/search-filters ../repo-search-filters origin/main
 git worktree list
 ```
 
-Install dependencies in each worktree if the project needs them:
+[Install dependencies in each worktree](/learn/answers/agents-and-git/node-modules-in-worktrees) if the project needs them:
 
 ```bash
 npm install --prefix ../repo-payments-retry
@@ -69,9 +69,9 @@ See [Agent Sessions](/docs/concepts/agent-sessions) and [Workspaces](/docs/conce
 
 ## Common failure cases
 
-**Both sessions share the home checkout.** Symptoms include interleaved edits, unexpected `git status`, and agents fighting over the same file. Fix by moving each session into its own worktree before continuing.
+**Both sessions share the home checkout.** Symptoms include interleaved edits, unexpected `git status`, and [agents fighting over the same file](/learn/answers/agents-and-git/agents-overwriting-each-other). Fix by moving each session into its own worktree before continuing.
 
-**Same branch checked out twice.** Git blocks a second worktree on the same local branch. Use unique branch names per session.
+**Same branch checked out twice.** Git [blocks a second worktree on the same local branch](/learn/answers/worktrees/branch-already-used-by-worktree). Use unique branch names per session.
 
 **Stale base after the other PR merges.** Rebase the remaining worktree:
 
@@ -80,7 +80,7 @@ git -C ../repo-search-filters fetch origin
 git -C ../repo-search-filters rebase origin/main
 ```
 
-**Orphan worktree after a killed terminal.** Remove or prune it:
+**Orphan worktree after a killed terminal.** [Remove or prune it](/learn/answers/worktrees/remove-locked-worktree):
 
 ```bash
 git worktree remove ../repo-payments-retry
@@ -104,3 +104,4 @@ git branch -d agent/payments-retry agent/search-filters
 - [Parallel Coding Agents Without Branch Chaos](/learn/parallel-coding-agents)
 - [Git Worktrees vs Clones](/learn/concepts/git/git-worktrees-vs-clones)
 - [Setting Up Claude Code](/learn/tutorials/setting-up-claude-code)
+- [Coding Agents and Git Answers](/learn/answers/agents-and-git)

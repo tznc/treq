@@ -116,9 +116,9 @@ Treq follows the worktree model. Each [Treq workspace](/docs/concepts/workspaces
 
 ## Scaling and Operations
 
-Give every concurrent writer its own branch. By default Git blocks one local branch from being checked out in two linked worktrees, because both directories could race to move the same ref.
+Give every concurrent writer its own branch. By default Git [blocks one local branch from being checked out in two linked worktrees](/learn/answers/worktrees/branch-already-used-by-worktree), because both directories could race to move the same ref.
 
-Do not delete linked worktree directories by hand. If a process dies before cleanup, prune the stale records:
+Do not delete linked worktree directories by hand. If a process dies before cleanup, [prune the stale records](/learn/answers/worktrees/remove-locked-worktree):
 
 ```bash
 git worktree prune

@@ -84,11 +84,11 @@ git branch -d agent/auth-timeout
 
 Worktrees fail in predictable ways.
 
-**Same branch in two places.** Git rejects a second checkout of a local branch. Give every agent a unique branch name to avoid this issue.
+**Same branch in two places.** Git [rejects a second checkout of a local branch](/learn/answers/worktrees/branch-already-used-by-worktree). Give every agent a unique branch name to avoid this issue.
 
 **Shared refs surprise you.** Deleting a branch, fetching, or running maintenance affects the whole repository. Coordinate these operations carefully to avoid gotchas when working on dependent branches.
 
-**Dependencies are per worktree.** `node_modules`, virtualenvs, and build outputs are not shared. Each agent directory can grow large as dependency trees bloat. Budget disk and install time for every worktree, clean unused dependency directories regularly, and make sure install or setup steps do not leak secrets into those trees.
+**[Dependencies are per worktree](/learn/answers/agents-and-git/node-modules-in-worktrees).** `node_modules`, virtualenvs, and build outputs are not shared. Each agent directory can grow large as dependency trees bloat. Budget disk and install time for every worktree, clean unused dependency directories regularly, and make sure install or setup steps do not leak secrets into those trees.
 
 **Secrets leaking.** Worktrees raise the chance that secrets spread across the disk. A `.env` file often has to be copied during worktree setup. Local test and validation scripts may also rely on secrets stored beside the code. Those files then exist in many directories, which makes cleanup harder and increases the blast radius of a leaked path or a backup that includes agent worktrees.
 
@@ -106,6 +106,8 @@ Name worktrees after the task, not after the agent product. Prefer names with wo
 ../app-pr-1842-auth-timeout
 ../app-task-search-index
 ```
+
+Put worktrees [next to the repository, not inside it](/learn/answers/worktrees/nested-or-sibling-worktrees), because the main checkout lists a nested worktree as an untracked directory.
 
 Automate creation and cleanup. Orphaned directories left behind by killed agent processes leave stale worktree records. Repair those with:
 
@@ -129,3 +131,4 @@ Create a workspace per task, start the agent session there, and merge only after
 - [Git Worktrees vs Clones](/learn/concepts/git/git-worktrees-vs-clones): choose the isolation level
 - [How to Run Multiple Claude Code Sessions](/learn/how-to/how-to-run-multiple-claude-code-sessions): run parallel Claude Code sessions
 - [Parallel Coding Agents Without Branch Chaos](/learn/parallel-coding-agents): full parallel-agent workflow
+- [Git Worktree Answers](/learn/answers/worktrees): short fixes for common worktree errors
