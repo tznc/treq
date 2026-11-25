@@ -231,6 +231,28 @@ for (const pr of prs) pr.statusCheckRollup = (checks[pr.headRefName] ?? []).map(
 
 const reviewThreads = {
   418: [
+    // The phone's #418 diff is web/src/events/post.ts (mobile/app.ts).
+    {
+      id: "PRRT_post_suggestion",
+      isResolved: false,
+      isOutdated: false,
+      path: "web/src/events/post.ts",
+      line: 5,
+      diffSide: "RIGHT",
+      comments: {
+        nodes: [
+          {
+            id: "PRRC_post_suggestion",
+            body: "Trim before checking length:\n\n```suggestion\n    typeof body.event_message === \"string\" && body.event_message.trim().length > 0\n```",
+            createdAt: "2026-08-12T16:10:00Z",
+            url: `${REPO}/pull/418#discussion_r4`,
+            diffHunk:
+              '@@ -1,5 +1,5 @@\n import type { EventBody } from "../../../api/src/schema";\n \n export async function postEvent(body: EventBody): Promise<Response> {\n-  const message = body.event_message;\n+  const message =\n+    typeof body.event_message === "string" && body.event_message.length > 0',
+            author: { ...author("zoe"), databaseId: 42 },
+          },
+        ],
+      },
+    },
     {
       id: "PRRT_client_suggestion",
       isResolved: false,
@@ -411,6 +433,25 @@ if (group === "pr" && command === "diff") {
   ].find((f) => existsSync(f));
   if (file) process.stdout.write(readFileSync(file, "utf8"));
   process.exit(0);
+}
+// "Commit suggestion": the PR's head, the file at it, and the new contents.
+const apiPath = group === "api" ? args.find((a) => a.startsWith("repos/")) : undefined;
+if (apiPath && /\/pulls\/\d+$/.test(apiPath)) {
+  out({ head: { ref: "feat/empty-event-message", repo: { full_name: "lorem-ipsum/event-bus" } } });
+}
+if (apiPath?.includes("/contents/")) {
+  if (args.includes("PUT")) {
+    readFileSync(0, "utf8");
+    out({ commit: { sha: "c0ffee" } });
+  }
+  const file = reviewThreads[418]
+    .flatMap((t) => t.comments.nodes)
+    .find((c) => c.id === "PRRC_client_suggestion")
+    .diffHunk.split("\n")
+    .slice(1)
+    .map((l) => l.slice(1))
+    .join("\n");
+  out({ content: Buffer.from(`${file}\n`).toString("base64"), sha: "S1" });
 }
 if (group === "api" && /^repos\/[^/]+\/[^/]+\/pulls\/\d+\/reviews$/.test(command ?? "")) {
   out({ id: 1, state: "COMMENTED" });
