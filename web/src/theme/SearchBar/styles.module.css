@@ -14,17 +14,15 @@
   background: var(--ifm-background-color);
   color: var(--ifm-font-color-base);
   outline: none;
-  transition: border-color 0.15s, width 0.2s;
+  transition: border-color 0.15s;
 }
 
 .input:focus {
   border-color: var(--treq-brand);
-  width: 240px;
 }
 
 @media screen and (max-width: 996px) {
-  .input,
-  .input:focus {
+  .input {
     width: 100%;
   }
 

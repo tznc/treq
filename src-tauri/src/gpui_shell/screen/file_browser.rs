@@ -23,6 +23,7 @@ use std::{
   sync::Arc,
   time::Duration,
 };
+use treq_ui::SelectorExt as _;
 
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use serde::Deserialize;
@@ -1246,8 +1247,7 @@ impl Render for FileBrowserView {
     let finish = self.finish_popover(&p, cx);
     let dialog = self.discard_dialog(window, &p, cx);
     ui::text(div(), TextSize::Sm)
-      .id("file-browser")
-      .debug_selector(|| "file-browser".into())
+      .selector("file-browser")
       .role(gpui::Role::Group)
       .aria_label("File browser")
       .test_support()
@@ -1294,10 +1294,9 @@ impl FileBrowserView {
     let muted = p.muted_foreground;
     let fg = p.foreground;
     let back = ui::text(div(), TextSize::Sm)
-      .id("file-browser-back")
+      .selector("file-browser-back")
       .role(gpui::Role::Button)
       .aria_label("Back")
-      .debug_selector(|| "file-browser-back".into())
       .flex()
       .items_center()
       .gap_1()
@@ -1334,8 +1333,7 @@ impl FileBrowserView {
             .gap_2()
             .child(
               ui::text(div(), TextSize::Sm)
-                .id("file-browser-pending")
-                .debug_selector(|| "file-browser-pending".into())
+                .selector("file-browser-pending")
                 .role(gpui::Role::Status)
                 .aria_label(format!("{} pending", count_label(n, "comment")))
                 .test_support()
@@ -1389,7 +1387,7 @@ impl FileBrowserView {
       return panel.child(ui::delayed(
         "file-tree-loading",
         div()
-          .debug_selector(|| "file-tree-loading".into())
+          .selector("file-tree-loading")
           .flex()
           .items_center()
           .justify_center()
@@ -1618,8 +1616,7 @@ impl FileBrowserView {
       // The preview scrolls itself, so a long README draws only the blocks
       // on screen.
       div()
-        .id("markdown-preview")
-        .debug_selector(|| "file-markdown-preview".into())
+        .selector("file-markdown-preview")
         .size_full()
         .bg(p.background)
         .px_8()
@@ -1651,7 +1648,7 @@ impl FileBrowserView {
         .into_any_element()
     };
     div()
-      .debug_selector(|| "file-content".into())
+      .selector("file-content")
       .size_full()
       .flex()
       .flex_col()
@@ -1678,8 +1675,7 @@ impl FileBrowserView {
       .min_w_0()
       .child(
         ui::text(div(), TextSize::Sm)
-          .id("file-content-path")
-          .debug_selector(|| "file-content-path".into())
+          .selector("file-content-path")
           .role(gpui::Role::Heading)
           .aria_label(rel.clone())
           .test_support()
@@ -1708,8 +1704,7 @@ impl FileBrowserView {
           time::full(modified),
           Side::Top,
           ui::text(div(), TextSize::Sm)
-            .id("file-modified-label")
-            .debug_selector(|| "file-modified".into())
+            .selector("file-modified")
             .role(gpui::Role::Label)
             .aria_label(format!("Modified {}", time::relative(modified)))
             .test_support()
@@ -1790,8 +1785,7 @@ impl FileBrowserView {
     // Code line: the file view sets the mono font on its parent.
     // ast-grep-ignore: gpui-sans-text-min-size
     let line = ui::text(div(), TextSize::Code)
-      .id(SharedString::from(format!("code-line-{n}")))
-      .debug_selector(move || format!("code-line-{n}"))
+      .selector(SharedString::from(format!("code-line-{n}")))
       .group("code-line")
       .relative()
       .flex()
@@ -1815,7 +1809,7 @@ impl FileBrowserView {
       .when(deleted, |this| {
         this.child(
           div()
-            .debug_selector(move || format!("deletion-marker-{n}"))
+            .selector(format!("deletion-marker-{n}"))
             .absolute()
             .left_0()
             .bottom(zpx(-1.5))
@@ -1826,10 +1820,9 @@ impl FileBrowserView {
       })
       .child(
         div()
-          .id(SharedString::from(format!("code-gutter-{n}")))
+          .selector(SharedString::from(format!("code-gutter-{n}")))
           .role(gpui::Role::Button)
           .aria_label(format!("Line {n}"))
-          .debug_selector(move || format!("code-gutter-{n}"))
           .relative()
           .flex()
           .flex_none()
@@ -1868,10 +1861,9 @@ impl FileBrowserView {
                     "Add comment",
                     Side::Top,
                     div()
-                      .id(SharedString::from(format!("add-comment-{n}")))
+                      .selector(SharedString::from(format!("add-comment-{n}")))
                       .role(gpui::Role::Button)
                       .aria_label("Add comment")
-                      .debug_selector(move || format!("add-comment-{n}"))
                       .size_5()
                       .flex()
                       .items_center()

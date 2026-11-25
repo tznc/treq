@@ -66,6 +66,19 @@ fn device_key_info(key: &PrivateKey) -> Result<DeviceKeyInfo, String> {
   })
 }
 
+/// Whether to ask `tauri-plugin-biometric` before touching the keystore. Not
+/// on iOS: that plugin sets its status only in `load(webview:)`, which Tauri
+/// calls when a WKWebView is created, and the GPUI app has none, so
+/// `status()` unwraps nil and aborts the app. The keychain item is stored with
+/// `.userPresence`, so iOS itself requires Face ID or the passcode.
+#[cfg_attr(
+  not(any(mobile, test)),
+  expect(dead_code, reason = "only used on mobile builds and in tests")
+)]
+fn checks_biometrics_first(target_os: &str) -> bool {
+  target_os != "ios"
+}
+
 #[cfg(mobile)]
 mod mobile_storage {
   use super::{generate_private_key, PrivateKey};
@@ -127,7 +140,9 @@ mod mobile_storage {
   }
 
   pub async fn load_or_create(app: &tauri::AppHandle) -> Result<PrivateKey, String> {
-    require_biometrics(app)?;
+    if super::checks_biometrics_first(std::env::consts::OS) {
+      require_biometrics(app)?;
+    }
 
     let existing = app
       .keystore()
@@ -212,5 +227,11 @@ mod tests {
     let key = generate_private_key().unwrap();
     let info = device_key_info(&key).unwrap();
     assert!(info.public_key.starts_with("ssh-ed25519 "));
+  }
+
+  #[test]
+  fn skips_the_biometric_check_on_ios_only() {
+    assert!(!checks_biometrics_first("ios"));
+    assert!(checks_biometrics_first("android"));
   }
 }
