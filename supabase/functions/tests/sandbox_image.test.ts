@@ -6,6 +6,7 @@
 
 import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { renderSandboxImageFiles } from "../../../scripts/render-sandbox-image.ts";
+import { defined } from "./helpers/remote_fakes.ts";
 
 const root = new URL("../../../sandbox-image/", import.meta.url);
 
@@ -29,7 +30,7 @@ Deno.test("the Dockerfile runs both setup scripts on a configurable base and exp
 
 Deno.test("an image build can render bootstrap for the treq binary it bakes in", () => {
   const files = renderSandboxImageFiles({ treqVersion: "0.5.0-nightly.20261106" });
-  assertStringIncludes(files["bootstrap.sh"], 'TREQ_VERSION="0.5.0-nightly.20261106"');
+  assertStringIncludes(defined(files["bootstrap.sh"]), 'TREQ_VERSION="0.5.0-nightly.20261106"');
   // The rest of the setup is unchanged.
   assertEquals(files["install-sshd.sh"], renderSandboxImageFiles()["install-sshd.sh"]);
 });

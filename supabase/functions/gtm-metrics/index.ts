@@ -28,13 +28,10 @@ function json(body: unknown, status = 200): Response {
 // depend on how much of the secret matched or on its length.
 async function secretMatches(presented: string, expected: string): Promise<boolean> {
   const encoder = new TextEncoder();
-  const [a, b] = await Promise.all(
-    [presented, expected].map(async (s) =>
-      new Uint8Array(await crypto.subtle.digest("SHA-256", encoder.encode(s)))
-    ),
-  );
+  const digest = async (s: string) => new DataView(await crypto.subtle.digest("SHA-256", encoder.encode(s)));
+  const [a, b] = await Promise.all([digest(presented), digest(expected)]);
   let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  for (let i = 0; i < a.byteLength; i++) diff |= a.getUint8(i) ^ b.getUint8(i);
   return diff === 0;
 }
 

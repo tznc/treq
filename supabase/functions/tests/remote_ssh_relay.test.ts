@@ -455,8 +455,8 @@ Deno.test("host key parsing reads real key lines and skips noise", async () => {
     "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl root@machine";
   const keys = await parseHostKeyLines(`sudo: warning\n${line}\n\n`);
   assertEquals(keys.length, 1);
-  assertEquals(keys[0].algorithm, "ssh-ed25519");
-  assert(keys[0].fingerprintSha256.startsWith("SHA256:"));
+  assertEquals(keys[0]?.algorithm, "ssh-ed25519");
+  assert(keys[0]?.fingerprintSha256.startsWith("SHA256:"));
   assertEquals(await parseHostKeyLines(""), []);
 });
 

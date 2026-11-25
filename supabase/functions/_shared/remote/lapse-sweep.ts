@@ -117,7 +117,7 @@ export async function sweepLapsedInstances(
     const id = instance.instance_id;
     const audit = (
       eventType: RemoteAuditEventType,
-      detail?: Record<string, unknown>,
+      detail: Record<string, unknown>,
     ) =>
       deps.store.audit({
         ownerUserId: instance.owner_user_id,

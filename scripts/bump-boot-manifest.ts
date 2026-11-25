@@ -21,8 +21,9 @@ export function bumpManifestSource(source: string, version: string, digests: Dig
     if (!/^[0-9a-f]{64}$/.test(d)) throw new Error(`bad sha256: ${d}`);
   }
   const pinned = `treq_sha256: { x86_64: "${digests.x86_64}", aarch64: "${digests.aarch64}" },`;
-  const entries = [...source.matchAll(ENTRY)].map((m) => ({ key: Number(m[1]), text: m[0], body: m[2] }));
-  if (entries.length === 0) throw new Error("no manifests found");
+  const entries = [...source.matchAll(ENTRY)].map((m) => ({ key: Number(m[1]), text: m[0], body: m[2] ?? "" }));
+  const last = entries.at(-1);
+  if (!last) throw new Error("no manifests found");
 
   const matching = entries.filter((e) => e.body.includes(`treq_version: "${version}",`));
   if (matching.length > 0) {
@@ -49,7 +50,6 @@ export function bumpManifestSource(source: string, version: string, digests: Dig
     .replace(/manifest_version: \d+,/, `manifest_version: ${next},`)
     .replace(/treq_version: "[^"]*",/, `treq_version: "${version}",`)
     .replace(/treq_sha256: \{[^}]*\},/, pinned);
-  const last = entries[entries.length - 1];
   return source
     .replace(`CURRENT_MANIFEST_VERSION = ${current};`, `CURRENT_MANIFEST_VERSION = ${next};`)
     .replace(last.text, `${last.text}  ${next}: {\n${body}  },\n`);
@@ -57,6 +57,9 @@ export function bumpManifestSource(source: string, version: string, digests: Dig
 
 if (import.meta.main) {
   const [version, x86_64, aarch64] = Deno.args;
+  if (!version || !x86_64 || !aarch64) {
+    throw new Error("usage: bump-boot-manifest.ts <version> <sha256-x86_64> <sha256-aarch64>");
+  }
   const path = new URL("../supabase/functions/_shared/remote/boot-manifest.ts", import.meta.url);
   const source = await Deno.readTextFile(path);
   await Deno.writeTextFile(path, bumpManifestSource(source, version, { x86_64, aarch64 }));

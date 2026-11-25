@@ -148,7 +148,7 @@ Deno.test("the bootstrap script carries the resolved version and digests, no pla
     },
   });
   await runBootManifest(provider, "m1", "bootstrap", resolverFor([release("v0.4.0", { prerelease: true }), release("v0.3.0")]));
-  const script = defined(execs[0])[2];
+  const script = defined(execs[0]?.[2]);
   assertStringIncludes(script, 'TREQ_VERSION="0.3.0"');
   assertStringIncludes(script, `TREQ_SHA256_X86_64="${X86}"`);
   assertStringIncludes(script, `TREQ_SHA256_AARCH64="${ARM}"`);
