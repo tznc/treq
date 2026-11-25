@@ -13,6 +13,7 @@
 use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
+use gpui_kit::base::ObservedElement;
 use gpui_kit::base::TestSupportExt as _;
 use std::{
   cell::RefCell,
@@ -21,6 +22,7 @@ use std::{
   sync::Arc,
   time::Duration,
 };
+use treq_ui::SelectorExt as _;
 
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
@@ -1193,7 +1195,12 @@ impl WorkspaceView {
     }
   }
 
-  fn header(&self, h: &Header, p: &Palette, cx: &mut Context<Self>) -> Div {
+  fn header(
+    &self,
+    h: &Header,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> ObservedElement<gpui::Stateful<Div>> {
     let mono_title = |text: &str| {
       ui::text(div(), TextSize::Sm)
         .font_family(theme::MONO_FONT)
@@ -1352,10 +1359,9 @@ impl WorkspaceView {
         // Short label (['issue key']): 11px is fine.
         // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
-          .id("workspace-linear")
+          .selector("workspace-linear")
           .role(gpui::Role::Link)
           .aria_label(linear.key.clone())
-          .debug_selector(|| "workspace-linear".into())
           .flex()
           .flex_none()
           .items_center()
@@ -1463,7 +1469,7 @@ impl WorkspaceView {
       .p_2()
       .border_b_1()
       .border_color(p.border)
-      .debug_selector(|| "workspace-header".into())
+      .selector("workspace-header")
       .child(
         div()
           .flex()
@@ -1604,7 +1610,7 @@ impl WorkspaceView {
         // Solid status colour, ringed in the background so it reads against
         // the button's border in both themes; inset so nothing clips it.
         div()
-          .debug_selector(|| "workspace-sync-pip".into())
+          .selector("workspace-sync-pip")
           .absolute()
           .top(zpx(-4.))
           .right(zpx(-4.))
@@ -1650,7 +1656,7 @@ impl WorkspaceView {
   }
 
   /// The workspace's tab bar: the view tabs, then its busy and loc status.
-  fn tab_bar(&self, row: &TabRow, p: &Palette) -> Div {
+  fn tab_bar(&self, row: &TabRow, p: &Palette) -> ObservedElement<gpui::Stateful<Div>> {
     // Counts are neutral, uncommitted changes yellow; a conflict shows once,
     // as a danger dot.
     let commits = ui::Tab::new("workspace-tab-commits", "Commits").icon(theme::ICON_COMMIT);
@@ -1740,7 +1746,7 @@ impl WorkspaceView {
       .bg(p.background)
       .border_b_1()
       .border_color(p.border)
-      .debug_selector(|| "workspace-tab-row".into())
+      .selector("workspace-tab-row")
       .child(div().flex().min_w_0().items_center().gap_2().child(list))
       .child(div().flex_1().min_w_0())
       .child(status)
@@ -1794,8 +1800,7 @@ fn loc_marker(loc: &Loc, p: &Palette) -> impl IntoElement {
   let (green, red) = (added.color(p), removed.color(p));
   let count = loc_count;
   div()
-    .id("loc-diff-marker")
-    .debug_selector(|| "loc-diff-marker".into())
+    .selector("loc-diff-marker")
     .role(gpui::Role::Image)
     .aria_label(format!(
       "{} lines added, {} lines removed",
@@ -2389,7 +2394,7 @@ impl Body {
       Body::Changes(changes) => changes.into_any_element(),
       Body::Logs(logs) => logs.into_any_element(),
       Body::StandIn(body) => div()
-        .debug_selector(|| "workspace-tab-stand-in".into())
+        .selector("workspace-tab-stand-in")
         .relative()
         .size_full()
         .opacity(STAND_IN_OPACITY)
@@ -2429,7 +2434,7 @@ impl Render for WorkspaceView {
         .h(zpx(49.))
         .border_b_1()
         .border_color(p.border)
-        .debug_selector(|| "workspace-header".into()),
+        .selector("workspace-header"),
     }
     .id("workspace-header")
     .role(gpui::Role::Banner)
