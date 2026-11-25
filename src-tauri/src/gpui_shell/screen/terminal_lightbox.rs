@@ -8,6 +8,7 @@ use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
+use gpui_kit::base::ObservedElement;
 use gpui_kit::base::TestSupportExt as _;
 use std::{
   cell::Cell,
@@ -15,6 +16,7 @@ use std::{
   path::{Path, PathBuf},
   rc::Rc,
 };
+use treq_ui::SelectorExt as _;
 
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use tauri_plugin_gpui::gpui::{
@@ -146,11 +148,9 @@ fn comment_card(comment: &LineComment, palette: &Palette) -> gpui::AnyElement {
     format!("Lines {}–{}", comment.start, comment.end)
   };
   ui::text(div(), TextSize::Sm)
-    .id(SharedString::from(format!("treq-send-line-comment-{id}")))
+    .selector(SharedString::from(format!("treq-send-line-comment-{id}")))
     .role(gpui::Role::Group)
     .aria_label(format!("Comment on {}", range.to_lowercase()))
-    .test_support()
-    .debug_selector(move || format!("treq-send-line-comment-{id}"))
     .flex()
     .flex_col()
     .gap_1()
@@ -363,10 +363,9 @@ impl Lightbox {
       .iter()
       .any(|c| start <= c.end && c.start <= end);
     let row = div()
-      .id(SharedString::from(format!("treq-send-block-{b}")))
+      .selector(SharedString::from(format!("treq-send-block-{b}")))
       .role(gpui::Role::Button)
       .aria_label(format!("Block {b}"))
-      .debug_selector(move || format!("treq-send-block-{b}"))
       .px_8()
       .py_1p5()
       .cursor_pointer()
@@ -878,7 +877,12 @@ fn content<E: InteractiveElement>(el: E) -> E {
 
 /// `Button variant="ghost" size="icon-xs" className="h-8 w-8 text-white
 /// hover:bg-white/15"`.
-fn tool(id: &'static str, name: &'static str, icon: &'static str, disabled: bool) -> Stateful<Div> {
+fn tool(
+  id: &'static str,
+  name: &'static str,
+  icon: &'static str,
+  disabled: bool,
+) -> ObservedElement<Stateful<Div>> {
   tool_with(
     id,
     name,
@@ -892,12 +896,11 @@ fn tool_with(
   name: &'static str,
   icon: gpui::AnyElement,
   disabled: bool,
-) -> Stateful<Div> {
+) -> ObservedElement<Stateful<Div>> {
   div()
-    .id(id)
+    .selector(id)
     .role(gpui::Role::Button)
     .aria_label(name)
-    .debug_selector(move || id.into())
     .size_8()
     .flex()
     .items_center()
@@ -940,7 +943,7 @@ impl Lightbox {
           // Short label (['zoom level']): 11px is fine.
           // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
-            .debug_selector(|| "treq-send-zoom-level".into())
+            .selector("treq-send-zoom-level")
             .min_w_10()
             .px_1()
             .flex()
@@ -988,8 +991,7 @@ impl Lightbox {
       let disabled = !self.can_review || self.sending;
       content(
         ui::text(div(), TextSize::Sm)
-          .id("treq-send-review-input")
-          .debug_selector(|| "treq-send-review-input".into())
+          .selector("treq-send-review-input")
           .min_w(zpx(224.))
           .max_w(zpx(448.))
           .flex_1()
@@ -1044,10 +1046,9 @@ impl Lightbox {
         .border_2()
     };
     let mut layer = div()
-      .id("treq-send-highlight-layer")
+      .selector("treq-send-highlight-layer")
       .role(gpui::Role::Group)
       .aria_label(format!("Image at {}%", (self.zoom * 100.).round()))
-      .debug_selector(|| "treq-send-highlight-layer".into())
       .relative()
       .flex_none()
       .w(zpx(w))
@@ -1059,11 +1060,9 @@ impl Lightbox {
       )
       .child(
         div()
-          .id("treq-send-highlight-surface")
+          .selector("treq-send-highlight-surface")
           .role(gpui::Role::Image)
           .aria_label("Drag to highlight a region")
-          .test_support()
-          .debug_selector(|| "treq-send-highlight-surface".into())
           .absolute()
           .inset_0()
           .cursor_crosshair()
@@ -1087,13 +1086,11 @@ impl Lightbox {
       let panel = (active == Some(id)).then(|| {
         let input = self.highlight_inputs.get(&id).cloned();
         div()
-          .id(SharedString::from(format!(
+          .selector(SharedString::from(format!(
             "treq-send-highlight-comment-{id}"
           )))
           .role(gpui::Role::Group)
           .aria_label(format!("Comment on region {id}"))
-          .test_support()
-          .debug_selector(move || format!("treq-send-highlight-comment-{id}"))
           .absolute()
           .left_full()
           .top_0()
@@ -1120,12 +1117,11 @@ impl Lightbox {
           .child(
             div().mt_1().flex().justify_end().child(
               div()
-                .id(SharedString::from(format!(
+                .selector(SharedString::from(format!(
                   "treq-send-highlight-remove-{id}"
                 )))
                 .role(gpui::Role::Button)
                 .aria_label("Remove highlight")
-                .debug_selector(|| "treq-send-highlight-remove".into())
                 .size_6()
                 .flex()
                 .items_center()
@@ -1159,8 +1155,7 @@ impl Lightbox {
     }
     let layer = content(layer).test_support();
     let scroll = div()
-      .id("treq-send-image-scroll")
-      .debug_selector(|| "treq-send-image-scroll".into())
+      .selector("treq-send-image-scroll")
       .w_full()
       .max_w_full()
       .overflow_scroll()
@@ -1220,9 +1215,8 @@ impl Lightbox {
           .iter()
           .any(|c| n >= c.start && n <= c.end);
         let row = div()
-          .id(SharedString::from(format!("treq-send-text-line-{n}")))
+          .selector(SharedString::from(format!("treq-send-text-line-{n}")))
           .cursor_text()
-          .debug_selector(move || format!("treq-send-text-line-{n}"))
           .role(gpui::Role::Row)
           .aria_label(format!("Line {n}"))
           .flex()
@@ -1283,11 +1277,9 @@ impl Lightbox {
     };
     let blank = self.composer_text.trim().is_empty();
     div()
-      .id("treq-send-line-comment-composer")
+      .selector("treq-send-line-comment-composer")
       .role(gpui::Role::Group)
       .aria_label("New comment")
-      .test_support()
-      .debug_selector(|| "treq-send-line-comment-composer".into())
       .bg(palette.background)
       .map(|this| {
         if inline {
@@ -1389,11 +1381,9 @@ impl Lightbox {
         // The cards hang from the row without growing it, so the text keeps
         // its spacing; the margin's empty rows let them show through.
         div()
-          .id("treq-send-margin")
+          .selector("treq-send-margin")
           .role(gpui::Role::Group)
           .aria_label("Comments")
-          .test_support()
-          .debug_selector(|| "treq-send-margin".into())
           .w(zpx(MARGIN_WIDTH))
           .flex_none()
           .relative()
@@ -1444,11 +1434,7 @@ impl Lightbox {
       .px_4()
       .py_1p5()
       .text_color(d.muted_foreground)
-      .child(
-        div()
-          .debug_selector(|| "treq-send-text-hint".into())
-          .child(hint),
-      )
+      .child(div().selector("treq-send-text-hint").child(hint))
       .when(markdown, |this| {
         let view = cx.entity().downgrade();
         this.child(
@@ -1477,11 +1463,9 @@ impl Lightbox {
     let d = theme::palette(text_panel_dark(rendered, self.dark));
     let max_h = f32::from(window.viewport_size().height) * 0.8;
     let panel = div()
-      .id("treq-send-text-preview")
+      .selector("treq-send-text-preview")
       .role(gpui::Role::Group)
       .aria_label("Text preview")
-      .test_support()
-      .debug_selector(|| "treq-send-text-preview".into())
       .w_full()
       .max_w(zpx(1152.))
       .max_h(zpx(max_h))
@@ -1504,12 +1488,7 @@ impl Lightbox {
           .test_support()
           .min_h_0()
           .flex_shrink(1.)
-          .when(rendered, |this| {
-            this
-              .debug_selector(|| "treq-send-markdown".into())
-              .py_4()
-              .font_family(theme::SANS_FONT)
-          })
+          .when(rendered, |this| this.py_4().font_family(theme::SANS_FONT))
           // Room under the last block for the cards hanging in the margin,
           // the same while writing and after, so the text never moves.
           .when(rendered && self.margin_shown(), |this| {
@@ -1536,7 +1515,7 @@ impl Lightbox {
     div().w_full().flex().justify_center().child(content(panel))
   }
 
-  fn nav(&self, next: bool, cx: &mut Context<Self>) -> Stateful<Div> {
+  fn nav(&self, next: bool, cx: &mut Context<Self>) -> ObservedElement<Stateful<Div>> {
     let disabled = if next {
       self.index + 1 >= self.assets.len()
     } else {
@@ -1554,10 +1533,9 @@ impl Lightbox {
     };
     content(
       div()
-        .id(id)
+        .selector(id)
         .role(gpui::Role::Button)
         .aria_label(if next { "Next" } else { "Previous" })
-        .debug_selector(move || id.into())
         .absolute()
         .top(gpui::relative(0.5))
         .mt_neg_8()
@@ -1646,8 +1624,7 @@ impl Render for Lightbox {
       .gap_1p5()
       .children(current.as_ref().map(|asset| {
         ui::text(div(), TextSize::Sm)
-          .id("treq-send-preview-title")
-          .debug_selector(|| "treq-send-preview-title".into())
+          .selector("treq-send-preview-title")
           .max_w_full()
           .truncate()
           .text_color(chrome(0.8))
@@ -1664,8 +1641,7 @@ impl Render for Lightbox {
     });
     let vw = f32::from(viewport.width);
     div()
-      .id("treq-send-preview-lightbox")
-      .debug_selector(|| "treq-send-preview-lightbox".into())
+      .selector("treq-send-preview-lightbox")
       .role(gpui::Role::Dialog)
       .aria_label("Preview")
       .test_support()
@@ -1700,10 +1676,9 @@ impl Render for Lightbox {
       )
       .child(
         div()
-          .id("treq-send-preview-carousel-shell")
+          .selector("treq-send-preview-carousel-shell")
           // A dismiss target, not a control.
           .cursor_default()
-          .debug_selector(|| "treq-send-preview-carousel-shell".into())
           .relative()
           .w(zpx(vw * 0.9))
           .min_w(zpx(vw * 0.75))
