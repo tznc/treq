@@ -432,8 +432,7 @@ mod proptests {
   }
 
   fn text() -> impl Strategy<Value = Text> {
-    // Few distinct lines, so old and new share context often. Lines may be
-    // empty or start with diff-ish characters.
+    // Few distinct lines so old and new often share context. Lines may be empty or diff-like.
     let line = prop_oneof![Just(String::new()), "[ab+\\- ]{1,3}", "[a-zé\\\\@ ]{0,6}",];
     (prop::collection::vec(line, 0..8), any::<bool>()).prop_map(
       |(mut lines, mut trailing_newline)| {
@@ -464,8 +463,7 @@ mod proptests {
       .zip(n[prefix..].iter().rev())
       .take_while(|(a, b)| a == b)
       .count();
-    // A side's last line without a newline is context only when paired with
-    // the other side's last line, and both lack the newline.
+    // A newline-less last line is context only when both sides' last lines lack the newline.
     if old_nl != new_nl {
       suffix = 0;
     }
