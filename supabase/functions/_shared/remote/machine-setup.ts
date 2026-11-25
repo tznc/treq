@@ -105,18 +105,34 @@ function supabasePlacementSecrets(supabase: SupabaseClient) {
   return { gateway: supabaseGatewaySecrets(supabase), integration: supabaseIntegrationSecrets(supabase) };
 }
 
+async function sshdInstalled(provider: SandboxProvider, providerResourceId: string): Promise<boolean> {
+  return (await provider.execOnMachine(providerResourceId, ["test", "-x", MANAGED_SSHD_LAUNCHER])).exitCode === 0;
+}
+
 /**
  * A pidfile-supervised service (Boat, Daytona) does not survive a stop and
  * start, so after a wake sshd and the gateway are started again. A provider
  * with a real supervisor restarts them on its own.
+ *
+ * `finishSetup` runs instead when sshd was never installed (the machine's
+ * setup stopped early, for example with no SSH CA), and the wake fails if
+ * sshd is still missing after it.
  */
 export async function reensureServicesAfterWake(
   provider: SandboxProvider,
   providerResourceId: string,
   placementId: string | null,
+  finishSetup?: () => Promise<void>,
 ): Promise<void> {
   const caps = provider.capabilities();
   if (caps.serviceSupervisor) return;
+  if (finishSetup && !(await sshdInstalled(provider, providerResourceId))) {
+    await finishSetup();
+    if (!(await sshdInstalled(provider, providerResourceId))) {
+      throw new ProviderError("other", "sshd is not installed after finishing the machine setup");
+    }
+    return;
+  }
   await provider.ensureService(providerResourceId, MANAGED_SSHD_SERVICE_NAME, { cmd: MANAGED_SSHD_LAUNCHER, args: [] });
   if (placementId) {
     await provider.ensureService(providerResourceId, GATEWAY_SERVICE_NAME, gatewayServiceSpec(placementId, provider.gatewayListenAddress));

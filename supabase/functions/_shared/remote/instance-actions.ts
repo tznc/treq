@@ -529,7 +529,14 @@ export async function handleWake(body: Record<string, unknown>, deps: RemoteInst
     await setInstanceStatus(supabase, instance, "waking");
     const provider = providerOf(deps, instance);
     await provider.wakeInstance(resourceId);
-    if (!deps.stub) await reensureServicesAfterWake(provider, resourceId, instance.active_placement_id ?? null);
+    if (!deps.stub) {
+      await reensureServicesAfterWake(
+        provider,
+        resourceId,
+        instance.active_placement_id ?? null,
+        () => finishMachineSetup(deps, instance, provider, resourceId),
+      );
+    }
     const observed = await provider.getInstance(resourceId);
     await setInstanceStatus(supabase, instance, observed.state, {
       ready_at: observed.state === "ready" ? new Date().toISOString() : instance.ready_at,
@@ -537,6 +544,37 @@ export async function handleWake(body: Record<string, unknown>, deps: RemoteInst
     return { detail: { observed_state: observed.state } };
   });
   return ok({ operation_id: opId, status: "succeeded" });
+}
+
+// Finishes a setup that create or repair left undone, as repair does: the
+// boot manifest, then sshd, CA trust, the host key and the placement's services.
+async function finishMachineSetup(
+  deps: RemoteInstanceDeps,
+  instance: InstanceRow,
+  provider: SandboxProvider,
+  resourceId: string,
+): Promise<void> {
+  const { supabase, ownerUserId, correlationId } = deps;
+  await runBootManifest(provider, resourceId, "repair", treqReleaseFor(deps));
+  const endpointId = await recordManagedEndpoint(supabase, {
+    ownerUserId,
+    instanceId: instance.id,
+    hostname: MANAGED_SSHD_HOST,
+    port: MANAGED_SSHD_PORT,
+    username: MANAGED_SSH_USERNAME,
+    existingEndpointId: instance.endpoint_id,
+  });
+  if (!instance.endpoint_id) await updateInstance(supabase, instance.id, { endpoint_id: endpointId });
+  await establishSshTrust(supabase, provider, {
+    ownerUserId,
+    instanceId: instance.id,
+    endpointId,
+    providerResourceId: resourceId,
+    generation: instance.generation,
+    correlationId,
+    stub: false,
+    placementId: instance.active_placement_id,
+  });
 }
 
 export async function handleReprovision(body: Record<string, unknown>, deps: RemoteInstanceDeps): Promise<Reply> {
