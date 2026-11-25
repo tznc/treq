@@ -132,6 +132,7 @@ function flyError(response: Response): Promise<ProviderError> {
     if (status === 401) return new ProviderError("other", detail);
     if (status === 403) return new ProviderError("quota_exceeded", "provider quota exceeded");
     if (status === 412) return new ProviderError("invalid_request", detail);
+    return undefined;
   });
 }
 

@@ -38,14 +38,7 @@ const PARAMS: CreateInstanceParams = {
 };
 
 Deno.test("daytonaConfigFromEnv needs the key and defaults the URL", () => {
-  const err = (() => {
-    try {
-      daytonaConfigFromEnv(() => undefined);
-    } catch (e) {
-      return e;
-    }
-  })();
-  assert(err instanceof ProviderError);
+  const err = assertThrows(() => daytonaConfigFromEnv(() => undefined), ProviderError);
   assertEquals(err.kind, "invalid_request");
   assertEquals(daytonaConfigFromEnv((k: string) => ({ TREQ_DAYTONA_API_KEY: "k" } as Record<string, string>)[k]), {
     baseUrl: "https://app.daytona.io/api",

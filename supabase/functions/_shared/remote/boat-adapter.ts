@@ -120,6 +120,7 @@ function boatError(response: Response): Promise<ProviderError> {
       return new ProviderError("quota_exceeded", "provider quota exceeded");
     }
     if (status === 408) return new ProviderError("other", detail);
+    return undefined;
   });
 }
 
