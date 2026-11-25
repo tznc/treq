@@ -1640,9 +1640,12 @@ impl SettingsView {
           "app.setupScript.run" => self.run_setup(cx),
           "app.addProfile" => self.add_profile(cx),
           "app.cloneDirectory.browse" => self.browse_clone_dir(cx),
-          browse if browse.starts_with("project.") && browse.ends_with(".browse") => {
-            let id = browse["project.".len()..browse.len() - ".browse".len()].to_string();
-            self.browse_project_dir(id, cx);
+          browse
+            if let Some(id) = browse
+              .strip_prefix("project.")
+              .and_then(|rest| rest.strip_suffix(".browse")) =>
+          {
+            self.browse_project_dir(id.to_string(), cx);
           }
           "repo.reviewPrompt.tune" => self.tune_review_prompt(cx),
           "repo.promptEdits.dismissAll" => self.dismiss_all_prompt_edits(cx),
