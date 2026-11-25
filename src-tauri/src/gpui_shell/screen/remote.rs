@@ -14,8 +14,8 @@
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
-use gpui_kit::base::TestSupportExt as _;
 use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
+use treq_ui::SelectorExt as _;
 
 use gpui_kit::component::{
   input::{InputEvent, InputState},
@@ -191,8 +191,7 @@ fn text_field(
   p: &Palette,
 ) -> impl IntoElement {
   div()
-    .id(id)
-    .debug_selector(|| id.into())
+    .selector(id)
     .w_full()
     .h(zpx(34.))
     .px_2()
@@ -817,10 +816,9 @@ impl RemoteView {
                 cx: &mut Context<Self>| {
       let hover_border = p.primary.opacity(0.6);
       div()
-        .id(id)
+        .selector(id)
         .role(gpui::Role::RadioButton)
         .aria_label(title)
-        .debug_selector(|| id.into())
         .flex_1()
         .min_w_0()
         .cursor_pointer()
@@ -837,7 +835,6 @@ impl RemoteView {
             .child(description),
         )
         .on_click(cx.listener(move |view, _, window, cx| view.set_mode(mode, window, cx)))
-        .test_support()
     };
     let wide = window.viewport_size().width >= crate::gpui_shell::ui::zoomed(640., window);
     div().child(
@@ -903,10 +900,9 @@ impl RemoteView {
   ) -> impl IntoElement {
     let busy = account.loading || account.signing_in;
     div()
-      .id("remote-setup-signed-out")
+      .selector("remote-setup-signed-out")
       .role(gpui::Role::Group)
       .aria_label("Sign in to Treq")
-      .debug_selector(|| "remote-setup-signed-out".into())
       .flex()
       .flex_col()
       .items_start()
@@ -931,7 +927,6 @@ impl RemoteView {
           .text_color(p.destructive)
           .child(format!("Sign-in failed: {error}"))
       }))
-      .test_support()
   }
 
   /// A text field whose `<datalist>` suggests the `~/.ssh/config` aliases
@@ -964,10 +959,9 @@ impl RemoteView {
       let rows = matches.into_iter().enumerate().map(|(i, alias)| {
         let (state, value) = (state.clone(), alias.clone());
         div()
-          .id(SharedString::from(format!("{id}-suggestion-{i}")))
+          .selector(SharedString::from(format!("{id}-suggestion-{i}")))
           .role(gpui::Role::ListBoxOption)
           .aria_label(alias.clone())
-          .debug_selector(move || format!("{id}-suggestion-{i}"))
           .px_2()
           .py_1()
           .rounded(radius::SM)
@@ -981,7 +975,6 @@ impl RemoteView {
               cx.stop_propagation();
             }),
           )
-          .test_support()
       });
       deferred(
         anchored()
@@ -1181,10 +1174,9 @@ impl RemoteView {
     let trust = form.trust.clone().map(|fingerprint| {
       let endpoint = format!("{username}@{hostname}:{port}");
       div()
-        .id("remote-trust-confirmation")
+        .selector("remote-trust-confirmation")
         .role(gpui::Role::Group)
         .aria_label("Confirm host trust")
-        .debug_selector(|| "remote-trust-confirmation".into())
         .mt_4()
         .rounded(radius::MD)
         .border_1()
@@ -1230,7 +1222,6 @@ impl RemoteView {
                 })),
             ),
         )
-        .test_support()
     });
 
     let show_continue = form.trust.is_none();
@@ -1287,14 +1278,12 @@ impl RemoteView {
         let message = format!("Hostnames are at most {MAX_HOSTNAME} characters.");
         this.child(
           ui::text(div(), TextSize::Sm)
-            .id("remote-hostname-too-long")
-            .debug_selector(|| "remote-hostname-too-long".into())
+            .selector("remote-hostname-too-long")
             .role(gpui::Role::Alert)
             .aria_label(message.clone())
             .mt_2()
             .text_color(ui::Tone::Danger.text(p))
-            .child(message)
-            .test_support(),
+            .child(message),
         )
       })
       .children(trust)
@@ -1433,13 +1422,11 @@ impl RemoteView {
         .when_some(self.sessions.error.clone(), |this, error| {
           this.child(
             div()
-              .id("remote-terminal-error")
+              .selector("remote-terminal-error")
               .role(gpui::Role::Alert)
               .aria_label(error.clone())
-              .debug_selector(|| "remote-terminal-error".into())
               .text_color(red)
-              .child(error)
-              .test_support(),
+              .child(error),
           )
         })
         .children(rows)
@@ -1519,12 +1506,10 @@ impl RemoteView {
       }))
       .child(
         div()
-          .id("remote-ambiguous-reason")
+          .selector("remote-ambiguous-reason")
           .role(gpui::Role::Paragraph)
           .aria_label(reason.clone())
-          .debug_selector(|| "remote-ambiguous-reason".into())
-          .child(reason)
-          .test_support(),
+          .child(reason),
       )
       .footer([
         Button::new("remote-ambiguous-dismiss", p)

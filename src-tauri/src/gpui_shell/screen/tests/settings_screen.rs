@@ -316,7 +316,10 @@ fn settings_reviews_proposed_prompt_edits_with_the_review_cards(cx: &mut TestApp
     .cx
     .debug_bounds("prompt-edit-apply-e1")
     .expect("apply drawn");
-  let card = h.cx.debug_bounds("prompt-edit-card").expect("card drawn");
+  let card = h
+    .cx
+    .debug_bounds("prompt-edit-card-e1")
+    .expect("card drawn");
   assert!(
     dismiss.right() <= apply.left(),
     "{dismiss:?} then {apply:?}"
@@ -369,7 +372,10 @@ fn settings_dismisses_every_proposed_prompt_edit_at_once(cx: &mut TestAppContext
     .cx
     .debug_bounds("prompt-edits-header")
     .expect("header drawn");
-  let card = h.cx.debug_bounds("prompt-edit-card").expect("card drawn");
+  let card = h
+    .cx
+    .debug_bounds("prompt-edit-card-e1")
+    .expect("card drawn");
   assert!(header.contains(&all.center()), "{all:?} in {header:?}");
   assert!(
     (card.right() - all.right()).abs() < gpui::px(1.),
