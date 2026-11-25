@@ -1,0 +1,56 @@
+id: gpui-row-one-text-size
+snapshots:
+  ? |
+    fn f() { div().flex().child(profile_link(&l, TextSize::Xs, p, cx)).child(ui::text(div(), TextSize::Sm).child(x)); }
+  : labels:
+    - source: div().flex().child(profile_link(&l, TextSize::Xs, p, cx)).child(ui::text(div(), TextSize::Sm).child(x))
+      style: primary
+      start: 9
+      end: 112
+    - source: (ui::text(div(), TextSize::Sm).child(x))
+      style: secondary
+      start: 72
+      end: 112
+    - source: (profile_link(&l, TextSize::Xs, p, cx))
+      style: secondary
+      start: 27
+      end: 66
+    - source: (profile_link(&l, TextSize::Xs, p, cx))
+      style: secondary
+      start: 27
+      end: 66
+    - source: flex
+      style: secondary
+      start: 15
+      end: 19
+  ? |
+    fn f() { div().flex().child(ui::text(div(), TextSize::Sm).child(a)).child(
+      // ast-grep-ignore: gpui-text-xs-short-label-only
+      ui::text(div(), TextSize::Xs).child(b)); }
+  : labels:
+    - source: |-
+        div().flex().child(ui::text(div(), TextSize::Sm).child(a)).child(
+          // ast-grep-ignore: gpui-text-xs-short-label-only
+          ui::text(div(), TextSize::Xs).child(b))
+      style: primary
+      start: 9
+      end: 168
+    - source: |-
+        (
+          // ast-grep-ignore: gpui-text-xs-short-label-only
+          ui::text(div(), TextSize::Xs).child(b))
+      style: secondary
+      start: 73
+      end: 168
+    - source: (ui::text(div(), TextSize::Sm).child(a))
+      style: secondary
+      start: 27
+      end: 67
+    - source: (ui::text(div(), TextSize::Sm).child(a))
+      style: secondary
+      start: 27
+      end: 67
+    - source: flex
+      style: secondary
+      start: 15
+      end: 19
