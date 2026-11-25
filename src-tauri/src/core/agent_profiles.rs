@@ -36,17 +36,18 @@ pub fn default_setting(agent: &str) -> String {
   format!("default_profile_{agent}")
 }
 
-/// A profile name: 1 to 32 lowercase letters, digits, `-` or `_`.
+/// A profile name: 1 to 32 lowercase letters, digits, `-` or `_`,
+/// starting with a letter or digit so it never reads as a flag.
 pub fn validate_name(name: &str) -> Result<String, String> {
   let name = name.trim();
+  let word = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit();
   let valid = (1..=32).contains(&name.len())
-    && name
-      .chars()
-      .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_');
+    && name.starts_with(word)
+    && name.chars().all(|c| word(c) || c == '-' || c == '_');
   if valid {
     Ok(name.to_string())
   } else {
-    Err("Use 1 to 32 lowercase letters, digits, - or _".into())
+    Err("Use 1 to 32 lowercase letters, digits, - or _, starting with a letter or digit".into())
   }
 }
 
@@ -154,7 +155,7 @@ mod tests {
   fn validates_names() {
     assert_eq!(validate_name(" work ").unwrap(), "work");
     assert_eq!(validate_name("side_job-2").unwrap(), "side_job-2");
-    for bad in ["", "Work", "a b", "../x", &"a".repeat(33)] {
+    for bad in ["", "Work", "a b", "../x", &"a".repeat(33), "-", "_", "-p", "_work"] {
       assert!(validate_name(bad).is_err(), "{bad:?} should be refused");
     }
   }
