@@ -20,7 +20,7 @@ pub fn open_or_create_workspace_from_github_issue(
     .map_err(|e| format!("Failed to get repo default branch: {e}"))?;
   let (workspace, created) = crate::core::open_or_create_workspace_from_issue(
     repo_path,
-    &github_issue_branch_name(number, title),
+    &crate::core::new_workspaces::issue_branch(repo_path, &github_issue_branch_name(number, title)),
     &base_branch,
     title,
     None,

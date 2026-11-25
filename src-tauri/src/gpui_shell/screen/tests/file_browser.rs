@@ -201,6 +201,7 @@ fn file_browser_back_hands_the_tab_to_react(cx: &mut TestAppContext) {
 }
 
 fn comment_line_one(h: &mut Harness, text: &str) {
+  hover_line(h, "code-line-1");
   h.click("add-comment-1");
   assert!(h.shows(gpui::Role::MultilineTextInput, "Add a comment…"));
   h.cx.simulate_input(text);

@@ -2,8 +2,8 @@
 // published release (not a prerelease) in treq.dev/releases.json that has
 // both Linux CLI archives wins, so machines keep working while the manifest's
 // pinned version is still unreleased; an older release is used when a newer
-// one is incomplete. Digests reviewed into a manifest
-// (scripts/bump-boot-manifest.ts) beat the digests releases.json reports.
+// one is incomplete. Digests pinned by hand in a manifest beat the digests
+// releases.json reports.
 // releases.json is GitHub's release list, rebuilt by the website deploy
 // (web/plugins/releasesJsonPlugin.js), so machines never call the GitHub API.
 
