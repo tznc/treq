@@ -55,6 +55,7 @@ import {
 import { logWithCorrelation } from "./correlation.ts";
 import { storedError } from "./error-scrub.ts";
 import { MANAGED_SSHD_HOST, MANAGED_SSHD_PORT } from "./ssh-vm-config.ts";
+import { caKeyMaterialFromEnv } from "./ssh-cert.ts";
 import { errorMessage } from "../error-message.ts";
 
 const MANAGED_SSH_USERNAME = "treq";
@@ -208,6 +209,22 @@ const ENSURE_FAILABLE = ["provisioning", "bootstrapping", "ready", "suspended", 
 
 const replay = (op: OperationRow): Reply => ok({ operation_id: op.id, status: op.status });
 
+// Without the CA a new machine gets no sshd and no certificate can be signed
+// for it, so it would be billed and never usable.
+const SSH_CA_NOT_CONFIGURED: Reply = {
+  status: 503,
+  body: { error: "Treq Cloud is not set up to sign SSH certificates yet", code: "ssh_ca_not_configured" },
+};
+
+function sshCaConfigured(): boolean {
+  try {
+    caKeyMaterialFromEnv();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function tierUnavailable(tierId: string, region: string): Reply {
   return {
     status: 400,
@@ -328,6 +345,7 @@ export async function handleEnsure(body: Record<string, unknown>, deps: RemoteIn
 
 async function ensureOnce(body: Record<string, unknown>, deps: RemoteInstanceDeps): Promise<Reply> {
   const { supabase, ownerUserId, correlationId } = deps;
+  if (!deps.stub && !sshCaConfigured()) return SSH_CA_NOT_CONFIGURED;
   const idempotencyKey = requireIdempotencyKey(body);
   const region: RegionCode = isRegionCode(body.region) ? body.region : "us_east";
   if (body.tier_id !== undefined && (typeof body.tier_id !== "string" || body.tier_id.length === 0)) {
