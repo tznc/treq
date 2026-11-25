@@ -43,8 +43,8 @@ export class FakeE2B {
     else if (init.body instanceof Uint8Array) body = decodeEnvelopes(init.body)[0]?.json;
     this.requests.push({ method, host: url.host, path: url.pathname, search: url.searchParams, headers, body });
     if (this.forcedStatus !== null) return errorResponse(this.forcedStatus, "forced");
-    const envd = url.host.match(/^49983-([^.]+)\./);
-    if (envd) return this.envd(envd[1], url.pathname, headers, body);
+    const [, envdId] = url.host.match(/^49983-([^.]+)\./) ?? [];
+    if (envdId !== undefined) return this.envd(envdId, url.pathname, headers, body);
     if (headers.get("X-API-Key") !== "e2b_test") return errorResponse(401, "unauthorized");
     return await Promise.resolve(this.route(method, url.pathname, url.searchParams, headers, body));
   };
@@ -84,10 +84,9 @@ export class FakeE2B {
       if (key) this.idempotency.set(key, id);
       return json(201, sandbox);
     }
-    const m = path.match(/^\/(v2\/)?sandboxes\/([^/]+)(\/[a-z]+)?$/);
-    const sandbox = m ? this.sandboxes.get(decodeURIComponent(m[2])) : undefined;
-    if (!m || !sandbox) return errorResponse(404, "not_found");
-    const action = m[3];
+    const [, , encodedId, action] = path.match(/^\/(v2\/)?sandboxes\/([^/]+)(\/[a-z]+)?$/) ?? [];
+    const sandbox = encodedId === undefined ? undefined : this.sandboxes.get(decodeURIComponent(encodedId));
+    if (!sandbox) return errorResponse(404, "not_found");
     if (!action && method === "GET") {
       const { trafficAccessToken: _t, ...detail } = sandbox;
       return json(200, detail);
@@ -159,9 +158,10 @@ export function decodeEnvelopes(bytes: Uint8Array): Array<{ flags: number; json:
   const out: Array<{ flags: number; json: unknown }> = [];
   let off = 0;
   while (off + 5 <= bytes.length) {
-    const len = new DataView(bytes.buffer, bytes.byteOffset + off + 1, 4).getUint32(0);
+    const header = new DataView(bytes.buffer, bytes.byteOffset + off, 5);
+    const len = header.getUint32(1);
     const text = new TextDecoder().decode(bytes.subarray(off + 5, off + 5 + len));
-    out.push({ flags: bytes[off], json: JSON.parse(text) });
+    out.push({ flags: header.getUint8(0), json: JSON.parse(text) });
     off += 5 + len;
   }
   return out;

@@ -65,7 +65,7 @@ export class FakeBoat {
     if (parts.length === 1 && method === "GET") {
       const labels = search.getAll("label").map((l) => l.split("="));
       const sandboxes = [...this.sandboxes.values()].filter((s) =>
-        labels.every(([k, v]) => s.labels[k] === v)
+        labels.every(([k, v]) => k !== undefined && s.labels[k] === v)
       );
       return json(200, { ok: true, type: "sandbox.list", sandboxes });
     }
@@ -91,6 +91,7 @@ export class FakeBoat {
       if (key) this.idempotency.set(key, id);
       return json(201, { ok: true, type: "sandbox.created", status: "provisioning", ttlSeconds: null, sandbox });
     }
+    if (parts[1] === undefined) return errorResponse(404, "not_found");
     const sandbox = this.sandboxes.get(parts[1]);
     if (!sandbox) return errorResponse(404, "not_found");
     const action = parts[2];

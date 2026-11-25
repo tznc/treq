@@ -13,6 +13,7 @@ import {
   preflightCommand,
   recloneCommand,
 } from "../_shared/remote/preflight.ts";
+import { defined } from "./helpers/remote_fakes.ts";
 
 Deno.test("the preflight command passes each repo path as its own argument", () => {
   const cmd = preflightCommand(["/home/treq/a", "/home/treq/b c"]);
@@ -74,15 +75,15 @@ Deno.test("a repo with no output is reported as an error and requires acknowledg
     "REPO\t/a\nVCS\tgit\nDIRTY\t0\nUNPUSHED\t0\nAGENTS\t0\n",
     ["/a", "/b"],
   );
-  assertEquals(report.repos[1].path, "/b");
-  assertEquals(report.repos[1].error, "no preflight output");
+  assertEquals(report.repos[1]?.path, "/b");
+  assertEquals(report.repos[1]?.error, "no preflight output");
   assert(report.requires_ack);
 });
 
 Deno.test("a missing repo directory is reported, not counted as lost work", () => {
   const report = parsePreflightOutput("REPO\t/a\nMISSING\n", ["/a"]);
-  assertEquals(report.repos[0].vcs, "none");
-  assertEquals(report.repos[0].error, "missing");
+  assertEquals(report.repos[0]?.vcs, "none");
+  assertEquals(report.repos[0]?.error, "missing");
   assertFalse(report.requires_ack);
 });
 
@@ -91,7 +92,7 @@ Deno.test("script errors and unparseable counts require acknowledgement", () => 
     "REPO\t/a\nVCS\tjj\nERROR\tjj log failed\n",
     ["/a"],
   );
-  assertEquals(err.repos[0].error, "jj log failed");
+  assertEquals(err.repos[0]?.error, "jj log failed");
   assert(err.requires_ack);
   const junk = parsePreflightOutput(
     "REPO\t/a\nVCS\tgit\nDIRTY\tlots\nUNPUSHED\t0\nAGENTS\t0\n",
@@ -148,7 +149,7 @@ Deno.test("ignored file names are reported so the user sees what is lost", () =>
     "IGNORED_PATH\tlocal.db",
   ]
     .join("\n");
-  const repo = parsePreflightOutput(out, ["/r"]).repos[0];
+  const repo = defined(parsePreflightOutput(out, ["/r"]).repos[0]);
   assertEquals(repo.ignored, 2);
   assertEquals(repo.ignored_paths, [".env", "local.db"]);
 });
@@ -181,16 +182,16 @@ Deno.test("the script reports an ignored .env, a stash and a plain folder with f
 
   const [cmd, ...args] = preflightCommand([repo, plain]);
   const out = new TextDecoder().decode(
-    (await new Deno.Command(cmd, { args }).output()).stdout,
+    (await new Deno.Command(defined(cmd), { args }).output()).stdout,
   );
   const report = parsePreflightOutput(out, [repo, plain]);
   await Deno.remove(root, { recursive: true });
 
   assert(report.requires_ack);
-  assertEquals(report.repos[0].dirty, 0);
-  assertEquals(report.repos[0].stashes, 1);
+  assertEquals(report.repos[0]?.dirty, 0);
+  assertEquals(report.repos[0]?.stashes, 1);
   // Regenerable build output is not counted as lost work.
-  assertEquals(report.repos[0].ignored_paths, [".env"]);
-  assertEquals(report.repos[1].vcs, "none");
-  assertEquals(report.repos[1].files, 1);
+  assertEquals(report.repos[0]?.ignored_paths, [".env"]);
+  assertEquals(report.repos[1]?.vcs, "none");
+  assertEquals(report.repos[1]?.files, 1);
 });

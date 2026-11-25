@@ -126,10 +126,9 @@ export interface IssuedCertificate {
 
 export function randomSerial(): bigint {
   const bytes = crypto.getRandomValues(new Uint8Array(8));
-  bytes[0] &= 0x7f; // keep it a positive int64 for readability in logs
   let value = 0n;
   for (const byte of bytes) value = (value << 8n) | BigInt(byte);
-  return value;
+  return value & 0x7fff_ffff_ffff_ffffn; // keep it a positive int64 for readability in logs
 }
 
 export async function issueEd25519UserCertificate(params: IssueCertificateParams): Promise<IssuedCertificate> {
@@ -186,6 +185,7 @@ export function decodeCertificateForTests(certificateLine: string): {
   validBefore: bigint;
 } {
   const [, encoded] = certificateLine.split(" ");
+  if (encoded === undefined) throw new Error("certificate line has no base64 field");
   const bytes = base64Decode(encoded);
   const reader = new SshReader(bytes);
   reader.readUtf8String(); // cert type

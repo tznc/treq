@@ -261,8 +261,8 @@ async function tracked(
     const done = await work(row.id);
     await completeOperation(supabase, row.id, { status: "succeeded", providerRequestId: done.providerRequestId });
     await audit(event("succeeded"), {
-      detail: done.detail,
-      providerRequestId: done.providerRequestId,
+      detail: done.detail ?? {},
+      providerRequestId: done.providerRequestId ?? null,
       durationMs: elapsed(),
     });
     return row.id;

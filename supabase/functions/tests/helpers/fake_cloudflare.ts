@@ -40,10 +40,9 @@ export class FakeCloudflare {
 
   private route(method: string, path: string, body: unknown): Response {
     if (path === "/v1/health" && method === "GET") return json(200, { ok: true });
-    const m = path.match(/^\/v1\/sandboxes\/([^/]+)(\/[a-z]+)?$/);
-    if (!m) return json(404, { error: "no route" });
-    const id = decodeURIComponent(m[1]);
-    const action = m[2] ?? "";
+    const [, encodedId, action = ""] = path.match(/^\/v1\/sandboxes\/([^/]+)(\/[a-z]+)?$/) ?? [];
+    if (encodedId === undefined) return json(404, { error: "no route" });
+    const id = decodeURIComponent(encodedId);
     const sandbox = this.sandboxes.get(id);
     if (method === "PUT" && action === "") {
       if (sandbox) return json(200, view(sandbox));
