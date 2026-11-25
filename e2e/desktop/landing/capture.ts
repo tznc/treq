@@ -374,11 +374,13 @@ try {
   console.error(error);
   const failure = resolve(here, "../test-results/landing/failure.png");
   mkdirSync(dirname(failure), { recursive: true });
-  await page?.screenshot({ path: failure }).catch(() => {});
+  await page?.screenshot({ path: failure }).catch((shotError: unknown) => console.error("failure screenshot failed:", shotError));
 } finally {
   // launch.ts and the app share the detached process group.
   try {
     process.kill(-app.pid!, "SIGTERM");
-  } catch {}
+  } catch {
+    // ESRCH: the process group has already exited.
+  }
 }
 process.exit(failed ? 1 : 0);

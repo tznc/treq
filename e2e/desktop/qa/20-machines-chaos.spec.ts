@@ -15,11 +15,12 @@ import { mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { createServer as netServer, type Server as NetServer, type Socket } from "node:net";
 import { join } from "node:path";
-import { chromium, expect, test, type Browser, type Page } from "@playwright/test";
+import { chromium, errors, expect, test, type Browser, type Page } from "@playwright/test";
 import { appBinary, port } from "../env.ts";
 import { errorMessage } from "../error-message.ts";
 import { appEnv, makeFixture } from "../harness.ts";
 import { capture, theme } from "./capture.ts";
+import { noteMiss } from "./helpers.ts";
 
 const appPort = port + 6;
 const SUPABASE_PORT = 54321;
@@ -52,7 +53,10 @@ async function handle(req: IncomingMessage, res: ServerResponse, body: string) {
   let action = "";
   try {
     action = JSON.parse(body || "{}").action ?? "";
-  } catch {}
+  } catch (err) {
+    // A body that is not JSON names no action.
+    if (!(err instanceof SyntaxError)) throw err;
+  }
   fake.calls.push(`${fake.mode} ${req.method} ${url.split("?")[0]} ${action}`);
   // Signing in keeps working in every mode: the modes are about the cloud.
   if (url.startsWith("/auth/v1/token")) {
@@ -163,11 +167,14 @@ async function launch(): Promise<void> {
     },
   });
   const deadline = Date.now() + 120_000;
+  let lastError: unknown;
   for (;;) {
     try {
       if ((await fetch(`http://127.0.0.1:${appPort}/`)).ok) break;
-    } catch {}
-    if (Date.now() > deadline) throw new Error("machines app did not start");
+    } catch (err) {
+      lastError = err;
+    }
+    if (Date.now() > deadline) throw new Error("machines app did not start", { cause: lastError });
     await new Promise((r) => setTimeout(r, 500));
   }
   for (let attempt = 1; ; attempt++) {
@@ -176,7 +183,7 @@ async function launch(): Promise<void> {
       page = await (await browser.newContext()).newPage();
       break;
     } catch (error) {
-      await browser?.close().catch(() => {});
+      await browser?.close();
       if (attempt >= 10) throw error;
       await new Promise((r) => setTimeout(r, 1000));
     }
@@ -238,8 +245,8 @@ async function closeDialog(): Promise<void> {
   await page.keyboard.press("Escape");
   await page.waitForTimeout(500);
   const close = page.getByRole("button", { name: "Close", exact: true });
-  if ((await close.count()) > 0 && (await close.first().isVisible().catch(() => false))) {
-    await close.first().click().catch(() => {});
+  if ((await close.count()) > 0 && (await close.first().isVisible())) {
+    await close.first().click().catch(noteMiss(note, "Close"));
     await page.waitForTimeout(500);
   }
 }
@@ -247,10 +254,11 @@ async function closeDialog(): Promise<void> {
 /** Waits until provisioning stops (the button is back), up to `ms`. */
 async function settled(ms: number): Promise<boolean> {
   try {
-    await expect(create()).toBeVisible({ timeout: ms });
+    await create().waitFor({ state: "visible", timeout: ms });
     return true;
-  } catch {
-    return false;
+  } catch (err) {
+    if (err instanceof errors.TimeoutError) return false;
+    throw err;
   }
 }
 
@@ -286,7 +294,7 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   console.log(`[machines-chaos] trail:\n${trail.join("\n")}`);
   console.log(`[machines-chaos] fake supabase calls:\n${fake.calls.join("\n")}`);
-  await browser?.close().catch(() => {});
+  await browser?.close();
   app?.kill("SIGTERM");
   await stopFake();
   blackHole?.close();
@@ -347,7 +355,7 @@ test("machines-chaos: own-VM form names", async () => {
   await page.waitForTimeout(3000);
   await alive("probe black hole");
   // Double-submit while probing.
-  await page.getByRole("button", { name: /Continue|Checking|Resolving/ }).first().dblclick().catch(() => {});
+  await page.getByRole("button", { name: /Continue|Checking|Resolving/ }).first().dblclick().catch(noteMiss(note, "double-submit"));
   await shot("form-blackhole-probing", "Probing a host that never answers", [
     "The form shows it is checking the host, Continue is disabled, the X still works",
   ]);
@@ -541,14 +549,14 @@ async function monkeyStep(i: number): Promise<string> {
       const n = await buttons.count();
       const names: string[] = [];
       for (let k = 0; k < n && k < 60; k++) {
-        const name = (await buttons.nth(k).getAttribute("aria-label").catch(() => null)) ??
+        const name = (await buttons.nth(k).getAttribute("aria-label").catch(noteMiss(note, `label of button ${k}`))) ??
           (await buttons.nth(k).textContent().catch(() => "")) ?? "";
         names.push(name);
       }
       const ok = names.map((nm, k) => [nm, k] as const).filter(([nm]) => nm && !AVOID.test(nm));
       if (!ok.length) return "button (none)";
       const [nm, k] = pick(ok);
-      await buttons.nth(k).click({ timeout: 3000 }).catch(() => {});
+      await buttons.nth(k).click({ timeout: 3000 }).catch(noteMiss(note, `button "${nm.slice(0, 40)}"`));
       return `button "${nm.slice(0, 40)}"`;
     }
     case "row": {
@@ -556,7 +564,7 @@ async function monkeyStep(i: number): Promise<string> {
       const n = await rows.count();
       if (!n) return "row (none)";
       const k = Math.floor(random() * n);
-      await rows.nth(k).click({ timeout: 3000 }).catch(() => {});
+      await rows.nth(k).click({ timeout: 3000 }).catch(noteMiss(note, `row #${k}`));
       return `row #${k}`;
     }
     case "key": {

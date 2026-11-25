@@ -20,12 +20,15 @@ type App = { app: ChildProcess; browser: Browser; page: Page; folder: string };
 
 async function waitForServer(): Promise<void> {
   const deadline = Date.now() + 120_000;
+  let lastError: unknown;
   for (;;) {
     try {
       const res = await fetch(`http://127.0.0.1:${plainPort}/`);
       if (res.ok) return;
-    } catch {}
-    if (Date.now() > deadline) throw new Error("not-a-repository app did not start");
+    } catch (err) {
+      lastError = err;
+    }
+    if (Date.now() > deadline) throw new Error("not-a-repository app did not start", { cause: lastError });
     await new Promise((r) => setTimeout(r, 500));
   }
 }
@@ -62,7 +65,7 @@ async function launch(): Promise<App> {
 
 /** Stops the app and waits for its port to free, so the next one can bind it. */
 async function stop({ app, browser }: App): Promise<void> {
-  await browser.close().catch(() => {});
+  await browser.close();
   const exited = new Promise((r) => app.once("exit", r));
   app.kill("SIGTERM");
   await Promise.race([exited, new Promise((r) => setTimeout(r, 10_000))]);
@@ -71,6 +74,7 @@ async function stop({ app, browser }: App): Promise<void> {
     try {
       await fetch(`http://127.0.0.1:${plainPort}/`);
     } catch {
+      // Connection refused: the app has let go of its port.
       return;
     }
     await new Promise((r) => setTimeout(r, 250));

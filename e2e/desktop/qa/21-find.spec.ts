@@ -1,6 +1,6 @@
 // The shared Cmd+F find bar: the Commits tab (headlines and open diffs),
 // the Changes diff and an open file in the Code tab.
-import { expect, test } from "@playwright/test";
+import { errors, expect, test } from "@playwright/test";
 import { capture } from "./capture.ts";
 import { mod, openTab, openWorkspace, settle } from "./helpers.ts";
 
@@ -51,7 +51,13 @@ test("find: commits headlines and an open diff", async ({ page }) => {
     expectations: ["Count reads '4 of N'; the current (stronger) mark moved down to a later match"],
   });
   await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "Close search" }).click().catch(() => {});
+  await page
+    .getByRole("button", { name: "Close search" })
+    .click()
+    .catch((err: unknown) => {
+      // Escape may have closed the bar already, leaving no button to click.
+      if (!(err instanceof errors.TimeoutError)) throw err;
+    });
   await settle(page, 500);
   await expect(page.getByRole("button", { name: "Next match" })).toHaveCount(0);
 });

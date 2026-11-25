@@ -21,7 +21,7 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  await m?.browser.close().catch(() => {});
+  await m?.browser.close();
   m?.app.kill("SIGTERM");
 });
 

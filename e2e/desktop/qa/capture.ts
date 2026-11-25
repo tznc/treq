@@ -61,6 +61,7 @@ function screenBox(): { x: number; y: number; w: number; h: number } | null {
       .split("\n")
       .filter(Boolean);
   } catch {
+    // xdotool search exits 1 when no window matches: there is nothing to box.
     return null;
   }
   const display = execFileSync("xdotool", ["getdisplaygeometry"], {

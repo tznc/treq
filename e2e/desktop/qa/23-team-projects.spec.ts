@@ -51,11 +51,14 @@ function seedTeam(userId: string): string {
 
 async function waitForServer(): Promise<void> {
   const deadline = Date.now() + 120_000;
+  let lastError: unknown;
   for (;;) {
     try {
       if ((await fetch(`http://127.0.0.1:${appPort}/`)).ok) return;
-    } catch {}
-    if (Date.now() > deadline) throw new Error("team projects QA app did not start");
+    } catch (err) {
+      lastError = err;
+    }
+    if (Date.now() > deadline) throw new Error("team projects QA app did not start", { cause: lastError });
     await new Promise((r) => setTimeout(r, 500));
   }
 }
@@ -112,7 +115,7 @@ async function launch(session: Session, openRepo: boolean): Promise<App> {
 }
 
 async function stop({ app, browser }: App): Promise<void> {
-  await browser.close().catch(() => {});
+  await browser.close();
   const exited = new Promise((r) => app.once("exit", r));
   app.kill("SIGTERM");
   await Promise.race([exited, new Promise((r) => setTimeout(r, 10_000))]);
