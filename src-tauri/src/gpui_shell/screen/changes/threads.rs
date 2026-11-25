@@ -746,7 +746,6 @@ impl ChangesView {
               .flex()
               .items_center()
               .gap_2()
-              .when(sent, |d| d.debug_selector(|| "sent-review-badge".into()))
               .child(ui::icon(icon, 14., tone.color(p)))
               .child(
                 // Short label (tag). ast-grep-ignore: gpui-text-xs-short-label-only
@@ -868,10 +867,6 @@ impl ChangesView {
       .to_string();
     div()
       .id(SharedString::from(format!("sent-review-collapsed-{id}")))
-      .debug_selector({
-        let id = id.clone();
-        move || format!("sent-review-collapsed-{id}")
-      })
       .role(gpui::Role::Button)
       .aria_label("Show resolved comment")
       .aria_expanded(false)
