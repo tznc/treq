@@ -2041,6 +2041,7 @@ fn terminal_workspace_label_click_navigates_by_path(cx: &mut TestAppContext) {
       permission_mode: None,
       agent: None,
       workspace_path: Some("/repo/.treq/workspaces/b".into()),
+      profile: None,
     },
   );
   let (mut h, _) = workspace_harness(cx, host, terminal_route(serde_json::json!({})));
