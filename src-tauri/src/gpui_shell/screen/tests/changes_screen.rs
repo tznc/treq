@@ -1393,34 +1393,38 @@ fn changes_tab_resolves_an_agent_comment(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn changes_tab_marks_a_sent_review_comment_and_folds_it_once_resolved(cx: &mut TestAppContext) {
+  use gpui::Role;
   let host = changes_host();
   let mut sent = agent_comment(None);
   sent.source = "sent-review".into();
   *host.agent.lock().unwrap() = vec![sent];
   let (mut h, host) = workspace_harness(cx, host, changes_route());
-  assert!(h.drawn("sent-review-badge"));
-  assert!(!h.drawn("agent-delete-ag"));
-  assert!(!h.drawn("agent-send-ag"));
-  h.click("agent-resolve-ag");
+  assert!(h.shows(Role::Group, "Sent comment on a.rs line 2"));
+  assert!(!h.shows(Role::Group, "Agent comment on a.rs line 2"));
+  assert!(!h.shows(Role::Button, "Delete"));
+  assert!(!h.shows(Role::Button, "Send to agent"));
+  click_named(&mut h, Role::Button, "Resolve");
   h.cx.run_until_parked();
   assert!(host
     .writes()
     .contains(&"resolve agent comment ag".to_string()));
-  // Resolved, it stays on its line, folded to its header.
-  assert!(h.drawn("sent-review-collapsed-ag"));
-  assert!(!h.drawn("agent-resolve-ag"));
-  h.click("sent-review-collapsed-ag");
-  assert!(h.drawn("agent-review-comment-card"));
-  assert!(!h.drawn("agent-resolve-ag"));
+  // Resolved, it stays on its line, folded to one row.
+  assert!(h.shows(Role::Button, "Show resolved comment"));
+  assert!(!h.shows(Role::Group, "Sent comment on a.rs line 2"));
+  click_named(&mut h, Role::Button, "Show resolved comment");
+  assert!(h.shows(Role::Group, "Sent comment on a.rs line 2"));
+  assert!(!h.shows(Role::Button, "Resolve"));
+  assert!(h.shows(Role::Button, "Hide resolved comment"));
 }
 
 #[gpui::test]
 fn changes_tab_marks_an_agent_comment_as_local(cx: &mut TestAppContext) {
+  use gpui::Role;
   let host = changes_host();
   *host.agent.lock().unwrap() = vec![agent_comment(None)];
   let (mut h, _) = workspace_harness(cx, host, changes_route());
-  assert!(!h.drawn("sent-review-badge"));
-  assert!(h.drawn("agent-delete-ag"));
+  assert!(h.shows(Role::Group, "Agent comment on a.rs line 2"));
+  assert!(h.shows(Role::Button, "Delete"));
 }
 
 #[gpui::test]

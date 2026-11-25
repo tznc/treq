@@ -724,7 +724,8 @@ impl ChangesView {
       .max_w(zpx(CARD_MAX_W))
       .role(gpui::Role::Group)
       .aria_label(format!(
-        "Agent comment on {} line {range}",
+        "{} comment on {} line {range}",
+        if sent { "Sent" } else { "Agent" },
         comment.file_path
       ))
       .font_family(theme::MONO_FONT)
