@@ -5,6 +5,7 @@ use super::*;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use gpui_kit::base::TestSupportExt as _;
+use treq_ui::SelectorExt as _;
 
 impl FileBrowserView {
   /// `FileCommentSection`.
@@ -16,7 +17,7 @@ impl FileBrowserView {
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
     let mut section = ui::text(div(), TextSize::Sm)
-      .debug_selector(|| "file-comment-section".into())
+      .selector("file-comment-section")
       .border_b_1()
       .border_color(p.border)
       .bg(comment_section_fill(p))
@@ -91,10 +92,9 @@ impl FileBrowserView {
               "Delete comment",
               Side::Top,
               div()
-                .id(SharedString::from(format!("delete-comment-{}", c.id)))
+                .selector(SharedString::from(format!("delete-comment-{}", c.id)))
                 .role(gpui::Role::Button)
                 .aria_label("Delete comment")
-                .debug_selector(|| "delete-comment".into())
                 .flex_none()
                 .p_1()
                 .rounded(radius::SM)
@@ -121,7 +121,7 @@ impl FileBrowserView {
   ) -> impl IntoElement {
     let empty = self.edit_text.trim().is_empty();
     div()
-      .debug_selector(|| "comment-edit".into())
+      .selector("comment-edit")
       .flex()
       .flex_col()
       .gap_2()
@@ -178,7 +178,7 @@ impl FileBrowserView {
   pub(super) fn comment_input(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     let empty = self.draft_text.trim().is_empty();
     div()
-      .debug_selector(|| "comment-input".into())
+      .selector("comment-input")
       .bg(p.muted)
       .border_1()
       .border_color(p.border)
@@ -249,10 +249,9 @@ impl FileBrowserView {
     let at = point(anchor.right() - px(width), anchor.bottom() + px(4.));
     let checked = self.use_idle;
     let checkbox = div()
-      .id("use-idle-agent")
+      .selector("use-idle-agent")
       .role(gpui::Role::CheckBox)
       .aria_label("Use an idle agent")
-      .debug_selector(|| "use-idle-agent".into())
       .flex()
       .items_center()
       .gap_1p5()
@@ -285,8 +284,7 @@ impl FileBrowserView {
       cx.notify();
     };
     let panel = div()
-      .id("finish-review-popover")
-      .debug_selector(|| "finish-review-popover".into())
+      .selector("finish-review-popover")
       .w(zpx(width))
       .relative()
       .p_4()
