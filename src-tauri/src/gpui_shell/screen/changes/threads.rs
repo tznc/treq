@@ -351,8 +351,10 @@ impl ChangesView {
       move |host, _| {
         host.apply_suggestion(&workspace, &thread.path, s.lines, &s.original, &s.suggested)?;
         if commit {
-          let message =
-            crate::github::suggestion_commit_message(&comment.author.login, comment.author_id);
+          let message = crate::core::github_cli::suggestion_commit_message(
+            &comment.author.login,
+            comment.author_id,
+          );
           host.split(&workspace, &message, vec![thread.path.clone()])?;
         }
         host.resolve_thread(&thread.id)
