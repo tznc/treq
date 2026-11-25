@@ -9,7 +9,7 @@ async function navigateToTools(page: import('@playwright/test').Page) {
 
 async function navigateToTool(
   page: import('@playwright/test').Page,
-  name: 'Branch Visualizer' | 'DAG Visualizer',
+  name: 'Branch Visualizer',
 ) {
   await navigateToTools(page);
   await page.getByRole('link', { name: new RegExp(name) }).click();
@@ -30,18 +30,9 @@ test.describe('Tools index (/tools)', () => {
     await expect(page.getByRole('link', { name: /Branch Visualizer/ })).toBeVisible();
   });
 
-  test('lists the DAG Visualizer card', async ({ page }) => {
-    await expect(page.getByRole('link', { name: /DAG Visualizer/ })).toBeVisible();
-  });
-
   test('Branch Visualizer card navigates to the tool', async ({ page }) => {
     await page.getByRole('link', { name: /Branch Visualizer/ }).click();
     await expect(page.getByRole('heading', { name: 'Branch Visualizer', level: 1 })).toBeVisible();
-  });
-
-  test('DAG Visualizer card navigates to the tool', async ({ page }) => {
-    await page.getByRole('link', { name: /DAG Visualizer/ }).click();
-    await expect(page.getByRole('heading', { name: 'DAG Visualizer', level: 1 })).toBeVisible();
   });
 });
 
@@ -116,101 +107,5 @@ test.describe('Branch Visualizer (/tools/branch-visualizer)', () => {
     expect(state.branches.length).toBeGreaterThan(0);
     expect(Array.isArray(state.commits)).toBe(true);
     expect(state.commits.length).toBeGreaterThan(0);
-  });
-});
-
-// ── DAG Visualizer ────────────────────────────────────────────────────────────
-
-test.describe('DAG Visualizer (/tools/dag-visualizer)', () => {
-  test.beforeEach(async ({ page }) => {
-    await navigateToTool(page, 'DAG Visualizer');
-    // BrowserOnly renders React Flow on the client; wait for nodes to appear
-    await page.getByTestId('flow-node').first().waitFor({ timeout: 15_000 });
-  });
-
-  test('renders the page title', async ({ page }) => {
-    await expect(
-      page.getByRole('heading', { name: 'DAG Visualizer', level: 1 }),
-    ).toBeVisible();
-  });
-
-  test('renders the default 6 workflow nodes', async ({ page }) => {
-    await expect(page.getByTestId('flow-node')).toHaveCount(6);
-  });
-
-  test('shows expected node labels from the default workflow', async ({ page }) => {
-    await expect(page.getByText('Requirements', { exact: true })).toBeVisible();
-    // exact: true to avoid matching the prompt text and skill badges that also contain "Deploy"
-    await expect(page.getByText('Deploy', { exact: true })).toBeVisible();
-  });
-
-  test('toolbar buttons are all visible', async ({ page }) => {
-    await expect(page.getByRole('button', { name: /Add node/i })).toBeVisible();
-    await expect(page.getByRole('button', { name: /Format/i })).toBeVisible();
-    await expect(page.getByRole('button', { name: /Copy link/i })).toBeVisible();
-  });
-
-  test('Add node button inserts a new node', async ({ page }) => {
-    const before = await page.getByTestId('flow-node').count();
-    await page.getByRole('button', { name: /Add node/i }).click();
-    await expect(page.getByTestId('flow-node')).toHaveCount(before + 1, { timeout: 5_000 });
-  });
-
-  test('clicking a node opens the detail panel', async ({ page }) => {
-    await page.getByTestId('flow-node').first().click();
-    await expect(page.getByText('Edit Node')).toBeVisible();
-  });
-
-  test('detail panel shows prompt textarea and skill input', async ({ page }) => {
-    await page.getByTestId('flow-node').first().click();
-    await expect(page.getByText('Edit Node')).toBeVisible();
-    await expect(
-      page.getByPlaceholder(/Describe what the AI agent should do/i),
-    ).toBeVisible();
-    await expect(page.getByPlaceholder('/skill-name')).toBeVisible();
-  });
-
-  test('adding a skill to a node renders it in the panel', async ({ page }) => {
-    await page.getByTestId('flow-node').first().click();
-    await expect(page.getByText('Edit Node')).toBeVisible();
-    await page.getByPlaceholder('/skill-name').fill('/my-custom-skill');
-    // Press Enter to commit — same handler as the Add button, no button ambiguity
-    await page.getByPlaceholder('/skill-name').press('Enter');
-    await expect(page.getByText('/my-custom-skill').first()).toBeVisible();
-  });
-
-  test('closing the detail panel via the ✕ button hides it', async ({ page }) => {
-    await page.getByTestId('flow-node').first().click();
-    await expect(page.getByText('Edit Node')).toBeVisible();
-    await page.getByRole('button', { name: 'Close panel' }).click();
-    await expect(page.getByText('Edit Node')).not.toBeVisible();
-  });
-
-  test('Format button re-arranges nodes without crashing', async ({ page }) => {
-    await page.getByRole('button', { name: /Format/i }).click();
-    // All nodes should still be present after the dagre layout runs
-    await expect(page.getByTestId('flow-node').first()).toBeVisible({ timeout: 5_000 });
-    await expect(page.getByTestId('flow-node')).toHaveCount(6);
-  });
-
-  test('graph state is serialised into the URL', async ({ page }) => {
-    await page.waitForURL(/[?&]s=/, { timeout: 5_000 });
-    expect(page.url()).toMatch(/[?&]s=/);
-  });
-
-  test('shared URL encodes valid nodes and edges', async ({ page }) => {
-    await page.waitForURL(/[?&]s=/, { timeout: 5_000 });
-    const s = new URL(page.url()).searchParams.get('s');
-    expect(s).toBeTruthy();
-    // Decode and verify the payload contains nodes and edges
-    const state = JSON.parse(decodeURIComponent(atob(s!)));
-    expect(Array.isArray(state.nodes)).toBe(true);
-    expect(state.nodes.length).toBeGreaterThan(0);
-    expect(Array.isArray(state.edges)).toBe(true);
-    expect(state.edges.length).toBeGreaterThan(0);
-    // Default node names should be present
-    const names = state.nodes.map((n: { data: { name: string } }) => n.data.name);
-    expect(names).toContain('Requirements');
-    expect(names).toContain('Deploy');
   });
 });

@@ -89,6 +89,9 @@
 /learn/workflows/stacks/rust-refactoring /learn/workflows/ai/ai-refactoring/ 301
 /learn/workflows/stacks/tauri-development/ /learn/workflows/ai/ai-feature-development/ 301
 /learn/workflows/stacks/tauri-development /learn/workflows/ai/ai-feature-development/ 301
+# Tools that were removed: the tools index.
+/tools/dag-visualizer/ /tools/ 301
+/tools/dag-visualizer /tools/ 301
 # Skills an upstream repo renamed or removed: the new name, else the author page.
 /skills/mattpocock/engineering/resolving-merge-conflicts/ /skills/mattpocock/ 301
 /skills/mattpocock/engineering/resolving-merge-conflicts /skills/mattpocock/ 301
