@@ -97,8 +97,7 @@ pub fn agent_comment_card(
         .gap_1p5()
         .child(ui::icon(theme::ICON_BOT, 12., ui::Tone::GitMerged.color(p)))
         .child(
-          // Short label (['tag']): 11px is fine.
-          // ast-grep-ignore: gpui-text-xs-short-label-only
+          // Short label (tag). ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .font_weight(FontWeight::MEDIUM)
             .text_color(ui::Tone::GitMerged.text(p))

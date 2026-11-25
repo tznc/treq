@@ -623,8 +623,7 @@ impl Remote {
       });
     };
     let (dir, tail) = below.split_once('/').unwrap_or((below, ""));
-    // Ids are never reused, so a workspace deleted since the last listing
-    // fails on the host rather than naming another.
+    // Ids are never reused: a workspace deleted since the listing fails, never naming another.
     let id = match self
       .transport
       .reads()
@@ -1463,8 +1462,7 @@ pub(crate) mod tests {
     let most = transport
       .most_reading
       .load(std::sync::atomic::Ordering::SeqCst);
-    // Counts overlapping reads rather than timing them: a loaded CI runner
-    // took 418 ms for a batch that does run in parallel.
+    // Counts overlapping reads, not time: a loaded CI runner took 418 ms for a parallel batch.
     assert!((2..=PARALLEL_READS).contains(&most), "{most} at once");
   }
 

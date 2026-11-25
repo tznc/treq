@@ -24,10 +24,7 @@ pub struct Database {
 impl Database {
   pub fn new(db_path: PathBuf) -> Result<Self> {
     let conn = Connection::open(&db_path)?;
-    // Several handles (and treq instances) share this file. As in
-    // `local_db::get_connection`, WAL lets reads run beside a write and
-    // busy_timeout retries a write conflict instead of failing at once with
-    // "database is locked".
+    // Shared by many handles: as in `local_db`, WAL and busy_timeout avoid "database is locked".
     conn.pragma_update(None, "journal_mode", "WAL")?;
     // Crash-safe under WAL; avoids an fsync per commit.
     conn.pragma_update(None, "synchronous", "NORMAL")?;

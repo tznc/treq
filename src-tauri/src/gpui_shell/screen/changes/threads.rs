@@ -300,8 +300,7 @@ impl ChangesView {
       .filter(|c| c.status != "resolved")
       .count();
     (open > 0).then(|| {
-      // Short label (['count']): 11px is fine.
-      // ast-grep-ignore: gpui-text-xs-short-label-only
+      // Short label (count). ast-grep-ignore: gpui-text-xs-short-label-only
       ui::text(div(), TextSize::Xs)
         .id("agent-review-comment-count")
         .debug_selector(|| "agent-review-comment-count".into())
@@ -442,8 +441,7 @@ impl ChangesView {
       .items_center()
       .gap_2()
       .cursor_pointer();
-    // Expanded: a compact pill above the comments. Collapsed: a full-width row
-    // holding the preview.
+    // Expanded: a pill above the comments. Collapsed: a full-width row holding the preview.
     toggle = if collapsed {
       toggle
         .w_full()
@@ -484,8 +482,7 @@ impl ChangesView {
     // Expanded threads show the badge beside the pill rather than inside it.
     let resolved = thread.is_resolved.then(|| {
       let grey = p.muted_foreground;
-      // Short label (['status pill']): 11px is fine.
-      // ast-grep-ignore: gpui-text-xs-short-label-only
+      // Short label (status pill). ast-grep-ignore: gpui-text-xs-short-label-only
       ui::text(div(), TextSize::Xs)
         .flex_none()
         .flex()
@@ -523,8 +520,7 @@ impl ChangesView {
     if !collapsed {
       let n = thread.comments.len();
       toggle = toggle.child(
-        // Short label (['count']): 11px is fine.
-        // ast-grep-ignore: gpui-text-xs-short-label-only
+        // Short label (count). ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .text_color(muted)
           .child(format!("{n} comment{}", if n == 1 { "" } else { "s" })),
@@ -644,8 +640,7 @@ impl ChangesView {
           .child(avatar(&comment.author.login, 32., p))
           .child(profile_link(&comment.author.login, p, cx))
           .child(
-            // Short label (['timestamp']): 11px is fine.
-            // ast-grep-ignore: gpui-text-xs-short-label-only
+            // Short label (timestamp). ast-grep-ignore: gpui-text-xs-short-label-only
             ui::text(div(), TextSize::Xs)
               .text_color(p.muted_foreground)
               .child(comment_date(&comment.created_at, this_year)),
@@ -728,8 +723,7 @@ impl ChangesView {
           .gap_2()
           .child(ui::icon(theme::ICON_BOT, 14., Tone::GitMerged.color(p)))
           .child(
-            // Short label (['tag']): 11px is fine.
-            // ast-grep-ignore: gpui-text-xs-short-label-only
+            // Short label (tag). ast-grep-ignore: gpui-text-xs-short-label-only
             ui::text(div(), TextSize::Xs)
               .font_weight(FontWeight::MEDIUM)
               .text_color(Tone::GitMerged.color(p))
@@ -824,8 +818,7 @@ fn violet(p: &Palette, alpha: f32) -> Hsla {
 
 /// `AuthorAvatar`'s fallback: the login's initial in a circle.
 fn avatar(login: &str, size: f32, p: &Palette) -> impl IntoElement {
-  // Short label (['avatar initial']): 11px is fine.
-  // ast-grep-ignore: gpui-text-xs-short-label-only
+  // Short label (avatar initial). ast-grep-ignore: gpui-text-xs-short-label-only
   ui::text(div(), TextSize::Xs)
     .size(zpx(size))
     .flex_none()
@@ -848,8 +841,7 @@ fn avatar(login: &str, size: f32, p: &Palette) -> impl IntoElement {
 /// `AuthorProfileLink`: "@login", opening the GitHub profile.
 fn profile_link(login: &str, p: &Palette, cx: &mut Context<ChangesView>) -> impl IntoElement {
   let url = format!("https://github.com/{login}");
-  // Short label (['username']): 11px is fine.
-  // ast-grep-ignore: gpui-text-xs-short-label-only
+  // Short label (username). ast-grep-ignore: gpui-text-xs-short-label-only
   ui::text(div(), TextSize::Xs)
     .id(SharedString::from(format!("profile-{login}")))
     .role(gpui::Role::Link)
@@ -879,8 +871,7 @@ pub(in crate::gpui_shell::screen) fn suggestion_box(
   suggested: &str,
   p: &Palette,
 ) -> impl IntoElement {
-  // Short label (['section heading']): 11px is fine.
-  // ast-grep-ignore: gpui-text-xs-short-label-only
+  // Short label (section heading). ast-grep-ignore: gpui-text-xs-short-label-only
   let header = ui::text(div(), TextSize::Xs)
     .id("suggested-change")
     .role(gpui::Role::Heading)
