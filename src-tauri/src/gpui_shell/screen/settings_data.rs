@@ -140,7 +140,7 @@ impl SettingsHost for Backend {
         .into_iter()
         .map(|p| {
           Ok(ProjectRow {
-            clone_directory: projects::project_clone_dir(db.conn(), &p.id)?,
+            clone_directory: projects::project_clone_dir(db, &p.id)?,
             id: p.id,
             name: p.name,
           })
@@ -150,7 +150,7 @@ impl SettingsHost for Backend {
   }
 
   fn set_project_clone_dir(&self, id: &str, dir: &str) -> Result<(), String> {
-    self.with_db(|db| projects::set_project_clone_dir(db.conn(), id, dir))
+    self.with_db(|db| projects::set_project_clone_dir(db, id, dir))
   }
 
   fn setup_script(&self) -> Result<AppSetupScriptStatus, String> {

@@ -18,10 +18,15 @@ function seedProjects(): void {
   const db = appDb();
   const at = new Date().toISOString();
   const add = db.prepare(
-    "INSERT OR REPLACE INTO projects (id, name, created_at, last_opened_at, clone_directory) VALUES (?, ?, ?, ?, ?)",
+    "INSERT OR REPLACE INTO projects (id, name, created_at, last_opened_at) VALUES (?, ?, ?, ?)",
   );
-  add.run("qa-checkout", "Checkout", at, at, "~/work");
-  add.run("qa-billing", "Billing", at, at, "");
+  add.run("qa-checkout", "Checkout", at, at);
+  add.run("qa-billing", "Billing", at, at);
+  // A project's folder is a local-only app setting, not a project column.
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(
+    "project_clone_directory:qa-checkout",
+    "~/work",
+  );
   const repos = db.prepare("INSERT OR IGNORE INTO project_repos VALUES (?, ?, 0)");
   repos.run("qa-checkout", repo);
   repos.run("qa-billing", `${repo}-billing`);
@@ -86,7 +91,11 @@ test("clone directory: projects tab", async ({ page }) => {
   });
   const db = appDb();
   const dir = (id: string) =>
-    (db.prepare("SELECT clone_directory AS d FROM projects WHERE id = ?").get(id) as { d: string }).d;
+    (
+      db.prepare("SELECT value AS d FROM settings WHERE key = ?").get(`project_clone_directory:${id}`) as
+        | { d: string }
+        | undefined
+    )?.d ?? "";
   const [billing, checkout] = [dir("qa-billing"), dir("qa-checkout")];
   db.close();
   expect(billing).toBe("~/billing");
