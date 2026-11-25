@@ -206,6 +206,11 @@ pub fn set_reaction(comment_id: &str, content: &str, on: bool) -> Result<(), Str
   github::gh_set_reaction_impl(&gh, comment_id, content, on, &path)
 }
 
+/// The message for a commit that applies `login`'s review suggestion.
+pub fn suggestion_commit_message(login: &str, user_id: Option<u64>) -> String {
+  github::suggestion_commit_message(login, user_id)
+}
+
 /// Marks a pull request review thread resolved.
 pub fn resolve_review_thread(thread_id: &str) -> Result<(), String> {
   let (gh, path) = gh()?;
