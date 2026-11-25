@@ -640,16 +640,9 @@ impl ChangesView {
           .gap_2()
           .mb_1p5()
           .child(avatar(&comment.author.login, 32., p))
-          .child(profile_link(
-            &comment.author.login,
-            // Short label (username, beside the date). ast-grep-ignore: gpui-text-xs-short-label-only
-            TextSize::Xs,
-            p,
-            cx,
-          ))
+          .child(profile_link(&comment.author.login, TextSize::Sm, p, cx))
           .child(
-            // Short label (timestamp). ast-grep-ignore: gpui-text-xs-short-label-only
-            ui::text(div(), TextSize::Xs)
+            ui::text(div(), TextSize::Sm)
               .text_color(p.muted_foreground)
               .child(comment_date(&comment.created_at, this_year)),
           )
@@ -722,15 +715,13 @@ impl ChangesView {
       .flex_col()
       .gap_2()
       .child(
-        // Pre-existing mixed sizes, to triage. ast-grep-ignore: gpui-row-one-text-size
         div()
           .flex()
           .items_center()
           .gap_2()
           .child(ui::icon(theme::ICON_BOT, 14., Tone::GitMerged.color(p)))
           .child(
-            // Short label (tag). ast-grep-ignore: gpui-text-xs-short-label-only
-            ui::text(div(), TextSize::Xs)
+            ui::text(div(), TextSize::Sm)
               .font_weight(FontWeight::MEDIUM)
               .text_color(Tone::GitMerged.color(p))
               .child("Local"),

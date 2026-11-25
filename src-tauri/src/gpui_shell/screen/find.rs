@@ -350,7 +350,6 @@ pub(in crate::gpui_shell::screen) fn bar<V: Findable>(
   );
   let close_button = button("close", theme::ICON_X, "Close search", "Close (Esc)", None);
   Some(
-    // Pre-existing mixed sizes, to triage. ast-grep-ignore: gpui-row-one-text-size
     div()
       .id(id)
       .debug_selector(move || id.into())
@@ -387,9 +386,7 @@ pub(in crate::gpui_shell::screen) fn bar<V: Findable>(
           .child(ui::input(&input).appearance(false).bordered(false)),
       )
       .child(
-        // Short label (['count']): 11px is fine.
-        // ast-grep-ignore: gpui-text-xs-short-label-only
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
           .debug_selector(move || format!("{id}-count"))
           .px_2()
           .whitespace_nowrap()

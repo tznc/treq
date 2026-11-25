@@ -488,7 +488,6 @@ impl ProjectHomeView {
               .on_click(self.send(open_tab_press("changes", &repo.path))),
           )
           .children(files.iter().map(|file| {
-            // Pre-existing mixed sizes, to triage. ast-grep-ignore: gpui-row-one-text-size
             div()
               .flex()
               .items_center()
@@ -496,9 +495,7 @@ impl ProjectHomeView {
               .px_3()
               .py_1()
               .child(
-                // Short label (['status letter']): 11px is fine.
-                // ast-grep-ignore: gpui-text-xs-short-label-only
-                ui::text(div(), TextSize::Xs)
+                ui::text(div(), TextSize::Sm)
                   .w(zpx(14.))
                   .font_weight(FontWeight::SEMIBOLD)
                   .text_color(file_status_color(&file.status, p))

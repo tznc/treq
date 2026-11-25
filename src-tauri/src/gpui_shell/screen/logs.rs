@@ -1363,7 +1363,6 @@ impl LogsView {
           .disabled(disabled)
       };
     Some(
-      // Pre-existing mixed sizes, to triage. ast-grep-ignore: gpui-row-one-text-size
       div()
         .selector("logs-find")
         .absolute()
@@ -1396,9 +1395,7 @@ impl LogsView {
             .child(ui::input(&input).appearance(false).bordered(false)),
         )
         .child(
-          // Short label (['count']): 11px is fine.
-          // ast-grep-ignore: gpui-text-xs-short-label-only
-          ui::text(div(), TextSize::Xs)
+          ui::text(div(), TextSize::Sm)
             .px_2()
             .whitespace_nowrap()
             .text_color(muted)

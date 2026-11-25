@@ -1683,7 +1683,6 @@ impl WorkspaceDialog {
           } else {
             commit.message
           };
-          // Pre-existing mixed sizes, to triage. ast-grep-ignore: gpui-row-one-text-size
           div()
             .selector(id)
             .role(gpui::Role::CheckBox)
@@ -1709,9 +1708,7 @@ impl WorkspaceDialog {
                 .disabled(is_locked),
             )
             .child(
-              // Short label (['short commit hash']): 11px is fine.
-              // ast-grep-ignore: gpui-text-xs-short-label-only
-              ui::text(div(), TextSize::Xs)
+              ui::text(div(), TextSize::Sm)
                 .flex_none()
                 .font_family(theme::MONO_FONT)
                 .text_color(p.muted_foreground)
@@ -1797,7 +1794,6 @@ impl WorkspaceDialog {
           let state = self.file_state(&path);
           let (letter, color) = file_status(&file.status, &p);
           let fg = p.foreground;
-          // Pre-existing mixed sizes, to triage. ast-grep-ignore: gpui-row-one-text-size
           let row = div()
             .id(SharedString::from(format!("dialog-file-{i}")))
             .flex()
@@ -1846,9 +1842,7 @@ impl WorkspaceDialog {
                 })),
             )
             .child(
-              // Short label (['status letter']): 11px is fine.
-              // ast-grep-ignore: gpui-text-xs-short-label-only
-              ui::text(div(), TextSize::Xs)
+              ui::text(div(), TextSize::Sm)
                 .w_4()
                 .flex_none()
                 .text_center()
