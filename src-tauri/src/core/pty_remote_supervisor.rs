@@ -1287,11 +1287,12 @@ mod tests {
         let paths = DaemonPaths::new(dir.path().join("pty"));
         let serving = paths.clone();
         let handle = std::thread::spawn(move || pty_daemon::serve(&serving));
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while pty_daemon::connect(&paths).unwrap().is_none() {
-          assert!(std::time::Instant::now() < deadline, "daemon did not start");
-          std::thread::sleep(std::time::Duration::from_millis(10));
-        }
+        assert!(
+          crate::test_repo::wait_until(std::time::Duration::from_secs(5), || {
+            pty_daemon::connect(&paths).unwrap().is_some()
+          }),
+          "daemon did not start"
+        );
         Self {
           paths,
           handle: Some(handle),
@@ -1357,18 +1358,20 @@ mod tests {
         filter_sessions(names, &repo_scope(other.path().to_str().unwrap()), None, 0).is_empty()
       );
 
-      std::thread::sleep(std::time::Duration::from_millis(300));
+      // The shell's prompt is its first output: it reads input from then on.
+      assert!(
+        crate::test_repo::wait_until(std::time::Duration::from_secs(10), || {
+          daemon::sessions(&served.paths).unwrap()[0]
+            .last_output
+            .is_some()
+        }),
+        "the shell printed nothing"
+      );
       let command = format!("printf 'a\\nb' > {}", out.display());
       daemon::paste(&served.paths, &name, "shell", &command, true).unwrap();
-      let mut pasted = String::new();
-      for _ in 0..50 {
-        pasted = std::fs::read_to_string(&out).unwrap_or_default();
-        if !pasted.is_empty() {
-          break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
-      }
-      assert_eq!(pasted, "a\nb");
+      let pasted = || std::fs::read_to_string(&out).unwrap_or_default();
+      crate::test_repo::wait_until(std::time::Duration::from_secs(5), || !pasted().is_empty());
+      assert_eq!(pasted(), "a\nb");
 
       daemon::resize(&served.paths, &name, 100, 40).unwrap();
       daemon::stop(&served.paths, &name).unwrap();
@@ -1394,24 +1397,22 @@ mod tests {
       )
       .unwrap();
       daemon::rename(&served.paths, &name, Some("Fix login")).unwrap();
-      let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-      let session = loop {
-        let listed = filter_sessions(
+      let listed = || {
+        filter_sessions(
           daemon::sessions(&served.paths).unwrap(),
           &repo_scope(repo_path),
           Some("3"),
           crate::core::pty_daemon::unix_now(),
-        );
-        // The shell's prompt is its first output.
-        if listed[0].idle_secs.is_some() {
-          break listed[0].clone();
-        }
-        assert!(
-          std::time::Instant::now() < deadline,
-          "the shell printed nothing"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        )
       };
+      // The shell's prompt is its first output.
+      assert!(
+        crate::test_repo::wait_until(std::time::Duration::from_secs(10), || {
+          listed()[0].idle_secs.is_some()
+        }),
+        "the shell printed nothing"
+      );
+      let session = listed()[0].clone();
       assert_eq!(session.title.as_deref(), Some("Fix login"));
       assert!(session.idle_secs.is_some_and(|s| s < 10));
       daemon::rename(&served.paths, &name, None).unwrap();
@@ -1566,7 +1567,19 @@ mod tests {
       24,
     )
     .unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    // The shell's prompt is its first output: it reads input from then on.
+    let target = format!("={}:", session_name(repo_path, workspace, label));
+    let shown = || {
+      let pane = Command::new("tmux")
+        .args(["capture-pane", "-p", "-t", target.as_str()])
+        .output()
+        .expect("run tmux");
+      String::from_utf8_lossy(&pane.stdout).trim().to_string()
+    };
+    assert!(
+      crate::test_repo::wait_until(std::time::Duration::from_secs(10), || !shown().is_empty()),
+      "the shell printed nothing"
+    );
     let command = format!("printf 'a\\nb' > {}", out.display());
     paste_text(
       PtyBackend::Tmux,
@@ -1577,14 +1590,9 @@ mod tests {
       true,
     )
     .unwrap();
-    let mut pasted = String::new();
-    for _ in 0..50 {
-      pasted = std::fs::read_to_string(&out).unwrap_or_default();
-      if !pasted.is_empty() {
-        break;
-      }
-      std::thread::sleep(std::time::Duration::from_millis(100));
-    }
+    let read = || std::fs::read_to_string(&out).unwrap_or_default();
+    crate::test_repo::wait_until(std::time::Duration::from_secs(5), || !read().is_empty());
+    let pasted = read();
     stop_session(PtyBackend::Tmux, repo_path, workspace, label).unwrap();
     assert_eq!(pasted, "a\nb");
   }

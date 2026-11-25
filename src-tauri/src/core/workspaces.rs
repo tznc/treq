@@ -2176,7 +2176,11 @@ mod tests {
       .to_string();
     let status_repo = repo_path.clone();
     let statuses = std::thread::spawn(move || super::list_workspace_statuses(&status_repo));
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    // Discovery holds a handle to the lock while it waits for create to finish.
+    let waits = crate::test_repo::wait_until(std::time::Duration::from_secs(5), || {
+      std::sync::Arc::strong_count(&lock) > 2
+    });
+    assert!(waits, "list_workspace_statuses never took the commit lock");
 
     let id = crate::local_db::add_workspace(
       &repo_path,

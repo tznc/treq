@@ -22,6 +22,13 @@ function copy<T>(value: T): T {
   return structuredClone(value);
 }
 
+// A copy whose data.object takes any value, for edits the fixture JSON's
+// inferred types refuse (a number where the fixture has null).
+type EditableEvent = { data: { object: Record<string, unknown> } };
+function editable(event: EditableEvent): EditableEvent {
+  return structuredClone(event);
+}
+
 describe("actionForEvent: subscriptions", () => {
   it("maps a trialing subscription with the period on its items", () => {
     expect(actionForEvent(subscriptionCreated)).toEqual({
@@ -57,17 +64,17 @@ describe("actionForEvent: subscriptions", () => {
   });
 
   it("treats cancel_at on the period end as canceling", () => {
-    const event = copy(subscriptionCreated);
+    const event = editable(subscriptionCreated);
     event.data.object.status = "active";
-    event.data.object.cancel_at = 1791209600 as unknown as null;
+    event.data.object.cancel_at = 1791209600;
     expect(actionForEvent(event)).toMatchObject({
       args: { p_cancel_at_period_end: true },
     });
   });
 
   it("does not treat a cancel_at after the period end as canceling", () => {
-    const event = copy(subscriptionCreated);
-    event.data.object.cancel_at = (1791209600 + 86_400 * 60) as unknown as null;
+    const event = editable(subscriptionCreated);
+    event.data.object.cancel_at = 1791209600 + 86_400 * 60;
     expect(actionForEvent(event)).toMatchObject({
       args: { p_cancel_at_period_end: false },
     });
@@ -99,9 +106,7 @@ describe("actionForEvent: subscriptions", () => {
   });
 
   it("reads an expanded customer object", () => {
-    const event = copy(subscriptionCreated) as unknown as {
-      data: { object: { customer: unknown } };
-    };
+    const event = editable(subscriptionCreated);
     event.data.object.customer = { id: "cus_Expanded", object: "customer" };
     expect(actionForEvent(event)).toMatchObject({
       args: { p_customer_id: "cus_Expanded" },
@@ -124,9 +129,7 @@ describe("actionForEvent: subscriptions", () => {
   });
 
   it("ignores a subscription without a customer", () => {
-    const event = copy(subscriptionCreated) as unknown as {
-      data: { object: { customer: unknown } };
-    };
+    const event = editable(subscriptionCreated);
     event.data.object.customer = null;
     expect(actionForEvent(event)).toMatchObject({ action: "ignore" });
   });
@@ -149,9 +152,7 @@ describe("actionForEvent: checkout.session.completed", () => {
   it("ignores a session whose owner exists only in client_reference_id", () => {
     // A Payment Link accepts client_reference_id from its URL, so anyone can
     // set it. Only billing-checkout writes metadata.
-    const event = copy(checkoutCompleted) as unknown as {
-      data: { object: { metadata: unknown } };
-    };
+    const event = editable(checkoutCompleted);
     event.data.object.metadata = {};
     expect(actionForEvent(event)).toMatchObject({ action: "ignore" });
   });
@@ -164,9 +165,7 @@ describe("actionForEvent: checkout.session.completed", () => {
   });
 
   it("ignores a session without client_reference_id", () => {
-    const event = copy(checkoutCompleted) as unknown as {
-      data: { object: { client_reference_id: unknown } };
-    };
+    const event = editable(checkoutCompleted);
     event.data.object.client_reference_id = null;
     expect(actionForEvent(event)).toMatchObject({ action: "ignore" });
   });

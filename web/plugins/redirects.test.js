@@ -14,6 +14,10 @@ const routes = new Set(
 // Skill and author pages come from the generated catalog (npm run build:skills-catalog).
 const catalog = require('../src/data/skills.json');
 for (const {route} of [...catalog.skills, ...buildAuthorPages(catalog)]) routes.add(`${route}/`);
+// Tools are React pages (src/pages/tools/<name>.tsx); files starting with _ are not routes.
+for (const file of fs.readdirSync(path.join(siteDir, 'src/pages/tools'))) {
+  if (file.endsWith('.tsx') && !file.startsWith('_')) routes.add(`/tools/${file === 'index.tsx' ? '' : `${file.slice(0, -4)}/`}`);
+}
 const rules = fs
   .readFileSync(path.join(siteDir, 'static/_redirects'), 'utf8')
   .split('\n')
@@ -103,6 +107,7 @@ const retired = [
   '/learn/workflows/stacks/react-development/',
   '/learn/workflows/stacks/rust-refactoring/',
   '/learn/workflows/stacks/tauri-development/',
+  '/tools/dag-visualizer/',
 ];
 
 test.each(retired)('%s redirects with and without the trailing slash', (url) => {

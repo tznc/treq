@@ -22,14 +22,6 @@ const tools = [
     tags: ['git', 'visualization'],
   },
   {
-    name: 'DAG Visualizer',
-    slug: 'dag-visualizer',
-    description:
-      'Map AI-aided engineering workflows as interactive DAGs. Edit prompts and slash skills per node.',
-    icon: '🔀',
-    tags: ['ai', 'workflow', 'dag'],
-  },
-  {
     name: 'Gherkin BDD Editor',
     slug: 'gherkin-editor',
     description:

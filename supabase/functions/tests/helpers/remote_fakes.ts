@@ -2,8 +2,9 @@
 // fills the fields a test does not care about with one fixed world: user
 // u1's instance "inst" on Daytona in us_east.
 
+import { DAYTONA_CAPABILITIES } from "../../_shared/remote/daytona-adapter.ts";
 import type { MigrationRow, PlacementRow } from "../../_shared/remote/migration-engine.ts";
-import type { ManagedInstanceState, ProviderInstance } from "../../_shared/remote/provider.ts";
+import type { ManagedInstanceState, ProviderInstance, SandboxProvider } from "../../_shared/remote/provider.ts";
 
 export function placementRow(id: string, fields: Partial<PlacementRow> = {}): PlacementRow {
   return {
@@ -44,6 +45,29 @@ export function providerInstance(
   extra: Partial<ProviderInstance> = {},
 ): ProviderInstance {
   return { providerResourceId: id, state, region: "us_east", sizePreset: "small", address: null, ...extra };
+}
+
+/** A provider call the test does not expect: making it fails the test. */
+export function unexpectedCall(name: string): () => Promise<never> {
+  return () => Promise.reject(new Error(`unexpected provider call: ${name}`));
+}
+
+/** A Daytona provider whose calls fail the test, but for the ones `overrides` gives. */
+export function fakeProvider(overrides: Partial<SandboxProvider>): SandboxProvider {
+  return {
+    kind: "daytona",
+    capabilities: () => DAYTONA_CAPABILITIES,
+    createInstance: unexpectedCall("createInstance"),
+    getInstance: unexpectedCall("getInstance"),
+    wakeInstance: unexpectedCall("wakeInstance"),
+    stopInstance: unexpectedCall("stopInstance"),
+    replaceInstance: unexpectedCall("replaceInstance"),
+    deleteInstance: unexpectedCall("deleteInstance"),
+    execOnMachine: unexpectedCall("execOnMachine"),
+    ensureService: unexpectedCall("ensureService"),
+    gatewayEndpoint: unexpectedCall("gatewayEndpoint"),
+    ...overrides,
+  };
 }
 
 /** The value, or a thrown error when a test's lookup found nothing. */

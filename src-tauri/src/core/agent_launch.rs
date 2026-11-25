@@ -1016,7 +1016,11 @@ mod tests {
         use std::sync::atomic::Ordering::SeqCst;
         let now = self.0.fetch_add(1, SeqCst) + 1;
         self.1.fetch_max(now, SeqCst);
-        std::thread::sleep(std::time::Duration::from_millis(5));
+        // Every kickoff holds the one lock while it opens the workspace.
+        assert!(matches!(
+          KICKOFF.try_lock(),
+          Err(std::sync::TryLockError::WouldBlock)
+        ));
         self.0.fetch_sub(1, SeqCst);
         Ok((1, true))
       }

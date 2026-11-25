@@ -577,12 +577,26 @@ interface TeamData {
   installations: Installation[];
 }
 
+// A to-one embed arrives as one row or null; the untyped client types it as a list.
+function embeddedOrganization(value: unknown): OrgMembership["organizations"] {
+  return typeof value === "object" && value !== null && "id" in value && "name" in value &&
+    typeof value.id === "string" && typeof value.name === "string"
+    ? { id: value.id, name: value.name }
+    : null;
+}
+
 async function loadTeamData(): Promise<TeamData> {
   const { data: membershipRows } = await supabase
     .from("organization_members")
     .select("org_id, user_id, role, created_at, organizations(id, name)")
     .order("created_at");
-  const memberships = (membershipRows ?? []) as unknown as OrgMembership[];
+  const memberships: OrgMembership[] = (membershipRows ?? []).map((row) => ({
+    org_id: row.org_id,
+    user_id: row.user_id,
+    role: row.role,
+    created_at: row.created_at,
+    organizations: embeddedOrganization(row.organizations),
+  }));
   const userIds = [...new Set(memberships.map((m) => m.user_id))];
   const [profiles, invites, subscriptions, customers, installations] =
     await Promise.all([

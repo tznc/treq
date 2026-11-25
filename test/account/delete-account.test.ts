@@ -123,12 +123,21 @@ function fakeStripe(subs: Record<string, StripeSub>, failDelete = false) {
 
 function fakeProvider(failDelete = false) {
   const deleted: string[] = [];
-  const provider = {
-    async deleteInstance(providerId: string) {
+  const unexpected = () =>
+    Promise.reject(new Error("delete-account only deletes machines"));
+  const provider: ManagedComputeProvider = {
+    createInstance: unexpected,
+    getInstance: unexpected,
+    wakeInstance: unexpected,
+    stopInstance: unexpected,
+    replaceInstance: unexpected,
+    async deleteInstance(providerId) {
       if (failDelete) throw new Error("provider unavailable");
       deleted.push(providerId);
     },
-  } as unknown as ManagedComputeProvider;
+    execOnMachine: unexpected,
+    ensureService: unexpected,
+  };
   return { provider, deleted };
 }
 
@@ -553,10 +562,10 @@ describe("deleteAccount final usage", () => {
 describe("createStripeClient DELETE", () => {
   it("sends DELETE without a body", async () => {
     const seen: { url: string; init: RequestInit }[] = [];
-    const fetchImpl = (async (url: string, init: RequestInit) => {
-      seen.push({ url, init });
+    const fetchImpl: typeof fetch = async (input, init) => {
+      seen.push({ url: String(input), init: init ?? {} });
       return new Response(JSON.stringify({ id: "sub_a", status: "canceled" }));
-    }) as unknown as typeof fetch;
+    };
     const client = createStripeClient("sk_test", fetchImpl);
     await client.request("DELETE", "/v1/subscriptions/sub_a");
     expect(seen[0].url).toBe("https://api.stripe.com/v1/subscriptions/sub_a");

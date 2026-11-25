@@ -17,16 +17,25 @@ export type ExchangeDeps = {
 
 export type ExchangeResult = { status: number; body: unknown };
 
-/** The slice of the PostgREST builder `consumeDesktopToken` uses. */
+/**
+ * The one PostgREST chain `consumeDesktopToken` runs, step by step, so
+ * `supabase.from("desktop_auth_tokens")` satisfies it as is.
+ */
 export type TokenTable = {
-  update(patch: { used: boolean }): TokenTable;
-  eq(column: string, value: unknown): TokenTable;
-  gt(column: string, value: unknown): TokenTable;
-  select(columns: string): TokenTable;
-  maybeSingle(): PromiseLike<{
-    data: { user_id: string } | null;
-    error: { message: string } | null;
-  }>;
+  update(patch: { used: boolean }): {
+    eq(column: string, value: unknown): {
+      eq(column: string, value: unknown): {
+        gt(column: string, value: unknown): {
+          select(columns: string): {
+            maybeSingle(): PromiseLike<{
+              data: { user_id: string } | null;
+              error: { message: string } | null;
+            }>;
+          };
+        };
+      };
+    };
+  };
 };
 
 /**

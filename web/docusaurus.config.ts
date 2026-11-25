@@ -58,22 +58,6 @@ const config: Config = {
                     priority: 40,
                     enforce: true,
                   },
-                  // React Flow — only loaded on dag-visualizer page
-                  reactFlow: {
-                    test: /[\\/]node_modules[\\/]@xyflow[\\/]/,
-                    name: 'chunk-react-flow',
-                    chunks: 'all' as const,
-                    priority: 40,
-                    enforce: true,
-                  },
-                  // Dagre — only loaded on dag-visualizer page
-                  dagre: {
-                    test: /[\\/]node_modules[\\/]@dagrejs[\\/]/,
-                    name: 'chunk-dagre',
-                    chunks: 'all' as const,
-                    priority: 40,
-                    enforce: true,
-                  },
                   // Rough.js — shared between branch-visualizer and vcs-simulator
                   roughjs: {
                     test: /[\\/]node_modules[\\/]roughjs[\\/]/,

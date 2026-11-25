@@ -95,6 +95,7 @@ impl RenderOnce for EmptyState {
       .flex_col()
       .items_center()
       .justify_center()
+      .max_w_full()
       .gap_2()
       .py_8()
       .px_6()

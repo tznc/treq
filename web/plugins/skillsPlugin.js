@@ -1,6 +1,7 @@
 // @ts-check
 const fs = require('fs');
 const path = require('path');
+const matter = require('gray-matter');
 const {canRedistribute, truncateDescription, relatedSkills, installCommands, triggerClause} = require('./skillPageContent');
 
 // Registers one static route per catalogued skill (e.g. /skills/anthropic/pdf),
@@ -11,17 +12,38 @@ const {canRedistribute, truncateDescription, relatedSkills, installCommands, tri
 /** @typedef {{id: string, name: string, description: string | null, source: string, category: string | null, route: string, path?: string, license?: string | null, files?: unknown[]}} Skill */
 /** @typedef {{sources: Source[], skills: Skill[]}} Catalog */
 /** @typedef {Record<string, {body: string | null, licenseUrl: string | null, manualOnly: boolean}>} SkillPages */
+/** @typedef {Record<string, {description: string, body: string}>} AuthorWriteups */
+
+/**
+ * Reads the hand-written review of each source from `<dir>/<id>.md`: a meta
+ * description in the frontmatter and a markdown body that renders above the
+ * author page's skill list.
+ * @param {string} dir
+ * @returns {AuthorWriteups}
+ */
+function loadAuthorWriteups(dir) {
+  if (!fs.existsSync(dir)) return {};
+  /** @type {AuthorWriteups} */
+  const writeups = {};
+  for (const file of fs.readdirSync(dir).filter((f) => f.endsWith('.md'))) {
+    const {data, content} = matter(fs.readFileSync(path.join(dir, file), 'utf8'));
+    writeups[path.basename(file, '.md')] = {description: data.description, body: content.trim()};
+  }
+  return writeups;
+}
 
 /**
  * Author pages (e.g. /skills/mattpocock) list one source's skills. People
  * search skills by author name, so each author gets a page of its own.
  * @param {Catalog} catalog
+ * @param {AuthorWriteups} [writeups]
  */
-function buildAuthorPages(catalog) {
+function buildAuthorPages(catalog, writeups = {}) {
   return catalog.sources
     .map((source) => ({
       route: `/skills/${source.id}`,
       source,
+      writeup: writeups[source.id] ?? null,
       skills: catalog.skills
         .filter((skill) => skill.source === source.id)
         .map(({files, ...rest}) => rest)
@@ -70,7 +92,7 @@ function skillPageProps(skill, catalog, pages) {
 
 /**
  * @param {import('@docusaurus/types').LoadContext} context
- * @returns {import('@docusaurus/types').Plugin<Catalog & {pages: SkillPages}>}
+ * @returns {import('@docusaurus/types').Plugin<Catalog & {pages: SkillPages, writeups: AuthorWriteups}>}
  */
 function skillsPlugin(context) {
   return {
@@ -78,16 +100,17 @@ function skillsPlugin(context) {
     async loadContent() {
       const dataDir = path.join(context.siteDir, 'src', 'data');
       const catalogPath = path.join(dataDir, 'skills.json');
-      if (!fs.existsSync(catalogPath)) return {sources: [], skills: [], pages: {}};
+      if (!fs.existsSync(catalogPath)) return {sources: [], skills: [], pages: {}, writeups: {}};
       const catalog = JSON.parse(fs.readFileSync(catalogPath, 'utf8'));
       const pagesPath = path.join(dataDir, 'skill-pages.json');
       const pages = fs.existsSync(pagesPath) ? JSON.parse(fs.readFileSync(pagesPath, 'utf8')) : {};
       const staticDir = path.join(context.siteDir, 'static', 'skills');
       fs.mkdirSync(staticDir, { recursive: true });
       fs.copyFileSync(catalogPath, path.join(staticDir, 'catalog.json'));
-      return {...catalog, pages};
+      const writeups = loadAuthorWriteups(path.join(context.siteDir, 'skill-authors'));
+      return {...catalog, pages, writeups};
     },
-    async contentLoaded({ content: {pages, ...catalog}, actions }) {
+    async contentLoaded({ content: {pages, writeups, ...catalog}, actions }) {
       for (const skill of catalog.skills) {
         actions.addRoute({
           path: skill.route,
@@ -96,12 +119,12 @@ function skillsPlugin(context) {
           props: skillPageProps(skill, catalog, pages),
         });
       }
-      for (const page of buildAuthorPages(catalog)) {
+      for (const page of buildAuthorPages(catalog, writeups)) {
         actions.addRoute({
           path: page.route,
           component: '@site/src/components/SkillAuthorPage/index.tsx',
           exact: true,
-          props: { source: page.source, skills: page.skills },
+          props: { source: page.source, skills: page.skills, writeup: page.writeup },
         });
       }
     },
@@ -110,5 +133,6 @@ function skillsPlugin(context) {
 
 module.exports = skillsPlugin;
 module.exports.buildAuthorPages = buildAuthorPages;
+module.exports.loadAuthorWriteups = loadAuthorWriteups;
 module.exports.skillPageTitle = skillPageTitle;
 module.exports.skillPageProps = skillPageProps;
