@@ -1062,7 +1062,7 @@ fn changes_tab_comments_a_line_and_keeps_the_review(cx: &mut TestAppContext) {
   let saved = host.review.lock().unwrap().clone().unwrap_or_default();
   assert!(saved.contains("\"Nit\""), "{saved}");
   assert!(saved.contains("\"file_path\":\"a.rs\""), "{saved}");
-  h.click("delete-comment");
+  click_named(&mut h, gpui::Role::Button, "Delete comment");
   h.cx.run_until_parked();
   assert!(!has_comment(&mut h, "^Comments on a.rs line \\d+$"));
   assert!(!h.shows(gpui::Role::Toolbar, "Review"));
@@ -1086,7 +1086,7 @@ fn changes_tab_edits_a_comment(cx: &mut TestAppContext) {
 #[gpui::test]
 fn changes_tab_comments_a_file(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
-  h.click("add-file-comment-button");
+  click_named(&mut h, gpui::Role::Button, "Add file comment on b.rs");
   assert!(h.shows(gpui::Role::MultilineTextInput, "Add a comment…"));
   h.click("comment-input");
   h.cx.simulate_input("Split this");
@@ -1304,7 +1304,7 @@ fn review_thread_quote_button_sits_in_the_card_bottom_row(cx: &mut TestAppContex
   host.threads = vec![gh_thread("t1", 2, false)];
   let (mut h, _host) = workspace_harness(cx, host, changes_route());
   h.cx.run_until_parked();
-  let card = h.cx.debug_bounds("github-comment-card").expect("card");
+  let card = by_id_prefix(&mut h, "github-comment-card-").bounds();
   let quote = h.cx.debug_bounds("github-comment-quote").expect("quote");
   let body = h.cx.debug_bounds("github-comment-body").expect("body");
   assert!(
@@ -1483,7 +1483,7 @@ fn changes_tab_applies_an_agent_suggestion_and_reads_again(cx: &mut TestAppConte
       .filter(|c| c.starts_with("read workspace diff"))
       .count()
   };
-  h.drawn("agent-review-comment-card");
+  by_id_prefix(&mut h, "agent-review-comment-card-");
   assert_eq!(reads(&host), 1);
   h.click("agent-apply-ag");
   h.cx.run_until_parked();

@@ -9,6 +9,7 @@ use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
 use gpui_kit::base::TestSupportExt as _;
 use std::{ops::Range, time::Duration};
+use treq_ui::SelectorExt as _;
 
 use super::*;
 use crate::core::review::{selected_range, selected_row, selected_text, word_at, TextPoint};
@@ -1259,12 +1260,11 @@ impl ChangesView {
       })
       .child(
         div()
-          .id(SharedString::from(format!("gutter-{path}-{h}-{l}")))
+          .selector(SharedString::from(format!("gutter-{path}-{h}-{l}")))
           .role(gpui::Role::Button)
-          .aria_label(format!("Line {}", l + 1))
-          .debug_selector({
-            let id = format!("gutter-{path}-{h}-{l}");
-            move || id
+          .aria_label(match new {
+            Some(n) => format!("Line {n} of {path}"),
+            None => format!("Removed line {} of {path}", old.unwrap_or_default()),
           })
           .w_24()
           .flex_none()
@@ -1299,10 +1299,7 @@ impl ChangesView {
           )
           .child(
             div()
-              .debug_selector({
-                let id = format!("line-new-{path}-{h}-{l}");
-                move || id
-              })
+              .selector(format!("line-new-{path}-{h}-{l}"))
               .w_10()
               .flex()
               .justify_end()
@@ -1327,11 +1324,7 @@ impl ChangesView {
                   "Add comment"
                 },
                 div()
-                  .id(SharedString::from(format!("add-comment-{path}-{h}-{l}")))
-                  .debug_selector({
-                    let id = format!("add-comment-{path}-{h}-{l}");
-                    move || id
-                  })
+                  .selector(SharedString::from(format!("add-comment-{path}-{h}-{l}")))
                   .role(gpui::Role::Button)
                   .aria_label(format!(
                     "Add comment on {path} line {}",
@@ -1365,11 +1358,7 @@ impl ChangesView {
       )
       .child(
         div()
-          .id(SharedString::from(format!("code-{path}-{h}-{l}")))
-          .debug_selector({
-            let id = format!("code-{path}-{h}-{l}");
-            move || id
-          })
+          .selector(SharedString::from(format!("code-{path}-{h}-{l}")))
           .flex_1()
           .min_w_0()
           .px_2()
@@ -1521,10 +1510,9 @@ impl ChangesView {
               format!("delete-comment-tip-{id}"),
               "Delete comment",
               div()
-                .id(SharedString::from(format!("delete-comment-{id}")))
+                .selector(SharedString::from(format!("delete-comment-{id}")))
                 .role(gpui::Role::Button)
                 .aria_label("Delete comment")
-                .debug_selector(|| "delete-comment".into())
                 .flex_none()
                 .p_1()
                 .rounded(radius::SM)
@@ -1555,8 +1543,7 @@ impl ChangesView {
     });
     by_agent.then(|| {
       div()
-        .id("agent-comment-tag")
-        .debug_selector(|| "agent-comment-tag".into())
+        .selector("agent-comment-tag")
         .role(gpui::Role::Label)
         .aria_label("Agent")
         .test_support()
@@ -1630,7 +1617,7 @@ impl ChangesView {
   ) -> impl IntoElement {
     let empty = self.review.edit_text.trim().is_empty();
     div()
-      .debug_selector(|| "comment-edit".into())
+      .selector("comment-edit")
       .flex()
       .flex_col()
       .gap_2()
@@ -1701,7 +1688,7 @@ impl ChangesView {
       .as_ref()
       .is_some_and(|d| suggestion_lines(d).is_some());
     ui::text(div(), TextSize::Sm)
-      .debug_selector(|| "comment-input".into())
+      .selector("comment-input")
       .bg(p.muted)
       .border_1()
       .border_color(p.border)
@@ -1804,8 +1791,7 @@ impl ChangesView {
         .child(text)
     };
     let preview = div()
-      .id("suggestion-preview")
-      .debug_selector(|| "suggestion-preview".into())
+      .selector("suggestion-preview")
       .role(gpui::Role::Group)
       .aria_label("Suggestion preview")
       .rounded(radius::SM)
@@ -1825,8 +1811,7 @@ impl ChangesView {
       );
     Some(
       div()
-        .id("suggestion-editor")
-        .debug_selector(|| "suggestion-editor".into())
+        .selector("suggestion-editor")
         .role(gpui::Role::Group)
         .aria_label("Suggested change")
         .mb_2()
@@ -1928,8 +1913,7 @@ impl ChangesView {
     }
     let tone = Tone::Warning;
     let mut section = div()
-      .id("outdated-comments")
-      .debug_selector(|| "outdated-comments".into())
+      .selector("outdated-comments")
       .role(gpui::Role::Group)
       .aria_label("Outdated comments")
       .test_support()
@@ -2073,7 +2057,7 @@ impl ChangesView {
       let (save, clear) = (conflict.clone(), conflict.id.clone());
       out.push(
         div()
-          .debug_selector(|| "conflict-comment-input".into())
+          .selector("conflict-comment-input")
           .bg(p.muted.opacity(0.6))
           .border_y_1()
           .border_color(p.border.opacity(0.4))
@@ -2119,8 +2103,7 @@ impl ChangesView {
     let total = self.review.comments.len() + self.review.notes.len();
     let send_bg = if conflicts { p.destructive } else { p.primary };
     div()
-      .id("review-action-bar")
-      .debug_selector(|| "review-action-bar".into())
+      .selector("review-action-bar")
       .role(gpui::Role::Toolbar)
       .aria_label("Review")
       .flex()
@@ -2239,8 +2222,7 @@ impl ChangesView {
     };
     Some(
       div()
-        .id("stale-banner")
-        .debug_selector(|| "stale-banner".into())
+        .selector("stale-banner")
         .role(gpui::Role::Status)
         .aria_label(format!(
           "{} changed since you started reviewing",
@@ -2319,10 +2301,9 @@ impl ChangesView {
     let checkbox = {
       let checked = self.review.use_idle;
       div()
-        .id("use-idle-agent")
+        .selector("use-idle-agent")
         .role(gpui::Role::CheckBox)
         .aria_label("Use an idle agent")
-        .debug_selector(|| "use-idle-agent".into())
         .flex()
         .items_center()
         .gap_1p5()
@@ -2352,8 +2333,7 @@ impl ChangesView {
         }))
     };
     let panel = div()
-      .id("finish-review-popover")
-      .debug_selector(|| "finish-review-popover".into())
+      .selector("finish-review-popover")
       .role(gpui::Role::Dialog)
       .aria_label(if conflicts {
         "Resolve conflicts"
