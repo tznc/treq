@@ -1,0 +1,57 @@
+id: no-stringified-error-ts
+language: typescript
+severity: error
+message: >
+  Do not stringify a caught error with String(err), `${err}`, "..." + err or
+  err.toString(), or cast it with `err as Error` (or any other type): the
+  string drops the stack and cause, and the cast is unchecked. Narrow with
+  `err instanceof Error`, rethrow with `new Error("...", { cause: err })`, log
+  the error object itself, or use the area's errorMessage(err) helper.
+note: >
+  An error binding is a catch clause parameter or the first parameter of a
+  callback passed to `.catch()`.
+# Every TypeScript file in the repo. .tsx files have their own -tsx rule.
+files: ["**/*.ts", "**/*.mts", "**/*.cts"]
+rule:
+  all:
+    - any:
+        - pattern: String($E)
+        - pattern: $E.toString()
+        - all:
+            - pattern: $E as $T
+            - not:
+                pattern: $E as unknown
+        - pattern: <$T>$E
+        - kind: template_substitution
+          has:
+            kind: identifier
+            pattern: $E
+        - kind: binary_expression
+          all:
+            - has:
+                field: operator
+                regex: '^\+$'
+            - has:
+                kind: identifier
+                pattern: $E
+            - has:
+                any:
+                  - kind: string
+                  - kind: template_string
+    - inside:
+        stopBy: end
+        any:
+          - kind: catch_clause
+            has:
+              field: parameter
+              pattern: $E
+          # The callback passed to promise.catch().
+          - pattern: '$P.catch(($E) => $B)'
+          - pattern: '$P.catch(($E: $PT) => $B)'
+          - pattern: '$P.catch($E => $B)'
+          - pattern: '$P.catch(async ($E) => $B)'
+          - pattern: '$P.catch(async ($E: $PT) => $B)'
+          - pattern: '$P.catch(async $E => $B)'
+          - pattern: '$P.catch(function ($E) { $$$ })'
+          - pattern: '$P.catch(async function ($E) { $$$ })'
+          - pattern: '$P.catch(function ($E: $PT) { $$$ })'
