@@ -2840,6 +2840,41 @@ fn press(id: &str) -> ScreenAction {
   ScreenAction::Press { id: id.into() }
 }
 
+/// Clicks the element of `role` named `name`, found as the user finds it.
+fn click_named(h: &mut Harness, role: gpui::Role, name: &str) {
+  use gpui_testing_library::prelude::*;
+  let screen = h.rendered();
+  let node = screen.get_by_role(gpui_testing_library::by::role(role).name(name));
+  screen.user().click(&node);
+  h.cx.run_until_parked();
+}
+
+/// The one element whose id starts with `prefix`: for elements named per
+/// item (a comment, a terminal column) where the test does not know the id.
+fn by_id_prefix(h: &mut Harness, prefix: &str) -> gpui_testing_library::Node {
+  use gpui_testing_library::prelude::*;
+  let mut nodes: Vec<_> = h
+    .rendered()
+    .elements()
+    .into_iter()
+    .filter(|n| matches!(n.element_id(), gpui::ElementId::Name(id) if id.starts_with(prefix)))
+    .collect();
+  assert_eq!(nodes.len(), 1, "one element with an id starting {prefix}");
+  nodes.remove(0)
+}
+
+/// Clicks the last terminal drawn, as the user clicks into the pane.
+fn click_terminal(h: &mut Harness) {
+  use gpui_testing_library::prelude::*;
+  let screen = h.rendered();
+  let terminal = screen
+    .get_all_by_role(gpui_testing_library::by::role(gpui::Role::Terminal))
+    .pop()
+    .expect("a terminal");
+  screen.user().click(&terminal);
+  h.cx.run_until_parked();
+}
+
 fn type_into(h: &mut Harness, selector: &'static str, text: &str) {
   h.click(selector);
   h.cx.simulate_input(text);

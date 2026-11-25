@@ -53,10 +53,8 @@ ignores:
   - "src-tauri/src/gpui_shell/screen/settings.rs"
   - "src-tauri/src/gpui_shell/screen/settings/account.rs"
   - "src-tauri/src/gpui_shell/screen/settings/account/team.rs"
-  - "src-tauri/src/gpui_shell/screen/terminal.rs"
   - "src-tauri/src/gpui_shell/screen/workspace.rs"
   - "src-tauri/src/gpui_shell/screen/workspace_deletion.rs"
-  - "src-tauri/src/gpui_shell/screen/workspace_dialog.rs"
   - "src-tauri/src/gpui_shell/screen/workspace_title.rs"
 utils:
   in-chain:
