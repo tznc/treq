@@ -15,7 +15,7 @@ import {
 } from "./byos.ts";
 import type { MachineTypeRow } from "./migration-engine.ts";
 import { establishSshTrust, reensureServicesAfterWake, runBootManifest } from "./machine-setup.ts";
-import { manifestTreqRelease, resolveTreqRelease } from "./treq-release.ts";
+import { resolveTreqRelease, stubTreqRelease } from "./treq-release.ts";
 import {
   cancelOpenMigration,
   createActivePlacement,
@@ -139,7 +139,7 @@ const providerOf = (deps: RemoteInstanceDeps, instance: InstanceRow) =>
   deps.provider(kindOf(instance), instance.active_placement_id);
 
 // The stub runs no bootstrap script, so it never fetches treq.dev/releases.json.
-const treqReleaseFor = (deps: RemoteInstanceDeps) => deps.stub ? manifestTreqRelease : resolveTreqRelease;
+const treqReleaseFor = (deps: RemoteInstanceDeps) => deps.stub ? stubTreqRelease : resolveTreqRelease;
 
 // `size_preset` predates tiers; it stays filled for existing readers.
 function sizePresetForTier(tierId: string): SizePreset {
