@@ -383,6 +383,7 @@ mod tests {
       start_line: None,
       diff_side: side.into(),
       comments: vec![GhReviewComment {
+        author_id: None,
         id: "c".into(),
         body: "Hm".into(),
         author: GhAuthor {
