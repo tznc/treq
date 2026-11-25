@@ -23,7 +23,8 @@ export async function generateCa(): Promise<CaFile> {
 }
 
 export function formatCaFile(ca: CaFile): string {
-  return (ca.seed ? `${SEED_SECRET}=${ca.seed}\n` : "") + `${PUBLIC_SECRET}=${ca.publicKey}\n`;
+  const seed = ca.seed ? `${SEED_SECRET}=${ca.seed}\n` : "";
+  return `${seed}${PUBLIC_SECRET}=${ca.publicKey}\n`;
 }
 
 export function parseCaFile(text: string): CaFile {

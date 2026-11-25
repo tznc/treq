@@ -6,7 +6,13 @@
 
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.95.3";
 import { must } from "./db.ts";
-import { caFingerprint, caKeyMaterialFromEnv, caKeyPairMatches, trustedCaKeysFromEnv } from "./ssh-cert.ts";
+import {
+  type CaKeyMaterial,
+  caFingerprint,
+  caKeyMaterialFromEnv,
+  caKeyPairMatches,
+  trustedCaKeysFromEnv,
+} from "./ssh-cert.ts";
 import { errorMessage } from "../error-message.ts";
 
 export interface MachineTrust {
@@ -27,15 +33,19 @@ export type CaStatus = { ca_error: string } | {
   stale_machines: Array<{ instance_id: string; fingerprints: string[] | null }>;
 };
 
-export async function caStatus(store: CaStatusStore): Promise<CaStatus> {
-  let ca, trusted;
+async function loadCa(): Promise<{ ca: CaKeyMaterial; trusted: string[] } | { ca_error: string }> {
   try {
-    ca = caKeyMaterialFromEnv();
-    trusted = await Promise.all(trustedCaKeysFromEnv().map(caFingerprint));
+    return { ca: caKeyMaterialFromEnv(), trusted: await Promise.all(trustedCaKeysFromEnv().map(caFingerprint)) };
   } catch (err) {
     // These name the secrets, never their values.
     return { ca_error: errorMessage(err) };
   }
+}
+
+export async function caStatus(store: CaStatusStore): Promise<CaStatus> {
+  const loaded = await loadCa();
+  if ("ca_error" in loaded) return loaded;
+  const { ca, trusted } = loaded;
   const machines = await store.runningMachineTrust();
   const matches = (fps: string[] | null) =>
     fps !== null && fps.length === trusted.length && trusted.every((f) => fps.includes(f));
