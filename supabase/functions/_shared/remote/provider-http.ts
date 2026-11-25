@@ -125,7 +125,8 @@ export async function ensurePidfileService(
     sudo ? `sudo mkdir -p ${dir} && sudo chown "$(id -u)" ${dir}` : `mkdir -p ${dir}`,
     `if [ -f ${pid} ] && kill -0 "$(cat ${pid})" 2>/dev/null; then kill "$(cat ${pid})"; sleep 1; fi`,
     `nohup setsid ${shellQuote([spec.cmd, ...spec.args])} >${log} 2>&1 </dev/null & echo $! >${pid}`,
-    `sleep 1; kill -0 "$(cat ${pid})"`,
+    // A process that already exited says why in its log.
+    `sleep 1; kill -0 "$(cat ${pid})" 2>/dev/null || { tail -n 20 ${log} >&2; exit 1; }`,
   ].join("\n");
   const result = await exec(["sh", "-c", script], 60);
   if (result.exitCode !== 0) {

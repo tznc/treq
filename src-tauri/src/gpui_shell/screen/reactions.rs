@@ -3,6 +3,7 @@
 
 use crate::gpui_shell::ui::radius;
 use tauri_plugin_gpui::gpui::{deferred, div, img, prelude::*, Context, Div, SharedString};
+use treq_ui::SelectorExt as _;
 
 use crate::{
   github::GhReactionGroup,
@@ -178,8 +179,7 @@ fn picker<V: Reacts>(
   let sky = Tone::Primary.color(p);
   deferred(
     div()
-      .id(SharedString::from(format!("reaction-picker-{id}")))
-      .debug_selector(|| "reaction-picker".into())
+      .selector(SharedString::from(format!("reaction-picker-{id}")))
       .absolute()
       .top(zpx(28.))
       .left_0()

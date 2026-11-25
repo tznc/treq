@@ -520,8 +520,8 @@ fn linear_issues_are_picked_from_the_users_task_list(cx: &mut TestAppContext) {
     .user()
     .click(&screen.get_by_role(by::role(Role::CheckBox).name("ENG-1 Issue 1")));
   let screen = show_lines(&mut h);
-  assert_eq!(status(&screen), "Will create eng-1 from ENG-1");
-  expect(screen.get_by_role(by::role(Role::ListItem).name("eng-1: new"))).to_be_visible();
+  assert_eq!(status(&screen), "Will create treq/eng-1 from ENG-1");
+  expect(screen.get_by_role(by::role(Role::ListItem).name("treq/eng-1: new"))).to_be_visible();
 
   // A search looks through everyone's.
   screen
@@ -585,9 +585,9 @@ fn a_sub_issue_picked_with_its_parent_stacks_on_it(cx: &mut TestAppContext) {
   pick_issue(&mut h, "ENG-1 Issue 1");
 
   let screen = show_lines(&mut h);
-  expect(screen.get_by_role(by::role(Role::ListItem).name("eng-4: on eng-1 · new")))
+  expect(screen.get_by_role(by::role(Role::ListItem).name("treq/eng-4: on treq/eng-1 · new")))
     .to_be_visible();
-  expect(screen.get_by_role(by::role(Role::ListItem).name("eng-1: new"))).to_be_visible();
+  expect(screen.get_by_role(by::role(Role::ListItem).name("treq/eng-1: new"))).to_be_visible();
 
   screen
     .user()
@@ -614,8 +614,10 @@ fn a_sub_issue_stacks_on_its_parents_open_workspace(cx: &mut TestAppContext) {
   pick_issue(&mut h, "ENG-4 Issue 4");
 
   let screen = show_lines(&mut h);
-  expect(screen.get_by_role(by::role(Role::ListItem).name("eng-4: on octocat/eng-1-parent · new")))
-    .to_be_visible();
+  expect(
+    screen.get_by_role(by::role(Role::ListItem).name("treq/eng-4: on octocat/eng-1-parent · new")),
+  )
+  .to_be_visible();
 }
 
 #[gpui::test]
