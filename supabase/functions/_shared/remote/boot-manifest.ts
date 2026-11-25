@@ -68,7 +68,6 @@ const MANIFESTS: Record<number, BootManifest> = {
   3: {
     manifest_version: 3,
     treq_version: "0.4.0",
-    // The release workflow pins these (scripts/bump-boot-manifest.ts).
     treq_sha256: { x86_64: "PLACEHOLDER-treq-0.4.0-x86_64", aarch64: "PLACEHOLDER-treq-0.4.0-aarch64" },
     jj_version: "0.40.0",
     jj_sha256: JJ_0_40_SHA256,
@@ -83,7 +82,6 @@ const MANIFESTS: Record<number, BootManifest> = {
   4: {
     manifest_version: 4,
     treq_version: "0.4.0",
-    // The release workflow pins these (scripts/bump-boot-manifest.ts).
     treq_sha256: { x86_64: "PLACEHOLDER-treq-0.4.0-x86_64", aarch64: "PLACEHOLDER-treq-0.4.0-aarch64" },
     jj_version: "0.40.0",
     jj_sha256: JJ_0_40_SHA256,
@@ -99,7 +97,6 @@ const MANIFESTS: Record<number, BootManifest> = {
   5: {
     manifest_version: 5,
     treq_version: "0.4.0",
-    // The release workflow pins these (scripts/bump-boot-manifest.ts).
     treq_sha256: { x86_64: "PLACEHOLDER-treq-0.4.0-x86_64", aarch64: "PLACEHOLDER-treq-0.4.0-aarch64" },
     jj_version: "0.40.0",
     jj_sha256: JJ_0_40_SHA256,

@@ -10,7 +10,7 @@ use super::{
   github_data::GithubHost, linear_data::LinearHost, workspace_dialog_data::WorkspaceDialogHost,
 };
 use crate::{
-  core::{self, BranchWorkspaceRequest},
+  core::{self, new_workspaces::apply_branch_name_pattern, BranchWorkspaceRequest},
   github::GhPullRequest,
   gpui_shell::{native::Backend, remote_repo::Remote},
   linear::LinearIssue,
@@ -136,10 +136,10 @@ impl Target {
   }
 
   /// A Linear issue, opened on its branch in the repository on screen.
-  pub fn from_issue(repo_path: &str, issue: &LinearIssue, existing: bool) -> Self {
+  pub fn from_issue(repo_path: &str, pattern: &str, issue: &LinearIssue, existing: bool) -> Self {
     Self {
       repo_path: repo_path.to_string(),
-      branch: issue.branch_name.clone(),
+      branch: apply_branch_name_pattern(pattern, &issue.branch_name),
       base: None,
       title: Some(issue.title.clone()),
       pr: None,
@@ -164,6 +164,7 @@ fn picked_parent<'a>(issue: &LinearIssue, issues: &'a [LinearIssue]) -> Option<&
 /// by Linear issue key).
 pub fn issue_targets(
   repo_path: &str,
+  pattern: &str,
   issues: &[LinearIssue],
   open: &HashSet<String>,
   linked: &HashMap<String, String>,
@@ -189,16 +190,17 @@ pub fn issue_targets(
   order
     .into_iter()
     .map(|issue| {
-      let existing = open.contains(&issue.branch_name) || linked.contains_key(&issue.identifier);
-      let mut target = Target::from_issue(repo_path, issue, existing);
+      let branch = |i: &LinearIssue| apply_branch_name_pattern(pattern, &i.branch_name);
+      let existing = open.contains(&branch(issue)) || linked.contains_key(&issue.identifier);
+      let mut target = Target::from_issue(repo_path, pattern, issue, existing);
       // Stacking only affects a workspace that is about to be made.
       if !existing {
         target.base = match picked_parent(issue, issues) {
           Some(parent) => Some(
             linked
               .get(&parent.identifier)
-              .unwrap_or(&parent.branch_name)
-              .clone(),
+              .cloned()
+              .unwrap_or_else(|| branch(parent)),
           ),
           None => issue
             .parent_identifier
@@ -584,7 +586,7 @@ mod tests {
   #[test]
   fn issue_targets_put_a_picked_parent_before_its_sub_issue() {
     let picked = [sub_issue("2", "1"), issue("1", "unstarted", None)];
-    let targets = issue_targets("/repo", &picked, &HashSet::new(), &HashMap::new());
+    let targets = issue_targets("/repo", "{name}", &picked, &HashSet::new(), &HashMap::new());
     assert_eq!(
       bases(&targets),
       vec![("eng-1", None, false), ("eng-2", Some("eng-1"), false)]
@@ -592,9 +594,34 @@ mod tests {
   }
 
   #[test]
+  fn issue_targets_name_branches_with_the_repo_pattern() {
+    let picked = [sub_issue("2", "1"), issue("1", "unstarted", None)];
+    let targets = issue_targets(
+      "/repo",
+      "treq/{name}",
+      &picked,
+      &HashSet::new(),
+      &HashMap::new(),
+    );
+    assert_eq!(
+      bases(&targets),
+      vec![
+        ("treq/eng-1", None, false),
+        ("treq/eng-2", Some("treq/eng-1"), false)
+      ]
+    );
+  }
+
+  #[test]
   fn issue_targets_stack_on_a_parent_workspace_that_is_open() {
     let linked = HashMap::from([("ENG-1".to_string(), "octocat/parent".to_string())]);
-    let targets = issue_targets("/repo", &[sub_issue("2", "1")], &HashSet::new(), &linked);
+    let targets = issue_targets(
+      "/repo",
+      "{name}",
+      &[sub_issue("2", "1")],
+      &HashSet::new(),
+      &linked,
+    );
     assert_eq!(
       bases(&targets),
       vec![("eng-2", Some("octocat/parent"), false)]
@@ -605,6 +632,7 @@ mod tests {
   fn issue_targets_keep_the_default_branch_without_a_parent_workspace() {
     let targets = issue_targets(
       "/repo",
+      "{name}",
       &[sub_issue("2", "1")],
       &HashSet::new(),
       &HashMap::new(),
@@ -618,7 +646,13 @@ mod tests {
       ("ENG-1".to_string(), "eng-1".to_string()),
       ("ENG-2".to_string(), "eng-2".to_string()),
     ]);
-    let targets = issue_targets("/repo", &[sub_issue("2", "1")], &HashSet::new(), &linked);
+    let targets = issue_targets(
+      "/repo",
+      "{name}",
+      &[sub_issue("2", "1")],
+      &HashSet::new(),
+      &linked,
+    );
     assert_eq!(bases(&targets), vec![("eng-2", None, true)]);
   }
 
