@@ -72,7 +72,7 @@ class FakeStore implements IdleStore {
 
 class FakeProvider {
   calls: string[] = [];
-  stateChangedAt: string | undefined;
+  stateChangedAt: string | null = null;
   constructor(
     public observed: ManagedInstanceState = "ready",
     public exec: () => MachineExecResult | Promise<MachineExecResult> = () => ({ exitCode: 0, stdout: probe(), stderr: "" }),

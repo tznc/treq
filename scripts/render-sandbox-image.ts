@@ -30,7 +30,7 @@ if (import.meta.main) {
   const treqVersion = at >= 0 ? Deno.args[at + 1] : undefined;
   if (at >= 0 && !/^[0-9A-Za-z.+-]+$/.test(treqVersion ?? "")) throw new Error("--treq-version needs a version");
   const root = new URL("../sandbox-image/", import.meta.url);
-  for (const [name, content] of Object.entries(renderSandboxImageFiles({ treqVersion }))) {
+  for (const [name, content] of Object.entries(renderSandboxImageFiles(treqVersion ? { treqVersion } : {}))) {
     await Deno.writeTextFile(new URL(name, root), content);
   }
 }

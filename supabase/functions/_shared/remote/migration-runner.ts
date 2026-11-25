@@ -34,7 +34,7 @@ export interface RunnerOptions {
   leaseOwner: string;
   budgetMs: number;
   limit: number;
-  migrationId?: string;
+  migrationId?: string | undefined;
   now?: () => number;
 }
 
