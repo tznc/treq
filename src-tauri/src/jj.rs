@@ -391,8 +391,7 @@ fn snapshot_fresh_working_copy(
   ))
   .map_err(|e| JjError::IoError(format!("Failed to check staleness: {e}")))?;
   if !matches!(freshness, WorkingCopyFreshness::Fresh) {
-    // Dropping the lock without `finish` leaves the working-copy state as it
-    // was; the stale-workspace recovery flow owns updating it.
+    // Dropping the lock without `finish` leaves the state to the stale-workspace recovery flow.
     return Ok(());
   }
   snapshot_locked_working_copy(
@@ -469,8 +468,7 @@ fn snapshot_up_to_date_working_copy(
   loaded: &mut LoadedWorkspaceRepo,
   ignore_root: &str,
 ) -> Result<Option<(Commit, MergedTree)>, JjError> {
-  // Each pass resolves one staleness or snapshots; a third means another
-  // process keeps moving the working copy.
+  // Each pass resolves a staleness or snapshots: a third means another process keeps moving it.
   for _ in 0..3 {
     let Some(wc_commit) = get_workspace_wc_commit(loaded)? else {
       return Ok(None);
@@ -497,8 +495,7 @@ fn snapshot_up_to_date_working_copy(
         )?;
         return Ok(Some((wc_commit, tree)));
       }
-      // Another process moved the working copy after `loaded` was read:
-      // keep its operation and read the repo again.
+      // Another process moved the working copy after `loaded` was read: keep its op and reload.
       WorkingCopyFreshness::Updated(_) => {
         let wc_op_id = locked_ws.locked_wc().old_operation_id().clone();
         block_on(locked_ws.finish(wc_op_id))
@@ -682,8 +679,7 @@ fn reconcile_colocated_home_repo(repo_path: &str) -> Result<(), JjError> {
   let _git_lock = FileLock::lock(initial.workspace.repo_path().join("git_import_export.lock"))
     .map_err(|e| JjError::GitWorkspaceError(format!("Failed to lock Git import/export: {e}")))?;
 
-  // Another process may have published an operation while this caller waited
-  // for the lock, so always reload the latest operation under the lock.
+  // Another process may have published an operation during the wait, so reload under the lock.
   let mut loaded = load_workspace_repo(repo_path)?;
   let workspace_name = loaded.workspace.workspace_name().to_owned();
 
@@ -966,8 +962,7 @@ async fn materialized_value_to_bytes(
 }
 
 fn diff_line_counts(before: &str, after: &str) -> (u32, u32) {
-  // Keep line terminators so a missing final newline changes the last line,
-  // as git counts it.
+  // Keep line terminators so a missing final newline changes the last line, as git counts it.
   let input = InternedInput::new(
     imara_diff::sources::lines_with_terminator(before),
     imara_diff::sources::lines_with_terminator(after),
@@ -979,9 +974,7 @@ fn diff_line_counts(before: &str, after: &str) -> (u32, u32) {
 const NO_NEWLINE: &str = "\\ No newline at end of file";
 
 fn build_text_hunks(before: &str, after: &str) -> Vec<JjDiffHunk> {
-  // The line diff ignores line endings, so a file's missing final newline
-  // is diffed as a marker line after its last line, then turned into git's
-  // `-old`/`+new`/`\ No newline` form.
+  // The diff ignores line endings: a missing final newline becomes a marker line, then git's form.
   let mark = |text: &str| {
     if text.is_empty() || text.ends_with('\n') {
       text.to_string()
@@ -1040,8 +1033,7 @@ fn rewrite_no_newline_marker(hunk: &mut JjDiffHunk) {
   let marker = NO_NEWLINE.to_string();
   let previous = at.checked_sub(1).map(|i| hunk.lines[i].clone());
   match (sign, previous) {
-    // Only one side lacks the newline, and its last line is unchanged
-    // text: show that line removed and added.
+    // One side lacks the newline on an unchanged last line: show that line removed and added.
     (b'-' | b'+', Some(line)) if line.starts_with(' ') => {
       let text = &line[1..];
       let (old, new) = (format!("-{text}"), format!("+{text}"));
@@ -1807,9 +1799,7 @@ username = "{}"
 // home-head-test: abandon_tip, undo_commit
 pub fn jj_abandon(workspace_path: &str, change_id: &str) -> Result<String, JjError> {
   match abandon_once(workspace_path, change_id) {
-    // Commit times are stored in whole seconds, so redoing an abandon right
-    // after undoing it can rewrite descendants into commits that already
-    // exist. A second later the rewrite gets a new timestamp.
+    // Commit times are whole seconds, so a redo right after an undo can recreate existing commits.
     Err(JjError::InitFailed(msg)) if msg.contains("already exists") => {
       std::thread::sleep(std::time::Duration::from_secs(1));
       abandon_once(workspace_path, change_id)
@@ -1845,6 +1835,9 @@ fn abandon_once(workspace_path: &str, change_id: &str) -> Result<String, JjError
 ///
 /// Fails if `operation_id` is not the current operation, so a toast Undo cannot
 /// clobber later work.
+///
+/// The restored view keeps the current record of Git's refs, as `jj op restore` does. With the
+/// old record the export would see nothing to change, and the next import would undo the restore.
 // home-head-test: undo_operation
 pub fn jj_undo_operation(workspace_path: &str, operation_id: &str) -> Result<String, JjError> {
   let mut loaded = load_workspace_repo_for_history_edit(workspace_path)?;
@@ -1861,10 +1854,7 @@ pub fn jj_undo_operation(workspace_path: &str, operation_id: &str) -> Result<Str
   let parent_repo = block_on(loaded.repo.loader().load_at(&parent))
     .map_err(|e| JjError::IoError(format!("Failed to load parent operation: {}", e)))?;
   let mut restored_view = parent_repo.view().store_view().clone();
-  // Keep the current record of Git's refs, as `jj op restore` does. With the
-  // old record, the export below would see nothing to change and leave Git's
-  // branch refs where the undone operation put them; the next import would
-  // then undo this restore.
+  // Keep the current record of Git's refs, as `jj op restore` does.
   let current = loaded.repo.view().store_view();
   restored_view.git_refs = current.git_refs.clone();
   restored_view.git_head = current.git_head.clone();
@@ -1939,8 +1929,7 @@ pub fn jj_undo_commit(
     ));
   }
 
-  // The working copy keeps its tree and moves onto the tip's parents, so the
-  // tip's changes become uncommitted (`jj abandon --restore-descendants`).
+  // Like `jj abandon --restore-descendants`: the tip's changes become uncommitted.
   let wc = resolve_commit_by_revision(&loaded, "@")?;
   let mut tx = loaded.repo.start_transaction();
   block_on(
@@ -2004,9 +1993,7 @@ pub fn jj_revert_commit(workspace_path: &str, change_id: &str) -> Result<String,
   let parent_tree = block_on(merge_commit_trees(loaded.repo.as_ref(), &parents))
     .map_err(|e| JjError::InitFailed(format!("Failed to merge parent trees: {}", e)))?;
 
-  // Diff from the commit's own tree back to its parent tree is exactly the
-  // reverse of the commit; applying it onto the current tip's tree (3-way
-  // merge, using the commit's own tree as the merge base) is a backout.
+  // The commit-to-parent diff, 3-way merged onto the tip with the commit as base, is a backout.
   let reverted_diff = Diff::new(
     (commit.tree(), commit.conflict_label()),
     (
@@ -2564,11 +2551,7 @@ fn reconcile_loaded_workspace(
   .map_err(|e| JjError::InitFailed(format!("Failed to check staleness: {}", e)))?;
 
   match freshness {
-    // Already at `repo`'s operation, or behind it with the same tree: the
-    // files are right. Finishing would only record the newer operation, an
-    // fsynced write for every workspace after every rewrite, so leave the
-    // state as it is (dropping the lock without `finish`); jj compares trees
-    // again next time.
+    // Files are right: `finish` would only add an fsynced write per workspace after every rewrite.
     WorkingCopyFreshness::Fresh => {}
     WorkingCopyFreshness::Updated(_) => {
       // `repo` is the stale side here; keep the working copy's newer operation.
@@ -2792,9 +2775,7 @@ pub fn jj_commit(workspace_path: &str, message: &str) -> Result<String, JjError>
   } else {
     resolve_home_repo_branch(workspace_path)?
   };
-  // Import git refs first, as jj does at the start of every command in a colocated
-  // repo. If jj's record of a git ref is stale (never imported, or moved by git),
-  // the export after this commit is refused and the next import conflicts the bookmark.
+  // Import first, as jj does: a stale ref record refuses the export and conflicts the bookmark.
   let mut loaded = load_workspace_repo(workspace_path)?;
   import_remaining_git_refs(&mut loaded)?;
   let LoadedWorkspaceRepo {
@@ -3209,6 +3190,16 @@ pub fn jj_rebase_workspace_bookmark_onto_deferred_checkout(
   )
 }
 
+/// Moves an explicit commit set, not `Roots`, so sibling bookmarks stay out of the move.
+///
+/// - The bookmark's whole ancestry above the target's moves. Workspace creation can leave the
+///   bookmark on an empty commit above a remote tip, and moving only that tip would detach the
+///   authored remote commits.
+/// - The workspace's working-copy commit moves explicitly. Left to the descendant pass, its stale
+///   empty delta can replay over a conflicted rebase and resolve the conflict as a deletion.
+/// - Everything stacked on the tip, and other working copies on moved commits, move too. Left
+///   out, they are reparented onto the lineage's old base, which takes home off its branch and
+///   splits the stack.
 // home-head-test: workspace_bookmark_rebase, stacked_workspace_rebase_keeps_home_on_branch, stacked_workspace_rebase_moves_chained_working_copies
 fn jj_rebase_workspace_bookmark_onto_with_checkout_mode(
   workspace_path: &str,
@@ -3236,16 +3227,10 @@ fn jj_rebase_workspace_bookmark_onto_with_checkout_mode(
     lineage_base = format!("({lineage_base} | {})", old_commit.id().hex());
   }
 
-  // Select the complete ancestry that belongs to this bookmark, stopping at
-  // the target's ancestry. Workspace creation can put the bookmark on a new
-  // empty working-copy commit above an existing remote branch tip; selecting
-  // only that tip would detach the authored remote commits during the move.
-  // An explicit commit set (rather than Roots) also prevents descendants on
-  // sibling bookmarks from becoming part of the move target.
+  // The bookmark's own ancestry, stopping at the target's.
   let branch_only_commits = evaluate_revset(
     &loaded,
-    // Other workspaces' working copies stay put: a child stacked on its
-    // parent's working copy moves onto the parent's bookmark instead.
+    // Other working copies stay: a child stacked on one moves onto the parent's bookmark instead.
     &format!(
       "({}..{}) ~ (working_copies() ~ @)",
       lineage_base,
@@ -3274,22 +3259,13 @@ fn jj_rebase_workspace_bookmark_onto_with_checkout_mode(
     .iter()
     .map(|commit| commit.id().clone())
     .collect();
-  // Treat this workspace's working-copy commit as part of the explicit move.
-  // Leaving it for the descendant pass can replay its stale empty-commit delta
-  // over a conflicted bookmark rebase and incorrectly resolve the conflict as
-  // a deletion. Keeping it explicit preserves both the conflict and the
-  // sibling-workspace isolation provided by `MoveCommitsTarget::Commits`.
+  // Moved explicitly, or the descendant pass can resolve a conflict as a deletion.
   if let Some(wc_commit) = old_wc_commit.as_ref() {
     if !commits_to_move.iter().any(|id| id == wc_commit.id()) {
       commits_to_move.insert(0, wc_commit.id().clone());
     }
   }
-  // Everything stacked on the branch tip moves with it: child workspaces sit
-  // on this branch's bookmark, and a commit set move would otherwise
-  // reparent them onto the lineage's old base. Children first, as
-  // `compute_move_commits` expects.
-  // A branch with no commits of its own has its tip on the shared base, so
-  // nothing above it is its own stack.
+  // The stack on the tip moves too, children first. A commitless branch has no stack of its own.
   let stacked = if branch_only_commits.is_empty() {
     Vec::new()
   } else {
@@ -3307,12 +3283,7 @@ fn jj_rebase_workspace_bookmark_onto_with_checkout_mode(
     .collect();
   with_stacked.append(&mut commits_to_move);
   commits_to_move = with_stacked;
-  // Other working copies sitting on moved commits move with them: the home
-  // repo on the branch this workspace is stacked on, and stacked workspaces
-  // with no commits yet, which chain on each other's working copies. Left
-  // out, the move reparents them onto the lineage's old base, which takes
-  // home off its branch and splits the stack. A working copy with commits on
-  // top stays, since moving it alone would split those commits off it.
+  // Working copies on moved commits follow, but one with commits on top stays to keep them.
   let wc_commits = revset::ResolvedRevsetExpression::commits(
     loaded
       .repo
@@ -3332,10 +3303,7 @@ fn jj_rebase_workspace_bookmark_onto_with_checkout_mode(
     .collect::<Result<Vec<_>, _>>()
     .map_err(|e| JjError::IoError(format!("Failed to load working-copy commit: {}", e)))?;
   pending.retain(|wc_commit| !moved.contains(wc_commit.id()));
-  // Repeat until nothing joins: a working copy can sit on another one that
-  // only joins in this loop. Each joins after its parents, so inserting it at
-  // the front keeps the list children-first, the order `compute_move_commits`
-  // expects.
+  // A working copy can sit on another that joins here. Front inserts keep the list children-first.
   while let Some(index) = pending
     .iter()
     .position(|wc_commit| wc_commit.parent_ids().iter().all(|id| moved.contains(id)))
@@ -3370,8 +3338,7 @@ fn jj_rebase_workspace_bookmark_onto_with_checkout_mode(
       e
     ))
   })?;
-  // A branch with no commits of its own moves up to the target: its
-  // bookmark stays below the working copy, which just moved there.
+  // A commitless branch's bookmark follows its working copy to the target, staying below it.
   if branch_only_commits.is_empty() {
     tx.repo_mut().set_local_bookmark_target(
       RefName::new(workspace_branch),
@@ -3449,6 +3416,7 @@ fn get_conflicted_files_from_branch_diff(
 
 /// Conflicted paths after importing Git state. `snapshot` false trusts a
 /// snapshot the caller just took, unless the import moved the operation.
+/// An empty working-copy child inherits a conflicted parent's tree, so tip conflicts show too.
 fn conflicted_files_in(
   loaded: &mut LoadedWorkspaceRepo,
   workspace_path: &str,
@@ -3457,8 +3425,7 @@ fn conflicted_files_in(
   let loaded_op_id = loaded.repo.op_id().clone();
   import_colocated_git_state(loaded, workspace_path)?;
 
-  // A Git import can move the working-copy commit, so the caller's snapshot
-  // no longer covers it.
+  // A Git import can move the working-copy commit, so the caller's snapshot no longer covers it.
   let snapshotted_tree_override = if snapshot || loaded.repo.op_id() != &loaded_op_id {
     snapshot_working_copy_tree(loaded, workspace_path)?.map(|(_, tree)| tree)
   } else {
@@ -3477,10 +3444,7 @@ fn conflicted_files_in(
     .get_commit(&wc_commit_id)
     .map_err(|e| JjError::IoError(format!("Failed to load wc commit: {}", e)))?;
 
-  // jj-lib MergedTree::conflicts() is the only source of truth — never scan
-  // working-copy file text for markers (false positives on literal <<<<<<<).
-  // Empty WC children inherit a conflicted parent tree, so committed-tip
-  // conflicts still appear here.
+  // Trees are the only source of truth: file text can hold a literal <<<<<<< that is no conflict.
   let mut conflicts = collect_conflict_paths_from_tree(&wc_commit.tree());
   if let Some(snapshotted_tree) = snapshotted_tree_override.as_ref() {
     conflicts.extend(collect_conflict_paths_from_tree(snapshotted_tree));
@@ -3541,8 +3505,7 @@ pub fn jj_get_committed_files(
       .map_err(|e| JjError::IoError(format!("Failed to load merge base commit: {}", e)))?
     {
       Some(commit) => commit,
-      // No common ancestor (e.g. target branch doesn't exist yet) — nothing
-      // to report as "already committed" relative to it.
+      // No common ancestor, such as a missing target branch: nothing counts as already committed.
       None => return Ok(Vec::new()),
     }
   };
@@ -4011,8 +3974,7 @@ pub fn jj_resolve_bookmark_conflict_losslessly(
       .unwrap_or_else(|| target.id().clone())
   };
 
-  // Verify the stable change IDs from the pre-operation snapshot are all
-  // ancestors of the new bookmark tip before making the operation visible.
+  // All pre-operation change IDs must be ancestors of the new tip before the op becomes visible.
   let mut pending = vec![tip_id.clone()];
   let mut seen = HashSet::new();
   let mut reachable_changes = HashSet::new();
@@ -4074,9 +4036,7 @@ fn abandon_commits_matching_revset(
       revset_expr, e
     ))
   })?;
-  // Never abandon a commit that is currently the live working-copy commit of *any*
-  // workspace (not just this one) — e.g. a stacked workspace's target may be another
-  // workspace's still-empty `@`, which must be exempt from the empty-commit policy.
+  // Never abandon any workspace's live `@`: a stacked target can be another workspace's empty `@`.
   let wc_commit_ids: HashSet<_> = loaded
     .repo
     .view()
@@ -4545,9 +4505,7 @@ pub fn workspace_has_unresolved_conflicts(workspace_path: &str) -> Result<bool, 
     .store()
     .get_commit(&wc_commit_id)
     .map_err(|e| JjError::IoError(format!("Failed to load working-copy commit: {}", e)))?;
-  // Walk the WC tree itself — tree_ids().is_resolved() is equivalent to
-  // has_conflict() for the root, but pairing this with get_conflicted_files
-  // (which uses tree.conflicts()) keeps the boolean and path list in sync.
+  // Same tree as `get_conflicted_files` reads, so this flag and its path list agree.
   Ok(wc_commit.tree().has_conflict())
 }
 
@@ -4981,8 +4939,7 @@ mod tests {
       let mut next = 0;
       for hunk in hunks {
         let ((start, count), _) = header_ranges(&hunk.header);
-        // A zero-length old side names the line after which to insert;
-        // the diff writes `-1,0` (not git's `-0,0`) for an empty file.
+        // An empty old side names the line to insert after, `-1,0` for an empty file, not `-0,0`.
         let at = if count == 0 {
           start.min(old.len())
         } else {
@@ -5361,8 +5318,7 @@ mod tests {
     git(other.path(), &["rev-parse", "HEAD"])
   }
 
-  // Two operations started from the same op head each move `main`: the race
-  // a background fetch and another jj op hit, leaving `main` conflicted.
+  // Two ops from one op head each move `main`, conflicting it as a fetch racing a jj op does.
   fn race_main_into_conflict(repo_path: &str, start: &str, a: &str, b: &str) {
     let set_main = |repo: &Arc<ReadonlyRepo>, hex: &str, name: &str| {
       let id = jj_lib::backend::CommitId::try_from_hex(hex).expect("hex");
@@ -5416,8 +5372,7 @@ mod tests {
     let (origin, home) = origin_and_home_clone();
     let home_path = home.path().to_str().unwrap();
     let base = git(home.path(), &["rev-parse", "main"]);
-    // Origin merges two sibling commits, so both race sides are on origin
-    // and neither descends from the other.
+    // Origin merges two siblings: both race sides reach origin and neither descends from the other.
     let other = TempDir::new().expect("other");
     git(
       other.path(),
@@ -5780,8 +5735,7 @@ mod tests {
     let mut loaded = load_workspace_repo(repo_path).expect("load repo");
     snapshot_working_copy_tree(&mut loaded, repo_path).expect("snapshot");
 
-    // A later operation that leaves the working copy alone, like the HEAD and
-    // refs imports those reads run.
+    // A later op leaving the working copy alone, like the HEAD and refs imports those reads run.
     let loaded = load_workspace_repo(repo_path).expect("reload repo");
     let root_id = loaded.repo.store().root_commit_id().clone();
     let mut tx = loaded.repo.start_transaction();
@@ -6500,8 +6454,7 @@ mod tests {
     init_jj_repo(&temp);
     let repo_path = temp.path().to_str().expect("utf8 path");
 
-    // Full checkout isn't an empty pattern list — it's a single pattern for the
-    // repo root, whose internal-path representation is the empty string.
+    // A full checkout is one pattern, the repo root, whose internal path is the empty string.
     let patterns = jj_get_sparse_patterns(repo_path).expect("read sparse patterns");
     assert_eq!(
       patterns,
@@ -6613,10 +6566,7 @@ mod tests {
 
     jj_import_remaining_git_refs(repo_path).expect("import remaining git refs");
 
-    // `git branch` with no explicit target points at git HEAD, which is still the
-    // "base" commit here — `jj git init --colocate` doesn't move git HEAD to jj's
-    // new (empty) @ until something reconciles them, so compare against the git
-    // commit the branch actually points at, not jj's own working-copy commit.
+    // The branch is on git HEAD, still "base" after colocating, not jj's new empty `@`.
     let imported = jj_get_commit_id(repo_path, "git-only-branch")
       .expect("branch should resolve as a jj revision after import");
     assert_eq!(

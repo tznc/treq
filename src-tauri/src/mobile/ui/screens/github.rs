@@ -120,8 +120,7 @@ impl Render for GithubScreen {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let palette = treq_ui::theme::current(cx);
     let view = cx.weak_entity();
-    // Underlined labels, as desktop's GitHub page has, so the tabs never
-    // look like the Open / Closed filter below them.
+    // Underlined, as on desktop, so the tabs never look like the Open / Closed filter below them.
     let tabs = div()
       .px_4()
       .pt_2()

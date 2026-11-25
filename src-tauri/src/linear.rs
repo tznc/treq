@@ -341,8 +341,7 @@ fn parse_graphql_response<T: DeserializeOwned>(
 }
 
 fn http_status_error(status: reqwest::StatusCode, text: &str, via_proxy: bool) -> String {
-  // The proxy explains its own failures ("Linear account not linked") in an
-  // `error` field. Those beat a generic status message.
+  // The proxy's `error` field ("Linear account not linked") beats a generic status message.
   if via_proxy {
     if let Some(message) = serde_json::from_str::<serde_json::Value>(text)
       .ok()
