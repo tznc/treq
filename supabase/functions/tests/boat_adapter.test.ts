@@ -61,7 +61,8 @@ Deno.test("boatConfigFromEnv reads the provider auto-stop backstop in minutes", 
 Deno.test("create looks up by owner and placement labels, then POSTs with the size and idempotency key", async () => {
   const { fake, provider } = setup();
   const instance = await provider.createInstance(PARAMS);
-  const [lookup, create] = fake.requests;
+  const lookup = defined(fake.requests[0]);
+  const create = defined(fake.requests[1]);
   assertEquals(lookup.method, "GET");
   assertEquals(lookup.path, "/sandboxes");
   assertEquals(lookup.search.getAll("label"), ["treq_owner=owner_1", "treq_placement=idem-1"]);
@@ -81,8 +82,9 @@ Deno.test("create looks up by owner and placement labels, then POSTs with the si
 
 Deno.test("create without a machine type uses Boat's default size", async () => {
   const { fake, provider } = setup();
-  await provider.createInstance({ ...PARAMS, machineType: undefined });
-  assertEquals((fake.requests[1].body as { type: string }).type, "default");
+  const { machineType: _, ...withoutMachineType } = PARAMS;
+  await provider.createInstance(withoutMachineType);
+  assertEquals((defined(fake.requests[1]).body as { type: string }).type, "default");
 });
 
 Deno.test("create returns the existing sandbox for the same placement under a new key", async () => {
@@ -298,6 +300,6 @@ Deno.test("getInstance reports the provider's updatedAt as stateChangedAt", asyn
   fake.sandboxes.set("bx_t", {
     id: "bx_t", name: "t", state: "archived", type: "small", labels: {}, ip: null, sshEndpoint: null,
     updatedAt: "2026-10-28T10:01:00Z",
-  } as unknown as Parameters<typeof fake.sandboxes.set>[1]);
+  });
   assertEquals((await provider.getInstance("bx_t")).stateChangedAt, "2026-10-28T10:01:00Z");
 });

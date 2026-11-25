@@ -2,12 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fetchWithTimeout } from "../../supabase/functions/_shared/http/fetch-with-timeout";
 
 // A fetch that never responds and only settles when its signal aborts.
-const hangingFetch = ((_input: unknown, init?: RequestInit) =>
+const hangingFetch: typeof fetch = (_input, init) =>
   new Promise<Response>((_resolve, reject) => {
     const signal = init?.signal;
     if (signal?.aborted) return reject(signal.reason);
     signal?.addEventListener("abort", () => reject(signal.reason));
-  })) as unknown as typeof fetch;
+  });
 
 afterEach(() => {
   vi.useRealTimers();
@@ -15,9 +15,7 @@ afterEach(() => {
 
 describe("fetchWithTimeout", () => {
   it("passes a successful response through", async () => {
-    const fetchImpl = vi.fn(
-      async () => new Response("ok"),
-    ) as unknown as typeof fetch;
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("ok"));
     const res = await fetchWithTimeout(
       "https://example.test",
       { method: "POST" },

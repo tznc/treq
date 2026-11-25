@@ -493,8 +493,7 @@ fn poll_one_repo(inner: &Inner, repo_path: &str) {
         info
       }
       Err(e) => {
-        // Keep prior cache entry on transient gh failures so the UI
-        // does not flicker to "no PR".
+        // Keep the prior cache entry on transient gh failures so the UI doesn't flicker to "no PR".
         log::warn!("pr-status: fetch failed for {repo_path}#{branch}: {e}");
         if let Some(prev) = inner
           .cache
@@ -537,8 +536,7 @@ fn poll_ci_only(inner: &Inner, repo_path: &str) {
     .cloned()
     .unwrap_or_default();
 
-  // With the bulk call a full refresh costs one `gh` spawn, no more than the
-  // CI rollups alone would.
+  // With the bulk call a full refresh costs one `gh` spawn, no more than the CI rollups alone.
   if pr_cache.is_empty() || inner.bulk_fetch.is_some() {
     poll_one_repo(inner, repo_path);
     return;
@@ -780,8 +778,7 @@ pub fn synced_repo(payload: &str) -> Option<String> {
 /// Attach a Tauri event emitter so cache refreshes notify the frontend.
 pub fn set_app_handle(app: tauri::AppHandle) {
   use tauri::Emitter;
-  // Listeners re-read the cache, so the event carries only which repo changed,
-  // and only when what the poll found differs from the last event.
+  // Listeners re-read the cache, so emit only the repo path, and only when its result changed.
   let last_emitted: Mutex<HashMap<String, u64>> = Mutex::new(HashMap::new());
   global().set_on_update(Arc::new(move |repo_path, statuses, ci_statuses| {
     // Follow GitHub retargets and merged bases before the UI rereads stacks.

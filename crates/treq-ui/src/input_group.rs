@@ -2,6 +2,7 @@
 //! (Bootstrap's input group). For a field whose value comes from an action,
 //! such as a picker, rather than only from typing.
 
+use crate::SelectorExt as _;
 use gpui::{div, prelude::*, AnyElement, App, SharedString, Window};
 
 use crate::{theme, theme::Palette, zpx};
@@ -46,11 +47,9 @@ impl RenderOnce for InputGroup {
   fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
     let p = self.palette;
     let height = theme::Density::current(cx).control_height();
-    let selector = self.id.to_string();
     let id = self.id.clone();
     div()
-      .id(self.id)
-      .debug_selector(move || selector)
+      .selector(self.id)
       .flex()
       .min_w_0()
       .h(zpx(height))
@@ -71,7 +70,7 @@ impl RenderOnce for InputGroup {
       .children(self.addons.into_iter().enumerate().map(move |(i, addon)| {
         let selector = format!("{id}-addon-{i}");
         div()
-          .debug_selector(move || selector)
+          .selector(selector)
           .flex_none()
           .h_full()
           .flex()

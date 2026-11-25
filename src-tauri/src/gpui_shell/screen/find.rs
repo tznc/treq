@@ -350,8 +350,7 @@ pub(in crate::gpui_shell::screen) fn bar<V: Findable>(
   );
   let close_button = button("close", theme::ICON_X, "Close search", "Close (Esc)", None);
   Some(
-    // Pre-existing mixed sizes, to triage.
-    // ast-grep-ignore: gpui-row-one-text-size
+    // Pre-existing mixed sizes, to triage. ast-grep-ignore: gpui-row-one-text-size
     div()
       .id(id)
       .debug_selector(move || id.into())

@@ -22,14 +22,6 @@ const tools = [
     tags: ['git', 'visualization'],
   },
   {
-    name: 'DAG Visualizer',
-    slug: 'dag-visualizer',
-    description:
-      'Map AI-aided engineering workflows as interactive DAGs. Edit prompts and slash skills per node.',
-    icon: '🔀',
-    tags: ['ai', 'workflow', 'dag'],
-  },
-  {
     name: 'Gherkin BDD Editor',
     slug: 'gherkin-editor',
     description:
@@ -91,7 +83,7 @@ export default function ToolsPage() {
         </div>
         <div className={styles.grid}>
           {tools.map((tool) => (
-            <Link key={tool.slug} to={`/tools/${tool.slug}`} className={styles.card}>
+            <Link key={tool.slug} to={`/tools/${tool.slug}`} className={styles.card ?? ''}>
               <div className={styles.cardIcon}>{tool.icon}</div>
               <div className={styles.cardBody}>
                 <h2 className={styles.cardTitle}>{tool.name}</h2>

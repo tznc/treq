@@ -1,17 +1,18 @@
 .cardContainer {
-  --ifm-link-color: var(--ifm-color-emphasis-800);
-  --ifm-link-hover-color: var(--ifm-color-emphasis-700);
+  --ifm-link-color: var(--treq-fg);
+  --ifm-link-hover-color: var(--treq-fg);
   --ifm-link-hover-decoration: none;
 
   box-shadow: none;
-  border: 1px solid #e7e5e4;
-  border-radius: 12px;
-  transition: border-color var(--ifm-transition-fast) ease;
+  border: 1px solid var(--treq-line);
+  border-radius: 10px;
+  transition: border-color var(--ifm-transition-fast) ease, transform 0.2s ease;
   padding: 1rem 1.15rem !important;
 }
 
 .cardContainer:hover {
-  border-color: var(--ifm-color-primary);
+  border-color: var(--treq-line-strong);
+  transform: translateY(-2px);
   box-shadow: none;
 }
 

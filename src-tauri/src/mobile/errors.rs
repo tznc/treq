@@ -66,8 +66,7 @@ pub fn describe(raw: &str) -> Problem {
       Some(Fix::ReviewHostKey),
     );
   }
-  // Before the SSH key check: a Git remote that refuses the host's
-  // credentials says "Authentication failed" or "Permission denied" too.
+  // Before the SSH key check: a Git remote refusing credentials also says "Permission denied".
   if has("push failed")
     && (has("could not read username")
       || has("authentication failed for")
@@ -138,8 +137,7 @@ pub fn describe(raw: &str) -> Problem {
       None,
     );
   }
-  // The CLI failed with nothing on stdout or stderr to say why: most often
-  // a treq that is missing, broken or too old for this app.
+  // A silent CLI failure most often means treq on the host is missing, broken or too old.
   if has("remote treq command failed") {
     return Problem::new(
       "treq on this host failed without saying why. Check that treq is installed and up to date there, then try again.",

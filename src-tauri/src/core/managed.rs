@@ -82,7 +82,10 @@ pub fn reason_code(reason: CutoffReason) -> &'static str {
 pub fn parse_time_ms(iso: &str) -> i64 {
   chrono::DateTime::parse_from_rfc3339(iso)
     .map(|t| t.timestamp_millis())
-    .unwrap_or_else(|_| now_ms() + 20 * 60 * 1000)
+    .unwrap_or_else(|e| {
+      log::warn!("Unreadable expiry time {iso:?} ({e}); assuming 20 minutes from now");
+      now_ms() + 20 * 60 * 1000
+    })
 }
 
 /// `composeManagedEndpoint`: the server's endpoint, authenticated with the
@@ -377,12 +380,23 @@ mod tests {
   struct Recorder {
     renewed: Mutex<Vec<String>>,
     cut: Mutex<Vec<CutoffReason>>,
+    renewal: tokio::sync::Notify,
+  }
+
+  impl Recorder {
+    /// Waits for a renewal, failing after `timeout`.
+    async fn wait_for_renewal(&self, timeout: Duration) {
+      tokio::time::timeout(timeout, self.renewal.notified())
+        .await
+        .expect("no renewal in time");
+    }
   }
 
   #[async_trait]
   impl RenewalHooks for Recorder {
     fn renewed(&self, _: &Lease, endpoint: SshEndpoint) {
       self.renewed.lock().unwrap().push(endpoint.id);
+      self.renewal.notify_one();
     }
     async fn cut_off(&self, _: &Lease, reason: CutoffReason) {
       self.cut.lock().unwrap().push(reason);
@@ -484,12 +498,7 @@ mod tests {
       hooks.clone(),
       fast,
     ));
-    for _ in 0..200 {
-      if !hooks.renewed.lock().unwrap().is_empty() {
-        break;
-      }
-      tokio::time::sleep(Duration::from_millis(5)).await;
-    }
+    hooks.wait_for_renewal(Duration::from_secs(5)).await;
     task.abort();
     assert_eq!(*hooks.renewed.lock().unwrap(), ["e1"]);
     assert!(hooks.cut.lock().unwrap().is_empty());
@@ -529,12 +538,7 @@ mod tests {
       fast,
     ));
     // The first renewal is due at 800 ms of the 1 s lease.
-    for _ in 0..2000 {
-      if !hooks.renewed.lock().unwrap().is_empty() {
-        break;
-      }
-      tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    hooks.wait_for_renewal(Duration::from_secs(20)).await;
     task.abort();
     assert_eq!(*hooks.renewed.lock().unwrap(), ["e1"]);
     assert!(hooks.cut.lock().unwrap().is_empty());
@@ -576,7 +580,8 @@ mod tests {
       fast,
     ));
     task.abort();
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    // Once the task is cancelled, its loop is gone for good.
+    assert!(task.await.unwrap_err().is_cancelled());
     assert!(hooks.renewed.lock().unwrap().is_empty());
     assert!(hooks.cut.lock().unwrap().is_empty());
   }

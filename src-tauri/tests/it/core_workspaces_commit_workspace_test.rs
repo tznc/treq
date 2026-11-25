@@ -342,8 +342,8 @@ fn test_create_commit_keeps_empty_working_copy_when_self_targeted() {
   )
   .expect("Failed to create workspace");
 
-  // Set the workspace's target_branch to itself so that post-commit
-  // rebase_after_commit picks it up and exercises the jj_sync_working_copy_if_safe
+  // Pointing the workspace's target_branch at itself makes post-commit
+  // rebase_after_commit pick it up and exercise the jj_sync_working_copy_if_safe
   // code path (auto_rebase/mod.rs branch_name == target_branch branch).
   treq_lib::local_db::update_workspace_target_branch(
     &repo.repo_path,

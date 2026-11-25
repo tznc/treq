@@ -55,7 +55,8 @@ const SIZE_PRESETS: Readonly<Record<string, string>> = {
 
 /** The size tier's name. Rows from before tiers only have a size preset. */
 export function sizeLabel(machine: Pick<Machine, "tier_id" | "size_preset">): string {
-  if (machine.tier_id && TIERS[machine.tier_id]) return TIERS[machine.tier_id];
+  const tier = machine.tier_id ? TIERS[machine.tier_id] : undefined;
+  if (tier) return tier;
   return SIZE_PRESETS[machine.size_preset] ?? machine.size_preset;
 }
 

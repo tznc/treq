@@ -84,8 +84,7 @@ pub(super) fn apply(conn: &Connection) -> Result<(), String> {
     )
     .map_err(|e| format!("Failed to create sessions table: {}", e))?;
 
-  // Before the rebuild below, which copies `model`: sessions tables that
-  // predate it still have `worktree_id`.
+  // Before the rebuild, which copies `model`: older sessions tables still have `worktree_id`.
   conn
     .execute("ALTER TABLE sessions ADD COLUMN model TEXT", [])
     .best_effort();
@@ -228,8 +227,7 @@ pub(super) fn apply(conn: &Connection) -> Result<(), String> {
     )
     .map_err(|e| format!("Failed to create pending_reviews table: {}", e))?;
 
-  // Migration: add conflict_comments column to pending_reviews if missing
-  // (covers DBs created before conflict comments were persisted).
+  // Adds pending_reviews.conflict_comments to DBs from before conflict comments persisted.
   let has_conflict_comments_column: Result<i64, _> = conn.query_row(
     "SELECT COUNT(*) FROM pragma_table_info('pending_reviews') WHERE name = 'conflict_comments'",
     [],
@@ -282,8 +280,7 @@ pub(super) fn apply(conn: &Connection) -> Result<(), String> {
     )
     .map_err(|e| format!("Failed to create pending_reviews workspace index: {}", e))?;
 
-  // Separate pending-review session for the FileBrowser's "review any file" flow —
-  // intentionally not shared with pending_reviews (the Review/Changes-tab session).
+  // FileBrowser's "review any file" session, apart from the Changes tab's pending_reviews.
   conn
     .execute(
       "CREATE TABLE IF NOT EXISTS file_browser_reviews (
@@ -305,11 +302,7 @@ pub(super) fn apply(conn: &Connection) -> Result<(), String> {
     )
     .map_err(|e| format!("Failed to create file_browser_reviews workspace index: {}", e))?;
 
-  // Local-only review comments left by a review agent. Deliberately never
-  // synced to GitHub — `source` records where a row came from so other local
-  // producers can be added later, and `target_type`/`target_id` keep the table
-  // generic over what was reviewed (a workspace diff, a FileBrowser file, and
-  // later other content types).
+  // Local review-agent comments, never synced to GitHub, generic over `source` and `target_type`.
   conn
     .execute(
       "CREATE TABLE IF NOT EXISTS agent_review_comments (
@@ -333,8 +326,7 @@ pub(super) fn apply(conn: &Connection) -> Result<(), String> {
     )
     .map_err(|e| format!("Failed to create agent_review_comments table: {}", e))?;
 
-  // Migration: add `source` to agent_review_comments if missing (covers DBs
-  // created before other local comment producers were anticipated).
+  // Adds agent_review_comments.source to DBs from before other comment producers were planned.
   let has_agent_review_source_column: Result<i64, _> = conn.query_row(
     "SELECT COUNT(*) FROM pragma_table_info('agent_review_comments') WHERE name = 'source'",
     [],
@@ -349,9 +341,7 @@ pub(super) fn apply(conn: &Connection) -> Result<(), String> {
       .map_err(|e| format!("Failed to add agent_review_comments source column: {}", e))?;
   }
 
-  // Migration: add `quoted_text` (the exact reviewed text a comment covers).
-  // Linear targets apply a suggestion by finding this text in the live
-  // Linear content, since their line numbers only hold for one snapshot.
+  // Adds `quoted_text`: Linear suggestions find it in live content, since line numbers go stale.
   let has_agent_review_quoted_text_column: Result<i64, _> = conn.query_row(
     "SELECT COUNT(*) FROM pragma_table_info('agent_review_comments') WHERE name = 'quoted_text'",
     [],
@@ -414,9 +404,7 @@ pub(super) fn apply(conn: &Connection) -> Result<(), String> {
     )
     .map_err(|e| format!("Failed to create instance_registry heartbeat index: {}", e))?;
 
-  // What happened in each code review, kept 30 days so an agent can tune
-  // the review prompt from it: every review-agent comment with what the
-  // user did about it, and every review the user sent to an agent.
+  // Each code review's outcome, kept 30 days so an agent can tune the review prompt from it.
   conn
     .execute_batch(
       "CREATE TABLE IF NOT EXISTS review_history (

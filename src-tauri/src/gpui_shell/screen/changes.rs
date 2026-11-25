@@ -359,9 +359,7 @@ impl ChangesView {
       return;
     }
     let moved = self.parent.key() != parent.key();
-    // Not on `parent.revision`: React bumps that after every read this tab
-    // reports (`handleRefreshingChange` invalidates the commit caches), so
-    // it would read forever. Its own `options.revision` covers file changes.
+    // Not on `parent.revision`, which React bumps after every read here: it would loop forever.
     let reread = moved
       || self.options.revision != options.revision
       || self.options.show_committed != options.show_committed;
@@ -696,8 +694,7 @@ impl ChangesView {
       .map(|f| f.path.clone())
       .filter(|p| !snapshot.generated.contains(p) || self.loaded_generated.contains(p))
       .collect();
-    // A refresh of an unchanged working copy (window focus, a watcher event
-    // for an ignored write) has no hunk to read again.
+    // A refresh of an unchanged working copy (focus, an ignored write) has no hunk to read again.
     let current = snapshot.token.is_some()
       && snapshot.token == self.hunks_token
       && paths.len() == self.hunks.len()
@@ -708,8 +705,7 @@ impl ChangesView {
           .is_some_and(|d| !d.loading && d.error.is_none())
       });
     let token = snapshot.token.clone();
-    // A refresh that finds the same files keeps the snapshot, and with it
-    // the committed hunks the rows were laid out from.
+    // The same files keep the snapshot, and with it the committed hunks the rows came from.
     if self.snapshot.as_ref() != Some(&snapshot) {
       self.snapshot = Some(snapshot);
       self.layout_gen += 1;
@@ -815,8 +811,7 @@ impl ChangesView {
       }
       None => (None, HashMap::new()),
     };
-    // What the batch's files show now, so the read compares against it off
-    // the main thread.
+    // What the batch's files show now, for the off-main-thread read to compare against.
     let shown: HashMap<String, (Arc<Vec<JjDiffHunk>>, Option<String>)> = batch
       .iter()
       .filter_map(|path| {
@@ -833,8 +828,7 @@ impl ChangesView {
           batch,
           read_from.as_deref(),
         )?;
-        // A refresh reads every file again; one that reads the same keeps
-        // its hunks, so its rows and marks are not redone.
+        // A file that reads the same keeps its hunks, so its rows and marks are not redone.
         let files: Vec<_> = read
           .files
           .into_iter()
@@ -1328,8 +1322,7 @@ impl ChangesView {
     let split = !staged.is_empty();
     let (host, parent) = (self.host.clone(), self.parent.clone());
     let key = parent.key();
-    // The commit is reported as soon as it lands; the push is a second stage
-    // with its own feedback, and runs even if the tab moved on meanwhile.
+    // The commit reports on landing. The push follows with its own feedback, even if the tab moved.
     cx.spawn(async move |this, cx| {
       let (work_host, work_parent) = (host.clone(), parent.clone());
       let committed = cx
@@ -1429,8 +1422,7 @@ impl ChangesView {
         if let InputEvent::Change = event {
           let was_empty = view.message.trim().is_empty();
           view.message = state.read(cx).value().to_string();
-          // The view draws only whether the message is empty, and the
-          // error a keystroke clears; the box redraws itself.
+          // Redraws only for emptiness or a cleared error: the input box redraws itself.
           if view.message_error.take().is_some() || was_empty != view.message.trim().is_empty() {
             cx.notify();
           }
@@ -1551,8 +1543,7 @@ impl ChangesView {
 
   /// `handleExpandContext`; `all` reads the whole gap ("Expand all").
   fn expand_context(&mut self, path: &str, h: usize, dir: Dir, all: bool, cx: &mut Context<Self>) {
-    // A committed card's lines are read from the working copy, which only
-    // matches the branch head while the file has no uncommitted edits.
+    // Committed lines come from the working copy, which matches the head only without edits.
     if !self.hunks.contains_key(path)
       && self
         .snapshot
@@ -1922,8 +1913,7 @@ impl Render for ChangesView {
     self.place_threads();
     self.index_matches();
     self.reveal_match(window, cx);
-    // Drawn lines record their layouts afresh each frame; a scrolled-off
-    // line must not be found under the pointer.
+    // Lines record layouts each frame, so a scrolled-off line is never found under the pointer.
     self.review.layouts.borrow_mut().clear();
     self.reveal_line(window, cx);
     self.scroll_to_file(window, cx);
@@ -3619,8 +3609,7 @@ impl ChangesView {
           "Base" => Tone::Warning,
           _ => Tone::DiffAdded,
         };
-        // Short label (['badge']): 11px is fine.
-        // ast-grep-ignore: gpui-text-xs-short-label-only
+        // Short label (badge). ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .debug_selector(move || format!("conflict-label-{label}"))
           .mr_2()
@@ -3697,8 +3686,7 @@ impl ChangesView {
       .gap_2()
       .font_family(theme::SANS_FONT)
       .child(
-        // Short label (['line-range meta']): 11px is fine.
-        // ast-grep-ignore: gpui-text-xs-short-label-only
+        // Short label (line-range meta). ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .flex()
           .items_center()

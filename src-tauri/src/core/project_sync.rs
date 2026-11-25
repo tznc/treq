@@ -303,8 +303,8 @@ mod tests {
   }
 
   #[cfg(feature = "gui")]
-  #[tokio::test]
-  async fn runner_runs_only_while_signed_in() {
+  #[test]
+  fn runner_runs_only_while_signed_in() {
     let runs = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let runner = Runner::default();
     let start = |runs: Arc<std::sync::atomic::AtomicUsize>| {
@@ -317,13 +317,11 @@ mod tests {
     runner.signed_in(start(runs.clone()));
     // A token refresh signs in again: still one loop.
     runner.signed_in(start(runs.clone()));
-    // The loop runs on the app runtime: give it a moment to start.
-    for _ in 0..100 {
-      if runs.load(std::sync::atomic::Ordering::SeqCst) > 0 {
-        break;
-      }
-      tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
+    // The loop runs on the app runtime: wait for it to start.
+    assert!(crate::test_repo::wait_until(
+      std::time::Duration::from_secs(5),
+      || runs.load(std::sync::atomic::Ordering::SeqCst) > 0
+    ));
     assert!(runner.is_running());
     assert_eq!(runs.load(std::sync::atomic::Ordering::SeqCst), 1);
     runner.signed_out();

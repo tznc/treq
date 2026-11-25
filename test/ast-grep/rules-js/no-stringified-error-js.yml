@@ -1,0 +1,45 @@
+id: no-stringified-error-js
+language: javascript
+severity: error
+message: >
+  Do not stringify a caught error with String(err), `${err}`, "..." + err or
+  err.toString(): the string drops the stack and cause. Narrow with
+  `err instanceof Error`, rethrow with `new Error("...", { cause: err })`, log
+  the error object itself, or use the area's errorMessage(err) helper.
+# Same rule as no-stringified-error-ts; see its note.
+files: ["**/*.js", "**/*.mjs", "**/*.cjs", "**/*.jsx"]
+rule:
+  all:
+    - any:
+        - pattern: String($E)
+        - pattern: $E.toString()
+        - kind: template_substitution
+          has:
+            kind: identifier
+            pattern: $E
+        - kind: binary_expression
+          all:
+            - has:
+                field: operator
+                regex: '^\+$'
+            - has:
+                kind: identifier
+                pattern: $E
+            - has:
+                any:
+                  - kind: string
+                  - kind: template_string
+    - inside:
+        stopBy: end
+        any:
+          - kind: catch_clause
+            has:
+              field: parameter
+              pattern: $E
+          # The callback passed to promise.catch().
+          - pattern: '$P.catch(($E) => $B)'
+          - pattern: '$P.catch($E => $B)'
+          - pattern: '$P.catch(async ($E) => $B)'
+          - pattern: '$P.catch(async $E => $B)'
+          - pattern: '$P.catch(function ($E) { $$$ })'
+          - pattern: '$P.catch(async function ($E) { $$$ })'

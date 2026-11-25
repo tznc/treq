@@ -838,8 +838,7 @@ pub fn full_path(workspace_path: &str, path: &str) -> String {
 /// `computeHunksHash`: djb2 over each hunk's header and lines, in hex.
 pub fn hunks_hash(hunks: &[JjDiffHunk]) -> String {
   let mut hash: u64 = 5381;
-  // JavaScript's `charCodeAt` counts UTF-16 units. Hashed piece by piece,
-  // as the hunks' text joined with `|`, without building that string.
+  // Hashes UTF-16 units, as JS `charCodeAt` counts, over the `|`-joined hunks without joining.
   let mut add = |text: &str| {
     for unit in text.encode_utf16() {
       hash = (hash * 33 + u64::from(unit)) % (1 << 32);

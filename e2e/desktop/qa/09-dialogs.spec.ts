@@ -26,7 +26,7 @@ const SCRATCH_TITLE = "QA scratch space";
 
 const heading = (p: Page) => p.getByRole("heading", { name: "New workspace" });
 
-test("dialogs: create workspace", async ({ page, context }) => {
+test("dialogs: create workspace", async ({ page }) => {
   await home(page);
   await page.keyboard.press(`${mod}+n`);
   await expect(heading(page)).toBeVisible();
@@ -102,7 +102,7 @@ test("dialogs: create workspace", async ({ page, context }) => {
   });
 });
 
-test("dialogs: delete workspace", async ({ page, context }) => {
+test("dialogs: delete workspace", async ({ page }) => {
   await home(page);
   await page.keyboard.press(`${mod}+k`);
   const palette = page;
@@ -130,7 +130,7 @@ test("dialogs: delete workspace", async ({ page, context }) => {
   });
   // Picking asks first, in the in-app confirmation: the question names
   // the workspace, and the buttons are Cancel and "Delete workspace".
-  await dialog.keyboard.press("Enter").catch(() => {});
+  await dialog.keyboard.press("Enter");
   const question = page.getByRole("dialog", { name: /^Delete .*qa-scratch.*\?$/ });
   const remove = page.getByTestId("confirm-confirm");
   await expect(question).toBeVisible();
@@ -162,7 +162,7 @@ test("dialogs: delete workspace", async ({ page, context }) => {
   await expect(page.getByRole("button", { name: /qa-scratch/ })).toHaveCount(0);
 });
 
-test("dialogs: stack workspace", async ({ page, context }) => {
+test("dialogs: stack workspace", async ({ page }) => {
   await openWorkspace(page, "feat/keyvalues-cache");
   await row(page, "feat/keyvalues-cache").hover();
   await row(page, "feat/keyvalues-cache").getByRole("button", { name: "Stack on this…" }).click();
@@ -197,7 +197,7 @@ test("dialogs: stack workspace", async ({ page, context }) => {
   await again.getByRole("button", { name: "Close" }).click();
 });
 
-test("dialogs: rename workspace from the context menu", async ({ page, context }) => {
+test("dialogs: rename workspace from the context menu", async ({ page }) => {
   await ready(page);
   await row(page, "feat/alerting-logs").click({ button: "right" });
   await settle(page, 1000);
@@ -268,7 +268,7 @@ test("dialogs: rename workspace from the context menu", async ({ page, context }
   await expect(name(dialog)).toHaveCount(0);
 });
 
-test("dialogs: agent prompt (Ctrl+I) and its pickers", async ({ page, context }) => {
+test("dialogs: agent prompt (Ctrl+I) and its pickers", async ({ page }) => {
   await openWorkspace(page, "feat/keyvalues-cache");
   await page.keyboard.press(`${mod}+i`);
   const title = (p: Page) => p.getByRole("dialog", { name: "Start a new agent session" });

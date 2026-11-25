@@ -11,6 +11,7 @@
 // verify_jwt is off in config.toml because sandbox tokens are not Supabase
 // JWTs; lib.ts checks both.
 
+// @ts-types="npm:@types/express@^4.17.25"
 import express from "npm:express@^4.21.2";
 import { createClient } from "npm:@supabase/supabase-js@2.95.3";
 import { fetchWithTimeout } from "../_shared/http/fetch-with-timeout.ts";
@@ -45,6 +46,15 @@ async function placementSecret(placementId: string) {
   return typeof data === "string" && data ? { secret: data, ownerUserId } : null;
 }
 
+/** A row of github_user_tokens_load. */
+interface GrantRow {
+  access_token: string;
+  refresh_token: string | null;
+  expires_at: string | null;
+  refresh_expires_at: string | null;
+  updated_at: string;
+}
+
 /** githubUserToken's dependencies for `userId`'s grant in Vault. */
 function userTokenDeps(userId: string): UserTokenDeps {
   const clientId = Deno.env.get("GITHUB_APP_CLIENT_ID");
@@ -58,14 +68,14 @@ function userTokenDeps(userId: string): UserTokenDeps {
           p_user_id: userId,
         });
         if (error) throw new Error(error.message);
-        const row = (data as Record<string, string | null>[] | null)?.[0];
+        const row = (data as GrantRow[] | null)?.[0];
         return row
           ? ({
-            accessToken: row.access_token as string,
+            accessToken: row.access_token,
             refreshToken: row.refresh_token,
             expiresAt: row.expires_at,
             refreshExpiresAt: row.refresh_expires_at,
-            updatedAt: row.updated_at as string,
+            updatedAt: row.updated_at,
           } satisfies StoredGrant)
           : null;
       },

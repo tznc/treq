@@ -598,7 +598,8 @@ mod tests {
       source: SshEndpointSource::UserManaged,
       hostname: addr.ip().to_string(),
       port: addr.port(),
-      username: std::env::var("USER").unwrap_or_else(|_| "user".to_string()),
+      // The test server accepts any user.
+      username: "user".to_string(),
       host_keys: vec![trusted_host_key(host_key)],
       authentication: SshAuthentication::PublicKey { key_reference },
       transport: Default::default(),

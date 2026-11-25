@@ -8,13 +8,13 @@ fn symlink_included_dirs_links_directory_to_home_repo() {
   let temp = tempfile::TempDir::new().expect("temp dir");
   let home = temp.path().join("home");
   let workspace = temp.path().join("workspace");
-  fs::create_dir_all(home.join("node_modules/pkg")).expect("create source dir");
-  fs::write(
+  TestRepo::ensure_dir(home.join("node_modules/pkg")).expect("create source dir");
+  TestRepo::write_path(
     home.join("node_modules/pkg/index.js"),
     "module.exports = 1;\n",
   )
   .expect("write source file");
-  fs::create_dir_all(&workspace).expect("create workspace");
+  TestRepo::ensure_dir(&workspace).expect("create workspace");
 
   treq_lib::core::symlink_included_dirs(
     home.to_str().unwrap(),
@@ -49,8 +49,8 @@ fn symlink_included_dirs_skips_missing_paths() {
   let temp = tempfile::TempDir::new().expect("temp dir");
   let home = temp.path().join("home");
   let workspace = temp.path().join("workspace");
-  fs::create_dir_all(&home).expect("create home");
-  fs::create_dir_all(&workspace).expect("create workspace");
+  TestRepo::ensure_dir(&home).expect("create home");
+  TestRepo::ensure_dir(&workspace).expect("create workspace");
 
   treq_lib::core::symlink_included_dirs(
     home.to_str().unwrap(),
@@ -69,9 +69,9 @@ fn symlink_included_dirs_creates_parent_dirs_for_nested_path() {
   let temp = tempfile::TempDir::new().expect("temp dir");
   let home = temp.path().join("home");
   let workspace = temp.path().join("workspace");
-  fs::create_dir_all(home.join("vendor/cache")).expect("create source");
-  fs::write(home.join("vendor/cache/data.bin"), "cached").expect("write");
-  fs::create_dir_all(&workspace).expect("create workspace");
+  TestRepo::ensure_dir(home.join("vendor/cache")).expect("create source");
+  TestRepo::write_path(home.join("vendor/cache/data.bin"), "cached").expect("write");
+  TestRepo::ensure_dir(&workspace).expect("create workspace");
 
   treq_lib::core::symlink_included_dirs(
     home.to_str().unwrap(),
@@ -98,9 +98,9 @@ fn symlink_included_dirs_links_files() {
   let temp = tempfile::TempDir::new().expect("temp dir");
   let home = temp.path().join("home");
   let workspace = temp.path().join("workspace");
-  fs::create_dir_all(&home).expect("create home");
-  fs::write(home.join(".env.local"), "SECRET=1\n").expect("write");
-  fs::create_dir_all(&workspace).expect("create workspace");
+  TestRepo::ensure_dir(&home).expect("create home");
+  TestRepo::write_path(home.join(".env.local"), "SECRET=1\n").expect("write");
+  TestRepo::ensure_dir(&workspace).expect("create workspace");
 
   treq_lib::core::symlink_included_dirs(
     home.to_str().unwrap(),
@@ -125,9 +125,9 @@ fn create_workspace_symlinks_configured_dirs_from_home_repo() {
   repo
     .commit_file(".gitignore", "node_modules/\n", "add gitignore")
     .expect("Failed to commit .gitignore");
-  fs::create_dir_all(Path::new(&repo.repo_path).join("node_modules/left-pad"))
+  TestRepo::ensure_dir(Path::new(&repo.repo_path).join("node_modules/left-pad"))
     .expect("create node_modules");
-  fs::write(
+  TestRepo::write_path(
     Path::new(&repo.repo_path).join("node_modules/left-pad/index.js"),
     "module.exports = 'pad';\n",
   )
@@ -173,9 +173,9 @@ fn create_workspace_can_copy_and_symlink_together() {
   repo
     .create_file(".env", "SECRET=1\n")
     .expect("Failed to create .env");
-  fs::create_dir_all(Path::new(&repo.repo_path).join("node_modules/x"))
+  TestRepo::ensure_dir(Path::new(&repo.repo_path).join("node_modules/x"))
     .expect("create node_modules");
-  fs::write(
+  TestRepo::write_path(
     Path::new(&repo.repo_path).join("node_modules/x/a.js"),
     "export {};\n",
   )

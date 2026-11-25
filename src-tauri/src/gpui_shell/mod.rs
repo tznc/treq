@@ -41,6 +41,8 @@ pub use screen::bench;
 mod shortcuts;
 mod sidebar;
 mod sidebar_actions;
+#[cfg(test)]
+mod test_helpers;
 use treq_ui::theme;
 mod time;
 mod title_bar;
@@ -137,8 +139,7 @@ impl Shell {
       let keystroke = &event.keystroke;
       let m = keys::held(keystroke.modifiers);
       let within = |name: &str| event.context_stack.iter().any(|c| c.contains(name));
-      // An open dialog (the palette, the shortcuts sheet, a picker) takes
-      // every key, its own Escape included.
+      // An open dialog (palette, shortcuts sheet, picker) takes every key, its own Escape included.
       if within(overlay::KEY_CONTEXT) {
         return;
       }
@@ -194,9 +195,7 @@ impl Render for Shell {
     static FIRST: std::sync::Once = std::sync::Once::new();
     FIRST.call_once(|| {
       crate::startup::mark("first render");
-      // The syntax set takes a while to load; load it before the first
-      // diff, but after the first frame, which it would compete with for a
-      // core.
+      // The syntax set loads slowly: after the first frame, which it would slow, before any diff.
       window.on_next_frame(|_, _| {
         std::thread::Builder::new()
           .name("warm-highlighting".into())
@@ -232,8 +231,7 @@ impl Render for Shell {
       .size_full()
       .flex()
       .font_family(theme::SANS_FONT)
-      // A click anywhere in the window closes an open menu, as one outside
-      // a native menu does.
+      // A click anywhere closes an open menu, as a click outside a native menu does.
       .capture_any_mouse_down(move |_, window, cx| {
         // Blurs the focused input too, as a browser does.
         window.blur(cx);
@@ -242,8 +240,7 @@ impl Render for Shell {
       .bg(theme::palette(dark).background)
       .when_some(self.sidebar.clone(), |this, sidebar| {
         let sidebar = Sidebar::element(&sidebar, cx);
-        // The cut-off overlay spans the sidebar too; the workspace view
-        // dims its own part below the remote strip.
+        // The cut-off overlay covers the sidebar. The workspace view dims below the remote strip.
         let cut_off = self
           .screen
           .as_ref()
@@ -272,8 +269,7 @@ impl Render for Shell {
           .h_full()
           .flex()
           .flex_col()
-          // The screen runs to the window's top edge beside the sidebar,
-          // which holds the title bar; without it, the screen moves down.
+          // The sidebar holds the title bar. Without a sidebar, the screen sits below one.
           .when(title_bar::SHOWN && self.sidebar.is_none(), |this| {
             this.child(title_bar::drag_area("screen-title-bar"))
           })
@@ -356,9 +352,7 @@ pub fn open_window(
     .title(title)
     .inner_size(1400.0, 900.0)
     .min_inner_size(MIN_WIDTH, MIN_HEIGHT);
-  // The default style already extends the content under an opaque bar,
-  // hiding GPUI's top rows. An overlay leaves only the traffic lights, over
-  // the title bar GPUI draws (`title_bar`).
+  // An overlay bar leaves only the traffic lights, over GPUI's own `title_bar`, hiding no rows.
   #[cfg(target_os = "macos")]
   let window = window
     .title_bar_style(tauri::TitleBarStyle::Overlay)

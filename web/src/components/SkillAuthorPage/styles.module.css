@@ -31,11 +31,17 @@
 
 .name {
   font-family: var(--ifm-font-family-monospace);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .description {
   margin: 0.25rem 0 0;
   font-size: 0.9rem;
   color: var(--ifm-color-emphasis-700);
+}
+
+.writeup {
+  margin-bottom: 2.5rem;
+  padding-bottom: 2rem;
+  border-bottom: 1px solid var(--ifm-color-emphasis-300);
 }

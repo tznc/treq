@@ -23,6 +23,7 @@ import {
 } from "./placement-store.ts";
 import type { MigrationRow, PlacementRow } from "./migration-engine.ts";
 import type { ProviderKind, SandboxProvider } from "./provider.ts";
+import { errorMessage } from "../error-message.ts";
 
 export const RETIRING_TTL_HOURS = 24;
 const DEFAULT_BATCH = 25;
@@ -132,9 +133,12 @@ async function createDrainBatch(
     )
     .not("state", "in", "(completed,rolled_back,failed,cancelled)"), "list open migrations");
   const busy = new Set((open ?? []).map((r) => r.instance_id as string));
-  const openForProvider = (open ?? []).filter((r) =>
-    (r.source as unknown as { provider_kind: string } | null)?.provider_kind === kind
-  ).length;
+  // A to-one embed arrives as one row or null; the untyped client cannot know that.
+  const openForProvider = (open ?? []).filter((r) => {
+    const source: unknown = r.source;
+    return typeof source === "object" && source !== null && "provider_kind" in source &&
+      source.provider_kind === kind;
+  }).length;
   const allowance = drainAllowance({
     batch: limit,
     openForProvider,
@@ -162,8 +166,11 @@ async function createDrainBatch(
   for (const p of placements ?? []) {
     if (created.length >= allowance) break;
     if (busy.has(p.instance_id) || !isOperatorMovable(p)) continue;
-    const joined = p.remote_instances as unknown as { tier_id: string | null } | null;
-    const tier = joined?.tier_id ?? "s";
+    const joined: unknown = p.remote_instances;
+    const tier = typeof joined === "object" && joined !== null && "tier_id" in joined &&
+        typeof joined.tier_id === "string"
+      ? joined.tier_id
+      : "s";
     const target = await resolveDefaultMachineType(supabase, tier, p.region);
     if (!target || target.provider_kind === kind) {
       skipped.push({ instance_id: p.instance_id, reason: "no_admitted_target" });
@@ -447,7 +454,7 @@ export async function destroyRetired(
     } catch (err) {
       // Claimed but not deleted: the orphan sweep retries it.
       failed.push(p.id);
-      await store.audit("placement_destroy_failed", p, { placement_id: p.id, error: (err as Error).message });
+      await store.audit("placement_destroy_failed", p, { placement_id: p.id, error: errorMessage(err) });
     }
   }
   for (const p of await store.listOrphans(opts.limit)) {
@@ -465,7 +472,7 @@ export async function destroyRetired(
       });
     } catch (err) {
       failed.push(p.id);
-      await store.audit("placement_destroy_failed", p, { placement_id: p.id, error: (err as Error).message });
+      await store.audit("placement_destroy_failed", p, { placement_id: p.id, error: errorMessage(err) });
     }
   }
   return { destroyed, failed, orphans_destroyed: orphans };

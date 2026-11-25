@@ -91,9 +91,7 @@ pub async fn connect(progress: impl Fn(&'static str) + Send + Sync) -> Result<Co
 
   match first_step(current.as_ref()) {
     Step::Provision => {
-      // Provisioning is server-side (`remote-instance` "ensure"), which
-      // checks Pro and ownership, as on desktop. One key per attempt so a
-      // retry after a failure is not a replay of it.
+      // The server's `ensure` checks Pro and ownership. A fresh key per attempt stops replays.
       progress("Creating the managed instance");
       let key = format!("provision-managed-{}", uuid::Uuid::new_v4());
       control_plane::ensure(supabase, &key, None, None)

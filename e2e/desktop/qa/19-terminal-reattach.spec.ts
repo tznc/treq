@@ -38,15 +38,11 @@ function repoDir(): string {
   const roots = readdirSync(tmpdir())
     .filter((d) => d.startsWith("treq-qa-"))
     .map((d) => join(tmpdir(), d))
-    .filter((d) => {
-      try {
-        return statSync(join(d, "qa-extra.json")).isFile();
-      } catch {
-        return false;
-      }
-    })
+    .filter((d) => statSync(join(d, "qa-extra.json"), { throwIfNoEntry: false })?.isFile() ?? false)
     .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
-  return JSON.parse(readFileSync(join(roots[0], "qa-extra.json"), "utf8")).repo;
+  const root = roots[0];
+  if (!root) throw new Error("no QA fixture");
+  return JSON.parse(readFileSync(join(root, "qa-extra.json"), "utf8")).repo;
 }
 
 /** The repo windows' X ids, oldest first. */
@@ -99,7 +95,7 @@ async function pickFolder(folder: string): Promise<void> {
       dialog = execFileSync("xdotool", ["search", "--onlyvisible", "--name", "Select folder"])
         .toString()
         .trim()
-        .split("\n")[0];
+        .split("\n")[0] ?? "";
     } catch {
       if (Date.now() > deadline) throw new Error("no folder picker");
       await new Promise((r) => setTimeout(r, 300));
@@ -178,6 +174,7 @@ test("terminal-reattach: a closed window's terminals open again", async ({ page,
 
   // A second window on the repository, then the first one closes.
   const first = repoWindows()[0];
+  if (!first) throw new Error("no repo window");
   await page.keyboard.press(`${mod}+k`);
   const palette = page;
   await palette.getByRole("textbox", { name: "Type a command or search…" }).fill("new window");

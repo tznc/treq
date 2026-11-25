@@ -2,16 +2,26 @@ import type {ReactNode} from 'react';
 import Layout from '@theme/Layout';
 import Link from '@docusaurus/Link';
 import DownloadCTA from '@site/src/components/DownloadCTA';
+import {renderMarkdownToHtml} from '../SkillDetailPage/markdown';
 import styles from './styles.module.css';
 
 type Source = {id: string; name: string; url: string};
 type SkillSummary = {id: string; name: string; description: string | null; category: string | null; route: string};
+type Writeup = {description: string; body: string};
 
-export default function SkillAuthorPage({source, skills}: {source: Source; skills: SkillSummary[]}): ReactNode {
+export default function SkillAuthorPage({
+  source,
+  skills,
+  writeup,
+}: {
+  source: Source;
+  skills: SkillSummary[];
+  writeup: Writeup | null;
+}): ReactNode {
   const description = `All ${skills.length} agent skills by ${source.name}, with their SKILL.md files. Browse each one or open it in Treq.`;
   const categories = [...new Set(skills.map((s) => s.category ?? 'Other'))].sort();
   return (
-    <Layout title={`${source.name} agent skills`} description={description}>
+    <Layout title={`${source.name} agent skills`} description={writeup?.description ?? description}>
       <main className={styles.page}>
         <div className={styles.breadcrumbs}>
           <Link to="/skills">Skills Library</Link>
@@ -22,6 +32,12 @@ export default function SkillAuthorPage({source, skills}: {source: Source; skill
         <p className={styles.lead}>
           {description} Source: <Link href={source.url}>{source.url.replace('https://', '')}</Link>
         </p>
+        {writeup && (
+          <article
+            className={`markdown ${styles.writeup ?? ''}`}
+            dangerouslySetInnerHTML={{__html: renderMarkdownToHtml(writeup.body)}}
+          />
+        )}
         {categories.map((category) => (
           <section key={category}>
             <h2>{category}</h2>
@@ -30,7 +46,7 @@ export default function SkillAuthorPage({source, skills}: {source: Source; skill
                 .filter((s) => (s.category ?? 'Other') === category)
                 .map((skill) => (
                   <li key={skill.id}>
-                    <Link to={skill.route} className={styles.name}>{skill.name}</Link>
+                    <Link to={skill.route} className={styles.name ?? ''}>{skill.name}</Link>
                     {skill.description && <p className={styles.description}>{skill.description}</p>}
                   </li>
                 ))}

@@ -7,8 +7,8 @@ message: >
   element, or use `TextSize::Sm`.
 note: >
   Where a parent sets the mono font, or the size feeds a mono view, mark the
-  line above with a short reason and
-  `// ast-grep-ignore: gpui-sans-text-min-size`. Short 11px labels are
+  line above with one comment line: a short reason, then the directive, e.g.
+  `// Mono parent. ast-grep-ignore: gpui-sans-text-min-size`. Short 11px labels are
   covered by gpui-text-xs-short-label-only.
 files:
   - "src-tauri/src/gpui_shell/**/*.rs"

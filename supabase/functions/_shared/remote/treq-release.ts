@@ -9,6 +9,7 @@
 
 import { allManifests, type BootManifest, type TreqSha256 } from "./boot-manifest.ts";
 import { ProviderError } from "./provider.ts";
+import { errorMessage } from "../error-message.ts";
 
 export interface ResolvedTreqRelease {
   version: string;
@@ -65,7 +66,7 @@ function publishedNewestFirst(releases: unknown[]): { version: string; release: 
       const release = entry as FeedRelease;
       if (release.prerelease !== false || typeof release.version !== "string") return [];
       const m = SEMVER.exec(release.version);
-      return m && release.tag === `v${release.version}` ? [{ release, parts: m.slice(1).map(Number) }] : [];
+      return m && release.tag === `v${release.version}` ? [{ release, parts: [Number(m[1]), Number(m[2]), Number(m[3])] as const }] : [];
     })
     .sort((a, b) => b.parts[0] - a.parts[0] || b.parts[1] - a.parts[1] || b.parts[2] - a.parts[2])
     .map(({ release, parts }) => ({ release, version: parts.join(".") }));
@@ -114,7 +115,7 @@ export function createTreqReleaseResolver(opts: TreqReleaseResolverOptions = {})
       }
       throw new ProviderError(
         "unavailable",
-        `cannot resolve a treq CLI release to bootstrap: ${(err as Error).message}; ` +
+        `cannot resolve a treq CLI release to bootstrap: ${errorMessage(err)}; ` +
           `manifest treq ${current?.treq_version} has no pinned digests`,
       );
     }
@@ -125,6 +126,7 @@ export const resolveTreqRelease = createTreqReleaseResolver();
 
 /** The current manifest's own treq pins, unchecked: for the stub provider, which runs no script. */
 export function manifestTreqRelease(): Promise<ResolvedTreqRelease> {
-  const m = allManifests()[allManifests().length - 1];
+  const m = allManifests().at(-1);
+  if (!m) throw new Error("no boot manifests");
   return Promise.resolve({ version: m.treq_version, sha256: m.treq_sha256, source: "manifest" });
 }

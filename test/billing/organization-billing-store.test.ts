@@ -13,7 +13,12 @@ function clientWithRole(role: string | null): ServiceClientLike {
       error: null,
     }),
   };
-  return { from: () => query } as unknown as ServiceClientLike;
+  return {
+    rpc: async () => {
+      throw new Error("canManageBilling reads organization_members only");
+    },
+    from: () => query,
+  };
 }
 
 describe("organizationBillingFor.canManageBilling", () => {

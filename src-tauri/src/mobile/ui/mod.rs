@@ -407,8 +407,7 @@ impl Root {
     self.sheet = None;
     tauri_plugin_gpui::set_back_enabled(self.stack.len() > 1);
     self.save_snapshot(cx);
-    // A page revealed by a pop was cached while it was covered; redraw it
-    // once so state it reads outside the entity (the store) is current.
+    // A revealed page was cached while covered, so redraw it for state it reads from the store.
     if let Some(page) = self.stack.last() {
       App::notify(cx, page.view.entity_id());
     }
@@ -585,9 +584,7 @@ impl Root {
         div()
           .flex_1()
           .min_h_0()
-          // Cached: a sheet, spinner or caret blink elsewhere in the window
-          // must not re-render the page. It re-renders when it notifies
-          // itself or an entity it observes, or when its bounds change.
+          // Cached: only its own or observed notifies, or new bounds, re-render the page.
           .child(
             page
               .view
@@ -745,9 +742,10 @@ pub fn sign_in(provider: OAuthProvider, cx: &mut App) {
       .await
   });
   cx.spawn(async move |cx| {
-    let result = done
-      .await
-      .unwrap_or_else(|_| Err("Sign-in was interrupted".into()));
+    let result = done.await.unwrap_or_else(|e| {
+      log::warn!("Sign-in task ended early: {e}");
+      Err("Sign-in was interrupted".into())
+    });
     model.update(cx, |m, cx| {
       m.auth_error = result.err().filter(|e| !is_cancel(e));
       cx.notify();
@@ -1075,8 +1073,7 @@ pub fn open_project(
     return Ok(());
   }
   connect(machine, false, cx);
-  // Open once the machine is ready; a failed connect shows on its row in
-  // Settings.
+  // Opens once the machine is ready, and a failed connect shows on its row in Settings.
   cx.spawn(async move |cx| {
     for _ in 0..480 {
       cx.background_executor()
@@ -1277,8 +1274,7 @@ fn resume(cx: &mut App) {
   let probe = backend::get().endpoint().ok().map(|endpoint| {
     backend::spawn(async move { backend::get().pool.probe(&endpoint, RESUME_PROBE).await })
   });
-  // The Treq Cloud machine may have slept, or its certificate lapsed, while
-  // the app was in the background. Only a ready one is rechecked.
+  // Treq Cloud may have slept or its certificate lapsed in the background: recheck it if ready.
   let managed = model.read(cx).machine(MANAGED_MACHINE).status == MachineStatus::Ready;
   let stale = managed.then(|| backend::spawn(managed::is_stale()));
   cx.spawn(async move |cx| {
@@ -1306,8 +1302,7 @@ fn restore(cx: &mut Context<Root>) {
   let restored = backend::spawn(async { backend::get().auth.restore().await });
   cx.spawn(async move |_, cx| {
     let snapshot = store::session_snapshot();
-    // Only Treq Cloud needs the session: an SSH host connects without
-    // waiting for its refresh, a network round trip.
+    // Only Treq Cloud needs the session, so an SSH host skips the refresh's network round trip.
     if !matches!(
       snapshot.as_ref().map(|s| &s.endpoint),
       Some(store::SessionEndpoint::UserManaged { .. })

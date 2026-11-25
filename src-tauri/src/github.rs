@@ -1041,6 +1041,60 @@ pub fn gh_current_user_impl(gh_path: &str, extended_path: &str) -> Result<String
   Ok(String::from_utf8_lossy(&bytes).trim().to_string())
 }
 
+/// Each login once, collaborators first; apps (`app/…`) can't be mentioned.
+fn mentionable_logins(collaborators: &str, pr_authors: &str) -> Vec<String> {
+  let mut seen = std::collections::HashSet::new();
+  collaborators
+    .lines()
+    .chain(pr_authors.lines())
+    .map(str::trim)
+    .filter(|login| !login.is_empty() && !login.starts_with("app/"))
+    .filter(|login| seen.insert(login.to_lowercase()))
+    .map(str::to_string)
+    .collect()
+}
+
+/// Who `@` can mention in `repo`: its collaborators and whoever opened a
+/// pull request. Reading collaborators needs push access; without it, only
+/// the PR authors.
+pub fn gh_mentionable_users_impl(
+  gh_path: &str,
+  repo: &str,
+  extended_path: &str,
+) -> Result<Vec<String>, String> {
+  let endpoint = format!("repos/{repo}/collaborators");
+  let collaborators = run_gh(
+    gh_path,
+    &["api", &endpoint, "--paginate", "--jq", ".[].login"],
+    extended_path,
+  )
+  .and_then(check_gh_output)
+  .unwrap_or_default();
+  let authors = run_gh(
+    gh_path,
+    &[
+      "pr",
+      "list",
+      "--repo",
+      repo,
+      "--state",
+      "all",
+      "--limit",
+      "500",
+      "--json",
+      "author",
+      "--jq",
+      ".[].author.login",
+    ],
+    extended_path,
+  )?;
+  let authors = check_gh_output(authors)?;
+  Ok(mentionable_logins(
+    &String::from_utf8_lossy(&collaborators),
+    &String::from_utf8_lossy(&authors),
+  ))
+}
+
 /// Unified diff of a PR (`gh pr diff`), base...head as GitHub shows it.
 pub fn gh_pr_diff_impl(
   gh_path: &str,
@@ -2325,6 +2379,14 @@ pub fn gh_list_pr_review_threads_impl(
 
 #[cfg(test)]
 mod tests {
+  #[test]
+  fn mentionable_logins_merge_collaborators_and_pr_authors_once() {
+    assert_eq!(
+      super::mentionable_logins("ziinc\nbob\n", "bob\napp/dependabot\nCodingFabian\n\n"),
+      vec!["ziinc", "bob", "CodingFabian"]
+    );
+  }
+
   #[cfg(unix)]
   #[test]
   fn reports_an_unauthenticated_gh_apart_from_other_failures() {
@@ -2376,8 +2438,7 @@ mod tests {
 
   #[test]
   fn the_wip_app_check_run_matches_by_whichever_app_link_github_reports() {
-    // The app sets no details URL, so GitHub reports the app's homepage, or
-    // nothing; a real CI job named WIP links to its run.
+    // No details URL: GitHub links the app homepage or nothing. A real WIP CI job links its run.
     for link in [
       "",
       "https://github.com/apps/wip",

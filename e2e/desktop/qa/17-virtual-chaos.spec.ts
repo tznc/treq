@@ -31,7 +31,11 @@ function random(): number {
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 }
 
-const pick = <T>(items: T[]): T => items[Math.floor(random() * items.length)];
+const pick = <T>(items: T[]): T => {
+  const item = items[Math.floor(random() * items.length)];
+  if (item === undefined) throw new Error("pick from an empty list");
+  return item;
+};
 const between = (lo: number, hi: number) => lo + Math.floor(random() * (hi - lo));
 
 /** The checkout of the running QA app's cache workspace. */
@@ -39,15 +43,11 @@ function cacheDir(): string {
   const roots = readdirSync(tmpdir())
     .filter((d) => d.startsWith("treq-qa-"))
     .map((d) => join(tmpdir(), d))
-    .filter((d) => {
-      try {
-        return statSync(join(d, "qa-extra.json")).isFile();
-      } catch {
-        return false;
-      }
-    })
+    .filter((d) => statSync(join(d, "qa-extra.json"), { throwIfNoEntry: false })?.isFile() ?? false)
     .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
-  const { repo } = JSON.parse(readFileSync(join(roots[0], "qa-extra.json"), "utf8"));
+  const root = roots[0];
+  if (!root) throw new Error("no QA fixture");
+  const { repo } = JSON.parse(readFileSync(join(root, "qa-extra.json"), "utf8"));
   return workspaceDir(repo, CACHE);
 }
 

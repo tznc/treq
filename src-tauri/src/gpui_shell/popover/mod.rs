@@ -10,7 +10,9 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use gpui_kit::base::ObservedElement;
 use std::sync::Arc;
+use treq_ui::SelectorExt as _;
 
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::input::{
@@ -191,10 +193,9 @@ impl Popover {
     width: f32,
     padding: f32,
     p: &Palette,
-  ) -> gpui::Stateful<gpui::Div> {
+  ) -> ObservedElement<gpui::Stateful<gpui::Div>> {
     div()
-      .id(id)
-      .debug_selector(move || id.into())
+      .selector(id)
       .w(zpx(width))
       .p(zpx(padding))
       .rounded(radius::MD)
@@ -247,18 +248,14 @@ impl Render for Popover {
       Content::Checks(_) => (checks::WIDTH, self.render_checks(&p, cx).into_any_element()),
     };
     let origin = self.origin(width, viewport);
-    // A press anywhere outside the popover, its own button included,
-    // only closes it.
+    // A press outside the popover, its own button included, only closes it.
     let close =
       |this: &mut Self, _: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>| this.close(cx);
     div()
-      .id("header-popover-backdrop")
+      .selector("header-popover-backdrop")
       // A dismiss target, not a control.
       .cursor_default()
-      .debug_selector(|| "header-popover-backdrop".into())
-      .track_focus(&self.focus)
-      // The workspace view places it at the window's origin; it covers the
-      // window.
+      // The workspace view places it at the window's origin, so it covers the window.
       .w(viewport.width)
       .h(viewport.height)
       // What lies under the backdrop gets no press while the popover shows.
@@ -299,6 +296,8 @@ impl Render for Popover {
           .role(gpui::Role::Dialog)
           .aria_label(name)
           .test_support()
+          // Focus sits in the dialog; keys still reach the backdrop's handlers.
+          .track_focus(&self.focus)
           .absolute()
           .left(origin.x)
           .top(origin.y)

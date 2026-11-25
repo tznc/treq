@@ -1016,11 +1016,12 @@ mod tests {
       let serve_paths = paths.clone();
       let handle =
         std::thread::spawn(move || serve_with_idle(&serve_paths, Duration::from_secs(600)));
-      let deadline = Instant::now() + Duration::from_secs(5);
-      while connect(&paths).unwrap().is_none() {
-        assert!(Instant::now() < deadline, "daemon did not start");
-        std::thread::sleep(Duration::from_millis(10));
-      }
+      assert!(
+        crate::test_repo::wait_until(Duration::from_secs(5), || {
+          connect(&paths).unwrap().is_some()
+        }),
+        "daemon did not start"
+      );
       Self {
         paths,
         handle: Some(handle),
@@ -1325,11 +1326,10 @@ mod tests {
     read_until(&mut client, "bye");
     let mut rest = Vec::new();
     client.read_to_end(&mut rest).ok();
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !daemon.names().is_empty() {
-      assert!(Instant::now() < deadline, "session outlived its program");
-      std::thread::sleep(Duration::from_millis(20));
-    }
+    assert!(
+      crate::test_repo::wait_until(Duration::from_secs(5), || daemon.names().is_empty()),
+      "session outlived its program"
+    );
   }
 
   #[test]
@@ -1352,15 +1352,14 @@ mod tests {
 
     daemon.call(&Request::Stop { name: "s".into() }).unwrap();
     assert!(daemon.names().is_empty());
-    let deadline = Instant::now() + Duration::from_secs(5);
-    // SAFETY: signal 0 only checks whether `pid` exists.
-    while unsafe { libc::kill(pid, 0) } == 0 {
-      assert!(
-        Instant::now() < deadline,
-        "the background child outlived stop"
-      );
-      std::thread::sleep(Duration::from_millis(20));
-    }
+    assert!(
+      crate::test_repo::wait_until(Duration::from_secs(5), || {
+        // SAFETY: signal 0 only checks whether `pid` exists.
+        let status = unsafe { libc::kill(pid, 0) };
+        status != 0
+      }),
+      "the background child outlived stop"
+    );
   }
 
   #[test]

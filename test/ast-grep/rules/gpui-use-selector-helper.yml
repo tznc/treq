@@ -1,0 +1,112 @@
+id: gpui-use-selector-helper
+language: rust
+severity: error
+message: >
+  Name an element for tests with `.selector("name")` from `treq_ui`, not a bare
+  `.debug_selector(..)`. It sets the element id and debug selector to the same
+  name and adds the gpui-testing-library node, so tests find the element by
+  role, name or id instead of by its painted bounds.
+note: >
+  Checked: a `div()` chain that takes `.debug_selector(..)`. A chain that
+  starts from a helper's result, or that sets a struct field (a component's
+  `base`), is not checked: the helper or the component's render names it.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+  - "crates/treq-ui/**/*.rs"
+ignores:
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+  - "crates/treq-ui/**/*_tests.rs"
+  # Baseline: files with bare debug selectors. Do not add to it;
+  # name each element with `.selector(..)` and drop the file from this list.
+  - "src-tauri/src/gpui_shell/screen/agent_card.rs"
+  - "src-tauri/src/gpui_shell/screen/changes.rs"
+  - "src-tauri/src/gpui_shell/screen/changes/pr.rs"
+  - "src-tauri/src/gpui_shell/screen/changes/review.rs"
+  - "src-tauri/src/gpui_shell/screen/changes/rows.rs"
+  - "src-tauri/src/gpui_shell/screen/changes/threads.rs"
+  - "src-tauri/src/gpui_shell/screen/commits.rs"
+  - "src-tauri/src/gpui_shell/screen/commits/rows.rs"
+  - "src-tauri/src/gpui_shell/screen/file_browser.rs"
+  - "src-tauri/src/gpui_shell/screen/file_browser/review.rs"
+  - "src-tauri/src/gpui_shell/screen/file_picker.rs"
+  - "src-tauri/src/gpui_shell/screen/find.rs"
+  - "src-tauri/src/gpui_shell/screen/github.rs"
+  - "src-tauri/src/gpui_shell/screen/github/detail.rs"
+  - "src-tauri/src/gpui_shell/screen/github/mention.rs"
+  - "src-tauri/src/gpui_shell/screen/github/parts.rs"
+  - "src-tauri/src/gpui_shell/screen/linear.rs"
+  - "src-tauri/src/gpui_shell/screen/merge.rs"
+  - "src-tauri/src/gpui_shell/screen/modal/prompt_history.rs"
+  - "src-tauri/src/gpui_shell/screen/modal/stash.rs"
+  - "src-tauri/src/gpui_shell/screen/onboarding.rs"
+  - "src-tauri/src/gpui_shell/screen/onboarding_remote.rs"
+  - "src-tauri/src/gpui_shell/screen/open_workspaces.rs"
+  - "src-tauri/src/gpui_shell/screen/pr_review.rs"
+  - "src-tauri/src/gpui_shell/screen/project_context_dialog.rs"
+  - "src-tauri/src/gpui_shell/screen/project_home.rs"
+  - "src-tauri/src/gpui_shell/screen/reactions.rs"
+  - "src-tauri/src/gpui_shell/screen/remote.rs"
+  - "src-tauri/src/gpui_shell/screen/remote_chrome.rs"
+  - "src-tauri/src/gpui_shell/screen/rename_dialog.rs"
+  - "src-tauri/src/gpui_shell/screen/save_project_dialog.rs"
+  - "src-tauri/src/gpui_shell/screen/settings.rs"
+  - "src-tauri/src/gpui_shell/screen/settings/account.rs"
+  - "src-tauri/src/gpui_shell/screen/settings/account/team.rs"
+  - "src-tauri/src/gpui_shell/screen/workspace.rs"
+  - "src-tauri/src/gpui_shell/screen/workspace_deletion.rs"
+  - "src-tauri/src/gpui_shell/screen/workspace_title.rs"
+utils:
+  in-chain:
+    any:
+      - kind: field_expression
+      - kind: call_expression
+      - kind: closure_expression
+      - kind: block
+        inside:
+          kind: closure_expression
+      - kind: arguments
+        inside:
+          kind: call_expression
+          has:
+            field: function
+            any:
+              - kind: identifier
+              - kind: scoped_identifier
+              - kind: field_expression
+                has:
+                  field: field
+                  regex: ^(when|when_some|when_none|map)$
+  div-chain:
+    inside:
+      stopBy:
+        not:
+          matches: in-chain
+      has:
+        stopBy:
+          not:
+            matches: in-chain
+        pattern: div()
+rule:
+  matches: div-chain
+  kind: call_expression
+  has:
+    field: function
+    kind: field_expression
+    has:
+      field: field
+      regex: ^debug_selector$
+  not:
+    any:
+      # A component's `base` field: checked where the component renders it.
+      - inside:
+          stopBy:
+            not:
+              matches: in-chain
+          kind: field_initializer
+      - inside:
+          kind: mod_item
+          has:
+            field: name
+            regex: ^tests$
+          stopBy: end

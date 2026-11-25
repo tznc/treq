@@ -38,11 +38,11 @@ export async function assertLocalSupabaseUp(): Promise<void> {
     });
   } catch (err) {
     clearTimeout(timer);
-    const reason = err instanceof Error ? err.message : String(err);
     throw new Error(
-      `Local Supabase is not reachable at ${url} (${reason}). ` +
+      `Local Supabase is not reachable at ${url}. ` +
         `Start it with \`npm run service-qa:up\` (or \`make start && make db.reset\`), ` +
         `then re-run service-qa. See .claude/skills/service-qa/SKILL.md.`,
+      { cause: err },
     );
   } finally {
     clearTimeout(timer);
@@ -94,10 +94,10 @@ async function warmEdgeFunctions(): Promise<void> {
     if (err instanceof Error && err.message.startsWith("Edge warm-up")) {
       throw err;
     }
-    const reason = err instanceof Error ? err.message : String(err);
     throw new Error(
-      `Edge Functions are not reachable (${reason}). ` +
-        `Run \`npm run service-qa:up\` and confirm edge_runtime is up.`,
+      "Edge Functions are not reachable. " +
+        "Run `npm run service-qa:up` and confirm edge_runtime is up.",
+      { cause: err },
     );
   } finally {
     clearTimeout(timer);

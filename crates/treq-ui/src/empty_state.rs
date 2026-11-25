@@ -1,5 +1,6 @@
 //! What a list or pane shows when it has nothing, or is still loading.
 
+use crate::SelectorExt as _;
 use std::time::Duration;
 
 use gpui::{
@@ -85,17 +86,16 @@ impl RenderOnce for EmptyState {
     } else {
       p.muted_foreground
     };
-    let selector = self.id.to_string();
     let message_id = format!("{}-message", self.id);
     div()
-      .id(self.id)
-      .debug_selector(move || selector)
+      .selector(self.id)
       .role(gpui::Role::Status)
       .aria_label(self.title.clone())
       .flex()
       .flex_col()
       .items_center()
       .justify_center()
+      .max_w_full()
       .gap_2()
       .py_8()
       .px_6()
@@ -189,10 +189,8 @@ impl Loading {
 impl RenderOnce for Loading {
   fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
     let p = &self.palette;
-    let selector = self.id.to_string();
     div()
-      .id(self.id.clone())
-      .debug_selector(move || selector)
+      .selector(self.id.clone())
       .role(gpui::Role::ProgressIndicator)
       .flex()
       .items_center()

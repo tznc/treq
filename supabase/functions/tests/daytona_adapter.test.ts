@@ -9,6 +9,7 @@ import {
   assert,
   assertEquals,
   assertRejects,
+  assertThrows,
 } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   DAYTONA_CAPABILITIES,
@@ -85,7 +86,8 @@ Deno.test("states normalize to the provider-neutral set", () => {
 Deno.test("create looks up by labels, then POSTs the tier's resources with the auto-stop backstop", async () => {
   const { fake, provider } = setup();
   const instance = await provider.createInstance(PARAMS);
-  const [lookup, create] = fake.requests;
+  const lookup = defined(fake.requests[0]);
+  const create = defined(fake.requests[1]);
   assertEquals(lookup.method, "GET");
   assertEquals(lookup.path, "/api/sandbox");
   assertEquals(JSON.parse(defined(lookup.search.get("labels"))), { treq_owner: "owner_1", treq_placement: "idem-1" });
@@ -223,7 +225,7 @@ Deno.test("getInstance reports the provider's updatedAt as stateChangedAt", asyn
     id: "dt_t", name: "t", state: "stopped", labels: {}, cpu: 2, memory: 4, disk: 10,
     autoStopInterval: 60, autoArchiveInterval: 0, autoDeleteInterval: -1, toolboxProxyUrl: "",
     updatedAt: "2026-10-28T10:01:00Z",
-  } as unknown as Parameters<typeof fake.sandboxes.set>[1]);
+  });
   assertEquals((await provider.getInstance("dt_t")).stateChangedAt, "2026-10-28T10:01:00Z");
 });
 

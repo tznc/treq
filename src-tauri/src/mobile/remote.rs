@@ -127,9 +127,7 @@ async fn read_on_host<T: DeserializeOwned>(
   request: TreqCommandRequest,
 ) -> Result<T, String> {
   let backend = backend::get();
-  // After the host restarts or the network changes, the pooled connection
-  // is dead but not yet known to be. A read is safe to send again, on a
-  // fresh connection (done once inside).
+  // A pooled connection can be dead unnoticed, so a read retries once, inside, on a fresh one.
   let result = execute_remote_read::<T>(
     &backend.pool,
     endpoint,

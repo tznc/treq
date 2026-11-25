@@ -274,8 +274,7 @@ pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
 
   let conn = Connection::open(&db_path).map_err(|e| format!("Failed to open local db: {}", e))?;
 
-  // Every remote request cold-starts `treq` and lands here, so the common
-  // case (schema already current) must cost one pragma read, not ~70 statements.
+  // Each remote request cold-starts `treq`, so a current schema must cost one pragma read.
   if migrations::is_current(&conn, migrations::MIGRATIONS)? {
     return Ok(db_path);
   }
@@ -320,16 +319,11 @@ fn open_connection(repo_path: &str, db_path: &Path) -> Result<Connection, String
   conn
     .pragma_update(None, "foreign_keys", enforce_foreign_keys)
     .map_err(|e| format!("Failed to enable foreign key enforcement: {}", e))?;
-  // Multiple treq instances/windows can share this db file (see
-  // `upsert_instance_registry`). WAL lets readers and a writer proceed
-  // concurrently instead of blocking, and busy_timeout makes a genuine
-  // writer-writer conflict retry for a bit instead of immediately failing
-  // with "database is locked".
+  // Shared by instances: WAL lets reads run beside a writer, busy_timeout retries writer clashes.
   conn
     .pragma_update(None, "journal_mode", "WAL")
     .map_err(|e| format!("Failed to enable WAL mode: {}", e))?;
-  // NORMAL is crash-safe under WAL (it can lose the last commits on power
-  // loss, never corrupt) and avoids an fsync per commit.
+  // Under WAL, NORMAL can lose recent commits on power loss but never corrupts, and saves fsyncs.
   conn
     .pragma_update(None, "synchronous", "NORMAL")
     .map_err(|e| format!("Failed to set synchronous mode: {}", e))?;
@@ -1173,7 +1167,8 @@ pub fn upsert_workspace_discovery(
 /// Upserts discovered workspaces and returns the persisted rows. A row is
 /// written only when discovery changed it (or it was never refreshed), so the
 /// periodic poll commits nothing in the steady state; `refreshed_at` is the
-/// time of the last such change.
+/// time of the last such change. Discovery falls back to the directory name when no
+/// bookmark matches, as after every rename, so that fallback never replaces a known name.
 pub fn sync_discovered_workspaces(
   repo_path: &str,
   discovered: &[DiscoveredWorkspace],
@@ -1188,17 +1183,12 @@ pub fn sync_discovered_workspaces(
     .transaction()
     .map_err(|e| format!("Failed to start discovery transaction: {}", e))?;
   for workspace in discovered {
-    // Prefer a discovered canonical bookmark (e.g. feat/foo) over a prior
-    // sanitized fallback (feat-foo), even while the bookmark is conflicted.
-    // Never replace a known name with the sanitized fallback: discovery falls
-    // back to the directory name whenever no bookmark matches it, which is
-    // always the case after a rename (the directory keeps its old name).
+    // A canonical bookmark (feat/foo) beats a sanitized fallback (feat-foo), even while conflicted.
     let discovered_has_canonical_bookmark = workspace.branch_name != workspace.workspace_name;
     let update_branch_name = discovered_has_canonical_bookmark;
     let update_workspace_name = !workspace.has_conflicts;
     release_archived_workspace_path(&tx, &workspace.workspace_path)?;
-    // Prepared once per sync rather than once per workspace, which was
-    // half of a poll's cost.
+    // Prepared once per sync rather than once per workspace, which was half of a poll's cost.
     tx.prepare_cached(
             "INSERT INTO workspaces (workspace_name, workspace_path, branch_name, created_at, refreshed_at)
              VALUES (?1, ?2, ?3, ?4, ?5)
@@ -2915,8 +2905,7 @@ mod tests {
 
   #[test]
   fn fresh_schema_matches_the_snapshot() {
-    // A change here is a schema change: it needs a migration for existing
-    // databases. Update `local_db/schema.snapshot` alongside the migration.
+    // A change here is a schema change: add a migration and update `local_db/schema.snapshot`.
     assert_eq!(
       fresh_schema_shape(),
       include_str!("local_db/schema.snapshot")
@@ -2955,8 +2944,7 @@ mod tests {
       .expect("user_version")
   }
 
-  // Windows and background tasks open a repo's db at the same time; each
-  // migration checks for its column, then adds it.
+  // Windows and background tasks open a repo's db at once, and each migration checks then adds.
   #[test]
   fn concurrent_inits_of_an_old_db_all_succeed() {
     for _ in 0..200 {
@@ -4247,7 +4235,6 @@ mod tests {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let repo_path = temp_dir.path().to_str().unwrap();
 
-    // Create a workspace first
     let workspace_id = add_workspace(
       repo_path,
       "test".to_string(),
@@ -4259,7 +4246,6 @@ mod tests {
     )
     .expect("add_workspace should succeed");
 
-    // Save a pending review
     let comments = r#"[{"id":"c1","filePath":"test.txt","hunkId":"h1","startLine":1,"endLine":1,"lineContent":["+new"],"text":"Comment","createdAt":"2025-01-15T10:00:00Z"}]"#;
     let viewed_files = r#"["file1.txt","file2.txt"]"#;
     let summary = "Overall summary";
@@ -4296,7 +4282,6 @@ mod tests {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let repo_path = temp_dir.path().to_str().unwrap();
 
-    // Create a workspace
     let workspace_id = add_workspace(
       repo_path,
       "test".to_string(),
@@ -4343,7 +4328,6 @@ mod tests {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let repo_path = temp_dir.path().to_str().unwrap();
 
-    // Create a workspace
     let workspace_id = add_workspace(
       repo_path,
       "test".to_string(),
@@ -4355,7 +4339,6 @@ mod tests {
     )
     .expect("add_workspace should succeed");
 
-    // Save a review
     save_pending_review(
       repo_path,
       workspace_id,
@@ -4387,7 +4370,6 @@ mod tests {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let repo_path = temp_dir.path().to_str().unwrap();
 
-    // Create a workspace
     let workspace_id = add_workspace(
       repo_path,
       "test".to_string(),
@@ -4399,7 +4381,6 @@ mod tests {
     )
     .expect("add_workspace should succeed");
 
-    // Save a review
     save_pending_review(
       repo_path,
       workspace_id,
@@ -4434,7 +4415,6 @@ mod tests {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let repo_path = temp_dir.path().to_str().unwrap();
 
-    // Create a workspace
     let workspace_id = add_workspace(
       repo_path,
       "test".to_string(),
@@ -4465,7 +4445,6 @@ mod tests {
     // Wait a moment
     std::thread::sleep(std::time::Duration::from_millis(10));
 
-    // Update the review
     save_pending_review(
       repo_path,
       workspace_id,

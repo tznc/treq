@@ -254,9 +254,7 @@ impl WorkspaceScreen {
     let poll = cx.spawn(async move |this, cx| loop {
       cx.background_executor().timer(MARKER_POLL).await;
       let polled = this.update(cx, |this, cx| {
-        // Nothing shows the result under another page or in the
-        // background. The next tick once shown catches up, and a return
-        // to the foreground refetches at once.
+        // Skipped while hidden. The next visible tick catches up and foregrounding refetches.
         if crate::mobile::backend::in_foreground() && nav::is_top(cx.entity_id(), cx) {
           this.poll_marker(cx);
         }
@@ -288,9 +286,7 @@ impl WorkspaceScreen {
     .detach();
     // Shown at once when this workspace was open before; refetched either way.
     let status = remote::last::<WorkspaceStatus>(&status_request(&target));
-    // The record names the workspace's sessions. The last status or the
-    // list's summary has it, so sessions are listed without waiting for
-    // this status (a round trip on the default tab).
+    // Sessions list from the last status or the list's summary, not waiting on this round trip.
     let workspace = status
       .as_ref()
       .map(|s| s.partial.current.clone())
@@ -359,8 +355,7 @@ impl WorkspaceScreen {
           this
             .sessions
             .update(cx, |sessions, cx| sessions.set_workspace(workspace, cx));
-          // Once the tab's own reads are back, the Commits tab's is
-          // started so that tab opens on content.
+          // Prefetch Commits once this tab's reads are back, so that tab opens on content.
           if first && this.commits.is_none() {
             commits::prefetch(&this.target);
           }
@@ -1074,7 +1069,10 @@ impl WorkspaceScreen {
     list(self.change_rows.clone(), move |ix, _, cx| {
       screen
         .update(cx, |this, cx| this.change_item(ix, cx))
-        .unwrap_or_else(|_| div().into_any_element())
+        .unwrap_or_else(|e| {
+          log::debug!("Drawing change row {ix} empty: the screen closed: {e}");
+          div().into_any_element()
+        })
     })
     .size_full()
     .into_any_element()

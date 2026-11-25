@@ -55,7 +55,10 @@ export function popupBox(): { x: number; y: number; w: number; h: number } | nul
   for (const id of ids) {
     const g = execFileSync("xdotool", ["getwindowgeometry", "--shell", id]).toString();
     const v = Object.fromEntries(g.trim().split("\n").map((l) => l.split("=")));
-    const [x, y, w, h] = ["X", "Y", "WIDTH", "HEIGHT"].map((k) => Number(v[k]) / scale);
+    const x = Number(v.X) / scale;
+    const y = Number(v.Y) / scale;
+    const w = Number(v.WIDTH) / scale;
+    const h = Number(v.HEIGHT) / scale;
     if (w < 20 || h < 20 || (x === 0 && y === 0 && w >= 1400)) continue;
     if (!best || w * h > best.w * best.h) best = { x, y, w, h };
   }
@@ -141,3 +144,16 @@ export async function dismissPopover(page: Page): Promise<void> {
   await page.waitForTimeout(500);
 }
 
+
+/**
+ * A .catch handler for a chaos action that may miss: random input moves the
+ * screen, so its target can close, move or be covered before Playwright
+ * reaches it. The miss goes to the run's notes and stands in as null; the
+ * run's liveness checks catch real breakage.
+ */
+export function noteMiss(note: (what: string) => void, action: string): (err: unknown) => null {
+  return (err) => {
+    note(`${action} missed: ${err instanceof Error ? err.message.split("\n")[0] : "non-Error rejection"}`);
+    return null;
+  };
+}

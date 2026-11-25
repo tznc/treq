@@ -10,7 +10,7 @@
 
 .title {
   font-size: 2.5rem;
-  font-weight: 700;
+  font-weight: 500;
   margin: 0 0 0.5rem;
 }
 
@@ -130,7 +130,7 @@
   margin-bottom: 0.2rem;
   border: none;
   background: none;
-  color: var(--ifm-color-primary);
+  color: var(--treq-link);
   cursor: pointer;
   border-radius: 6px;
 }
@@ -215,7 +215,7 @@
 
 .cardTitle {
   font-size: 1rem;
-  font-weight: 600;
+  font-weight: 500;
   margin: 0;
   color: var(--ifm-font-color-base);
   font-family: var(--ifm-font-family-monospace);
@@ -225,7 +225,7 @@
 .sourceBadge {
   flex-shrink: 0;
   font-size: 0.68rem;
-  font-weight: 600;
+  font-weight: 500;
   padding: 2px 8px;
   border-radius: 999px;
   white-space: nowrap;
@@ -325,7 +325,7 @@
 
 .asideTitle {
   font-size: 0.95rem;
-  font-weight: 700;
+  font-weight: 500;
   margin: 0;
 }
 
@@ -374,7 +374,7 @@
   flex-shrink: 0;
   width: 1.4em;
   font-size: 0.75rem;
-  font-weight: 700;
+  font-weight: 500;
   color: var(--ifm-color-emphasis-500);
 }
 
@@ -391,7 +391,7 @@
   flex: 1;
   min-width: 0;
   font-size: 0.85rem;
-  font-weight: 600;
+  font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -413,7 +413,7 @@
 }
 
 .repoLink:hover {
-  color: var(--ifm-color-primary) !important;
+  color: var(--treq-link) !important;
 }
 
 /* Stack the aside below the catalog on narrower screens. */

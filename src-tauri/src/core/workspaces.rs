@@ -264,8 +264,7 @@ pub fn ls_workspace(
     }
 
     if let Some(name) = entry_path.file_name().and_then(|name| name.to_str()) {
-      // As `list_directory`: the listing's type, a stat only for a symlink,
-      // and no times, which no caller reads.
+      // As `list_directory`: the listing's type, a stat only for a symlink, and no times (unread).
       let is_directory = match entry.file_type() {
         Some(t) if !t.is_symlink() => t.is_dir(),
         _ => entry_path.is_dir(),
@@ -326,7 +325,10 @@ pub fn workspace_overview(
 impl WorkspaceMetadata {
   /// Serialize metadata to JSON string for storage
   pub fn to_json(&self) -> String {
-    serde_json::to_string(self).unwrap_or_else(|_| "{}".to_string())
+    serde_json::to_string(self).unwrap_or_else(|error| {
+      tracing::error!(%error, "workspace metadata did not serialize; storing {{}}");
+      "{}".to_string()
+    })
   }
 }
 
@@ -573,16 +575,14 @@ pub fn open_or_create_workspace_from_pr(
   };
   request.validate()?;
 
-  // Prune rows whose directory or jj registration is gone first; otherwise a
-  // stale row is "opened" while the sidebar, which lists jj workspaces, shows nothing.
+  // Stale rows go first, or one "opens" while the sidebar, which lists jj workspaces, is empty.
   sync_workspaces(repo_path)?;
 
   if let Some(existing) = existing_branch_workspace(repo_path, request.head_branch.trim())? {
     return Ok((existing, false));
   }
 
-  // Ensure remote bookmarks (including the PR head) are imported before create.
-  // Best effort: offline, the workspace still opens on the local bookmarks.
+  // The fetch imports remote bookmarks, the PR head included. Offline, local bookmarks serve.
   if let Err(error) = jj::jj_git_fetch(repo_path) {
     tracing::warn!(%error, repo_path, "fetch before opening a workspace failed; using local bookmarks");
   }
@@ -698,8 +698,7 @@ pub(crate) fn open_or_create_synced(
     None,
   )?;
 
-  // create_workspace may default the target to the repo default branch; retarget
-  // onto the PR base so stacked rebases follow the PR's merge base.
+  // Retargets onto the PR base, not the default branch, so stacked rebases follow its merge base.
   ensure_local_branch(repo_path, base_branch)?;
   apply_workspace_target_branch_after(repo_path, workspace.id, base_branch, RECENT_FETCH)?;
 
@@ -822,9 +821,7 @@ pub fn create_workspace_with_symlinked_dirs(
   // None and an empty list both mean a full checkout.
   let sparse_patterns = sparse_patterns.filter(|patterns| !patterns.is_empty());
 
-  // Workspace creation mutates the same JJ operation graph as commits and
-  // auto-rebases. Keep the guard through JJ creation and DB registration so
-  // an in-process retry cannot observe a half-registered workspace.
+  // Held through jj creation and DB registration: a retry never sees a half-registered workspace.
   let repo_mutation_lock = commit_lock_for_repo(repo_path);
   let _repo_mutation_guard = repo_mutation_lock.lock_or_recover();
 
@@ -885,17 +882,14 @@ pub fn create_workspace_with_symlinked_dirs(
       .warn_on_err("jj get changed files");
   }
 
-  // One load answers the local and remote questions and reads the bookmark's
-  // commit for the rollback below.
+  // One load answers local and remote existence and reads the bookmark's commit for rollback.
   let remote_ref = format!("{}@origin", branch_name);
   let existing =
     jj::WorkspaceRepo::load(repo_path).map_err(|e| format!("Failed to get branches: {}", e))?;
   let (branch_exists, branch_exists_on_remote) = existing.bookmark_presence(branch_name, "origin");
 
   let resolved_source_branch = if source_branch.is_none() {
-    // A local tracking branch can lag its remote after fetching. In that case,
-    // cloning the branch must start at the remote tip rather than whichever
-    // side of the imported bookmark conflict happens to sort first.
+    // A lagging local branch starts at the remote tip, not whichever conflict side sorts first.
     if branch_exists_on_remote
       && (!branch_exists || jj::is_local_branch_behind_remote(repo_path, branch_name))
     {
@@ -911,7 +905,7 @@ pub fn create_workspace_with_symlinked_dirs(
   let effective_target_branch: String = if let Some(source_ws) = &stacked_source_workspace {
     source_ws.branch_name.clone()
   } else {
-    jj::get_default_branch(repo_path).unwrap_or_else(|_| "main".to_string())
+    default_branch_or_main(repo_path)
   };
 
   let new_branch: bool = !branch_exists || resolved_source_branch.as_deref() == Some(&remote_ref);
@@ -1237,9 +1231,7 @@ fn forget_workspace_record(
         .ok_or_else(|| "Workspace path is not valid UTF-8".to_string())?
         .to_string();
 
-      // Splice direct children onto this workspace's own target so a stack
-      // stays connected when a middle workspace goes away. Children keep
-      // their commits: work from the removed branch now counts as theirs.
+      // Children splice onto this target to keep the stack connected, and inherit the removed work.
       let children = local_db::get_workspaces_by_target_branch(repo_path, &workspace.branch_name)
         .map_err(|e| format!("Failed to get child workspaces: {}", e))?;
       if !children.is_empty() {
@@ -1247,7 +1239,7 @@ fn forget_workspace_record(
           Some(target) if !target.is_empty() && target != workspace.branch_name => {
             target.to_string()
           }
-          _ => jj::get_default_branch(repo_path).unwrap_or_else(|_| "main".to_string()),
+          _ => default_branch_or_main(repo_path),
         };
         for child in &children {
           local_db::update_workspace_target_branch(repo_path, child.id, &new_target)
@@ -1275,11 +1267,13 @@ fn forget_workspace_record(
             .map_err(|e| format!("Failed to archive workspace in db: {}", e))?;
         }
       }
-      // Rebase spliced children now so a merged parent's commits drop out of
-      // their PRs immediately. Best effort: the next auto-rebase retries.
+      // Rebasing now drops a merged parent's commits from child PRs. Auto-rebase retries a failure.
       if !children.is_empty() {
-        let style = resolve_workspace_diff_conflict_marker_style(repo_path)
-          .unwrap_or_else(|_| crate::core::DEFAULT_CONFLICT_MARKER_STYLE.to_string());
+        let style =
+          resolve_workspace_diff_conflict_marker_style(repo_path).unwrap_or_else(|error| {
+            tracing::warn!(%error, repo_path, "using the default conflict marker style");
+            crate::core::DEFAULT_CONFLICT_MARKER_STYLE.to_string()
+          });
         for child in &children {
           if let Err(e) = check_and_rebase_workspaces(repo_path, Some(child.id), None, None, &style)
           {
@@ -1369,12 +1363,11 @@ pub fn push_workspace_to_remote(
     // For home repo, use repo_path directly
     let branch_name = jj::resolve_home_repo_branch(repo_path)
       .map_err(|e| format!("Failed to resolve home repo branch: {}", e))?;
-    let target_branch = jj::get_default_branch(repo_path).unwrap_or_else(|_| "main".to_string());
+    let target_branch = default_branch_or_main(repo_path);
     (repo_path.to_string(), branch_name, target_branch, false)
   };
 
-  // An ancestry-only merge cannot be abandoned cleanly while its bookmark still
-  // points at it: jj preserves both parents and turns the bookmark into a conflict.
+  // An empty merge tip can't be abandoned under its bookmark: jj would make the bookmark conflict.
   jj::jj_collapse_empty_merge_tip(&push_path, &branch_name)
     .warn_on_err("jj collapse empty merge tip");
   // Ensure no empty commits reach the remote; best-effort, never blocks the push.
@@ -1383,12 +1376,10 @@ pub fn push_workspace_to_remote(
   // Perform the push
   let result = jj::jj_push(&push_path).map_err(|e| format!("Push failed: {}", e))?;
 
-  // Clear the not_on_remote flag after successful push (only for workspaces).
-  // A write is a commit with fsyncs, so skip it when the flag is clear.
+  // Only a set not_on_remote flag is cleared: each write is a commit with fsyncs.
   if let (Some(id), true) = (workspace_id, not_on_remote) {
     local_db::update_workspace_not_on_remote(repo_path, id, false)?;
-    // The pull request takes the title and description edited here. Best
-    // effort: the code is pushed, and the edits stay unsynced (Resync shows).
+    // Best effort: the code is pushed, and a failure leaves the edits unsynced (Resync shows).
     if let Err(err) = super::pr_sync::push_edits_to_github(repo_path, id) {
       tracing::warn!(%err, id, "push: sending the title and description to the PR failed");
     }
@@ -1476,19 +1467,17 @@ pub fn sync_workspaces(repo_path: &str) -> Result<(), String> {
 /// Discovers jj workspaces, heals conflicted bookmarks losslessly onto a linear
 /// tip (rebase local-only commits onto `@origin`), then persists identity fields
 /// for the sidebar.
+///
+/// Holds the commit lock throughout. Create registers the jj workspace before its DB
+/// row, and discovery in that window would insert a bare row that fails the create on
+/// the UNIQUE path. Bookmark healing also rewrites history, as commits do.
 pub fn list_workspace_statuses(repo_path: &str) -> Result<Vec<WorkspaceSidebarStatus>, String> {
-  // Workspace creation registers the jj workspace before it writes the DB row.
-  // Discovery must not see that window, or it inserts a bare row that makes
-  // the create fail on the UNIQUE path. The bookmark healing below also
-  // rewrites history, so it belongs under the same lock as commits.
   let repo_mutation_lock = commit_lock_for_repo(repo_path);
   let repo_mutation_guard = repo_mutation_lock.lock_or_recover();
   let discovered = jj::discover_workspaces_with_conflicts(repo_path)
     .map_err(|e| format!("Failed to discover workspaces from jj: {}", e))?;
 
-  // Conflicted bookmarks break tip/PR revsets (`Revision '…' doesn't exist` /
-  // ambiguous). Resolve them automatically with linear, lossless history before
-  // the sidebar reads identity or conflict state.
+  // Conflicted bookmarks break tip and PR revsets, so they resolve losslessly before any read.
   let mut resolved_any = false;
   for workspace in discovered.iter().filter(|w| w.bookmark_conflicted) {
     let workspace_dir = Path::new(repo_path)
@@ -1524,8 +1513,7 @@ pub fn list_workspace_statuses(repo_path: &str) -> Result<Vec<WorkspaceSidebarSt
     }
   }
 
-  // Discovery loads the repository once for every workspace; only a
-  // resolution above changes what it saw.
+  // Discovery loads the repo once for all workspaces: only a resolution above makes it stale.
   let discovered = if resolved_any {
     jj::discover_workspaces_with_conflicts(repo_path).map_err(|e| {
       format!(
@@ -1569,8 +1557,7 @@ pub fn list_workspace_statuses(repo_path: &str) -> Result<Vec<WorkspaceSidebarSt
         .get(&current.workspace_path)
         .cloned()
         .flatten();
-      // Discovery's flag already covers the working-copy tree's conflicts
-      // (`workspace_has_unresolved_conflicts`), from the same load.
+      // Discovery's flag already covers working-copy conflicts, from the same load.
       let has_conflicts = discovered_has_conflicts;
       Ok(WorkspaceSidebarStatus {
         current,
@@ -1819,8 +1806,7 @@ pub fn workspace_status(
   let dag_nodes = Vec::new();
   let conflicted_workspace_ids = Vec::new();
 
-  // Commits ahead of the target branch, whether or not a workspace holds it;
-  // with no target, ahead of the repository default branch.
+  // Ahead of the target branch, held by a workspace or not, else of the default branch.
   let ahead_base = current_workspace
     .target_branch
     .clone()
@@ -1855,8 +1841,7 @@ pub fn workspace_status(
   } else {
     jj::get_conflicted_files(workspace_path_str, Some(&conflict_target)).unwrap_or_default()
   };
-  // Tree-id resolution and path discovery can diverge (e.g. conflicted committed
-  // tip with an empty WC child). Surface a conflict whenever either signal fires.
+  // Tree-id and path checks can disagree (a conflicted tip under an empty child): either counts.
   let has_conflicts = jj::workspace_has_unresolved_conflicts(workspace_path_str).unwrap_or(false)
     || !conflicted_files.is_empty();
 
@@ -2095,11 +2080,7 @@ mod tests {
       .status()
       .expect("jj init");
     assert!(status.success());
-    // get_default_branch() falls back to git's init.defaultBranch config once no
-    // "main"/"master" branch ref exists yet (true here: no commit has been made,
-    // so the colocated repo has no real git branch ref at all). That config
-    // depends on the runner's git version/settings (observed "master" on the
-    // Windows CI image); pin it to "main" so resolution is deterministic.
+    // No commit yet, so get_default_branch reads init.defaultBranch: "master" on Windows CI.
     let status = Command::new("git")
       .current_dir(temp.path())
       .args(["config", "init.defaultBranch", "main"])
@@ -2151,8 +2132,7 @@ mod tests {
     let lock = crate::core::repo::commit_lock_for_repo(&repo_path);
     let guard = lock.lock_or_recover();
 
-    // Reproduce create_workspace's window: jj has registered the workspace
-    // but the DB row is not written yet.
+    // create_workspace's window: jj has registered the workspace, the DB row is not written yet.
     let full_path = crate::jj::create_workspace(
       &repo_path,
       "fix/race",
@@ -2170,7 +2150,11 @@ mod tests {
       .to_string();
     let status_repo = repo_path.clone();
     let statuses = std::thread::spawn(move || super::list_workspace_statuses(&status_repo));
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    // Discovery holds a handle to the lock while it waits for create to finish.
+    let waits = crate::test_repo::wait_until(std::time::Duration::from_secs(5), || {
+      std::sync::Arc::strong_count(&lock) > 2
+    });
+    assert!(waits, "list_workspace_statuses never took the commit lock");
 
     let id = crate::local_db::add_workspace(
       &repo_path,
@@ -2623,8 +2607,7 @@ mod tests {
       .join(".treq/workspaces")
       .join(&ws.workspace_path);
     let ws_dir = ws_dir.to_str().expect("utf-8");
-    // Workspaces made before d4a24ff, or advanced after a rebase, carry the
-    // bookmark on their (empty) working-copy commit.
+    // Workspaces from before d4a24ff, or advanced after a rebase, bookmark their empty WC commit.
     super::advance_bookmark_to_working_copy_tip(ws_dir, "fix/wc").expect("advance bookmark");
 
     super::archive_workspace(&repo_path, &ws.id).expect("archive workspace");
@@ -2675,8 +2658,7 @@ mod tests {
       .expect("archive workspace")
       .expect("leftover directory");
 
-    // The directory is out of the workspace slot before the caller deletes it,
-    // so an immediate recreate cannot race the background removal.
+    // The directory leaves the slot before deletion, so a quick recreate can't race the removal.
     assert!(!workspace_dir.exists());
     let second = super::create_workspace(&repo_path, "fix/race", None, None, None, None, None)
       .expect("recreate while removal is pending");
@@ -2816,8 +2798,7 @@ mod tests {
   fn create_workspace_recovers_workspace_registered_by_interrupted_create() {
     let temp = TempDir::new().expect("tempdir");
     let repo_path = init_workspace_creation_repo(&temp);
-    // A create killed after jj registered the workspace but before it moved
-    // the working copy off the root commit and set the bookmark.
+    // A create killed after jj registration, before leaving the root commit and bookmarking.
     fs::create_dir_all(temp.path().join(".treq/workspaces")).expect("workspaces dir");
     let status = Command::new("jj")
       .current_dir(temp.path())
@@ -3574,7 +3555,10 @@ pub fn plan_merge_landing(
 }
 
 fn default_branch_or_main(repo_path: &str) -> String {
-  jj::get_default_branch(repo_path).unwrap_or_else(|_| "main".to_string())
+  jj::get_default_branch(repo_path).unwrap_or_else(|error| {
+    tracing::warn!(%error, repo_path, "default branch lookup failed; using main");
+    "main".to_string()
+  })
 }
 
 fn load_merge_landing_plan(
@@ -3758,7 +3742,6 @@ fn merge_workspace_landing(
   // Deferring the cleanup also defers moving the home checkout.
   let defer_home_edit = defer_removal;
 
-  // Get the workspace from the database
   let workspace = local_db::get_workspace_by_id(repo_path, workspace_id)
     .map_err(|e| format!("Failed to get workspace from db: {}", e))?
     .ok_or("Workspace not found in database")?;
@@ -3821,8 +3804,7 @@ fn merge_workspace_landing(
     }
   }
 
-  // Merging the target branch into itself syncs the home checkout with the
-  // workspace's, which needs the edit first.
+  // Merging the target into itself syncs home with the workspace, which needs the edit first.
   let home_edit_later = defer_home_edit && workspace.branch_name != target_branch;
   if !home_edit_later {
     jj::jj_edit_bookmark(repo_path, target_branch)
@@ -3947,9 +3929,10 @@ fn sync_home_on_branch_and_workspace(
   let checkout_tip = jj::jj_resolve_bookmark_tip(source_path)
     .map_err(|e| format!("Failed to resolve source tip: {}", e))?;
   // The bookmark is the branch; a checkout's working copy, dirty or not, is never moved onto it.
-  let source_tip = jj::jj_get_commit_id(source_path, branch)
-    .ok()
-    .unwrap_or(checkout_tip);
+  let source_tip = jj::jj_get_commit_id(source_path, branch).unwrap_or_else(|error| {
+    tracing::debug!(%error, branch, "branch has no commit in the checkout; using its tip");
+    checkout_tip
+  });
 
   let destination_path = match source {
     SyncSource::HomeToWorkspace => workspace_path_str,
@@ -4252,7 +4235,7 @@ pub fn update_workspace_with_title(
     .ok_or("Workspace not found in database")?;
 
   if !matches!(target_branch, MaybeEmptyParam::Omitted) {
-    let default_branch = jj::get_default_branch(repo_path).unwrap_or_else(|_| "main".to_string());
+    let default_branch = default_branch_or_main(repo_path);
     // An empty target means "back onto the repo's default branch".
     let new_target = match target_branch {
       MaybeEmptyParam::Some(branch) => branch,
@@ -4557,8 +4540,7 @@ pub fn move_workspace_changes(
   // Only files changed in the source move; the rest become warnings.
   let mut files = Vec::new();
   if !request.files.is_empty() {
-    // Record the source changes before the filesystem transfer so tracked
-    // files can be restored to their parent state rather than left deleted.
+    // Snapshot before the move, so tracked files restore to their parent state, not deleted.
     let changed = jj::jj_get_changed_files(&source_full_path_str)
       .map_err(|e| format!("Failed to snapshot source files: {}", e))?;
     for file in &request.files {
@@ -4592,9 +4574,7 @@ pub fn move_workspace_changes(
       Some(files.clone()),
     )
     .map_err(|e| format!("Failed to move files: {}", e))?;
-    // Source restoration can reconcile other workspaces and check out the
-    // destination before its copied paths have been snapshotted. Preserve
-    // those bytes across that rewrite, then snapshot them afterward.
+    // Restoring the source can check out the destination before its copies are snapshotted.
     let destination_file_saves: Vec<(String, Option<Vec<u8>>)> = files
       .iter()
       .map(|file_path| {
@@ -4676,9 +4656,7 @@ pub fn pull_workspace_from_remote(
 ) -> Result<PullWorkspaceResult, String> {
   // When workspace_id is None, do a simple pull for the home repo
   let Some(workspace_id) = workspace_id else {
-    // For home repo, just fetch — do not rebase, which would detach HEAD.
-    // Read the branch first: a fetch that moves it past the checkout leaves
-    // Git HEAD detached.
+    // Fetch only, as a rebase detaches HEAD. The branch is read first: a fetch can detach HEAD too.
     let home_branch = jj::resolve_home_repo_branch(repo_path)
       .map_err(|e| format!("Failed to resolve home repo branch: {}", e))?;
     jj::jj_git_fetch(repo_path).map_err(|e| format!("Fetch failed: {}", e))?;
@@ -4709,8 +4687,7 @@ pub fn pull_workspace_from_remote(
 
   let branch_name = &workspace.branch_name;
 
-  // An automatic review is due only when the fetch actually moved the branch
-  // this workspace tracks, so read its remote tip on both sides of the fetch.
+  // Auto-review is due only if the fetch moved the tracked branch, so its tip is read either side.
   let remote_target = format!("{}@origin", branch_name);
   let target_before = jj::jj_get_commit_id(full_path_str, &remote_target).ok();
 
@@ -4783,9 +4760,7 @@ pub fn pull_workspace_from_remote(
     )
     .map_err(|e| format!("Failed to rebase local commits: {}", e))?;
 
-    // Step 5b: Advance the bookmark to the rebased local tip.
-    // Without this, the bookmark stays on origin and Sync reports InSync while
-    // conflicted/rebased work only lives on @ — users can't resolve locally and push.
+    // Step 5b: the bookmark moves to the rebased tip, or Sync says InSync while work sits on @.
     let rebased_heads = jj::jj_log_revset_commit_ids(
       full_path_str,
       &format!("heads({})", local_change_ids.join(" | ")),
@@ -4804,8 +4779,7 @@ pub fn pull_workspace_from_remote(
 
   let has_conflicts = workspace_pull_has_conflicts(full_path_str, branch_name);
 
-  // A diverged pull rewrites the workspace's own commits onto the remote tip,
-  // so its result is worth reviewing even when the remote tip stood still.
+  // A diverged pull rewrites the workspace's commits, so it merits review even if the tip held.
   auto_review::notify(
     repo_path,
     workspace_id,
@@ -5031,15 +5005,12 @@ fn workspace_diff_with_conflict_style(
   if let Some(empty) = jj::revision_diff_if_workspace_missing(&workspace_dir) {
     return Ok(empty);
   }
-  // One load, lock and snapshot for the whole reload; the revision queries
-  // below see the same snapshot as the uncommitted files.
+  // One load, lock and snapshot: the revision queries below see what the uncommitted files saw.
   let (repo, working_copy) = jj::WorkspaceRepo::load_working_copy(workspace_dir_str)
     .map_err(|e| format!("Failed to load workspace repo: {}", e))?;
   let base_revision = resolve_workspace_diff_base_revision(repo_path, &workspace, &repo)?;
   let tip_revision = resolve_workspace_diff_tip_revision(&workspace, &repo)?;
-  // Diff from the fork point, not the base tip: when the target moves ahead
-  // (e.g. a remote merge is fetched) before the workspace is rebased, a
-  // two-dot diff shows the target's new commits as reverted Committed files.
+  // Fork point, not base tip: a target that moved ahead would show its commits as reverted.
   let base_revision = if base_revision == "@" {
     base_revision
   } else {
@@ -5068,16 +5039,11 @@ fn workspace_diff_with_conflict_style(
     .collect();
   let conflicted_paths: std::collections::HashSet<String> =
     conflicted_files.iter().cloned().collect();
-  // Drop clean overlap with the working copy so WC-only edits (bookmark at @)
-  // are not duplicated under Committed + Changes. Conflicted paths stay in
-  // committed_files — rebase conflicts live in committed hunks. Review's Show
-  // toggle keeps those dirty/conflicted committed rows visible when off.
+  // Clean overlap with the working copy leaves Committed. Rebase conflicts stay: they live there.
   diff.committed_files.retain(|file| {
     !uncommitted_paths.contains(&file.path) || conflicted_paths.contains(&file.path)
   });
-  // A file both committed and dirty reviews as one diff, fork point to the
-  // working copy, not the committed half alone. Conflicted files keep their
-  // committed hunks: rebase conflicts live there.
+  // A dirty committed file reviews as one diff from the fork point, not the committed half.
   let dirty_committed: std::collections::HashSet<String> = diff
     .hunks_by_file
     .iter()
@@ -5108,8 +5074,7 @@ fn workspace_diff_with_conflict_style(
   }
   diff.uncommitted_files = uncommitted_files;
   diff.conflicted_files = conflicted_files;
-  // As `list_file_hunks_batch` names its reads, so the Changes tab can tell
-  // that hunks it read are still current.
+  // Named as `list_file_hunks_batch` names its reads, so Changes can tell its hunks are current.
   diff.working_copy_token = token.map(|token| format!("{token}:{conflict_marker_style}"));
 
   Ok(diff)
@@ -5293,9 +5258,7 @@ pub fn check_and_rebase_workspaces(
   force: Option<bool>,
   conflict_style: &str,
 ) -> Result<SingleRebaseResult, String> {
-  // Dashboard/ShowWorkspace refreshes and post-commit auto-rebase can overlap. jj transactions
-  // share one operation store across all workspaces, so serialize these history rewrites with
-  // commits to prevent stale operations, competing checkouts, and conflicted bookmarks.
+  // Refreshes and auto-rebase share jj's operation store, so rewrites serialize with commits.
   let repo_commit_lock = commit_lock_for_repo(repo_path);
   let _repo_commit_guard = repo_commit_lock.lock_or_recover();
 
@@ -5513,12 +5476,11 @@ fn commit_workspace_locked(
   } else {
     let branch = jj::resolve_home_repo_branch(repo_path)
       .map_err(|e| format!("Failed to resolve home repo branch: {}", e))?;
-    let target_branch = jj::get_default_branch(repo_path).unwrap_or_else(|_| "main".to_string());
+    let target_branch = default_branch_or_main(repo_path);
     (branch, target_branch)
   };
 
-  // Checked under the commit lock: a check made before it races with a
-  // concurrent commit that empties the working copy first.
+  // Checked under the commit lock, or a concurrent commit could empty the working copy first.
   if require_changes
     && jj::jj_get_changed_files(&workspace_root)
       .map_err(|e| format!("Failed to list changed files: {}", e))?

@@ -38,7 +38,7 @@ function DownloadAnchor({
 }: {
   link: DownloadLink;
   location: string;
-  className?: string;
+  className?: string | undefined;
   children: ReactNode;
 }): ReactNode {
   // Installers download in place. The release page opens in a new tab.
@@ -82,7 +82,7 @@ export function OtherDownloads({
   className,
 }: {
   location: string;
-  className?: string;
+  className?: string | undefined;
 }): ReactNode {
   const {secondary} = useDownloads();
   return (

@@ -1,3 +1,4 @@
+use crate::gpui_shell::test_helpers::WindowHarness;
 use gpui_testing_library::Queries as _;
 use std::{cell::RefCell, rc::Rc, sync::Mutex};
 
@@ -201,6 +202,12 @@ struct Harness {
   host: Arc<FakeHost>,
 }
 
+impl WindowHarness for Harness {
+  fn cx(&mut self) -> &mut VisualTestContext {
+    &mut self.cx
+  }
+}
+
 impl Harness {
   fn new(cx: &mut TestAppContext, json: serde_json::Value, host: FakeHost) -> Self {
     let snapshot: OverlaySnapshot = serde_json::from_value(json).expect("parse");
@@ -220,25 +227,6 @@ impl Harness {
       sent,
       host,
     }
-  }
-
-  /// The window as the user sees it, once everything pending has run.
-  fn rendered(&mut self) -> gpui_testing_library::Screen {
-    self.cx.run_until_parked();
-    let window = self.cx.update(|window, _| window.window_handle());
-    let screen = gpui_testing_library::Screen::new(&self.cx, window);
-    screen.redraw();
-    screen
-  }
-
-  fn click(&mut self, selector: &'static str) {
-    self.cx.run_until_parked();
-    let bounds = self
-      .cx
-      .debug_bounds(selector)
-      .unwrap_or_else(|| panic!("{selector} is not drawn"));
-    self.cx.simulate_click(bounds.center(), Modifiers::none());
-    self.cx.run_until_parked();
   }
 
   fn keys(&mut self, keys: &str) {
@@ -745,8 +733,7 @@ mod testing_library {
     expect(screen.get_by_role(by::role(Role::Dialog))).to_be_visible();
     let search = screen.get_by_role(option("Go to file"));
     expect(&search).to_be_visible();
-    // gpui-testing-library 0.1 does not read gpui-kit's descriptions yet;
-    // the e2e suite checks the description text.
+    // gpui-testing-library 0.1 can't read gpui-kit descriptions yet: the e2e suite checks them.
   }
 
   #[gpui::test]

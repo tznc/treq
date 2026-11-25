@@ -143,6 +143,7 @@ export function bootstrapScript(requestedVersion: number, overrides: BootstrapOv
   // version number, so the rendered script stays internally consistent.
   const manifestVersion = requested ? requestedVersion : CURRENT_MANIFEST_VERSION;
   const manifest = requested ?? MANIFESTS[CURRENT_MANIFEST_VERSION];
+  if (!manifest) throw new Error(`no boot manifest ${CURRENT_MANIFEST_VERSION}`);
   const agentLines = manifest.agents
     .map((agent) => `install_agent "${agent.name}" "${agent.version}"\n`)
     .join("");

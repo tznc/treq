@@ -1,7 +1,7 @@
 name: Windows Tests
 
-# Separate from nightly.yml so a Windows test failure doesn't mark the
-# nightly build red, and so it can be re-run on its own.
+# Separate from release.yml so a Windows test failure doesn't mark the
+# daily release build red, and so it can be re-run on its own.
 
 defaults:
   run:
@@ -9,7 +9,7 @@ defaults:
 
 on:
   schedule:
-    - cron: "0 9 * * *" # 09:00 UTC daily, alongside the nightly build
+    - cron: "0 9 * * *" # 09:00 UTC daily, alongside the release build
   workflow_dispatch:
 
 concurrency:

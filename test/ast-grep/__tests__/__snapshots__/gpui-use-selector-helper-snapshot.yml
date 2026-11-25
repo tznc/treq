@@ -1,0 +1,102 @@
+id: gpui-use-selector-helper
+snapshots:
+  ? |
+    fn v() -> impl IntoElement {
+      div().id("commit-message").debug_selector(|| "commit-message".into())
+    }
+  : labels:
+    - source: div().id("commit-message").debug_selector(|| "commit-message".into())
+      style: primary
+      start: 31
+      end: 100
+    - source: div()
+      style: secondary
+      start: 31
+      end: 36
+    - source: div()
+      style: secondary
+      start: 31
+      end: 36
+    - source: debug_selector
+      style: secondary
+      start: 58
+      end: 72
+    - source: div().id("commit-message").debug_selector
+      style: secondary
+      start: 31
+      end: 72
+  ? |
+    fn v() -> impl IntoElement {
+      div().id("send").role(Role::Button).test_support().debug_selector(|| "send".into())
+    }
+  : labels:
+    - source: div().id("send").role(Role::Button).test_support().debug_selector(|| "send".into())
+      style: primary
+      start: 31
+      end: 114
+    - source: div()
+      style: secondary
+      start: 31
+      end: 36
+    - source: div()
+      style: secondary
+      start: 31
+      end: 36
+    - source: debug_selector
+      style: secondary
+      start: 82
+      end: 96
+    - source: div().id("send").role(Role::Button).test_support().debug_selector
+      style: secondary
+      start: 31
+      end: 96
+  ? |
+    fn v() -> impl IntoElement {
+      ui::text(div().debug_selector(|| "title".into()), TextSize::Sm)
+    }
+  : labels:
+    - source: div().debug_selector(|| "title".into())
+      style: primary
+      start: 40
+      end: 79
+    - source: div()
+      style: secondary
+      start: 40
+      end: 45
+    - source: div()
+      style: secondary
+      start: 40
+      end: 45
+    - source: debug_selector
+      style: secondary
+      start: 46
+      end: 60
+    - source: div().debug_selector
+      style: secondary
+      start: 40
+      end: 60
+  ? |
+    fn v(on: bool) -> impl IntoElement {
+      div().when(on, |d| d.debug_selector(|| "on".into()))
+    }
+  : labels:
+    - source: d.debug_selector(|| "on".into())
+      style: primary
+      start: 58
+      end: 90
+    - source: div()
+      style: secondary
+      start: 39
+      end: 44
+    - source: div()
+      style: secondary
+      start: 39
+      end: 44
+    - source: debug_selector
+      style: secondary
+      start: 60
+      end: 74
+    - source: d.debug_selector
+      style: secondary
+      start: 58
+      end: 74

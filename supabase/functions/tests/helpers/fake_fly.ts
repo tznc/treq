@@ -22,6 +22,7 @@ export interface FakeFlyMachine {
     services?: Array<Record<string, unknown>>;
     metadata?: Record<string, string>;
   };
+  updated_at?: string;
 }
 
 export interface RecordedRequest {
@@ -72,6 +73,7 @@ export class FakeFly {
         this.volumes.set(v.id, v);
         return json(200, v);
       }
+      if (id === undefined) return err(404, "volume not found");
       const v = this.volumes.get(id);
       if (!v) return err(404, "volume not found");
       if (method === "DELETE") {
@@ -110,6 +112,7 @@ export class FakeFly {
       this.machines.set(m.id, m);
       return json(200, m);
     }
+    if (id === undefined) return err(404, "machine not found");
     const m = this.machines.get(id);
     if (!m) return err(404, "machine not found");
     if (!action && method === "GET") return json(200, m);

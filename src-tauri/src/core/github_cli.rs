@@ -179,6 +179,27 @@ pub fn submit_pr_review(
   github::gh_submit_pr_review_impl(&gh, repo, number, event, body, comments, &path)
 }
 
+/// `@`-mentionable logins of `repo`, read once per launch.
+pub fn mentionable_users(repo: &str) -> Result<Vec<String>, String> {
+  static CACHE: std::sync::Mutex<Option<std::collections::HashMap<String, Vec<String>>>> =
+    std::sync::Mutex::new(None);
+  if let Some(users) = CACHE
+    .lock()
+    .ok()
+    .and_then(|cache| cache.as_ref()?.get(repo).cloned())
+  {
+    return Ok(users);
+  }
+  let (gh, path) = gh()?;
+  let users = github::gh_mentionable_users_impl(&gh, repo, &path)?;
+  if let Ok(mut cache) = CACHE.lock() {
+    cache
+      .get_or_insert_with(Default::default)
+      .insert(repo.to_string(), users.clone());
+  }
+  Ok(users)
+}
+
 /// Turns the reaction `content` on or off for a comment.
 pub fn set_reaction(comment_id: &str, content: &str, on: bool) -> Result<(), String> {
   let (gh, path) = gh()?;

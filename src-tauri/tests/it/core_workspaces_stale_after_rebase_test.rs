@@ -243,7 +243,7 @@ fn deferred_rebase_leaves_no_stale_working_copy() {
     .expect("Failed to create workspace with commit");
   let ws_b_path = repo.workspace_full_path(&ws_b);
 
-  // Add a new commit to main to give the rebase something to do
+  // A new commit on main gives the rebase something to do.
   repo
     .commit_file(
       "main-deferred.txt",

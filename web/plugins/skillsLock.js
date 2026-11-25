@@ -40,7 +40,11 @@ function lockProblems(sources, lock) {
  */
 function nextLock(sources, prev, heads, stars) {
   return Object.fromEntries(
-    sources.map(({id}) => [id, {commit: heads[id], stars: stars[id] ?? prev[id]?.stars ?? null}]),
+    sources.map(({id}) => {
+      const commit = heads[id];
+      if (commit === undefined) throw new Error(`${id}: no branch head`);
+      return [id, {commit, stars: stars[id] ?? prev[id]?.stars ?? null}];
+    }),
   );
 }
 
