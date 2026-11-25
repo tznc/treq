@@ -87,6 +87,7 @@ jobs:
 
       # tauri-action reuses this draft and leaves its body alone.
       - name: Create draft release without chore, lint and style PRs
+        if: steps.gate.outputs.should_run == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
