@@ -21,7 +21,7 @@
 
 /* ── Shared design-system tokens ──────────────────────────────────────────────
    These mirror the desktop app's tokens so that shared React components
-   (CommentInput, Button, etc.) render the same in both contexts. Labels on
+   render the same in both contexts. Labels on
    the primary blue are ink, not white, for contrast.                        */
 
 :root {

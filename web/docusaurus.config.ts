@@ -50,18 +50,10 @@ const config: Config = {
               splitChunks: {
                 chunks: 'all' as const,
                 cacheGroups: {
-                  // three.js — only loaded on rubber-duck, vibe-idea-generator, and roadmap pages
+                  // three.js — only loaded on the roadmap page
                   three: {
                     test: /[\\/]node_modules[\\/]three[\\/]/,
                     name: 'chunk-three',
-                    chunks: 'all' as const,
-                    priority: 40,
-                    enforce: true,
-                  },
-                  // Rough.js — shared between branch-visualizer and vcs-simulator
-                  roughjs: {
-                    test: /[\\/]node_modules[\\/]roughjs[\\/]/,
-                    name: 'chunk-roughjs',
                     chunks: 'all' as const,
                     priority: 40,
                     enforce: true,
