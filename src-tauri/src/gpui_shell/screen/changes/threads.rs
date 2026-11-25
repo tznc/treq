@@ -129,7 +129,7 @@ impl ChangesView {
     self.threads.revision += 1;
   }
 
-  fn read_agent(&mut self, cx: &mut Context<Self>) {
+  pub(super) fn read_agent(&mut self, cx: &mut Context<Self>) {
     let Some(id) = self.parent.workspace_id() else {
       return;
     };
