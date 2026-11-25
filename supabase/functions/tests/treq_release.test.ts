@@ -1,9 +1,9 @@
 // Which treq CLI release a machine bootstraps: the newest published release
-// in treq.dev/releases.json with both Linux CLI assets, reviewed manifest
-// pins first. No network: fetch is a fake.
+// in treq.dev/releases.json with both Linux CLI assets. No network: fetch is
+// a fake.
 
 import { assert, assertEquals, assertRejects, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { type BootManifest, bootstrapScript, CURRENT_MANIFEST_VERSION, manifestForVersion } from "../_shared/remote/boot-manifest.ts";
+import { bootstrapScript, CURRENT_MANIFEST_VERSION } from "../_shared/remote/boot-manifest.ts";
 import { createTreqReleaseResolver } from "../_shared/remote/treq-release.ts";
 import { runBootManifest } from "../_shared/remote/machine-setup.ts";
 import { ProviderError } from "../_shared/remote/provider.ts";
@@ -44,17 +44,14 @@ function fakeFetch(answer: unknown[] | Record<string, unknown> | Response | Erro
   return { fetch, urls };
 }
 
-/** The current manifest with placeholder treq digests, as on main today. */
-const unpinned: BootManifest = { ...defined(manifestForVersion(CURRENT_MANIFEST_VERSION)), treq_version: "0.4.0" };
-const resolverFor = (answer: Parameters<typeof fakeFetch>[0], manifests = [unpinned], now = () => 0) =>
-  createTreqReleaseResolver({ fetch: fakeFetch(answer).fetch, manifests, now });
+const resolverFor = (answer: Parameters<typeof fakeFetch>[0]) =>
+  createTreqReleaseResolver({ fetch: fakeFetch(answer).fetch, now: () => 0 });
 
 Deno.test("the newest published release wins, by semver", async () => {
   const resolve = resolverFor([release("v0.2.0"), release("v0.10.0"), release("v0.9.0")]);
   const r = await resolve();
   assertEquals(r.version, "0.10.0");
-  assertEquals(r.sha256, { x86_64: X86, aarch64: ARM });
-  assertEquals(r.source, "github");
+  assertEquals(r, { version: "0.10.0", sha256: { x86_64: X86, aarch64: ARM } });
 });
 
 Deno.test("a version, tag or digest that fails its pattern is skipped before it reaches the script", async () => {
@@ -70,7 +67,7 @@ Deno.test("a version, tag or digest that fails its pattern is skipped before it 
     null,
     release("v0.3.0"),
   ])();
-  assertEquals(r, { version: "0.3.0", sha256: { x86_64: X86, aarch64: ARM }, source: "github" });
+  assertEquals(r, { version: "0.3.0", sha256: { x86_64: X86, aarch64: ARM } });
 });
 
 Deno.test("a prerelease and the nightly are skipped", async () => {
@@ -92,13 +89,7 @@ Deno.test("a release missing a Linux CLI asset or its digest falls back to the p
   assertEquals(r.version, "0.3.0");
 });
 
-Deno.test("reviewed manifest pins beat the digests releases.json reports", async () => {
-  const pinned = { ...unpinned, treq_version: "0.3.0", treq_sha256: { x86_64: "a".repeat(64), aarch64: "b".repeat(64) } };
-  const r = await resolverFor([release("v0.3.0")], [pinned, unpinned])();
-  assertEquals(r, { version: "0.3.0", sha256: pinned.treq_sha256, source: "manifest" });
-});
-
-Deno.test("an unreachable or malformed releases.json throws a ProviderError when the manifest has no real pins", async () => {
+Deno.test("an unreachable or malformed releases.json throws a ProviderError", async () => {
   const malformed = [
     {},
     { schema: 2, releases: [release("v0.3.0")] },
@@ -112,16 +103,10 @@ Deno.test("an unreachable or malformed releases.json throws a ProviderError when
   }
 });
 
-Deno.test("a releases.json failure falls back to the current manifest when it has real pins", async () => {
-  const pinned = { ...unpinned, treq_sha256: { x86_64: "a".repeat(64), aarch64: "b".repeat(64) } };
-  const r = await resolverFor(new Response("boom", { status: 500 }), [pinned])();
-  assertEquals(r, { version: "0.4.0", sha256: pinned.treq_sha256, source: "manifest" });
-});
-
 Deno.test("the resolved release is cached for about ten minutes", async () => {
   const { fetch, urls } = fakeFetch([release("v0.3.0")]);
   let t = 0;
-  const resolve = createTreqReleaseResolver({ fetch, manifests: [unpinned], now: () => t });
+  const resolve = createTreqReleaseResolver({ fetch, now: () => t });
   await resolve();
   t = 9 * 60_000;
   await resolve();
@@ -135,7 +120,7 @@ Deno.test("the resolved release is cached for about ten minutes", async () => {
 Deno.test("TREQ_RELEASES_URL overrides where releases.json is read from", async () => {
   const { fetch, urls } = fakeFetch([release("v0.3.0")]);
   const env = (key: string) => key === "TREQ_RELEASES_URL" ? "https://preview.example/releases.json" : undefined;
-  await createTreqReleaseResolver({ fetch, manifests: [unpinned], env })();
+  await createTreqReleaseResolver({ fetch, env })();
   assertEquals(urls, ["https://preview.example/releases.json"]);
 });
 
@@ -153,6 +138,6 @@ Deno.test("the bootstrap script carries the resolved version and digests, no pla
   assertStringIncludes(script, `TREQ_SHA256_X86_64="${X86}"`);
   assertStringIncludes(script, `TREQ_SHA256_AARCH64="${ARM}"`);
   assert(!/="PLACEHOLDER/.test(script), "no placeholder digest");
-  // Without overrides the script still renders the manifest's own values.
-  assertStringIncludes(bootstrapScript(CURRENT_MANIFEST_VERSION), `TREQ_VERSION="${unpinned.treq_version}"`);
+  // Without a resolved release the script fails closed at the digest check.
+  assertStringIncludes(bootstrapScript(CURRENT_MANIFEST_VERSION), 'TREQ_SHA256_X86_64="PLACEHOLDER');
 });

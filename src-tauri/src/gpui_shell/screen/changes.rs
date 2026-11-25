@@ -18,6 +18,7 @@ use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
+use gpui_kit::base::ObservedElement;
 use std::{
   cell::RefCell,
   collections::{HashMap, HashSet},
@@ -25,6 +26,7 @@ use std::{
   sync::Arc,
   time::{Duration, Instant},
 };
+use treq_ui::SelectorExt as _;
 
 /// Prefix of a viewed hash taken from a file's content id, for files with
 /// no diff lines to hash (binary, empty, mode-only, or not yet loaded).
@@ -1881,12 +1883,10 @@ fn header_button(
   label: impl Into<SharedString>,
   fg: Hsla,
   p: &Palette,
-) -> Stateful<Div> {
+) -> ObservedElement<Stateful<Div>> {
   let id: SharedString = id.into();
-  let selector = id.to_string();
   div()
-    .id(id)
-    .debug_selector(move || selector)
+    .selector(id)
     .role(gpui::Role::Button)
     .aria_label(label.into())
     .p_1()
@@ -1922,8 +1922,7 @@ impl Render for ChangesView {
     }
     let p = theme::palette(self.dark);
     let root = ui::text(div(), TextSize::Sm)
-      .id("changes-diff-viewer")
-      .debug_selector(|| "changes-diff-viewer".into())
+      .selector("changes-diff-viewer")
       .role(gpui::Role::Group)
       .aria_label("Changes")
       .size_full()
@@ -2154,8 +2153,7 @@ impl ChangesView {
     let primary = p.primary;
     let palette = *p;
     let handle = div()
-      .id("changes-file-list-resize")
-      .debug_selector(|| "changes-file-list-resize".into())
+      .selector("changes-file-list-resize")
       .absolute()
       .top_0()
       .bottom_0()
@@ -2174,7 +2172,7 @@ impl ChangesView {
         }
       }));
     div()
-      .debug_selector(|| "changes-file-list".into())
+      .selector("changes-file-list")
       .relative()
       .w(zpx(self.side_width))
       .flex_none()
@@ -2275,8 +2273,7 @@ impl ChangesView {
         .justify_between()
         .child(
           ui::text(div(), TextSize::Sm)
-            .id("changes-nothing-to-commit")
-            .debug_selector(|| "changes-nothing-to-commit".into())
+            .selector("changes-nothing-to-commit")
             .role(gpui::Role::Status)
             .aria_label("Nothing to commit")
             .test_support()
@@ -2448,7 +2445,7 @@ impl ChangesView {
       }))
       .child(
         div()
-          .debug_selector(|| "commit-message".into())
+          .selector("commit-message")
           .when(error.is_some(), |this| {
             this
               .rounded(radius::MD)
@@ -2460,8 +2457,7 @@ impl ChangesView {
       .when_some(error, |this, err| {
         this.child(
           div()
-            .id("commit-message-error")
-            .debug_selector(|| "commit-message-error".into())
+            .selector("commit-message-error")
             .role(gpui::Role::Alert)
             .aria_label(err)
             .text_color(p.destructive)
@@ -3058,8 +3054,7 @@ impl ChangesView {
     if let Some(err) = self.pr.as_ref().and_then(|pr| pr.error.clone()) {
       return area.child(
         ui::text(div(), TextSize::Sm)
-          .id("pr-diff-error")
-          .debug_selector(|| "pr-diff-error".into())
+          .selector("pr-diff-error")
           .role(gpui::Role::Alert)
           .aria_label(format!("Failed to load the PR diff: {err}"))
           .test_support()
@@ -3084,7 +3079,7 @@ impl ChangesView {
       };
       return area.child(
         div()
-          .debug_selector(|| "changes-loading-skeleton".into())
+          .selector("changes-loading-skeleton")
           .size_full()
           .p_4()
           .flex()
@@ -3199,12 +3194,15 @@ impl ChangesView {
       .child(header)
       .children(self.file_comments(&path, p, cx));
     let muted = p.muted_foreground;
-    let placeholder = |el: Div| div().font_family(theme::MONO_FONT).child(el);
+    let placeholder =
+      |el: ObservedElement<gpui::Stateful<Div>>| div().font_family(theme::MONO_FONT).child(el);
     match kind {
       Body::Binary | Body::Deleted => card.child(placeholder(
         div()
-          .when(kind == Body::Deleted, |this| {
-            this.debug_selector(|| "deleted-file-placeholder".into())
+          .selector(if kind == Body::Deleted {
+            "deleted-file-placeholder"
+          } else {
+            "binary-file-placeholder"
           })
           .flex()
           .items_center()
@@ -3241,26 +3239,24 @@ impl ChangesView {
             .unwrap_or_default(),
         ),
       ),
-      Body::Empty => card.child(
-        div()
-          .debug_selector(|| "empty-diff-placeholder".into())
-          .child(if conflicted_file {
-            ui::EmptyState::new(
-              "empty-diff-conflicted",
-              "No diff for this conflicted file",
-              p,
-            )
-            .message("The file may have been deleted on one side of the conflict.")
-          } else {
-            ui::EmptyState::new("empty-diff-none", "No diff hunks", p)
-              .message("This change has no text lines to show, such as a mode change.")
-          }),
-      ),
+      Body::Empty => card.child(div().selector("empty-diff-placeholder").child(
+        if conflicted_file {
+          ui::EmptyState::new(
+            "empty-diff-conflicted",
+            "No diff for this conflicted file",
+            p,
+          )
+          .message("The file may have been deleted on one side of the conflict.")
+        } else {
+          ui::EmptyState::new("empty-diff-none", "No diff hunks", p)
+            .message("This change has no text lines to show, such as a mode change.")
+        },
+      )),
       Body::Generated => {
         let file = path.clone();
         card.child(
           div()
-            .debug_selector(|| "generated-file-placeholder".into())
+            .selector("generated-file-placeholder")
             .py_6()
             .flex()
             .flex_col()
@@ -3426,10 +3422,9 @@ impl ChangesView {
           format!("add-file-comment-tip-{path}"),
           "Add file comment",
           div()
-            .id(SharedString::from(format!("add-file-comment-{path}")))
+            .selector(SharedString::from(format!("add-file-comment-{path}")))
             .role(gpui::Role::Button)
             .aria_label(format!("Add file comment on {path}"))
-            .debug_selector(|| "add-file-comment-button".into())
             .p_1()
             .rounded(radius::SM)
             .cursor_pointer()
@@ -3476,7 +3471,7 @@ impl ChangesView {
     if deleted {
       right = right.child(
         div()
-          .debug_selector(|| "deleted-file-badge".into())
+          .selector("deleted-file-badge")
           .child(badge("Deleted", Tone::Danger)),
       );
     }
@@ -3611,7 +3606,7 @@ impl ChangesView {
         };
         // Short label (badge). ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
-          .debug_selector(move || format!("conflict-label-{label}"))
+          .selector(format!("conflict-label-{label}"))
           .mr_2()
           .px_1p5()
           .py_0p5()
@@ -3625,7 +3620,7 @@ impl ChangesView {
       let line_id = format!("conflict-line-{}-{i}-{side:?}", conflict.id);
       pre = pre.child(
         div()
-          .debug_selector(move || line_id)
+          .selector(line_id)
           .flex()
           .when_some(bg, |this, bg| this.bg(bg))
           .when(kind == ConflictLineKind::Marker, |this| {
@@ -3642,8 +3637,7 @@ impl ChangesView {
       );
       let deleted_notice = |side: &'static str, tone: Tone| {
         div()
-          .id("conflict-deleted-side")
-          .debug_selector(|| "conflict-deleted-side".into())
+          .selector("conflict-deleted-side")
           .role(gpui::Role::Label)
           .aria_label(format!("{side} deleted this file"))
           .my_1()
@@ -3672,8 +3666,7 @@ impl ChangesView {
     };
     let card = format!("conflict-card-{}", conflict.id);
     div()
-      .id(SharedString::from(card.clone()))
-      .debug_selector(move || card)
+      .selector(SharedString::from(card))
       .role(gpui::Role::Group)
       .aria_label(number.clone())
       .bg(p.destructive.opacity(0.1))
@@ -3763,11 +3756,9 @@ fn file_action(
   fg: Hsla,
   hidden: bool,
   p: &Palette,
-) -> Stateful<Div> {
-  let selector = id.clone();
+) -> ObservedElement<Stateful<Div>> {
   div()
-    .id(SharedString::from(id))
-    .debug_selector(move || selector)
+    .selector(SharedString::from(id))
     .role(gpui::Role::Button)
     .aria_label(name)
     .p_0p5()
@@ -3808,7 +3799,7 @@ fn context_row(
         .child(div().w_10().mr_1().flex().justify_end().child(number(old)))
         .child(
           div()
-            .debug_selector(move || selector)
+            .selector(selector)
             .w_10()
             .flex()
             .justify_end()
