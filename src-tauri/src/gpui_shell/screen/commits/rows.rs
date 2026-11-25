@@ -10,8 +10,8 @@
 
 use crate::core::review::selected_range;
 use crate::gpui_shell::ui::radius;
-use gpui_kit::base::TestSupportExt as _;
 use std::{collections::HashSet, rc::Rc};
+use treq_ui::SelectorExt as _;
 
 use tauri_plugin_gpui::gpui::{
   self, div, list, prelude::*, px, rems, AnyElement, Context, ListAlignment, ListOffset, ListState,
@@ -492,17 +492,13 @@ impl CommitsView {
 
   /// The tab's list.
   pub(super) fn feed_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
-    div()
-      .id("commits-scroll")
-      .debug_selector(|| "commits-list".into())
-      .size_full()
-      .child(
-        list(
-          self.feed.list.clone(),
-          cx.processor(|view, ix, _, cx| view.row(ix, cx)),
-        )
-        .size_full(),
+    div().selector("commits-list").size_full().child(
+      list(
+        self.feed.list.clone(),
+        cx.processor(|view, ix, _, cx| view.row(ix, cx)),
       )
+      .size_full(),
+    )
   }
 
   fn row(&mut self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
@@ -540,14 +536,12 @@ impl CommitsView {
           "There are no commits within this workspace branch yet."
         };
         div()
-          .id("own-commits-empty")
-          .debug_selector(|| "own-commits-empty".into())
+          .selector("own-commits-empty")
           .role(gpui::Role::Status)
           .aria_label(message)
           .pl_7()
           .text_color(p.muted_foreground)
           .child(message)
-          .test_support()
           .into_any_element()
       }
       Row::LoadMore(target) => self.load_more_row(target, &p, cx).into_any_element(),
@@ -562,15 +556,13 @@ impl CommitsView {
           .child(div().pb_4().child(div().h(zpx(1.)).bg(p.border).mx_2()))
           .child(
             ui::text(div(), ui::TextSize::Sm)
-              .debug_selector(|| "target-divider".into())
+              .selector("target-divider")
               .font_weight(gpui::FontWeight::SEMIBOLD)
               .text_color(p.muted_foreground)
               .pl_7()
               .child(format!("On {branch} (read-only)"))
-              .id("target-divider")
               .role(gpui::Role::Heading)
-              .aria_label(format!("On {branch} (read-only)"))
-              .test_support(),
+              .aria_label(format!("On {branch} (read-only)")),
           )
           .into_any_element()
       }
@@ -787,13 +779,12 @@ impl CommitsView {
         .pr_0p5()
         .child(
           div()
-            .id(SharedString::from(format!("add-comment-{h}-{l}")))
+            .selector(SharedString::from(format!("add-comment-{h}-{l}")))
             .role(gpui::Role::Button)
             .aria_label(format!(
               "Add comment on {path} line {}",
               new.or(old).unwrap_or_default()
             ))
-            .debug_selector(move || format!("add-comment-{h}-{l}"))
             .p_px()
             .rounded(radius::SM)
             .bg(p.primary)
@@ -805,13 +796,11 @@ impl CommitsView {
             .on_click(cx.listener(move |view, _, _, cx| {
               cx.stop_propagation();
               view.add_comment(&c, &file, at, cx);
-            }))
-            .test_support(),
+            })),
         )
     };
     let (id, file) = (commit.commit_id.clone(), path.to_string());
     let (press_id, press_file) = (commit.commit_id.clone(), path.to_string());
-    let selector = format!("commit-line-{path}-{h}-{l}");
     let code_selector = format!("commit-code-{path}-{h}-{l}");
     let picked: Vec<_> = self
       .text
@@ -841,8 +830,7 @@ impl CommitsView {
       (commit.commit_id.clone(), path.to_string(), at),
     );
     div()
-      .id(SharedString::from(format!("diff-line-{h}-{l}")))
-      .debug_selector(move || selector)
+      .selector(SharedString::from(format!("commit-line-{path}-{h}-{l}")))
       .role(gpui::Role::Row)
       .aria_label(line.to_string())
       .group("diff-line")
@@ -866,8 +854,7 @@ impl CommitsView {
       )
       .child(
         div()
-          .id(SharedString::from(code_selector.clone()))
-          .debug_selector(move || code_selector)
+          .selector(SharedString::from(code_selector))
           .relative()
           .flex_1()
           .min_w_0()
@@ -893,6 +880,5 @@ impl CommitsView {
             .size_0(),
           ),
       )
-      .test_support()
   }
 }
