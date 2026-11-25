@@ -4,7 +4,7 @@
 // Run with: `deno test supabase/functions/tests/remote_ca_scripts.test.ts`
 
 import { assert, assertEquals, assertMatch, assertThrows } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { checkCaStatus, formatCaFile, generateCa, parseCaFile } from "../../../scripts/remote-ca/lib.ts";
+import { checkCaStatus, formatCaFile, generateCa, parseCaFile, planRoll } from "../../../scripts/remote-ca/lib.ts";
 import { caKeyPairMatches } from "../_shared/remote/ssh-cert.ts";
 import { base64Decode } from "../_shared/remote/ssh-wire.ts";
 
@@ -60,4 +60,48 @@ Deno.test("verify reports a CA the functions cannot load", () => {
   assertEquals(checkCaStatus({ ca_error: "secrets must be set" }, { signing: "x", trusted: ["x"] }), [
     "the functions cannot load the CA: secrets must be set",
   ]);
+});
+
+const current = { seed: "c-seed", publicKey: "c-pub" };
+const next = { seed: "n-seed", publicKey: "n-pub" };
+
+Deno.test("stage trusts both CAs and sweeps, keeping the current signer", () => {
+  assertEquals(planRoll({ step: "stage", current, next }), {
+    set: { REMOTE_SSH_CA_TRUSTED_PUBLIC_KEYS_BASE64: "c-pub,n-pub" },
+    unset: [],
+    sweep: true,
+    expect: { signing: "c-pub", trusted: ["c-pub", "n-pub"] },
+  });
+});
+
+Deno.test("promote signs with the next CA while both stay trusted", () => {
+  assertEquals(planRoll({ step: "promote", current, next }), {
+    set: { REMOTE_SSH_CA_ED25519_SEED_BASE64: "n-seed", REMOTE_SSH_CA_ED25519_PUBLIC_KEY_BASE64: "n-pub" },
+    unset: [],
+    sweep: false,
+    expect: { signing: "n-pub", trusted: ["c-pub", "n-pub"] },
+  });
+});
+
+Deno.test("retire drops the trust list so only the signer is trusted, and sweeps", () => {
+  assertEquals(planRoll({ step: "retire", next }), {
+    set: {},
+    unset: ["REMOTE_SSH_CA_TRUSTED_PUBLIC_KEYS_BASE64"],
+    sweep: true,
+    expect: { signing: "n-pub", trusted: ["n-pub"] },
+  });
+});
+
+Deno.test("emergency signs with and trusts only the next CA at once, and sweeps", () => {
+  assertEquals(planRoll({ step: "emergency", next }), {
+    set: { REMOTE_SSH_CA_ED25519_SEED_BASE64: "n-seed", REMOTE_SSH_CA_ED25519_PUBLIC_KEY_BASE64: "n-pub" },
+    unset: ["REMOTE_SSH_CA_TRUSTED_PUBLIC_KEYS_BASE64"],
+    sweep: true,
+    expect: { signing: "n-pub", trusted: ["n-pub"] },
+  });
+});
+
+Deno.test("a step that signs with a CA needs its seed", () => {
+  assertThrows(() => planRoll({ step: "promote", current, next: { publicKey: "n-pub" } }), Error, "seed");
+  assertThrows(() => planRoll({ step: "stage", next }), Error, "current");
 });
