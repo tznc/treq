@@ -478,15 +478,18 @@ pub fn ensure_repo(spec: &str, root: &Path, known: &[String]) -> Result<(String,
 fn known_clone(spec: &str, known: &[String]) -> Option<String> {
   let id = |url: &str| managed_clone_path(Path::new(""), url);
   let want = id(spec)?;
-  known.iter().find_map(|repo| {
-    let out = std::process::Command::new("git")
-      .args(["remote", "get-url", "origin"])
-      .current_dir(repo)
-      .output()
-      .ok()?;
-    let origin = String::from_utf8(out.stdout).ok()?;
-    (out.status.success() && id(origin.trim()).as_ref() == Some(&want)).then(|| repo.clone())
-  })
+  known
+    .iter()
+    .find(|repo| origin_url(repo).and_then(|url| id(&url)).as_ref() == Some(&want))
+    .cloned()
+}
+
+/// The fetch URL of `repo`'s `origin` remote, read with gix.
+fn origin_url(repo: &str) -> Option<String> {
+  let repo = gix::open(repo).ok()?;
+  let remote = repo.find_remote("origin").ok()?;
+  let url = remote.url(gix::remote::Direction::Fetch)?;
+  Some(url.to_bstring().to_string())
 }
 
 /// Every local repository of any project, saved or draft, once.
@@ -1137,7 +1140,8 @@ mod tests {
   #[test]
   fn ensure_repo_takes_an_existing_folder_as_is() {
     let dir = tempfile::TempDir::new().unwrap();
-    let (path, cloned) = ensure_repo(dir.path().to_str().unwrap(), Path::new("/unused"), &[]).unwrap();
+    let (path, cloned) =
+      ensure_repo(dir.path().to_str().unwrap(), Path::new("/unused"), &[]).unwrap();
     assert!(!cloned);
     assert_eq!(Path::new(&path), std::fs::canonicalize(dir.path()).unwrap());
   }
@@ -1232,14 +1236,18 @@ mod tests {
     let known = tempfile::TempDir::new().unwrap();
     let path = known.path().to_string_lossy().to_string();
     let git = |args: &[&str]| {
-      assert!(std::process::Command::new("git").args(args).current_dir(&path).status().unwrap().success());
+      assert!(std::process::Command::new("git")
+        .args(args)
+        .current_dir(&path)
+        .status()
+        .unwrap()
+        .success());
     };
     git(&["init", "-q"]);
     git(&["remote", "add", "origin", "git@github.com:tznc/treq.git"]);
     let root = tempfile::TempDir::new().unwrap();
     let other = "/no/such/repo".to_string();
-    let (got, cloned) =
-      ensure_repo("tznc/treq", root.path(), &[other, path.clone()]).unwrap();
+    let (got, cloned) = ensure_repo("tznc/treq", root.path(), &[other, path.clone()]).unwrap();
     assert!(!cloned, "no clone for a repo treq already has");
     assert_eq!(got, path);
     assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);

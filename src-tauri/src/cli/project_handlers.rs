@@ -140,7 +140,8 @@ fn run(
         "invalid_arguments: add-repo needs a folder, URL or owner/name".to_string()
       })?;
       let project = current_project(db, repo_path)?;
-      let (path, cloned) = projects::ensure_repo(spec, clones_root, &projects::all_repos(db.conn())?)?;
+      let (path, cloned) =
+        projects::ensure_repo(spec, clones_root, &projects::all_repos(db.conn())?)?;
       core::init(&path).map_err(|e| e.to_string())?;
       let added = projects::add_repo(db.conn(), &project.id, &path)?;
       match format {
