@@ -346,8 +346,9 @@ function parseProcessStream(bytes: Uint8Array): MachineExecResult {
   let exitCode: number | null = null;
   let off = 0;
   while (off + 5 <= bytes.length) {
-    const flags = bytes[off];
-    const len = new DataView(bytes.buffer, bytes.byteOffset + off + 1, 4).getUint32(0);
+    const header = new DataView(bytes.buffer, bytes.byteOffset + off, 5);
+    const flags = header.getUint8(0);
+    const len = header.getUint32(1);
     const message = JSON.parse(new TextDecoder().decode(bytes.subarray(off + 5, off + 5 + len)));
     off += 5 + len;
     if (flags & 0x02) {

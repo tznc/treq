@@ -83,8 +83,7 @@ pub fn render(list: &Checklist, ctx: &Ctx) -> impl IntoElement {
           .h(zpx(24.))
           .gap_1()
           .px_2(),
-        // Short label (['button label']): 11px is fine.
-        // ast-grep-ignore: gpui-text-xs-short-label-only
+        // Short label (button label). ast-grep-ignore: gpui-text-xs-short-label-only
         TextSize::Xs,
       )
       .child(if list.validating {
@@ -123,8 +122,7 @@ fn tool_row(tool: &Tool, ctx: &Ctx) -> impl IntoElement {
     _ => ui::icon(theme::ICON_CIRCLE, 16., p.muted_foreground),
   };
   let muted = |label: &'static str| {
-    // Short label (['status label']): 11px is fine.
-    // ast-grep-ignore: gpui-text-xs-short-label-only
+    // Short label (status label). ast-grep-ignore: gpui-text-xs-short-label-only
     ui::text(div(), TextSize::Xs)
       .text_color(p.muted_foreground)
       .child(label)
@@ -142,8 +140,7 @@ fn tool_row(tool: &Tool, ctx: &Ctx) -> impl IntoElement {
           .h_auto()
           .gap_1()
           .p_0(),
-        // Short label (['button label']): 11px is fine.
-        // ast-grep-ignore: gpui-text-xs-short-label-only
+        // Short label (button label). ast-grep-ignore: gpui-text-xs-short-label-only
         TextSize::Xs,
       )
       .label("Install")

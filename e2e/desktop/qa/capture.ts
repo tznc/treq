@@ -61,14 +61,16 @@ function screenBox(): { x: number; y: number; w: number; h: number } | null {
       .split("\n")
       .filter(Boolean);
   } catch {
+    // xdotool search exits 1 when no window matches: there is nothing to box.
     return null;
   }
-  const screen = execFileSync("xdotool", ["getdisplaygeometry"], {
+  const display = execFileSync("xdotool", ["getdisplaygeometry"], {
     encoding: "utf8",
-  })
-    .trim()
-    .split(" ")
-    .map(Number);
+  }).trim();
+  const [screenW, screenH] = display.split(" ").map(Number);
+  if (screenW === undefined || screenH === undefined) {
+    throw new Error(`xdotool getdisplaygeometry printed "${display}"`);
+  }
   let box: { x0: number; y0: number; x1: number; y1: number } | null = null;
   for (const id of ids) {
     let geo: string;
@@ -85,14 +87,17 @@ function screenBox(): { x: number; y: number; w: number; h: number } | null {
         .filter(Boolean)
         .map((l) => l.split("=") as [string, string]),
     );
-    const [x, y, w, h] = [v.X, v.Y, v.WIDTH, v.HEIGHT].map(Number);
+    const x = Number(v.X);
+    const y = Number(v.Y);
+    const w = Number(v.WIDTH);
+    const h = Number(v.HEIGHT);
     if (w < 4 || h < 4) continue;
-    if (w >= screen[0] && h >= screen[1]) continue;
+    if (w >= screenW && h >= screenH) continue;
     const r = {
       x0: Math.max(0, x),
       y0: Math.max(0, y),
-      x1: Math.min(screen[0], x + w),
-      y1: Math.min(screen[1], y + h),
+      x1: Math.min(screenW, x + w),
+      y1: Math.min(screenH, y + h),
     };
     box = box
       ? {
@@ -136,7 +141,7 @@ export async function capture(page: Page, shot: Capture): Promise<string> {
       issue = issue ? `${issue}; ${blank}` : blank;
     }
   } else {
-    await page.screenshot({ path: png, clip: shot.clip });
+    await page.screenshot({ path: png, ...(shot.clip ? { clip: shot.clip } : {}) });
   }
   writeFileSync(
     join(outDir, `${name}.json`),

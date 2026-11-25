@@ -1012,8 +1012,9 @@ mod refresh_resilience_tests {
       .respond_with(ResponseTemplate::new(503))
       .mount(&server)
       .await;
+    let backoff = Duration::from_millis(300);
     let auth = std::sync::Arc::get_mut(&mut supabase.auth).unwrap();
-    auth.refresh_backoff = Duration::from_millis(300);
+    auth.refresh_backoff = backoff;
 
     for _ in 0..3 {
       assert_eq!(supabase.auth.access_token().await.as_deref(), Some("a1"));
@@ -1021,7 +1022,12 @@ mod refresh_resilience_tests {
     let requests = server.received_requests().await.unwrap();
     assert_eq!(refresh_requests(&requests), 1);
 
-    tokio::time::sleep(Duration::from_millis(350)).await;
+    // The backoff runs out: the failure is now that long ago.
+    {
+      let mut failed_at = supabase.auth.refresh_failed_at.lock().unwrap();
+      let at = failed_at.expect("the failed refresh is remembered");
+      *failed_at = Some(at - backoff);
+    }
     assert_eq!(supabase.auth.access_token().await.as_deref(), Some("a1"));
     let requests = server.received_requests().await.unwrap();
     assert_eq!(refresh_requests(&requests), 2);

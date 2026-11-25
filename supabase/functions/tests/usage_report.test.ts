@@ -67,21 +67,22 @@ type Call = { method: string; path: string; params?: StripeParams; idempotencyKe
 function fakeStripe(failTimes = 0, failWith: () => Error = () => new Error("stripe down")) {
   const calls: Call[] = [];
   let failures = failTimes;
-  const stripe = {
-    request: async (
+  const stripe: StripeClient = {
+    request: async <T>(
       method: string,
       path: string,
       params?: StripeParams,
       options?: { idempotencyKey?: string },
-    ) => {
+    ): Promise<T> => {
       calls.push({ method, path, params, idempotencyKey: options?.idempotencyKey });
       if (failures > 0) {
         failures--;
         throw failWith();
       }
-      return { object: "billing.meter_event" };
+      // A meter event; the code under test reads nothing back.
+      return { object: "billing.meter_event" } as T;
     },
-  } as unknown as StripeClient;
+  };
   return { stripe, calls };
 }
 
@@ -96,7 +97,7 @@ Deno.test("shadow mode builds reports but sends nothing", async () => {
   const result = await reportUsage({ store, stripe, now: () => NOW, enabled: false, log });
   assertEquals(built, [NOW]);
   assertEquals(calls.length, 0);
-  assertEquals(rows[0].sent, false);
+  assertEquals(rows[0]?.sent, false);
   assertEquals(result.sent, 0);
 });
 
@@ -122,7 +123,7 @@ Deno.test("enabled sends one meter event per row", async () => {
     },
     idempotencyKey: `treq-usage-${USER}:2026-10-28T10`,
   });
-  assertEquals(calls[1].params?.["payload[value]"], "1");
+  assertEquals(calls[1]?.params?.["payload[value]"], "1");
   assertEquals(rows.every((r) => r.sent), true);
   assertEquals(result.sent, 2);
 });
@@ -131,7 +132,7 @@ Deno.test("uses the configured event name", async () => {
   const { store } = fakeStore([row()]);
   const { stripe, calls } = fakeStripe();
   await reportUsage({ store, stripe, now: () => NOW, enabled: true, log, eventName: "custom" });
-  assertEquals(calls[0].params?.event_name, "custom");
+  assertEquals(calls[0]?.params?.event_name, "custom");
 });
 
 Deno.test("a failure is recorded and retried with the same identifier", async () => {
@@ -139,15 +140,15 @@ Deno.test("a failure is recorded and retried with the same identifier", async ()
   const { stripe, calls } = fakeStripe(1);
   const first = await reportUsage({ store, stripe, now: () => NOW, enabled: true, log });
   assertEquals(first.failed, 1);
-  assertEquals(rows[0].sent, false);
-  assertEquals(rows[0].error, "stripe down");
+  assertEquals(rows[0]?.sent, false);
+  assertEquals(rows[0]?.error, "stripe down");
 
   const second = await reportUsage({ store, stripe, now: () => NOW, enabled: true, log });
   assertEquals(second.sent, 1);
-  assertEquals(rows[0].sent, true);
+  assertEquals(rows[0]?.sent, true);
   assertEquals(calls.length, 2);
-  assertEquals(calls[0].params?.identifier, calls[1].params?.identifier);
-  assertEquals(calls[0].idempotencyKey, calls[1].idempotencyKey);
+  assertEquals(defined(calls[0]).params?.identifier, defined(calls[1]).params?.identifier);
+  assertEquals(defined(calls[0]).idempotencyKey, defined(calls[1]).idempotencyKey);
 });
 
 Deno.test("a row without a Stripe customer becomes terminal and alerts", async () => {
@@ -156,8 +157,8 @@ Deno.test("a row without a Stripe customer becomes terminal and alerts", async (
   const { stripe, calls } = fakeStripe();
   const result = await reportUsage({ store, stripe, now: () => NOW, enabled: true, log });
   assertEquals(calls.length, 0);
-  assertEquals(rows[0].sent, false);
-  assertEquals(rows[0].terminal, "no_customer");
+  assertEquals(rows[0]?.sent, false);
+  assertEquals(rows[0]?.terminal, "no_customer");
   assertEquals(result.skipped, 1);
   assertEquals(logs.some((l) => l.level === "error" && l.alert === true && l.identifier === row().identifier), true);
   // It is not picked up again.
@@ -169,7 +170,7 @@ Deno.test("a non-retryable 4xx marks the row dead", async () => {
   const { store, rows } = fakeStore([row()]);
   const { stripe } = fakeStripe(1, () => new StripeApiError(400, "No such customer"));
   const result = await reportUsage({ store, stripe, now: () => NOW, enabled: true, log });
-  assertEquals(rows[0].terminal, "dead");
+  assertEquals(rows[0]?.terminal, "dead");
   assertEquals(result.dead, 1);
   assertEquals(logs.some((l) => l.level === "error" && l.alert === true), true);
 });
@@ -178,8 +179,8 @@ Deno.test("a 429 is retried and counts an attempt", async () => {
   const { store, rows } = fakeStore([row()]);
   const { stripe } = fakeStripe(1, () => new StripeApiError(429, "rate limited"));
   const result = await reportUsage({ store, stripe, now: () => NOW, enabled: true, log });
-  assertEquals(rows[0].terminal, null);
-  assertEquals(rows[0].attempts, 1);
+  assertEquals(defined(rows[0]).terminal, null);
+  assertEquals(rows[0]?.attempts, 1);
   assertEquals(result.failed, 1);
 });
 
@@ -187,7 +188,7 @@ Deno.test("the last allowed attempt failing marks the row dead", async () => {
   const { store, rows } = fakeStore([row({ attempts: MAX_USAGE_REPORT_ATTEMPTS - 1 })]);
   const { stripe } = fakeStripe(1);
   await reportUsage({ store, stripe, now: () => NOW, enabled: true, log });
-  assertEquals(rows[0].terminal, "dead");
+  assertEquals(rows[0]?.terminal, "dead");
 });
 
 // Stripe dedupes meter events by identifier for about 24 hours only. A row
@@ -201,7 +202,7 @@ Deno.test("a row tried before and older than 23 hours is not resent", async () =
   const { stripe, calls } = fakeStripe();
   await reportUsage({ store, stripe, now: () => NOW, enabled: true, log });
   assertEquals(calls.length, 0);
-  assertEquals(rows[0].terminal, "dead");
+  assertEquals(rows[0]?.terminal, "dead");
   assert(logs.some((l) => l.alert === true && l.msg === "usage report past dedupe window"));
 });
 
@@ -211,7 +212,7 @@ Deno.test("a row never tried is sent however old it is", async () => {
   const { stripe, calls } = fakeStripe();
   await reportUsage({ store, stripe, now: () => NOW, enabled: true, log });
   assertEquals(calls.length, 1);
-  assertEquals(rows[0].terminal, null);
+  assertEquals(defined(rows[0]).terminal, null);
 });
 
 Deno.test("a row unsent more than an hour after its hour ends is logged as late", async () => {
@@ -224,8 +225,8 @@ Deno.test("a row unsent more than an hour after its hour ends is logged as late"
   await reportUsage({ store, stripe, now: () => NOW, enabled: true, log });
   const late = logs.filter((l) => l.msg === "usage report late");
   assertEquals(late.length, 1);
-  assertEquals(late[0].level, "warn");
-  assertEquals(late[0].identifier, row().identifier);
+  assertEquals(late[0]?.level, "warn");
+  assertEquals(late[0]?.identifier, row().identifier);
 });
 
 Deno.test("a row that rounds to zero is marked sent without an event", async () => {
@@ -233,5 +234,5 @@ Deno.test("a row that rounds to zero is marked sent without an event", async () 
   const { stripe, calls } = fakeStripe();
   await reportUsage({ store, stripe, now: () => NOW, enabled: true, log });
   assertEquals(calls.length, 0);
-  assertEquals(rows[0].sent, true);
+  assertEquals(rows[0]?.sent, true);
 });

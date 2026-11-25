@@ -1,0 +1,10 @@
+id: no-narrating-comments-tsx
+snapshots:
+  ? |
+    // Create a one-time token for desktop auth handoff
+    const el = <Callback token={token} />;
+  : labels:
+    - source: // Create a one-time token for desktop auth handoff
+      style: primary
+      start: 0
+      end: 51

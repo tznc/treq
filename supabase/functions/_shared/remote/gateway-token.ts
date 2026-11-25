@@ -83,7 +83,7 @@ export async function verifyGatewayToken(
 ): Promise<GatewayTokenCheck> {
   const parts = token.split(".");
   if (parts.length !== 4) return "malformed";
-  const [version, placement, expiryText, mac] = parts;
+  const [version, placement = "", expiryText = "", mac = ""] = parts;
   if (version !== "v1" || mac.length !== 64 || !/^\d+$/.test(expiryText)) return "malformed";
   const expiry = Number(expiryText);
   if (!constantTimeEqual(await macHex(secret, placement, expiry), mac)) return "bad_signature";

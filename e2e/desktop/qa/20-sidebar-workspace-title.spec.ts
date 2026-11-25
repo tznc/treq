@@ -13,7 +13,7 @@ const TITLE = "Fail readiness when the spool queue is unreachable for longer tha
 
 const heading = (p: Page) => p.getByRole("heading", { name: "New workspace" });
 
-test("sidebar-workspace-title: a titled row shows its title", async ({ page, context }) => {
+test("sidebar-workspace-title: a titled row shows its title", async ({ page }) => {
   await home(page);
   await page.keyboard.press(`${mod}+n`);
   await expect(heading(page)).toBeVisible();
@@ -64,7 +64,7 @@ test("sidebar-workspace-title: a titled row shows its title", async ({ page, con
   const picker = page;
   await search(picker).fill("fail-readiness");
   await settle(page, 800);
-  await picker.keyboard.press("Enter").catch(() => {});
+  await picker.keyboard.press("Enter");
   await page.getByTestId("confirm-confirm").click();
   await page.waitForTimeout(2500);
   await ready(page);

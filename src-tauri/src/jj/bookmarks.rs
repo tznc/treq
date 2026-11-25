@@ -221,8 +221,7 @@ pub fn jj_reset_bookmark_to_remote(
     )));
   }
   let remote = format_revset_symbol(&format!("{branch_name}@origin"));
-  // The fetch leaves the bookmark conflicted when it diverged, so name its
-  // targets by id.
+  // The fetch leaves the bookmark conflicted when it diverged, so name its targets by id.
   let local = loaded
     .repo
     .view()

@@ -32,8 +32,8 @@ export interface LayoutNode {
 }
 
 export interface RenderOptions {
-  highlightedId?: string;
-  headLabel?: string;
+  highlightedId?: string | undefined;
+  headLabel?: string | undefined;
 }
 
 // ── Default palette ───────────────────────────────────────────────────────────

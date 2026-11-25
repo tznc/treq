@@ -107,8 +107,7 @@ mod tests {
   fn colours_lines_by_their_first_character() {
     assert_eq!(line_kind("+added"), LineKind::Added);
     assert_eq!(line_kind("-removed"), LineKind::Removed);
-    // Hunk lines carry no file headers: these are a removed `-- comment`
-    // and `---` (Markdown front matter), and an added `++count`.
+    // Hunks have no file headers: removed `-- comment` and `---`, and an added `++count`.
     assert_eq!(line_kind("--- comment"), LineKind::Removed);
     assert_eq!(line_kind("----"), LineKind::Removed);
     assert_eq!(line_kind("+++count"), LineKind::Added);

@@ -32,7 +32,7 @@ fn pane(cx: &mut TestAppContext, shells: usize) -> (Harness, Arc<FakeHost>, Vec<
   h.cx
     .simulate_resize(gpui::size(gpui::px(2560.), gpui::px(1440.)));
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
-  h.click("terminal-body");
+  click_terminal(&mut h);
   for _ in 0..shells {
     h.cx.simulate_keystrokes("cmd-\\");
     h.cx.run_until_parked();

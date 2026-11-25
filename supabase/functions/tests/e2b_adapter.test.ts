@@ -88,7 +88,8 @@ Deno.test("capabilities: per-second billing, pause keeps disk, gateway via ingre
 Deno.test("create looks up by owner and placement, then POSTs the size's template with autoPause", async () => {
   const { fake, provider } = setup();
   const instance = await provider.createInstance(PARAMS);
-  const [lookup, create] = fake.requests;
+  const lookup = defined(fake.requests[0]);
+  const create = defined(fake.requests[1]);
   assertEquals(lookup.method, "GET");
   assertEquals(lookup.path, "/v2/sandboxes");
   assertEquals(lookup.search.get("metadata"), "treq_owner=owner_1&treq_placement=pl-1");
@@ -126,8 +127,9 @@ Deno.test("create for another placement of the same owner makes a new sandbox", 
 
 Deno.test("create without a placement id uses the idempotency key as the placement", async () => {
   const { fake, provider } = setup();
-  await provider.createInstance({ ...PARAMS, placementId: undefined });
-  assertEquals(fake.requests[0].search.get("metadata"), "treq_owner=owner_1&treq_placement=idem_1");
+  const { placementId: _, ...withoutPlacement } = PARAMS;
+  await provider.createInstance(withoutPlacement);
+  assertEquals(fake.requests[0]?.search.get("metadata"), "treq_owner=owner_1&treq_placement=idem_1");
 });
 
 Deno.test("create skips a killed sandbox (gone from the running/paused list)", async () => {
@@ -200,7 +202,7 @@ Deno.test("ensureService runs a pidfile supervisor and fails when it fails", asy
   const { providerResourceId: id } = await provider.createInstance(PARAMS);
   await provider.ensureService(id, "sshd", { cmd: "/usr/sbin/sshd", args: ["-D"] });
   const script = (defined(fake.requests.at(-1)).body as { process: { args: string[] } }).process.args[1];
-  assert(script.includes("sshd.pid"));
+  assert(defined(script).includes("sshd.pid"));
   fake.commandResult = { exitCode: 1, stdout: "", stderr: "boom" };
   await assertRejects(() => provider.ensureService(id, "sshd", { cmd: "/usr/sbin/sshd", args: [] }), ProviderError);
 });

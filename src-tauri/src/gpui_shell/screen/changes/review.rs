@@ -9,6 +9,7 @@ use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
 use gpui_kit::base::TestSupportExt as _;
 use std::{ops::Range, time::Duration};
+use treq_ui::SelectorExt as _;
 
 use super::*;
 use crate::core::review::{selected_range, selected_row, selected_text, word_at, TextPoint};
@@ -768,10 +769,27 @@ impl ChangesView {
       }),
       cx,
     );
+    self.keep_sent(cx);
     if self.review.parked.is_some() {
       self.reload_stale(cx);
     }
     self.reset_review(cx);
+  }
+
+  /// The sent comments stay on the diff, marked sent, until resolved.
+  fn keep_sent(&mut self, cx: &mut Context<Self>) {
+    let Some(id) = self.parent.workspace_id() else {
+      return;
+    };
+    let comments = self.review.comments.clone();
+    self.run(
+      move |host, parent| host.keep_sent_comments(&parent.repo_path, id, &comments),
+      |view, result, cx| match result {
+        Ok(()) => view.read_agent(cx),
+        Err(err) => log::warn!("Failed to keep sent review comments: {err}"),
+      },
+      cx,
+    );
   }
 
   /// Clears everything and the kept review.
@@ -1242,12 +1260,11 @@ impl ChangesView {
       })
       .child(
         div()
-          .id(SharedString::from(format!("gutter-{path}-{h}-{l}")))
+          .selector(SharedString::from(format!("gutter-{path}-{h}-{l}")))
           .role(gpui::Role::Button)
-          .aria_label(format!("Line {}", l + 1))
-          .debug_selector({
-            let id = format!("gutter-{path}-{h}-{l}");
-            move || id
+          .aria_label(match new {
+            Some(n) => format!("Line {n} of {path}"),
+            None => format!("Removed line {} of {path}", old.unwrap_or_default()),
           })
           .w_24()
           .flex_none()
@@ -1282,10 +1299,7 @@ impl ChangesView {
           )
           .child(
             div()
-              .debug_selector({
-                let id = format!("line-new-{path}-{h}-{l}");
-                move || id
-              })
+              .selector(format!("line-new-{path}-{h}-{l}"))
               .w_10()
               .flex()
               .justify_end()
@@ -1310,11 +1324,7 @@ impl ChangesView {
                   "Add comment"
                 },
                 div()
-                  .id(SharedString::from(format!("add-comment-{path}-{h}-{l}")))
-                  .debug_selector({
-                    let id = format!("add-comment-{path}-{h}-{l}");
-                    move || id
-                  })
+                  .selector(SharedString::from(format!("add-comment-{path}-{h}-{l}")))
                   .role(gpui::Role::Button)
                   .aria_label(format!(
                     "Add comment on {path} line {}",
@@ -1348,11 +1358,7 @@ impl ChangesView {
       )
       .child(
         div()
-          .id(SharedString::from(format!("code-{path}-{h}-{l}")))
-          .debug_selector({
-            let id = format!("code-{path}-{h}-{l}");
-            move || id
-          })
+          .selector(SharedString::from(format!("code-{path}-{h}-{l}")))
           .flex_1()
           .min_w_0()
           .px_2()
@@ -1504,10 +1510,9 @@ impl ChangesView {
               format!("delete-comment-tip-{id}"),
               "Delete comment",
               div()
-                .id(SharedString::from(format!("delete-comment-{id}")))
+                .selector(SharedString::from(format!("delete-comment-{id}")))
                 .role(gpui::Role::Button)
                 .aria_label("Delete comment")
-                .debug_selector(|| "delete-comment".into())
                 .flex_none()
                 .p_1()
                 .rounded(radius::SM)
@@ -1538,8 +1543,7 @@ impl ChangesView {
     });
     by_agent.then(|| {
       div()
-        .id("agent-comment-tag")
-        .debug_selector(|| "agent-comment-tag".into())
+        .selector("agent-comment-tag")
         .role(gpui::Role::Label)
         .aria_label("Agent")
         .test_support()
@@ -1548,8 +1552,7 @@ impl ChangesView {
         .gap_1p5()
         .child(ui::icon(theme::ICON_BOT, 12., Tone::GitMerged.color(p)))
         .child(
-          // Short label (tag): 11px is fine.
-          // ast-grep-ignore: gpui-text-xs-short-label-only
+          // Short label (tag). ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .font_weight(FontWeight::MEDIUM)
             .text_color(Tone::GitMerged.text(p))
@@ -1614,7 +1617,7 @@ impl ChangesView {
   ) -> impl IntoElement {
     let empty = self.review.edit_text.trim().is_empty();
     div()
-      .debug_selector(|| "comment-edit".into())
+      .selector("comment-edit")
       .flex()
       .flex_col()
       .gap_2()
@@ -1685,7 +1688,7 @@ impl ChangesView {
       .as_ref()
       .is_some_and(|d| suggestion_lines(d).is_some());
     ui::text(div(), TextSize::Sm)
-      .debug_selector(|| "comment-input".into())
+      .selector("comment-input")
       .bg(p.muted)
       .border_1()
       .border_color(p.border)
@@ -1788,8 +1791,7 @@ impl ChangesView {
         .child(text)
     };
     let preview = div()
-      .id("suggestion-preview")
-      .debug_selector(|| "suggestion-preview".into())
+      .selector("suggestion-preview")
       .role(gpui::Role::Group)
       .aria_label("Suggestion preview")
       .rounded(radius::SM)
@@ -1809,8 +1811,7 @@ impl ChangesView {
       );
     Some(
       div()
-        .id("suggestion-editor")
-        .debug_selector(|| "suggestion-editor".into())
+        .selector("suggestion-editor")
         .role(gpui::Role::Group)
         .aria_label("Suggested change")
         .mb_2()
@@ -1818,8 +1819,7 @@ impl ChangesView {
         .flex_col()
         .gap_1p5()
         .child(
-          // Short label (['section heading']): 11px is fine.
-          // ast-grep-ignore: gpui-text-xs-short-label-only
+          // Short label (section heading). ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .text_color(p.muted_foreground)
             .child("Suggested change"),
@@ -1834,8 +1834,7 @@ impl ChangesView {
             .child(ui::text(Textarea::new(&input.state), TextSize::Code)),
         )
         .child(
-          // Short label (['section heading']): 11px is fine.
-          // ast-grep-ignore: gpui-text-xs-short-label-only
+          // Short label (section heading). ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .text_color(p.muted_foreground)
             .child("Preview"),
@@ -1914,8 +1913,7 @@ impl ChangesView {
     }
     let tone = Tone::Warning;
     let mut section = div()
-      .id("outdated-comments")
-      .debug_selector(|| "outdated-comments".into())
+      .selector("outdated-comments")
       .role(gpui::Role::Group)
       .aria_label("Outdated comments")
       .test_support()
@@ -1949,8 +1947,7 @@ impl ChangesView {
                   .items_center()
                   .gap_2()
                   .child(
-                    // Short label (['badge']): 11px is fine.
-                    // ast-grep-ignore: gpui-text-xs-short-label-only
+                    // Short label (badge). ast-grep-ignore: gpui-text-xs-short-label-only
                     ui::text(div(), TextSize::Xs)
                       .px_1p5()
                       .py_0p5()
@@ -1961,8 +1958,7 @@ impl ChangesView {
                       .child("Outdated"),
                   )
                   .child(
-                    // Short label (['status label']): 11px is fine.
-                    // ast-grep-ignore: gpui-text-xs-short-label-only
+                    // Short label (status label). ast-grep-ignore: gpui-text-xs-short-label-only
                     ui::text(div(), TextSize::Xs)
                       .text_color(p.muted_foreground)
                       .child(outdated_label(c)),
@@ -2061,7 +2057,7 @@ impl ChangesView {
       let (save, clear) = (conflict.clone(), conflict.id.clone());
       out.push(
         div()
-          .debug_selector(|| "conflict-comment-input".into())
+          .selector("conflict-comment-input")
           .bg(p.muted.opacity(0.6))
           .border_y_1()
           .border_color(p.border.opacity(0.4))
@@ -2107,8 +2103,7 @@ impl ChangesView {
     let total = self.review.comments.len() + self.review.notes.len();
     let send_bg = if conflicts { p.destructive } else { p.primary };
     div()
-      .id("review-action-bar")
-      .debug_selector(|| "review-action-bar".into())
+      .selector("review-action-bar")
       .role(gpui::Role::Toolbar)
       .aria_label("Review")
       .flex()
@@ -2227,8 +2222,7 @@ impl ChangesView {
     };
     Some(
       div()
-        .id("stale-banner")
-        .debug_selector(|| "stale-banner".into())
+        .selector("stale-banner")
         .role(gpui::Role::Status)
         .aria_label(format!(
           "{} changed since you started reviewing",
@@ -2307,10 +2301,9 @@ impl ChangesView {
     let checkbox = {
       let checked = self.review.use_idle;
       div()
-        .id("use-idle-agent")
+        .selector("use-idle-agent")
         .role(gpui::Role::CheckBox)
         .aria_label("Use an idle agent")
-        .debug_selector(|| "use-idle-agent".into())
         .flex()
         .items_center()
         .gap_1p5()
@@ -2340,8 +2333,7 @@ impl ChangesView {
         }))
     };
     let panel = div()
-      .id("finish-review-popover")
-      .debug_selector(|| "finish-review-popover".into())
+      .selector("finish-review-popover")
       .role(gpui::Role::Dialog)
       .aria_label(if conflicts {
         "Resolve conflicts"

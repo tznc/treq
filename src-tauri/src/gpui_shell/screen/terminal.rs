@@ -17,15 +17,16 @@ use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use crate::lock_ext::LockExt as _;
 use crate::result_ext::ResultExt;
+use gpui_kit::base::ObservedElement;
 use std::{
   cell::Cell,
   rc::Rc,
   sync::Arc,
   time::{Duration, Instant},
 };
+use treq_ui::SelectorExt as _;
 
 use futures::StreamExt as _;
-use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::{
   input::{Escape, Input, InputEvent, InputState},
   Sizable,
@@ -308,12 +309,12 @@ pub fn cursor_div(
   (w, h): (f32, f32),
   (focused, on): (bool, bool),
   color: gpui::Hsla,
-) -> Div {
+) -> ObservedElement<gpui::Stateful<Div>> {
   // Plain pixels: the cell already carries the zoom, so rems would apply
   // it twice and move the cursor off its row.
   let origin = cell_origin(row, col, (w, h));
   let base = div()
-    .debug_selector(|| "terminal-cursor".into())
+    .selector("terminal-cursor")
     .absolute()
     .top(origin.y)
     .left(origin.x)
@@ -1102,11 +1103,9 @@ impl TerminalView {
     .on_click(move |_, _, _| deliver_host.agent_msg_deliver_now(&deliver_pty));
     Some(
       div()
-        .id("terminal-msg-banner")
+        .selector("terminal-msg-banner")
         .role(gpui::Role::Status)
         .aria_label(summary.clone())
-        .test_support()
-        .debug_selector(|| "terminal-msg-banner".into())
         .absolute()
         .top_0()
         .left_0()
@@ -1544,8 +1543,7 @@ impl TerminalView {
     let bg = p.background;
     let button = |id: &'static str, icon: &'static str, disabled: bool| {
       div()
-        .id(id)
-        .debug_selector(move || id.into())
+        .selector(id)
         .size_5()
         .flex()
         .items_center()
@@ -1594,11 +1592,9 @@ impl TerminalView {
     );
     Some(
       div()
-        .id("terminal-search")
+        .selector("terminal-search")
         .role(gpui::Role::Search)
         .aria_label("Find in terminal")
-        .test_support()
-        .debug_selector(|| "terminal-search".into())
         .absolute()
         .top_2()
         .right_2()
@@ -1719,11 +1715,9 @@ impl TerminalView {
       });
       return Some(
         ui::text(div(), TextSize::Sm)
-          .id("remote-terminal-lost")
+          .selector("remote-terminal-lost")
           .role(gpui::Role::Alert)
           .aria_label(message.clone())
-          .test_support()
-          .debug_selector(|| "remote-terminal-lost".into())
           .absolute()
           .inset_0()
           .flex()
@@ -1776,11 +1770,9 @@ impl TerminalView {
     };
     Some(
       ui::text(div(), TextSize::Sm)
-        .id("remote-terminal-attaching")
+        .selector("remote-terminal-attaching")
         .role(gpui::Role::Status)
         .aria_label(label)
-        .test_support()
-        .debug_selector(|| "remote-terminal-attaching".into())
         .absolute()
         .inset_0()
         .flex()
@@ -1803,15 +1795,15 @@ impl TerminalView {
     if let Some(target) = self.remote_target() {
       return self.remote_overlay(&target.clone(), p, cx);
     }
-    self.local_overlay(p, cx).map(IntoElement::into_any_element)
+    self.local_overlay(p, cx)
   }
 
-  fn local_overlay(&self, p: &Palette, cx: &mut Context<Self>) -> Option<Div> {
+  fn local_overlay(&self, p: &Palette, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
     match &self.status {
       Status::Ready => None,
       Status::Preparing => Some(
         div()
-          .debug_selector(|| "terminal-preparing".into())
+          .selector("terminal-preparing")
           .absolute()
           .inset_0()
           .flex()
@@ -1825,7 +1817,8 @@ impl TerminalView {
             16.,
             p.muted_foreground,
           ))
-          .child(ui::text(div(), TextSize::Sm).child("Preparing terminal…")),
+          .child(ui::text(div(), TextSize::Sm).child("Preparing terminal…"))
+          .into_any_element(),
       ),
       Status::AgentFailed(error) => Some(
         div()
@@ -1844,13 +1837,14 @@ impl TerminalView {
               .text_center()
               .text_color(p.muted_foreground)
               .child(format!("Failed to start agent: {error}")),
-          ),
+          )
+          .into_any_element(),
       ),
       Status::Failed(error) => {
         let error = error.clone();
         Some(
           div()
-            .debug_selector(|| "terminal-error".into())
+            .selector("terminal-error")
             .absolute()
             .inset_0()
             .p_6()
@@ -1896,7 +1890,8 @@ impl TerminalView {
                         ),
                     ),
                 ),
-            ),
+            )
+            .into_any_element(),
         )
       }
     }
@@ -1918,8 +1913,9 @@ impl Render for TerminalView {
     let entity = cx.entity().downgrade();
     let search = self.search_bar(&p, cx);
     div()
-      .id(SharedString::from(format!("terminal-{}", self.pty)))
-      .debug_selector(|| "terminal-body".into())
+      .selector(SharedString::from(format!("terminal-{}", self.pty)))
+      .role(gpui::Role::Terminal)
+      .aria_label("Terminal")
       .key_context(TERMINAL_CONTEXT)
       .track_focus(&self.focus)
       .relative()
@@ -2531,11 +2527,9 @@ impl TerminalPane {
   fn title(&self, id: &str, text: String, color: gpui::Hsla, cx: &mut Context<Self>) -> AnyElement {
     if let Some(renaming) = self.renaming.as_ref().filter(|r| r.id == id) {
       return div()
-        .id("terminal-rename-input")
+        .selector("terminal-rename-input")
         .role(gpui::Role::Group)
         .aria_label("Rename terminal")
-        .test_support()
-        .debug_selector(|| "terminal-rename-input".into())
         .w(zpx(200.))
         .min_w_0()
         .text_color(color)
@@ -2555,11 +2549,9 @@ impl TerminalPane {
     let id = id.to_string();
     let tip = format!("terminal-title-tip-{id}");
     let title = div()
-      .id(SharedString::from(format!("terminal-title-{id}")))
+      .selector(SharedString::from(format!("terminal-title-{id}")))
       .role(gpui::Role::Label)
       .aria_label(SharedString::from(text.clone()))
-      .test_support()
-      .debug_selector(|| "terminal-title".into())
       .min_w_0()
       .truncate()
       .font_weight(gpui::FontWeight::MEDIUM)
@@ -3344,14 +3336,9 @@ impl TerminalPane {
                 Side::Bottom,
                 Some(TooltipContent::Text(asset.title.clone().into())),
                 div()
-                  .id(SharedString::from(format!("terminal-send-name-{id}")))
+                  .selector(SharedString::from(format!("terminal-send-name-{id}")))
                   .role(gpui::Role::Label)
                   .aria_label(asset.title.clone())
-                  .test_support()
-                  .debug_selector({
-                    let id = id.clone();
-                    move || format!("terminal-send-title-{id}")
-                  })
                   .max_w_full()
                   .truncate()
                   .child(asset.title.clone()),
@@ -3366,15 +3353,9 @@ impl TerminalPane {
         title: asset.title,
       };
       div()
-        .id(SharedString::from(format!("terminal-send-preview-{id}")))
+        .selector(SharedString::from(format!("terminal-send-preview-{id}")))
         .role(gpui::Role::Button)
         .aria_label(open_name)
-        .test_support()
-        .debug_selector({
-          let id = id.clone();
-          move || format!("terminal-send-preview-{id}")
-        })
-        .test_support()
         .relative()
         .flex_none()
         .size_20()
@@ -3402,14 +3383,9 @@ impl TerminalPane {
         .when(shown, |d| {
           d.child(
             div()
-              .id(SharedString::from(format!("terminal-send-dismiss-{id}")))
+              .selector(SharedString::from(format!("terminal-send-dismiss-{id}")))
               .role(gpui::Role::Button)
               .aria_label(remove_name)
-              .test_support()
-              .debug_selector({
-                let id = id.clone();
-                move || format!("terminal-send-dismiss-{id}")
-              })
               .absolute()
               .top(zpx(-8.))
               .right(zpx(-8.))
@@ -3440,11 +3416,9 @@ impl TerminalPane {
     });
     Some(
       div()
-        .id("terminal-send-previews")
+        .selector("terminal-send-previews")
         .role(gpui::Role::Group)
         .aria_label("Attachments")
-        .test_support()
-        .debug_selector(|| "terminal-send-previews".into())
         .absolute()
         .top_0()
         .left_0()
@@ -3468,10 +3442,9 @@ impl TerminalPane {
         )
         .child(
           div()
-            .id(SharedString::from(format!(
+            .selector(SharedString::from(format!(
               "terminal-send-previews-drop-{column_id}"
             )))
-            .debug_selector(|| "terminal-send-previews-drop".into())
             .relative()
             .px_3()
             .pb_8()
@@ -3510,10 +3483,9 @@ impl TerminalPane {
     let hover = p.muted_foreground;
     Some(
       div()
-        .id("terminal-row-scrollbar")
+        .selector("terminal-row-scrollbar")
         .role(gpui::Role::ScrollBar)
         .aria_label("Scroll terminals")
-        .debug_selector(|| "terminal-row-scrollbar".into())
         .absolute()
         .bottom_0()
         .left(px(left))
@@ -3533,8 +3505,7 @@ impl TerminalPane {
             cx.stop_propagation();
             cx.notify();
           }),
-        )
-        .test_support(),
+        ),
     )
   }
 
@@ -3600,8 +3571,7 @@ impl TerminalPane {
     let fg = p.foreground;
     let button = |id: &'static str, icon: &'static str, name: &'static str| {
       div()
-        .id(id)
-        .debug_selector(move || id.into())
+        .selector(id)
         .role(gpui::Role::Button)
         .aria_label(name)
         .size_5()
@@ -3630,13 +3600,7 @@ impl TerminalPane {
       buttons.push(
         self
           .tooltips
-          .wrap(
-            "terminal-expand",
-            Side::Top,
-            tip("Expand", "⌘ + J"),
-            b.test_support(),
-            cx,
-          )
+          .wrap("terminal-expand", Side::Top, tip("Expand", "⌘ + J"), b, cx)
           .into_any_element(),
       );
     } else {
@@ -3668,8 +3632,7 @@ impl TerminalPane {
             let open = std::mem::take(&mut pane.environment_menu);
             cx.notify();
             open
-          })
-          .test_support();
+          });
           deferred(panel).with_priority(1)
         });
         buttons.push(
@@ -3690,7 +3653,7 @@ impl TerminalPane {
               "terminal-restore",
               Side::Top,
               tip("Restore", MAXIMIZE_KEYS),
-              b.test_support(),
+              b,
               cx,
             )
             .into_any_element(),
@@ -3705,7 +3668,7 @@ impl TerminalPane {
               "terminal-maximize",
               Side::Top,
               tip("Maximize", MAXIMIZE_KEYS),
-              b.test_support(),
+              b,
               cx,
             )
             .into_any_element(),
@@ -3725,18 +3688,16 @@ impl TerminalPane {
             "terminal-collapse",
             Side::Top,
             tip("Collapse", "⌘ + J"),
-            b.test_support(),
+            b,
             cx,
           )
           .into_any_element(),
       );
     }
     div()
-      .id("terminal-pane-controls")
+      .selector("terminal-pane-controls")
       .role(gpui::Role::Toolbar)
       .aria_label("Terminal pane controls")
-      .test_support()
-      .debug_selector(|| "terminal-pane-controls".into())
       .flex()
       .items_center()
       .gap_px()
@@ -3775,7 +3736,7 @@ impl TerminalPane {
       let loc = place.workspace_loc(&key).map(|loc| {
         let (key, react) = changes;
         div()
-          .id(SharedString::from(format!("terminal-workspace-loc-{id}")))
+          .selector(SharedString::from(format!("terminal-workspace-loc-{id}")))
           .role(gpui::Role::Button)
           .aria_label("Open changes")
           .flex()
@@ -3795,7 +3756,6 @@ impl TerminalPane {
               cx,
             )
           })
-          .debug_selector(|| "terminal-workspace-loc".into())
           .child(super::workspace::loc_count(
             format!("+{}", loc.insertions),
             ui::Tone::DiffAdded.text(tones),
@@ -3808,11 +3768,9 @@ impl TerminalPane {
       // Short label (['workspace label']): 11px is fine.
       // ast-grep-ignore: gpui-text-xs-short-label-only
       ui::text(div(), TextSize::Xs)
-        .id(SharedString::from(format!("terminal-workspace-label-{id}")))
+        .selector(SharedString::from(format!("terminal-workspace-label-{id}")))
         .role(gpui::Role::Button)
         .aria_label(format!("Go to {name}"))
-        .test_support()
-        .debug_selector(|| "terminal-workspace-label".into())
         .max_w(zpx(360.))
         .min_w_0()
         .overflow_hidden()
@@ -3843,15 +3801,13 @@ impl TerminalPane {
           )
         })
         .child(div().min_w_0().truncate().child(name))
-        .children(loc.map(|loc| loc.test_support()))
-        .test_support()
+        .children(loc)
     };
     let close_id = column.id.clone();
     let close = div()
-      .id(SharedString::from(format!("terminal-close-{}", column.id)))
+      .selector(SharedString::from(format!("terminal-close-{}", column.id)))
       .role(gpui::Role::Button)
       .aria_label("Close terminal")
-      .debug_selector(|| "terminal-close".into())
       .flex()
       .items_center()
       .justify_center()
@@ -3887,14 +3843,12 @@ impl TerminalPane {
           // Short label (['link label']): 11px is fine.
           // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
-            .id(SharedString::from(format!(
+            .selector(SharedString::from(format!(
               "terminal-link-label-{}",
               column.id
             )))
             .role(gpui::Role::Link)
             .aria_label(url.clone())
-            .test_support()
-            .debug_selector(|| "terminal-link-label".into())
             .flex()
             .flex_none()
             .items_center()
@@ -3918,7 +3872,6 @@ impl TerminalPane {
             })
             .child(ui::icon(theme::ICON_GITHUB, 12., d.foreground))
             .child(link_label(&url))
-            .test_support()
         });
         let waiting = self
           .host
@@ -3931,10 +3884,9 @@ impl TerminalPane {
           .unwrap_or_else(|| self.home_branch());
         let view = column.view.clone();
         let search = div()
-          .id(SharedString::from(format!("terminal-search-{}", column.id)))
+          .selector(SharedString::from(format!("terminal-search-{}", column.id)))
           .role(gpui::Role::Button)
           .aria_label("Search terminal")
-          .debug_selector(|| "terminal-search-button".into())
           .h_6()
           .px_2()
           .flex()
@@ -4015,15 +3967,13 @@ impl TerminalPane {
               .children(waiting.map(|waiting| {
                 let count = waiting.count;
                 div()
-                  .id("terminal-msg-badge")
+                  .selector("terminal-msg-badge")
                   .role(gpui::Role::Status)
                   .aria_label(if count == 1 {
                     "1 message waiting".to_string()
                   } else {
                     format!("{count} messages waiting")
                   })
-                  .test_support()
-                  .debug_selector(|| "terminal-msg-badge".into())
                   .child(ui::Count::new(waiting.count, &d))
               }))
               .child(search)
@@ -4074,11 +4024,9 @@ impl TerminalPane {
         // Wrapped so the active column's selector does not replace this one.
         div().flex_shrink_0().child(
           ui::text(div(), TextSize::Sm)
-            .id("remote-terminal-header")
+            .selector("remote-terminal-header")
             .role(gpui::Role::Group)
             .aria_label(format!("{} session", target.endpoint.hostname))
-            .test_support()
-            .debug_selector(|| "remote-terminal-header".into())
             .h(zpx(REMOTE_HEADER_HEIGHT))
             .min_h(zpx(REMOTE_HEADER_HEIGHT))
             .flex_shrink_0()
@@ -4113,11 +4061,9 @@ impl TerminalPane {
                   // Short label (['status label']): 11px is fine.
                   // ast-grep-ignore: gpui-text-xs-short-label-only
                   ui::text(div(), TextSize::Xs)
-                    .id("remote-terminal-ended")
+                    .selector("remote-terminal-ended")
                     .role(gpui::Role::Status)
                     .aria_label(text.clone())
-                    .test_support()
-                    .debug_selector(|| "remote-terminal-ended".into())
                     .text_color(ui::Tone::Warning.text(p))
                     .child(text)
                 })),
@@ -4223,7 +4169,7 @@ impl TerminalPane {
       Kind::Remote { .. } => "Remote terminal".into(),
     };
     div()
-      .id(SharedString::from(format!("terminal-column-{id}")))
+      .selector(SharedString::from(format!("terminal-column-{id}")))
       .role(gpui::Role::Group)
       .aria_label(name)
       .aria_selected(active)
@@ -4233,17 +4179,6 @@ impl TerminalPane {
         "Another workspace's terminal, dimmed"
       } else {
         "Another workspace's terminal"
-      })
-      .test_support()
-      .debug_selector(move || {
-        format!(
-          "terminal-column-{}",
-          if id.starts_with("agent-") {
-            "agent"
-          } else {
-            "shell"
-          }
-        )
       })
       .flex()
       .flex_col()
@@ -4302,7 +4237,7 @@ impl TerminalPane {
       .child({
         let (on_asset, on_files) = (view.clone(), view.clone());
         div()
-          .debug_selector(move || state)
+          .selector(state)
           .when(dimmed, |d| d.opacity(DIMMED_OPACITY))
           .relative()
           .flex_1()
@@ -4710,11 +4645,9 @@ impl Render for TerminalPane {
     }
     if self.collapsed {
       return div()
-        .id("workspace-terminal-pane")
+        .selector("workspace-terminal-pane")
         .role(gpui::Role::Region)
         .aria_label("Terminal pane")
-        .test_support()
-        .debug_selector(|| "workspace-terminal-pane".into())
         .flex()
         .justify_end()
         .m_1p5()
@@ -4868,11 +4801,9 @@ impl Render for TerminalPane {
       })
       .child(
         div()
-          .id("workspace-terminal-pane")
+          .selector("workspace-terminal-pane")
           .role(gpui::Role::Region)
           .aria_label("Terminal pane")
-          .test_support()
-          .debug_selector(|| "workspace-terminal-pane".into())
           .relative()
           .flex_1()
           .min_h_0()
@@ -4883,11 +4814,9 @@ impl Render for TerminalPane {
           .bg(p.background)
           .child(
             div()
-              .id("terminal-scroll-container")
+              .selector("terminal-scroll-container")
               .role(gpui::Role::Group)
               .aria_label("Terminals")
-              .test_support()
-              .debug_selector(|| "terminal-scroll-container".into())
               .flex_1()
               .min_h_0()
               .flex()

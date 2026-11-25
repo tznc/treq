@@ -8,11 +8,12 @@ import { assert, assertEquals, assertStringIncludes } from "https://deno.land/st
 import { bootstrapScript, CURRENT_MANIFEST_VERSION, manifestForVersion } from "../_shared/remote/boot-manifest.ts";
 import { TREQ_BINARY } from "../_shared/remote/ssh-vm-config.ts";
 
-const script = bootstrapScript(CURRENT_MANIFEST_VERSION);
-const version = defined(manifestForVersion(CURRENT_MANIFEST_VERSION)).treq_version;
+// treq-release.ts resolves the treq release at boot; the manifests pin none.
+const release = { version: "0.4.2", sha256: { x86_64: "a".repeat(64), aarch64: "b".repeat(64) } };
+const script = bootstrapScript(CURRENT_MANIFEST_VERSION, { treqVersion: release.version, treqSha256: release.sha256 });
 
 Deno.test("bootstrap downloads the treq CLI release for the machine's arch", () => {
-  assertStringIncludes(script, `TREQ_VERSION="${version}"`);
+  assertStringIncludes(script, `TREQ_VERSION="${release.version}"`);
   assertStringIncludes(
     script,
     "https://github.com/tznc/treq/releases/download/v$TREQ_VERSION/treq-cli-$TREQ_VERSION-linux-$ARCH.tar.gz",
@@ -21,10 +22,9 @@ Deno.test("bootstrap downloads the treq CLI release for the machine's arch", () 
   assertStringIncludes(script, "aarch64|arm64) ARCH=aarch64");
 });
 
-Deno.test("bootstrap checks the archive against the pinned digest before installing", () => {
-  const pinned = defined(manifestForVersion(CURRENT_MANIFEST_VERSION)).treq_sha256;
-  assertStringIncludes(script, `TREQ_SHA256_X86_64="${pinned.x86_64}"`);
-  assertStringIncludes(script, `TREQ_SHA256_AARCH64="${pinned.aarch64}"`);
+Deno.test("bootstrap checks the archive against the resolved digest before installing", () => {
+  assertStringIncludes(script, `TREQ_SHA256_X86_64="${release.sha256.x86_64}"`);
+  assertStringIncludes(script, `TREQ_SHA256_AARCH64="${release.sha256.aarch64}"`);
   // The digest comes from the control plane, not from the same release.
   assert(!script.includes(".tar.gz.sha256"), "no downloaded checksum");
   assertStringIncludes(script, `echo "$expected  $tmp/treq.tar.gz" | sha256sum -c -`);
@@ -34,16 +34,19 @@ Deno.test("bootstrap checks the archive against the pinned digest before install
   assert(download > 0 && check > download && extract > check, "the checksum is verified before extraction");
 });
 
-Deno.test("bootstrap fails closed while a pinned digest is a placeholder", () => {
-  assertStringIncludes(script, `PLACEHOLDER*) echo "treq bootstrap: no pinned sha256 for treq $TREQ_VERSION $ARCH" >&2; exit 1 ;;`);
-  const guard = script.indexOf("PLACEHOLDER*)");
-  assert(guard > 0 && guard < script.indexOf("curl -fsSL"), "refuses before downloading");
+Deno.test("bootstrap fails closed when no treq release was resolved", () => {
+  const unresolved = bootstrapScript(CURRENT_MANIFEST_VERSION);
+  assertStringIncludes(unresolved, 'TREQ_SHA256_X86_64="PLACEHOLDER');
+  assertStringIncludes(unresolved, `PLACEHOLDER*) echo "treq bootstrap: no sha256 for treq $TREQ_VERSION $ARCH" >&2; exit 1 ;;`);
+  const guard = unresolved.indexOf("PLACEHOLDER*)");
+  assert(guard > 0 && guard < unresolved.indexOf("curl -fsSL"), "refuses before downloading");
 });
 
-Deno.test("every manifest pins a digest per arch", () => {
+Deno.test("manifests pin jj per arch and leave the treq release to boot time", () => {
   for (let v = 1; v <= CURRENT_MANIFEST_VERSION; v++) {
     const m = defined(manifestForVersion(v));
-    for (const d of [m.treq_sha256.x86_64, m.treq_sha256.aarch64]) {
+    assert(!("treq_version" in m) && !("treq_sha256" in m), `manifest ${v} pins a treq release`);
+    for (const d of [m.jj_sha256.x86_64, m.jj_sha256.aarch64]) {
       assert(/^[0-9a-f]{64}$/.test(d) || d.startsWith("PLACEHOLDER"), `bad digest ${d}`);
     }
   }

@@ -1,0 +1,85 @@
+id: no-selector-interaction
+snapshots:
+  ? |
+    fn t(h: &mut Harness) {
+      h.click("merge-confirm");
+    }
+  : labels:
+    - source: h.click("merge-confirm")
+      style: primary
+      start: 26
+      end: 50
+  ? |
+    fn t(h: &mut Harness) {
+      h.hover("tab-1");
+    }
+  : labels:
+    - source: h.hover("tab-1")
+      style: primary
+      start: 26
+      end: 42
+  ? |
+    fn t(h: &mut Harness) {
+      h.right_click("workspace-row");
+    }
+  : labels:
+    - source: h.right_click("workspace-row")
+      style: primary
+      start: 26
+      end: 56
+  ? |
+    fn t(h: &mut Harness) {
+      hover(h, "tab-1", Duration::ZERO);
+    }
+  : labels:
+    - source: hover(h, "tab-1", Duration::ZERO)
+      style: primary
+      start: 26
+      end: 59
+  ? |
+    fn t(h: &mut Harness) {
+      right_click(h, "row");
+    }
+  : labels:
+    - source: right_click(h, "row")
+      style: primary
+      start: 26
+      end: 47
+  ? |
+    fn t(h: &mut Harness) {
+      type_into(h, "commit-message", "fix");
+    }
+  : labels:
+    - source: type_into(h, "commit-message", "fix")
+      style: primary
+      start: 26
+      end: 63
+  ? |
+    fn t(h: &mut Harness, path: &str) {
+      h.click(leak(format!("file-row-{path}")));
+    }
+  : labels:
+    - source: h.click(leak(format!("file-row-{path}")))
+      style: primary
+      start: 38
+      end: 79
+  ? |
+    fn t(mut h: Harness) {
+      double_click(&mut h, "terminal-body");
+    }
+  : labels:
+    - source: double_click(&mut h, "terminal-body")
+      style: primary
+      start: 25
+      end: 62
+  ? |
+    impl Ctx {
+      fn t(&mut self) {
+        self.h.click("x");
+      }
+    }
+  : labels:
+    - source: self.h.click("x")
+      style: primary
+      start: 35
+      end: 52

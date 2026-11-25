@@ -1,3 +1,4 @@
+use crate::gpui_shell::test_helpers::WindowHarness;
 use std::{
   cell::RefCell,
   collections::HashMap,
@@ -17,6 +18,12 @@ struct Harness {
   screen: Entity<Screen>,
   sent: Rc<RefCell<Vec<ScreenAction>>>,
   popups: Rc<RefCell<Vec<crate::gpui_shell::popup::PopupRequest>>>,
+}
+
+impl WindowHarness for Harness {
+  fn cx(&mut self) -> &mut VisualTestContext {
+    &mut self.cx
+  }
 }
 
 type Sink = Arc<dyn Fn(&[u8]) + Send + Sync>;
@@ -1159,6 +1166,23 @@ impl changes_data::ChangesHost for FakeHost {
     Ok(self.agent.lock().unwrap().clone())
   }
 
+  fn keep_sent_comments(
+    &self,
+    _: &str,
+    workspace_id: i64,
+    comments: &[crate::core::review::LineComment],
+  ) -> Result<(), String> {
+    let kept: Vec<String> = comments
+      .iter()
+      .map(|c| format!("{}:{}", c.file_path, c.text))
+      .collect();
+    self.record(format!(
+      "keep sent comments {workspace_id} {}",
+      kept.join(",")
+    ));
+    Ok(())
+  }
+
   fn resolve_agent_comment(&self, _: &str, id: &str) -> Result<(), String> {
     self.record(format!("resolve agent comment {id}"));
     for c in self.agent.lock().unwrap().iter_mut().filter(|c| c.id == id) {
@@ -1926,25 +1950,6 @@ impl Harness {
     self.cx.debug_bounds(selector).is_some()
   }
 
-  /// The window as the user sees it, once everything pending has run.
-  fn rendered(&mut self) -> gpui_testing_library::Screen {
-    self.cx.run_until_parked();
-    let window = self.cx.update(|window, _| window.window_handle());
-    let screen = gpui_testing_library::Screen::new(&self.cx, window);
-    screen.redraw();
-    screen
-  }
-
-  /// Whether the user sees an element of `role` named `name`.
-  fn shows(&mut self, role: gpui::Role, name: &str) -> bool {
-    !self
-      .rendered()
-      .query_all_by_role(
-        gpui_testing_library::by::role(role).name(gpui_testing_library::normalize(name)),
-      )
-      .is_empty()
-  }
-
   /// Clicks `button` in the confirmation on screen, found by role and
   /// name, as the user would.
   fn answer(&mut self, button: &str) {
@@ -1966,30 +1971,6 @@ impl Harness {
       .unwrap_or_else(|| panic!("no {button} button in the confirmation"));
     screen.user().click(&target);
     self.cx.run_until_parked();
-  }
-
-  fn click(&mut self, selector: &'static str) {
-    self.cx.run_until_parked();
-    let bounds = self
-      .cx
-      .debug_bounds(selector)
-      .unwrap_or_else(|| panic!("{selector} is not drawn"));
-    self.cx.simulate_click(bounds.center(), Modifiers::none());
-  }
-
-  fn right_click(&mut self, selector: &'static str) {
-    self.cx.run_until_parked();
-    let at = self
-      .cx
-      .debug_bounds(selector)
-      .unwrap_or_else(|| panic!("{selector} is not drawn"))
-      .center();
-    self
-      .cx
-      .simulate_mouse_down(at, gpui::MouseButton::Right, Modifiers::none());
-    self
-      .cx
-      .simulate_mouse_up(at, gpui::MouseButton::Right, Modifiers::none());
   }
 
   fn sent(&self) -> Vec<ScreenAction> {
@@ -2531,8 +2512,18 @@ fn selected_lines(h: &mut Harness) -> Option<(String, Vec<(usize, usize)>)> {
   })
 }
 
+/// Rests the pointer on the diff line with element id `id`, which shows its
+/// Add comment button.
+fn hover_line(h: &mut Harness, id: &str) {
+  use gpui_testing_library::prelude::*;
+  let screen = h.rendered();
+  let row = screen.get_by_element_id(gpui::SharedString::from(id.to_owned()));
+  screen.user().hover(&row);
+}
+
 /// Comments line `+b` of a.rs with `text`.
 fn comment_line(h: &mut Harness, text: &str) {
+  hover_line(h, "diff-line-a.rs-0-1");
   h.click("add-comment-a.rs-0-1");
   let screen = h.rendered();
   gpui_testing_library::expect(screen.get_by_role(
@@ -2870,6 +2861,41 @@ fn commit(id: &str, insertions: u32, deletions: u32) -> serde_json::Value {
 
 fn press(id: &str) -> ScreenAction {
   ScreenAction::Press { id: id.into() }
+}
+
+/// Clicks the element of `role` named `name`, found as the user finds it.
+fn click_named(h: &mut Harness, role: gpui::Role, name: &str) {
+  use gpui_testing_library::prelude::*;
+  let screen = h.rendered();
+  let node = screen.get_by_role(gpui_testing_library::by::role(role).name(name));
+  screen.user().click(&node);
+  h.cx.run_until_parked();
+}
+
+/// The one element whose id starts with `prefix`: for elements named per
+/// item (a comment, a terminal column) where the test does not know the id.
+fn by_id_prefix(h: &mut Harness, prefix: &str) -> gpui_testing_library::Node {
+  use gpui_testing_library::prelude::*;
+  let mut nodes: Vec<_> = h
+    .rendered()
+    .elements()
+    .into_iter()
+    .filter(|n| matches!(n.element_id(), gpui::ElementId::Name(id) if id.starts_with(prefix)))
+    .collect();
+  assert_eq!(nodes.len(), 1, "one element with an id starting {prefix}");
+  nodes.remove(0)
+}
+
+/// Clicks the last terminal drawn, as the user clicks into the pane.
+fn click_terminal(h: &mut Harness) {
+  use gpui_testing_library::prelude::*;
+  let screen = h.rendered();
+  let terminal = screen
+    .get_all_by_role(gpui_testing_library::by::role(gpui::Role::Terminal))
+    .pop()
+    .expect("a terminal");
+  screen.user().click(&terminal);
+  h.cx.run_until_parked();
 }
 
 fn type_into(h: &mut Harness, selector: &'static str, text: &str) {

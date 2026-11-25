@@ -685,14 +685,6 @@ fn code_tab_shows_no_deleted_branch_alert_while_the_branch_exists(cx: &mut TestA
   assert!(host.calls().contains(&"read branch deleted 7".to_string()));
 }
 
-fn screen(h: &mut Harness) -> gpui_testing_library::Screen {
-  h.cx.run_until_parked();
-  let window = h.cx.update(|window, _| window.window_handle());
-  let screen = gpui_testing_library::Screen::new(&h.cx, window);
-  screen.redraw();
-  screen
-}
-
 /// Trunk commits sit under one "On main (read-only)" divider, not an
 /// "Immutable" pill on every row.
 #[gpui::test]
@@ -710,7 +702,7 @@ fn code_tab_groups_trunk_commits_under_a_read_only_divider(cx: &mut TestAppConte
   .ok();
   let (mut h, _) = workspace_harness(cx, host, code_route());
   assert!(h.shows(gpui::Role::Button, "Release 1.2"));
-  let screen = screen(&mut h);
+  let screen = h.rendered();
   expect(screen.get_by_text("On main (read-only)")).to_be_visible();
   assert!(screen.query_by_text("Recent on main").is_none());
   assert!(screen.query_by_text("Immutable").is_none());
@@ -745,7 +737,7 @@ fn a_failed_read_shows_errors_not_empty_boxes(cx: &mut TestAppContext) {
     ..code_host()
   };
   let (mut h, _) = workspace_harness(cx, host, code_route());
-  let screen = screen(&mut h);
+  let screen = h.rendered();
   expect(screen.get_by_role(by::role(Role::Status).name("Couldn't load commits"))).to_be_visible();
   expect(screen.get_by_role(by::role(Role::Status).name("Can't show this workspace's files")))
     .to_be_visible();
@@ -774,7 +766,7 @@ fn the_files_panel_error_is_plain_with_show_error_and_no_retry(cx: &mut TestAppC
   );
   assert!(!h.shows(gpui::Role::MultilineTextInput, "File read error"));
   {
-    let screen = screen(&mut h);
+    let screen = h.rendered();
     expect(screen.get_by_role(by::role(Role::Status).name("Can't show this workspace's files")))
       .to_be_visible();
     expect(screen.get_by_text("Its folder is missing or can't be read.")).to_be_visible();
@@ -796,7 +788,7 @@ fn the_files_panel_error_is_plain_with_show_error_and_no_retry(cx: &mut TestAppC
     h.shows(gpui::Role::MultilineTextInput, "File read error"),
     "Show error opens the error"
   );
-  let screen = screen(&mut h);
+  let screen = h.rendered();
   assert_eq!(
     screen
       .get_by_label_text("File read error")
@@ -822,7 +814,7 @@ fn the_commits_panel_error_has_show_error_but_no_retry_or_message(cx: &mut TestA
     !h.shows(gpui::Role::Button, "Retry"),
     "no Retry in the Commits panel"
   );
-  let screen = screen(&mut h);
+  let screen = h.rendered();
   assert!(screen.query_by_text("could not be read").is_none());
   assert!(screen
     .query_by_text("Its commit history could not be read.")

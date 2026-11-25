@@ -18,7 +18,10 @@ function setup(
     mintStatus?: number;
   } = {},
 ) {
-  const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+  const calls: [string, RequestInit][] = [];
+  const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
+    const url = String(input);
+    calls.push([url, init ?? {}]);
     const repo = url.match(/\/repos\/([^/]+\/[^/]+)$/)?.[1];
     if (repo) {
       const push = o.push?.[repo] ?? true;
@@ -45,12 +48,9 @@ function setup(
       o.userToken === undefined ? "ghu_owner" : o.userToken,
     ),
     appJwt: async () => "app-jwt",
-    fetch: fetch as unknown as typeof globalThis.fetch,
+    fetch,
   };
-  return {
-    deps,
-    calls: fetch.mock.calls as unknown as [string, RequestInit][],
-  };
+  return { deps, calls };
 }
 
 describe("sandboxGithubTokens", () => {

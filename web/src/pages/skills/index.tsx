@@ -170,7 +170,7 @@ export default function SkillsPage() {
             ) : (
               <div className={styles.grid}>
                 {filtered.map((skill) => (
-                  <Link key={skill.id} to={skill.route} className={styles.card}>
+                  <Link key={skill.id} to={skill.route} className={styles.card ?? ''}>
                     <div className={styles.cardHead}>
                       <h2 className={styles.cardTitle}>{skill.name}</h2>
                       <span className={styles.sourceBadge} data-source={skill.source}>

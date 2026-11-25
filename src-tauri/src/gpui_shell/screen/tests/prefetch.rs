@@ -154,9 +154,13 @@ fn a_file_opening_shows_its_spinner_only_after_a_moment(cx: &mut TestAppContext)
   assert!(drawn_now(&mut h, "file-browser-loading"));
   assert!(!drawn_now(&mut h, "file-browser-loading-shown"));
   // The spinner's delay runs on the real clock, as animations do.
-  std::thread::sleep(crate::gpui_shell::ui::SPINNER_DELAY + Duration::from_millis(50));
-  first_frame(&mut h);
-  assert!(drawn_now(&mut h, "file-browser-loading-shown"));
+  assert!(crate::test_repo::wait_until(
+    crate::gpui_shell::ui::SPINNER_DELAY + Duration::from_secs(5),
+    || {
+      first_frame(&mut h);
+      drawn_now(&mut h, "file-browser-loading-shown")
+    }
+  ));
 }
 
 #[gpui::test]

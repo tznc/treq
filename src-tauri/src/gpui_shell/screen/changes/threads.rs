@@ -5,8 +5,10 @@
 use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use gpui_kit::base::ObservedElement;
 use gpui_kit::base::TestSupportExt as _;
 use std::time::Duration;
+use treq_ui::SelectorExt as _;
 
 use gpui::{AnyElement, StrikethroughStyle, StyledText, Task};
 
@@ -127,7 +129,7 @@ impl ChangesView {
     self.threads.revision += 1;
   }
 
-  fn read_agent(&mut self, cx: &mut Context<Self>) {
+  pub(super) fn read_agent(&mut self, cx: &mut Context<Self>) {
     let Some(id) = self.parent.workspace_id() else {
       return;
     };
@@ -344,11 +346,9 @@ impl ChangesView {
       .filter(|c| c.status != "resolved")
       .count();
     (open > 0).then(|| {
-      // Short label (['count']): 11px is fine.
-      // ast-grep-ignore: gpui-text-xs-short-label-only
+      // Short label (count). ast-grep-ignore: gpui-text-xs-short-label-only
       ui::text(div(), TextSize::Xs)
-        .id("agent-review-comment-count")
-        .debug_selector(|| "agent-review-comment-count".into())
+        .selector("agent-review-comment-count")
         .role(gpui::Role::Label)
         .aria_label(count_label(open, "local review comment"))
         .text_color(Tone::GitMerged.color(p))
@@ -380,7 +380,7 @@ impl ChangesView {
       .get(&(path.to_string(), number, side))
     {
       let mut list = div()
-        .debug_selector(|| "agent-review-inline-list".into())
+        .selector("agent-review-inline-list")
         .border_y_1()
         .border_color(violet(p, 0.3))
         .bg(violet(p, 0.03))
@@ -423,10 +423,9 @@ impl ChangesView {
   ) -> Option<impl IntoElement> {
     let threads = self.threads.placed.unplaced.get(path)?;
     let mut section = div()
-      .id(SharedString::from(format!(
+      .selector(SharedString::from(format!(
         "github-outdated-threads-{path}"
       )))
-      .debug_selector(|| "github-outdated-threads".into())
       .role(gpui::Role::Group)
       .aria_label(format!("Outdated threads on {path}"))
       .border_b_1()
@@ -472,8 +471,7 @@ impl ChangesView {
     let muted = p.muted_foreground;
     let id = thread.id.clone();
     let mut toggle = div()
-      .id(SharedString::from(format!("github-thread-{}", thread.id)))
-      .debug_selector(|| "github-thread-toggle".into())
+      .selector(SharedString::from(format!("github-thread-{}", thread.id)))
       .role(gpui::Role::Button)
       .aria_label(if collapsed {
         "Show review thread"
@@ -486,8 +484,7 @@ impl ChangesView {
       .items_center()
       .gap_2()
       .cursor_pointer();
-    // Expanded: a compact pill above the comments. Collapsed: a full-width row
-    // holding the preview.
+    // Expanded: a pill above the comments. Collapsed: a full-width row holding the preview.
     toggle = if collapsed {
       toggle
         .w_full()
@@ -528,8 +525,7 @@ impl ChangesView {
     // Expanded threads show the badge beside the pill rather than inside it.
     let resolved = thread.is_resolved.then(|| {
       let grey = p.muted_foreground;
-      // Short label (['status pill']): 11px is fine.
-      // ast-grep-ignore: gpui-text-xs-short-label-only
+      // Short label (status pill). ast-grep-ignore: gpui-text-xs-short-label-only
       ui::text(div(), TextSize::Xs)
         .flex_none()
         .flex()
@@ -553,8 +549,7 @@ impl ChangesView {
     if let (true, Some(first)) = (collapsed, first) {
       toggle = toggle.child(
         ui::text(div(), TextSize::Sm)
-          .id("github-thread-collapsed-preview")
-          .debug_selector(|| "github-thread-collapsed-preview".into())
+          .selector("github-thread-collapsed-preview")
           .role(gpui::Role::Paragraph)
           .aria_label(preview(&first.body))
           .min_w_0()
@@ -567,8 +562,7 @@ impl ChangesView {
     if !collapsed {
       let n = thread.comments.len();
       toggle = toggle.child(
-        // Short label (['count']): 11px is fine.
-        // ast-grep-ignore: gpui-text-xs-short-label-only
+        // Short label (count). ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .text_color(muted)
           .child(format!("{n} comment{}", if n == 1 { "" } else { "s" })),
@@ -599,7 +593,7 @@ impl ChangesView {
     if !collapsed {
       // One card per thread; replies follow flush, split by a rule.
       let mut comments = div()
-        .debug_selector(|| "github-thread-comments".into())
+        .selector("github-thread-comments")
         .min_w_0()
         .flex()
         .flex_col()
@@ -611,7 +605,7 @@ impl ChangesView {
       for (i, comment) in thread.comments.iter().enumerate() {
         let id = comment.id.clone();
         let mut c = div()
-          .debug_selector(move || format!("github-comment-{id}"))
+          .selector(format!("github-comment-{id}"))
           .child(self.thread_comment(comment, lines, path, anchor.clone(), line, side, p, cx));
         if i > 0 {
           c = c.border_t_1().border_color(p.border.opacity(0.6));
@@ -641,7 +635,12 @@ impl ChangesView {
 
   /// A GitHub comment's text, its ```` ```suggestion ```` block drawn as a
   /// diff against the line it replaces rather than as a code block.
-  fn github_comment_body(&self, comment: &GhReviewComment, lines: usize, p: &Palette) -> Div {
+  fn github_comment_body(
+    &self,
+    comment: &GhReviewComment,
+    lines: usize,
+    p: &Palette,
+  ) -> ObservedElement<gpui::Stateful<Div>> {
     let md = |key: &str, text: &str| {
       super::super::code::markdown(
         format!("github-comment-{}{key}", comment.id),
@@ -650,7 +649,7 @@ impl ChangesView {
         self.dark,
       )
     };
-    let body = div().debug_selector(|| "github-comment-body".into());
+    let body = div().selector("github-comment-body");
     let Some(s) = crate::core::review::parse_suggestion(&comment.body) else {
       return body.child(md("", &comment.body));
     };
@@ -685,11 +684,10 @@ impl ChangesView {
     let quoted = comment.clone();
     let file = path.to_string();
     div()
-      .id(SharedString::from(format!(
+      .selector(SharedString::from(format!(
         "github-comment-card-{}",
         comment.id
       )))
-      .debug_selector(|| "github-comment-card".into())
       .role(gpui::Role::Group)
       .aria_label(format!("Comment by {}", comment.author.login))
       .min_w_0()
@@ -703,8 +701,7 @@ impl ChangesView {
           .child(avatar(&comment.author.login, 32., p))
           .child(profile_link(&comment.author.login, p, cx))
           .child(
-            // Short label (['timestamp']): 11px is fine.
-            // ast-grep-ignore: gpui-text-xs-short-label-only
+            // Short label (timestamp). ast-grep-ignore: gpui-text-xs-short-label-only
             ui::text(div(), TextSize::Xs)
               .text_color(p.muted_foreground)
               .child(comment_date(&comment.created_at, this_year)),
@@ -722,23 +719,21 @@ impl ChangesView {
           cx,
         )
         .child(
-          div()
-            .debug_selector(|| "github-comment-quote".into())
-            .child(
-              self.tip(
-                format!("quote-{}", comment.id),
-                "Quote this comment",
-                Button::new(SharedString::from(format!("quote-{}", comment.id)), p)
-                  .variant(Variant::Outline)
-                  .size(Size::Xs)
-                  .icon(theme::ICON_BOT, 12.)
-                  .label("Quote")
-                  .on_click(cx.listener(move |view, _, _, cx| {
-                    view.quote(&quoted, &file, anchor.clone(), line, side, cx)
-                  })),
-                cx,
-              ),
+          div().selector("github-comment-quote").child(
+            self.tip(
+              format!("quote-{}", comment.id),
+              "Quote this comment",
+              Button::new(SharedString::from(format!("quote-{}", comment.id)), p)
+                .variant(Variant::Outline)
+                .size(Size::Xs)
+                .icon(theme::ICON_BOT, 12.)
+                .label("Quote")
+                .on_click(cx.listener(move |view, _, _, cx| {
+                  view.quote(&quoted, &file, anchor.clone(), line, side, cx)
+                })),
+              cx,
             ),
+          ),
         ),
       )
       .test_support()
@@ -760,11 +755,10 @@ impl ChangesView {
       comment.start_line.to_string()
     };
     let mut card = div()
-      .id(SharedString::from(format!(
+      .selector(SharedString::from(format!(
         "agent-review-comment-card-{}",
         comment.id
       )))
-      .debug_selector(|| "agent-review-comment-card".into())
       .max_w(zpx(CARD_MAX_W))
       .role(gpui::Role::Group)
       .aria_label(format!(
@@ -787,8 +781,7 @@ impl ChangesView {
           .gap_2()
           .child(ui::icon(theme::ICON_BOT, 14., Tone::GitMerged.color(p)))
           .child(
-            // Short label (['tag']): 11px is fine.
-            // ast-grep-ignore: gpui-text-xs-short-label-only
+            // Short label (tag). ast-grep-ignore: gpui-text-xs-short-label-only
             ui::text(div(), TextSize::Xs)
               .font_weight(FontWeight::MEDIUM)
               .text_color(Tone::GitMerged.color(p))
@@ -883,8 +876,7 @@ fn violet(p: &Palette, alpha: f32) -> Hsla {
 
 /// `AuthorAvatar`'s fallback: the login's initial in a circle.
 fn avatar(login: &str, size: f32, p: &Palette) -> impl IntoElement {
-  // Short label (['avatar initial']): 11px is fine.
-  // ast-grep-ignore: gpui-text-xs-short-label-only
+  // Short label (avatar initial). ast-grep-ignore: gpui-text-xs-short-label-only
   ui::text(div(), TextSize::Xs)
     .size(zpx(size))
     .flex_none()
@@ -907,8 +899,7 @@ fn avatar(login: &str, size: f32, p: &Palette) -> impl IntoElement {
 /// `AuthorProfileLink`: "@login", opening the GitHub profile.
 fn profile_link(login: &str, p: &Palette, cx: &mut Context<ChangesView>) -> impl IntoElement {
   let url = format!("https://github.com/{login}");
-  // Short label (['username']): 11px is fine.
-  // ast-grep-ignore: gpui-text-xs-short-label-only
+  // Short label (username). ast-grep-ignore: gpui-text-xs-short-label-only
   ui::text(div(), TextSize::Xs)
     .id(SharedString::from(format!("profile-{login}")))
     .role(gpui::Role::Link)
@@ -938,8 +929,7 @@ pub(in crate::gpui_shell::screen) fn suggestion_box(
   suggested: &str,
   p: &Palette,
 ) -> impl IntoElement {
-  // Short label (['section heading']): 11px is fine.
-  // ast-grep-ignore: gpui-text-xs-short-label-only
+  // Short label (section heading). ast-grep-ignore: gpui-text-xs-short-label-only
   let header = ui::text(div(), TextSize::Xs)
     .id("suggested-change")
     .role(gpui::Role::Heading)
@@ -955,8 +945,7 @@ pub(in crate::gpui_shell::screen) fn suggestion_box(
   let body = match suggestion_diff(original, suggested) {
     Some(rows) => {
       let mut el = ui::text(div(), TextSize::Sm)
-        .id("agent-review-suggestion")
-        .debug_selector(|| "agent-review-suggestion".into())
+        .selector("agent-review-suggestion")
         .role(gpui::Role::Group)
         .aria_label("Suggestion")
         .font_family(theme::MONO_FONT);
@@ -1010,8 +999,7 @@ pub(in crate::gpui_shell::screen) fn suggestion_box(
       el.test_support().into_any_element()
     }
     None => ui::text(div(), TextSize::Sm)
-      .id("agent-review-suggestion")
-      .debug_selector(|| "agent-review-suggestion".into())
+      .selector("agent-review-suggestion")
       .role(gpui::Role::Group)
       .aria_label("Suggestion")
       .font_family(theme::MONO_FONT)

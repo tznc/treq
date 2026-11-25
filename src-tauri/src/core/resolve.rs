@@ -167,7 +167,10 @@ fn find_existing_resolve_for_change(
 }
 
 fn conflicted_files_or_empty(path: &str) -> Vec<String> {
-  jj::get_conflicted_files(path, None).unwrap_or_else(|_| Vec::new())
+  jj::get_conflicted_files(path, None).unwrap_or_else(|error| {
+    tracing::warn!(%error, path, "could not list conflicted files; assuming none");
+    Vec::new()
+  })
 }
 
 fn resolve_instruction_body(workspace_slug: &str) -> String {

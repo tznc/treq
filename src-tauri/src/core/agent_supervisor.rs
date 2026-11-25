@@ -480,7 +480,7 @@ mod tests {
     let record = start_test_process(repo, "demo", &workspace_path, "sleep");
     assert!(record.pid > 0);
     // Windows `tasklist` can miss a pid that has not yet shown up.
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    wait_for_process(&record);
 
     let status = agent_status(repo, "demo").unwrap();
     assert!(status.running);
@@ -540,17 +540,19 @@ mod tests {
     // Unix `cat` echoes stdin into the log. Windows has no FIFO, so the
     // helper process is only required to stay alive for a successful write.
     let placeholder = if cfg!(windows) { "sleep" } else { "cat" };
-    let _record = start_test_process(repo, "demo", &workspace_path, placeholder);
-    std::thread::sleep(std::time::Duration::from_millis(150));
+    let record = start_test_process(repo, "demo", &workspace_path, placeholder);
+    wait_for_process(&record);
 
     let sent = send_agent_input(repo, "demo", "hello-from-supervisor").unwrap();
     assert!(sent.contains("sent"));
     if !cfg!(windows) {
-      std::thread::sleep(std::time::Duration::from_millis(150));
-      let logs = agent_logs(repo, "demo").unwrap();
+      let echoed = crate::test_repo::wait_until(std::time::Duration::from_secs(5), || {
+        agent_logs(repo, "demo").is_ok_and(|logs| logs.contains("hello-from-supervisor"))
+      });
       assert!(
-        logs.contains("hello-from-supervisor"),
-        "expected agent log to contain written stdin, got: {logs:?}"
+        echoed,
+        "expected agent log to contain written stdin, got: {:?}",
+        agent_logs(repo, "demo")
       );
     }
   }
@@ -600,6 +602,17 @@ mod tests {
     if let Some(keeper_pid) = record.keeper_pid {
       kill_process(keeper_pid, record.keeper_start.as_deref());
     }
+  }
+
+  /// Waits until the process `record` names is seen running.
+  fn wait_for_process(record: &AgentRecord) {
+    assert!(
+      crate::test_repo::wait_until(std::time::Duration::from_secs(5), || {
+        process_is_recorded(record.pid, record.pid_start.as_deref())
+      }),
+      "process {} never showed up",
+      record.pid
+    );
   }
 
   /// Spawns a real long-lived process in place of `start_agent`'s allow-listed

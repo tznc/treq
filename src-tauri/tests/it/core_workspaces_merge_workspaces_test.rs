@@ -152,7 +152,6 @@ fn test_can_merge_workspace_into_home_repo_with_merge_commit_strategy() {
     .to_str()
     .expect("workspace path should be utf-8");
 
-  // Add a file to the workspace and commit
   TestRepo::write_workspace_file(
     workspace_path_str,
     "merge-feature.txt",
@@ -188,7 +187,6 @@ fn test_can_merge_workspace_into_home_repo_with_merge_commit_strategy() {
     "Commit message should be a non-empty string"
   );
 
-  // Get the current branch before merge (should be on main)
   let initial_branch_str =
     TestRepo::run_git(&repo.repo_path, &["rev-parse", "--abbrev-ref", "HEAD"])
       .expect("Failed to get current branch")

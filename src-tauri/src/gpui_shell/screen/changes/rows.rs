@@ -7,6 +7,7 @@
 //! and the character-level marks are kept between frames, per file, until
 //! its diff changes.
 
+use gpui_kit::base::ObservedElement;
 use gpui_kit::base::TestSupportExt as _;
 use std::{
   collections::{BTreeSet, HashMap, HashSet},
@@ -15,6 +16,7 @@ use std::{
   sync::Arc,
   time::{Duration, Instant},
 };
+use treq_ui::SelectorExt as _;
 
 use tauri_plugin_gpui::gpui::{
   self, div, list, prelude::*, px, AnyElement, Context, ListAlignment, ListOffset, ListState,
@@ -156,8 +158,7 @@ struct Key {
 impl Default for DiffRows {
   fn default() -> Self {
     Self {
-      // Draws a screen's worth above and below, so a scroll or the next
-      // arrow key rarely meets an unmeasured row.
+      // Draws a screen's worth either side, so scrolls and arrow keys rarely hit unmeasured rows.
       list: ListState::new(0, ListAlignment::Top, px(800.)),
       rows: Vec::new(),
       cards: Vec::new(),
@@ -330,8 +331,7 @@ impl ChangesView {
     for (h, hunk) in hunks.iter().enumerate() {
       let before = read(h, Dir::Before);
       let (above, below) = self.context_ranges(path, hunks, h);
-      // Once the lines above meet the previous hunk's, or the file's start,
-      // the header no longer separates anything.
+      // Lines above reaching the previous hunk or the file's start leave nothing to separate.
       let joined = above.is_none()
         && (before > 0
           || h
@@ -458,16 +458,13 @@ impl ChangesView {
 
   /// The diff's list.
   pub(super) fn diff_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
-    div()
-      .debug_selector(|| "changes-diff-list".into())
-      .size_full()
-      .child(
-        list(
-          self.diff.list.clone(),
-          cx.processor(|view, ix, window, cx| view.row(ix, window, cx)),
-        )
-        .size_full(),
+    div().selector("changes-diff-list").size_full().child(
+      list(
+        self.diff.list.clone(),
+        cx.processor(|view, ix, window, cx| view.row(ix, window, cx)),
       )
+      .size_full(),
+    )
   }
 
   fn row(&mut self, ix: usize, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -543,7 +540,7 @@ impl ChangesView {
     let language = highlight::language(path);
     let border = p.border.opacity(0.4);
     let muted = p.muted_foreground;
-    let gutter_cols = |el: Stateful<gpui::Div>| {
+    let gutter_cols = |el: ObservedElement<Stateful<gpui::Div>>| {
       el.child(div().w_24().flex_none().border_r_1().border_color(border))
         .child(div().w_6().flex_none())
         .child(div().w_5().flex_none())
@@ -553,13 +550,9 @@ impl ChangesView {
         let file = path.to_string();
         gutter_cols(
           div()
-            .id(SharedString::from(format!("hunk-header-{path}-{h}")))
+            .selector(SharedString::from(format!("hunk-header-{path}-{h}")))
             .when(expandable, |this| {
               this.role(gpui::Role::Button).aria_label("Show more lines")
-            })
-            .debug_selector({
-              let id = format!("hunk-header-{path}-{h}");
-              move || id
             })
             .flex()
             .bg(p.muted.opacity(0.6))
@@ -595,8 +588,7 @@ impl ChangesView {
             )
             .when(expandable, |this| {
               this.child(
-                // Short label (['expander button label']): 11px is fine.
-                // ast-grep-ignore: gpui-text-xs-short-label-only
+                // Expander button label. ast-grep-ignore: gpui-text-xs-short-label-only
                 ui::text(div(), TextSize::Xs)
                   .ml_2()
                   .flex_none()
@@ -672,15 +664,11 @@ impl ChangesView {
         let file = path.to_string();
         gutter_cols(
           div()
-            .id(SharedString::from(format!("expand-after-{path}-{h}")))
+            .selector(SharedString::from(format!("expand-after-{path}-{h}")))
             .role(gpui::Role::Button)
             .aria_label(match self.context_ranges(path, hunks, h).1 {
               Some((start, _)) => format!("Show more lines of {path} from line {start}"),
               None => "Show more lines".to_string(),
-            })
-            .debug_selector({
-              let id = format!("expand-after-{path}-{h}");
-              move || id
             })
             .flex()
             .bg(p.muted.opacity(0.3))
@@ -691,8 +679,7 @@ impl ChangesView {
             })),
         )
         .child(
-          // Short label (['expander button label']): 11px is fine.
-          // ast-grep-ignore: gpui-text-xs-short-label-only
+          // Short label (expander button label). ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .flex_1()
             .flex()
@@ -733,15 +720,13 @@ impl ChangesView {
     };
     let file = path.to_string();
     let hover = p.foreground;
-    // Short label (['expander button label']): 11px is fine.
-    // ast-grep-ignore: gpui-text-xs-short-label-only
+    // Short label (expander button label). ast-grep-ignore: gpui-text-xs-short-label-only
     ui::text(div(), TextSize::Xs)
-      .id(SharedString::from(id.clone()))
+      .selector(SharedString::from(id))
       .role(gpui::Role::Button)
       .aria_label(format!(
         "Expand all {count} lines of {path} from line {start}"
       ))
-      .debug_selector(move || id)
       .ml_3()
       .flex_none()
       .text_color(p.muted_foreground)

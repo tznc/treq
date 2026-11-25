@@ -16,14 +16,9 @@ function qaFixture(): { root: string; repo: string } {
   const root = readdirSync(tmpdir())
     .filter((d) => d.startsWith("treq-qa-"))
     .map((d) => join(tmpdir(), d))
-    .filter((d) => {
-      try {
-        return statSync(join(d, "qa-extra.json")).isFile();
-      } catch {
-        return false;
-      }
-    })
+    .filter((d) => statSync(join(d, "qa-extra.json"), { throwIfNoEntry: false })?.isFile() ?? false)
     .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
+  if (!root) throw new Error("no QA fixture");
   const { repo } = JSON.parse(readFileSync(join(root, "qa-extra.json"), "utf8"));
   return { root, repo };
 }

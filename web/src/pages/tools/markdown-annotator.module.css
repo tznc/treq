@@ -32,7 +32,7 @@
 
 .breadcrumb a,
 .breadcrumbBtn {
-  color: var(--ifm-color-primary);
+  color: var(--treq-link);
   text-decoration: none;
   background: none;
   border: none;
@@ -49,7 +49,7 @@
 
 .toolTitle {
   font-size: 1.75rem;
-  font-weight: 700;
+  font-weight: 500;
   margin: 0 0 0.3rem;
   white-space: nowrap;
   overflow: hidden;
@@ -88,7 +88,7 @@
 }
 
 .sourceUrlLink {
-  color: var(--ifm-color-primary);
+  color: var(--treq-link);
   text-decoration: none;
   word-break: break-all;
 }
@@ -117,7 +117,7 @@
 
 .viewToggleBtnActive {
   background: var(--ifm-color-primary);
-  color: #fff;
+  color: var(--treq-on-brand);
 }
 
 .viewToggleBtn:not(.viewToggleBtnActive):hover {
@@ -141,12 +141,12 @@
 
 .finishReviewBtn {
   background: var(--ifm-color-primary);
-  color: #fff;
+  color: var(--treq-on-brand);
   border: none;
   border-radius: 7px;
   padding: 0.35rem 1rem;
   font-size: 0.8rem;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   transition: opacity 0.12s;
   white-space: nowrap;
@@ -193,7 +193,7 @@
 .bodyTabActive {
   color: var(--ifm-font-color-base);
   border-bottom-color: var(--ifm-color-primary);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .bodyTab:hover:not(.bodyTabActive) {
@@ -235,7 +235,7 @@
 }
 
 .loaderTabActive {
-  color: var(--ifm-color-primary);
+  color: var(--treq-link);
   border-bottom-color: var(--ifm-color-primary);
 }
 
@@ -308,12 +308,12 @@
 
 .loaderBtn {
   background: var(--ifm-color-primary);
-  color: #fff;
+  color: var(--treq-on-brand);
   border: none;
   border-radius: 7px;
   padding: 0.5rem 1.1rem;
   font-size: 0.875rem;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   transition: opacity 0.12s;
   white-space: nowrap;
@@ -415,13 +415,13 @@
 }
 
 .lineNum:hover {
-  color: var(--ifm-color-primary);
+  color: var(--treq-link);
   background: var(--ifm-color-emphasis-100);
 }
 
 .lineNumAnchor {
   background: rgba(99, 102, 241, 0.12) !important;
-  color: var(--ifm-color-primary) !important;
+  color: var(--treq-link) !important;
 }
 
 .annotDot {
@@ -538,12 +538,12 @@
 
 .selectionAddBtn {
   background: var(--ifm-color-primary);
-  color: #fff;
+  color: var(--treq-on-brand);
   border: none;
   border-radius: 6px;
   padding: 0.3rem 0.75rem;
   font-size: 0.8rem;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   transition: opacity 0.12s;
 }
@@ -578,7 +578,7 @@
 .previewContent h6 {
   margin-top: 1.4em;
   margin-bottom: 0.5em;
-  font-weight: 700;
+  font-weight: 500;
   line-height: 1.3;
 }
 
@@ -634,7 +634,7 @@
 }
 
 .previewContent a { color: var(--ifm-color-primary); }
-.previewContent strong { font-weight: 700; }
+.previewContent strong { font-weight: 500; }
 .previewContent em { font-style: italic; }
 .previewContent del { text-decoration: line-through; }
 
@@ -648,8 +648,8 @@
 
 .previewAnnotationsTitle {
   font-size: 0.82rem;
-  font-weight: 600;
-  text-transform: uppercase;
+  font-weight: 500;
+  text-transform: none;
   letter-spacing: 0.04em;
   color: var(--ifm-color-emphasis-500);
   margin-bottom: 0.25rem;
@@ -724,7 +724,7 @@
 
 .dialogTitle {
   font-size: 0.9rem;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .dialogClose {
@@ -798,12 +798,12 @@
 
 .dialogConfirm {
   background: var(--ifm-color-primary);
-  color: #fff;
+  color: var(--treq-on-brand);
   border: none;
   border-radius: 7px;
   padding: 0.4rem 1rem;
   font-size: 0.85rem;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   transition: opacity 0.12s;
 }
@@ -834,7 +834,7 @@
 
 .reviewPanelTitle {
   font-size: 1.1rem;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .reviewStats {
@@ -851,7 +851,7 @@
 
 .reviewSourceLink {
   font-size: 0.82rem;
-  color: var(--ifm-color-primary);
+  color: var(--treq-link);
   text-decoration: none;
   word-break: break-all;
 }
@@ -866,7 +866,7 @@
 
 .reviewLabel {
   font-size: 0.82rem;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--ifm-color-emphasis-700);
 }
 
@@ -915,7 +915,7 @@
   border-radius: 7px;
   padding: 0.45rem 1rem;
   font-size: 0.85rem;
-  font-weight: 600;
+  font-weight: 500;
   text-decoration: none;
   transition: opacity 0.12s;
 }
@@ -930,7 +930,7 @@
   border-radius: 7px;
   padding: 0.45rem 1rem;
   font-size: 0.85rem;
-  font-weight: 600;
+  font-weight: 500;
   text-decoration: none;
   transition: opacity 0.12s;
 }
@@ -952,8 +952,8 @@
 
 .reviewPromptLabel {
   font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
+  font-weight: 500;
+  text-transform: none;
   letter-spacing: 0.04em;
   color: var(--ifm-color-emphasis-500);
 }
@@ -988,7 +988,7 @@
 
 .toolTitleCompact {
   font-size: 1rem;
-  font-weight: 600;
+  font-weight: 500;
   margin: 0;
   white-space: nowrap;
   overflow: hidden;
@@ -1016,7 +1016,7 @@
 
 .embedToggleBtnActive {
   border-color: var(--ifm-color-primary);
-  color: var(--ifm-color-primary);
+  color: var(--treq-link);
   background: rgba(99, 102, 241, 0.06);
 }
 
@@ -1050,7 +1050,7 @@
 
 .embedPanelTitle {
   font-size: 0.95rem;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .embedPanelClose {
@@ -1140,8 +1140,8 @@
 
 .embedCodeLabel {
   font-size: 0.78rem;
-  font-weight: 600;
-  text-transform: uppercase;
+  font-weight: 500;
+  text-transform: none;
   letter-spacing: 0.04em;
   color: var(--ifm-color-emphasis-500);
   margin-bottom: 0.45rem;
@@ -1179,12 +1179,12 @@
 
 .embedCopyBtn {
   background: var(--ifm-color-primary);
-  color: #fff;
+  color: var(--treq-on-brand);
   border: none;
   border-radius: 7px;
   padding: 0.5rem 1rem;
   font-size: 0.82rem;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   transition: opacity 0.12s;
   white-space: nowrap;
@@ -1199,7 +1199,7 @@
 
 .embedPreviewLink {
   font-size: 0.82rem;
-  color: var(--ifm-color-primary);
+  color: var(--treq-link);
   text-decoration: none;
 }
 
@@ -1212,8 +1212,8 @@
 
 .embedInstructionsTitle {
   font-size: 0.78rem;
-  font-weight: 700;
-  text-transform: uppercase;
+  font-weight: 500;
+  text-transform: none;
   letter-spacing: 0.04em;
   color: var(--ifm-color-emphasis-500);
   margin-bottom: 0.5rem;
@@ -1245,7 +1245,7 @@
 
 .loaderLabel {
   font-size: 0.85rem;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--ifm-color-emphasis-700);
 }
 
@@ -1282,7 +1282,7 @@
 .previewBlockContent h6 {
   margin-top: 0.2em;
   margin-bottom: 0.4em;
-  font-weight: 700;
+  font-weight: 500;
   line-height: 1.3;
 }
 
@@ -1328,7 +1328,7 @@
 
 .previewBlockContent hr { border: none; border-top: 1px solid var(--ifm-color-emphasis-300); margin: 0.75em 0; }
 .previewBlockContent a { color: var(--ifm-color-primary); }
-.previewBlockContent strong { font-weight: 700; }
+.previewBlockContent strong { font-weight: 500; }
 .previewBlockContent em { font-style: italic; }
 .previewBlockContent del { text-decoration: line-through; }
 

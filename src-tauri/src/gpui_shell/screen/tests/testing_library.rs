@@ -8,15 +8,6 @@ use gpui_testing_library::prelude::*;
 
 use super::*;
 
-/// The harness's window, queried the way a user perceives it.
-fn screen(h: &mut Harness) -> gpui_testing_library::Screen {
-  h.cx.run_until_parked();
-  let window = h.cx.update(|window, _| window.window_handle());
-  let screen = gpui_testing_library::Screen::new(&h.cx, window);
-  screen.redraw();
-  screen
-}
-
 // agent-notification-setting.test.tsx
 
 /// The toggle sits below the setup checklist, so scroll the page to it.
@@ -34,7 +25,7 @@ fn notify_toggle(screen: &gpui_testing_library::Screen) -> gpui_testing_library:
 #[gpui::test]
 fn the_agent_finished_notification_is_on_by_default(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, settings_route("application"));
-  let screen = screen(&mut h);
+  let screen = h.rendered();
   let toggle = notify_toggle(&screen);
   expect(&toggle).to_be_checked();
 }
@@ -43,7 +34,7 @@ fn the_agent_finished_notification_is_on_by_default(cx: &mut TestAppContext) {
 fn turning_the_agent_finished_notification_off_saves_it(cx: &mut TestAppContext) {
   let host = Arc::new(FakeHost::default());
   let mut h = Harness::with_host(cx, settings_route("application"), host.clone());
-  let screen = screen(&mut h);
+  let screen = h.rendered();
   let user = screen.user();
 
   let toggle = notify_toggle(&screen);
@@ -70,7 +61,7 @@ fn turning_the_agent_finished_notification_off_saves_it(cx: &mut TestAppContext)
 #[gpui::test]
 fn the_prompt_dialog_sends_in_edit_mode_from_the_send_button(cx: &mut TestAppContext) {
   let (mut h, host) = modal_harness(cx, FakeHost::default(), agent_modal());
-  let screen = screen(&mut h);
+  let screen = h.rendered();
   let user = screen.user();
   expect(screen.get_by_role(by::role(Role::Dialog).name("Start a new agent session")))
     .to_be_visible();
@@ -91,21 +82,21 @@ fn the_send_button_is_disabled_without_a_prompt(cx: &mut TestAppContext) {
   let mut modal = agent_modal();
   modal["initialPrompt"] = serde_json::Value::Null;
   let (mut h, _) = modal_harness(cx, FakeHost::default(), modal);
-  let screen = screen(&mut h);
+  let screen = h.rendered();
   expect(screen.get_by_role(by::role(Role::Button).name("Send"))).to_be_disabled();
 }
 
 #[gpui::test]
 fn the_prompt_dialog_targets_the_workspace_it_opened_on(cx: &mut TestAppContext) {
   let (mut h, _) = modal_harness(cx, FakeHost::default(), agent_modal());
-  let screen = screen(&mut h);
+  let screen = h.rendered();
   expect(screen.get_by_role(by::role(Role::Button).name("Workspace: treq/login"))).to_be_visible();
 
   let mut on_main = agent_modal();
   on_main["initialWorkspaceId"] = serde_json::Value::Null;
   h.set_modal(None);
   h.set_modal(Some(on_main));
-  let screen = self::screen(&mut h);
+  let screen = h.rendered();
   expect(screen.get_by_role(by::role(Role::Button).name("Workspace: main"))).to_be_visible();
 }
 
@@ -113,7 +104,7 @@ fn the_prompt_dialog_targets_the_workspace_it_opened_on(cx: &mut TestAppContext)
 fn agents_without_plan_mode_send_the_same_way(cx: &mut TestAppContext) {
   let host = FakeHost::with_settings(&[("/repo:default_agent", "codex")]);
   let (mut h, _) = modal_harness(cx, host, agent_modal());
-  let screen = screen(&mut h);
+  let screen = h.rendered();
   expect(screen.get_by_role(by::role(Role::Button).name("Send"))).to_be_visible();
   assert!(screen
     .query_by_role(by::role(Role::Button).name("Run"))
@@ -125,7 +116,7 @@ fn agents_without_plan_mode_send_the_same_way(cx: &mut TestAppContext) {
 #[gpui::test]
 fn the_agent_picker_lists_every_agent(cx: &mut TestAppContext) {
   let (mut h, _) = modal_harness(cx, FakeHost::default(), agent_modal());
-  let screen = screen(&mut h);
+  let screen = h.rendered();
   let picker = screen.get_by_role(by::role(Role::ComboBox).name("Agent"));
   expect(&picker).to_have_value("Claude");
   screen.user().click(&picker);
@@ -145,7 +136,7 @@ fn the_agent_picker_lists_every_agent(cx: &mut TestAppContext) {
 #[gpui::test]
 fn escape_closes_the_workspace_picker_then_the_dialog(cx: &mut TestAppContext) {
   let (mut h, _) = modal_harness(cx, FakeHost::default(), agent_modal());
-  let screen = screen(&mut h);
+  let screen = h.rendered();
   let user = screen.user();
   user.click(&screen.get_by_role(by::role(Role::Button).name("Workspace: treq/login")));
   let search = screen.get_by_role(by::role(Role::TextInput).name("Search workspaces…"));
@@ -176,8 +167,8 @@ fn the_agent_picker_hides_agents_that_are_not_installed(cx: &mut TestAppContext)
   };
   let (mut h, _) = modal_harness(cx, host, agent_modal());
   // The dialog is built on its first draw, and only then looks up the tools.
-  screen(&mut h);
-  let screen = screen(&mut h);
+  h.rendered();
+  let screen = h.rendered();
   screen
     .user()
     .click(&screen.get_by_role(by::role(Role::ComboBox).name("Agent")));
@@ -192,7 +183,7 @@ fn the_agent_picker_hides_agents_that_are_not_installed(cx: &mut TestAppContext)
 #[gpui::test]
 fn choosing_another_agent_offers_to_make_it_the_repo_default(cx: &mut TestAppContext) {
   let (mut h, host) = modal_harness(cx, FakeHost::default(), agent_modal());
-  let screen = screen(&mut h);
+  let screen = h.rendered();
   let user = screen.user();
   let save_default = by::role(Role::CheckBox).name("Set as default for this repo");
   assert!(screen.query_by_role(save_default.clone()).is_none());
@@ -234,7 +225,7 @@ fn the_create_dialog_names_the_branch_from_the_title(cx: &mut TestAppContext) {
   }))
   .expect("snapshot");
   let mut h = Harness::with_host(cx, snapshot, host.clone());
-  let screen = screen(&mut h);
+  let screen = h.rendered();
   let user = screen.user();
   expect(screen.get_by_role(by::role(Role::Heading).name("Stack a new workspace"))).to_be_visible();
 
@@ -264,7 +255,7 @@ fn the_create_dialog_names_the_branch_from_the_title(cx: &mut TestAppContext) {
 #[gpui::test]
 fn settings_tabs_show_which_one_is_open(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, settings_route("application"));
-  let screen = screen(&mut h);
+  let screen = h.rendered();
   expect(screen.get_by_role(by::role(Role::Tab).name("Application"))).to_be_selected();
   let repository = screen.get_by_role(by::role(Role::Tab).name("Repository"));
   expect(&repository).not().to_be_selected();
@@ -284,7 +275,7 @@ fn turning_skills_installation_on_shows_the_skills_tab(cx: &mut TestAppContext) 
     "false",
   )]));
   let mut h = Harness::with_host(cx, settings_route("preview"), host.clone());
-  let screen = screen(&mut h);
+  let screen = h.rendered();
   assert!(screen
     .query_by_role(by::role(Role::Tab).name("Skills"))
     .is_none());
@@ -305,7 +296,7 @@ fn turning_skills_installation_on_shows_the_skills_tab(cx: &mut TestAppContext) 
 #[gpui::test]
 fn commit_does_nothing_until_a_message_is_typed(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
-  let screen = screen(&mut h);
+  let screen = h.rendered();
   let user = screen.user();
   let commit = || screen.get_by_role(by::role(Role::Button).name("Commit"));
   user.click(&commit());
@@ -343,7 +334,7 @@ fn the_remote_chooser_closes_from_its_x(cx: &mut TestAppContext) {
     FakeHost::default(),
     setup_route(true, serde_json::json!({})),
   );
-  let screen = screen(&mut h);
+  let screen = h.rendered();
   screen
     .user()
     .click(&screen.get_by_role(by::role(Role::Button).name("Close")));
@@ -360,7 +351,7 @@ fn button(name: &str) -> gpui_testing_library::ByRole {
 #[gpui::test]
 fn the_workspace_header_names_its_icon_buttons(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, feature_host(), workspace_route());
-  let screen = screen(&mut h);
+  let screen = h.rendered();
   for name in [
     "Workspace target",
     "View PR (#42, open)",
@@ -383,7 +374,7 @@ fn the_workspace_header_names_the_create_pr_buttons(cx: &mut TestAppContext) {
     ..FakeHost::default()
   };
   let (mut h, _) = workspace_harness(cx, host, workspace_route());
-  let screen = screen(&mut h);
+  let screen = h.rendered();
   expect(screen.get_by_role(button("Create PR"))).to_be_visible();
   expect(screen.get_by_role(button("More create PR options"))).to_be_visible();
 }
@@ -391,7 +382,7 @@ fn the_workspace_header_names_the_create_pr_buttons(cx: &mut TestAppContext) {
 #[gpui::test]
 fn the_create_dialog_names_its_target_button(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, workspace_dialogs::dialog(serde_json::json!({})));
-  let screen = screen(&mut h);
+  let screen = h.rendered();
   expect(screen.get_by_role(button("Workspace target"))).to_be_visible();
 }
 
@@ -402,7 +393,7 @@ fn the_prerequisites_recheck_is_named(cx: &mut TestAppContext) {
     ..FakeHost::default()
   });
   let mut h = Harness::with_host(cx, onboarding(), host);
-  let screen = screen(&mut h);
+  let screen = h.rendered();
   // It is in this computer's tools popover.
   let user = screen.user();
   // Nothing is installed in the fake, so its button says so.
@@ -413,7 +404,7 @@ fn the_prerequisites_recheck_is_named(cx: &mut TestAppContext) {
 #[gpui::test]
 fn settings_selects_are_named_after_their_fields(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, settings_route("application"));
-  let screen = screen(&mut h);
+  let screen = h.rendered();
   for name in [
     "Theme",
     "Font size",
@@ -439,7 +430,7 @@ fn the_view_pr_button_reads_the_pull_requests_status(cx: &mut TestAppContext) {
       pr.is_draft = draft;
     }
     let (mut h, _) = workspace_harness(cx, host, workspace_route());
-    let screen = screen(&mut h);
+    let screen = h.rendered();
     let name = format!("View PR (#42, {})", label.to_lowercase());
     screen.get_by_role(by::role(Role::Button).name(name.as_str()));
   }
@@ -451,13 +442,13 @@ fn the_view_pr_button_reads_the_pull_requests_status(cx: &mut TestAppContext) {
 fn a_new_shell_takes_focus_fully_in_view(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
-  h.click("terminal-body");
+  click_terminal(&mut h);
   // Each column keeps 40% of the row: two shells beside the agent overflow it.
   h.cx.simulate_keystrokes("cmd-\\");
   h.cx.run_until_parked();
   h.cx.simulate_keystrokes("cmd-\\");
   h.cx.run_until_parked();
-  let shown = screen(&mut h);
+  let shown = h.rendered();
   let shells = shown.query_all_by_role(by::role(Role::Group).name("Shell terminal"));
   assert_eq!(shells.len(), 2);
   let last = shells[1].snapshot();
@@ -512,17 +503,17 @@ fn account_deletion_refusal_is_announced_as_an_alert_in_a_dialog(cx: &mut TestAp
     ..FakeHost::default()
   });
   let mut h = signed_in_as_ada(cx, host);
-  let s = screen(&mut h);
+  let s = h.rendered();
   s.user()
     .click(&s.get_by_role(by::role(Role::Button).name("Delete account")));
-  let s = screen(&mut h);
+  let s = h.rendered();
   expect(s.get_by_role(by::role(Role::Dialog).name("Delete your Treq account?"))).to_be_visible();
   settings_act(
     &mut h,
     field("account.delete.email", "ada@example.com".into()),
   );
   h.click("account-delete-confirm");
-  let s = screen(&mut h);
+  let s = h.rendered();
   expect(s.get_by_role(by::role(Role::Alert).name(reason))).to_be_visible();
 }
 
@@ -536,7 +527,7 @@ fn the_farewell_after_deleting_an_account_is_an_alert(cx: &mut TestAppContext) {
   );
   h.click("account-delete-confirm");
   h.set_account(account_state(serde_json::json!({})));
-  let s = screen(&mut h);
+  let s = h.rendered();
   expect(s.get_by_role(by::role(Role::Alert).name("Sorry to see you go"))).to_be_visible();
 }
 
@@ -662,7 +653,7 @@ fn code_tab_marks_each_file_status_and_hides_untouched_files(cx: &mut TestAppCon
     status_entry(".gitignore", "untouched"),
   ];
   let (mut h, _) = workspace_harness(cx, host, code_route());
-  let screen = screen(&mut h);
+  let screen = h.rendered();
   let user = screen.user();
 
   for (file, status) in [
@@ -692,7 +683,7 @@ fn code_tab_marks_each_file_status_and_hides_untouched_files(cx: &mut TestAppCon
 #[gpui::test]
 fn code_tab_keeps_entries_without_a_status_visible(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, code_host(), code_route());
-  let screen = screen(&mut h);
+  let screen = h.rendered();
   expect(screen.get_by_role(by::role(Role::Button).name("README.md"))).to_be_visible();
   assert!(screen
     .query_by_role(by::role(Role::Button).name("Show 1 unchanged file"))
@@ -781,7 +772,7 @@ fn project_context_screen() -> ScreenSnapshot {
 fn tab_moves_between_the_instructions_and_the_context_paths(cx: &mut TestAppContext) {
   let host = Arc::new(FakeHost::default());
   let mut h = Harness::with_host(cx, project_context_screen(), host.clone());
-  let screen = screen(&mut h);
+  let screen = h.rendered();
   let user = screen.user();
   // `{Tab}` moves focus itself when unhandled, which the app does not: press the real key.
   // The dialog's tab order: Instructions, Add files…, the context paths.
@@ -828,7 +819,7 @@ fn home_shows_a_repository_deleted_from_disk_as_not_on_this_machine(cx: &mut Tes
     ..FakeHost::default()
   });
   let mut h = Harness::with_host(cx, home_screen(), host.clone());
-  let screen = screen(&mut h);
+  let screen = h.rendered();
   expect(screen.get_by_role(by::role(Role::Button).name("api: not on this machine")))
     .to_be_visible();
   expect(screen.get_by_role(by::role(Role::Button).name("Open web"))).to_be_visible();
@@ -854,7 +845,7 @@ fn switching_home_tabs_reads_the_repositories_again(cx: &mut TestAppContext) {
 #[gpui::test]
 fn the_code_tab_offers_start_an_agent(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, code_host(), code_route());
-  let screen = screen(&mut h);
+  let screen = h.rendered();
   let button = screen.get_by_role(by::role(Role::Button).name("Start an agent"));
   screen.user().click(&button);
   h.cx.run_until_parked();

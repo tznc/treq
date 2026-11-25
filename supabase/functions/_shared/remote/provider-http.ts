@@ -9,6 +9,7 @@ import type {
   ServiceSpec,
 } from "./provider.ts";
 import { ProviderError } from "./provider.ts";
+import { errorMessage } from "../error-message.ts";
 
 /** fetch with a timeout; a transport failure becomes `timeout` or `unavailable`. */
 export async function providerFetch(
@@ -23,7 +24,7 @@ export async function providerFetch(
   } catch (err) {
     throw new ProviderError(
       err instanceof DOMException && err.name === "TimeoutError" ? "timeout" : "unavailable",
-      `could not reach ${vendor}: ${(err as Error).message}`,
+      `could not reach ${vendor}: ${errorMessage(err)}`,
     );
   }
 }
@@ -124,7 +125,8 @@ export async function ensurePidfileService(
     sudo ? `sudo mkdir -p ${dir} && sudo chown "$(id -u)" ${dir}` : `mkdir -p ${dir}`,
     `if [ -f ${pid} ] && kill -0 "$(cat ${pid})" 2>/dev/null; then kill "$(cat ${pid})"; sleep 1; fi`,
     `nohup setsid ${shellQuote([spec.cmd, ...spec.args])} >${log} 2>&1 </dev/null & echo $! >${pid}`,
-    `sleep 1; kill -0 "$(cat ${pid})"`,
+    // A process that already exited says why in its log.
+    `sleep 1; kill -0 "$(cat ${pid})" 2>/dev/null || { tail -n 20 ${log} >&2; exit 1; }`,
   ].join("\n");
   const result = await exec(["sh", "-c", script], 60);
   if (result.exitCode !== 0) {

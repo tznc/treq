@@ -18,13 +18,10 @@ fn fork_with_upstream_ahead() -> (TestRepo, tempfile::TempDir) {
   )
   .expect("clone upstream");
   // CI has no global git identity; the bare clone needs its own to commit.
-  let mut config = std::fs::OpenOptions::new()
-    .append(true)
-    .open(upstream.join("config"))
-    .unwrap();
-  std::io::Write::write_all(
-    &mut config,
-    b"[user]\n\tname = Test User\n\temail = test@example.com\n",
+  TestRepo::append_workspace_file(
+    &upstream.to_string_lossy(),
+    "config",
+    "[user]\n\tname = Test User\n\temail = test@example.com\n",
   )
   .unwrap();
   TestRepo::gix_commit_file_on_ref(

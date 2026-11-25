@@ -442,9 +442,9 @@ fn opening_advanced_only_makes_the_dialog_taller(cx: &mut TestAppContext) {
   h.cx
     .simulate_resize(gpui::size(gpui::px(1400.), gpui::px(900.)));
   h.cx.run_until_parked();
-  let closed = h.cx.debug_bounds("workspace-dialog").expect("dialog");
+  let closed = h.cx.debug_bounds("workspace-dialog-panel").expect("dialog");
   h.click("workspace-dialog-advanced");
-  let open = h.cx.debug_bounds("workspace-dialog").expect("dialog");
+  let open = h.cx.debug_bounds("workspace-dialog-panel").expect("dialog");
   assert_eq!(open.size.width, closed.size.width);
   assert!(open.size.height > closed.size.height);
 }

@@ -32,6 +32,7 @@ import {
 import type { ManagedComputeProvider, ProviderKind } from "./provider.ts";
 import { must, rpc } from "./db.ts";
 import { STALE_PROVISIONING_MS } from "./instance-store.ts";
+import { errorMessage } from "../error-message.ts";
 
 export const LAPSE_GRACE_DAYS = 30;
 const DAY_MS = 86_400_000;
@@ -116,7 +117,7 @@ export async function sweepLapsedInstances(
     const id = instance.instance_id;
     const audit = (
       eventType: RemoteAuditEventType,
-      detail?: Record<string, unknown>,
+      detail: Record<string, unknown>,
     ) =>
       deps.store.audit({
         ownerUserId: instance.owner_user_id,
@@ -169,7 +170,7 @@ export async function sweepLapsedInstances(
         result.kept.push(id);
       }
     } catch (err) {
-      const error = err instanceof Error ? err.message : String(err);
+      const error = errorMessage(err);
       result.failed.push({ instanceId: id, error });
       deps.log({ operation: "lapse_sweep_failed", instance_id: id, error });
       await audit("instance_lapse_sweep_failed", { error });

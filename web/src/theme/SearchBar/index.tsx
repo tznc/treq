@@ -82,7 +82,7 @@ function SearchBarInner() {
             <Link
               key={i}
               to={r.url}
-              className={styles.result}
+              className={styles.result ?? ''}
               onClick={() => { setOpen(false); setQuery(''); }}
             >
               <div
@@ -100,7 +100,7 @@ function SearchBarInner() {
           {query.trim() && (
             <Link
               to={`/search?q=${encodeURIComponent(query.trim())}`}
-              className={styles.seeAll}
+              className={styles.seeAll ?? ''}
               onClick={() => setOpen(false)}
             >
               See all results for "{query}"

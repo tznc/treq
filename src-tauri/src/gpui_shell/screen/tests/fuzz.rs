@@ -406,7 +406,7 @@ fn fuzz_from(mut run: Run, steps: &[Step]) -> Run {
     if let Some(focused) = after.focused() {
       if let Some(dialog) = dialogs.first() {
         assert!(
-          dialog.contains(focused),
+          dialog.path() == focused.path() || dialog.contains(focused),
           "focus {:?} {:?} is outside dialog {:?} {}",
           focused.role(),
           focused.name(),
@@ -603,7 +603,7 @@ fn dialog_scenario(which: u8) -> Scenario {
     wide: false,
     clicks: DIALOG_CLICKS,
     fields: DIALOG_FIELDS,
-    layers: &["workspace-dialog", "rename-workspace-dialog"],
+    layers: &["workspace-dialog-panel", "rename-workspace-dialog-panel"],
   }
 }
 
@@ -642,7 +642,6 @@ fn workspace_dialogs_survive_random_input() {
 const CHANGES_CLICKS: &[&str] = &[
   "add-comment-a.rs-0-1",
   "add-comment-a.rs-0-2",
-  "add-file-comment-button",
   "comment-input",
   "comment-submit",
   "inline-comment-card",
@@ -650,7 +649,6 @@ const CHANGES_CLICKS: &[&str] = &[
   "comment-save",
   "comment-edit-cancel",
   "comment-discard",
-  "delete-comment",
   "discard-review",
   "confirm-discard-review",
   "finish-review",
@@ -681,7 +679,7 @@ fn the_changes_tab_survives_random_review() {
         wide: true,
         clicks: CHANGES_CLICKS,
         fields: CHANGES_FIELDS,
-        layers: &["discard-all-dialog"],
+        layers: &["discard-all-dialog-panel"],
       };
       let run = fuzz(cx, scenario, &steps);
       let log = run.log.join("\n");

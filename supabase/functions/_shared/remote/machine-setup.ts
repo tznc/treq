@@ -31,6 +31,7 @@ import {
   provisionIntegrationCredential,
   supabaseIntegrationSecrets,
 } from "./integration-credential.ts";
+import { errorMessage } from "../error-message.ts";
 
 /** Where per-placement gateway secrets are kept (Vault, via 051_gateway_secrets.sql). */
 export interface GatewaySecretStore {
@@ -104,18 +105,34 @@ function supabasePlacementSecrets(supabase: SupabaseClient) {
   return { gateway: supabaseGatewaySecrets(supabase), integration: supabaseIntegrationSecrets(supabase) };
 }
 
+async function sshdInstalled(provider: SandboxProvider, providerResourceId: string): Promise<boolean> {
+  return (await provider.execOnMachine(providerResourceId, ["test", "-x", MANAGED_SSHD_LAUNCHER])).exitCode === 0;
+}
+
 /**
  * A pidfile-supervised service (Boat, Daytona) does not survive a stop and
  * start, so after a wake sshd and the gateway are started again. A provider
  * with a real supervisor restarts them on its own.
+ *
+ * `finishSetup` runs instead when sshd was never installed (the machine's
+ * setup stopped early, for example with no SSH CA), and the wake fails if
+ * sshd is still missing after it.
  */
 export async function reensureServicesAfterWake(
   provider: SandboxProvider,
   providerResourceId: string,
   placementId: string | null,
+  finishSetup?: () => Promise<void>,
 ): Promise<void> {
   const caps = provider.capabilities();
   if (caps.serviceSupervisor) return;
+  if (finishSetup && !(await sshdInstalled(provider, providerResourceId))) {
+    await finishSetup();
+    if (!(await sshdInstalled(provider, providerResourceId))) {
+      throw new ProviderError("other", "sshd is not installed after finishing the machine setup");
+    }
+    return;
+  }
   await provider.ensureService(providerResourceId, MANAGED_SSHD_SERVICE_NAME, { cmd: MANAGED_SSHD_LAUNCHER, args: [] });
   if (placementId) {
     await provider.ensureService(providerResourceId, GATEWAY_SERVICE_NAME, gatewayServiceSpec(placementId, provider.gatewayListenAddress));
@@ -208,7 +225,7 @@ export async function recordHostKeys(
       instanceId: p.instanceId,
       endpointId: p.endpointId,
       eventType: "readiness_stage_failed",
-      detail: { stage: "host_key_read", reason: scrubErrorText((err as Error).message) },
+      detail: { stage: "host_key_read", reason: scrubErrorText(errorMessage(err)) },
       correlationId: p.correlationId,
     });
   }
@@ -240,7 +257,7 @@ export async function establishSshTrust(
       instanceId: p.instanceId,
       endpointId: p.endpointId,
       eventType: "ca_trust_install_failed",
-      detail: { error: scrubErrorText((err as Error).message) },
+      detail: { error: scrubErrorText(errorMessage(err)) },
       correlationId: p.correlationId,
     });
     return;
@@ -260,7 +277,7 @@ export async function establishSshTrust(
         instanceId: p.instanceId,
         endpointId: p.endpointId,
         eventType: "readiness_stage_failed",
-        detail: { stage: "gateway", reason: scrubErrorText((err as Error).message) },
+        detail: { stage: "gateway", reason: scrubErrorText(errorMessage(err)) },
         correlationId: p.correlationId,
       });
     }

@@ -235,9 +235,7 @@ impl WorkspacesScreen {
     let poll = cx.spawn(async move |this, cx| loop {
       cx.background_executor().timer(MARKER_POLL).await;
       let polled = this.update(cx, |this, cx| {
-        // Nothing shows the result under another page or in the
-        // background. The next tick once shown catches up, and a return
-        // to the foreground refetches at once.
+        // Skipped while hidden. The next visible tick catches up and foregrounding refetches.
         if crate::mobile::backend::in_foreground() && nav::is_top(cx.entity_id(), cx) {
           this.poll_marker(cx);
         }
@@ -904,8 +902,7 @@ impl WorkspacesScreen {
   fn head(&self, cx: &mut Context<Self>) -> AnyElement {
     let count = self.list.ready().map_or(0, Vec::len);
     let palette = treq_ui::theme::current(cx);
-    // A list row is as wide as its content unless told otherwise, which
-    // left the search field a sliver and the refresh button by the count.
+    // A list row is only as wide as its content by default, which squeezed the search field.
     v_flex()
       .w_full()
       .gap_3()
@@ -1002,7 +999,10 @@ impl Render for WorkspacesScreen {
           list(self.rows.clone(), move |ix, _, cx| {
             screen
               .update(cx, |this, cx| this.item(ix, cx))
-              .unwrap_or_else(|_| div().into_any_element())
+              .unwrap_or_else(|e| {
+                log::debug!("Drawing workspace row {ix} empty: the screen closed: {e}");
+                div().into_any_element()
+              })
           })
           .size_full(),
         ),

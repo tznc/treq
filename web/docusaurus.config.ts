@@ -58,22 +58,6 @@ const config: Config = {
                     priority: 40,
                     enforce: true,
                   },
-                  // React Flow — only loaded on dag-visualizer page
-                  reactFlow: {
-                    test: /[\\/]node_modules[\\/]@xyflow[\\/]/,
-                    name: 'chunk-react-flow',
-                    chunks: 'all' as const,
-                    priority: 40,
-                    enforce: true,
-                  },
-                  // Dagre — only loaded on dag-visualizer page
-                  dagre: {
-                    test: /[\\/]node_modules[\\/]@dagrejs[\\/]/,
-                    name: 'chunk-dagre',
-                    chunks: 'all' as const,
-                    priority: 40,
-                    enforce: true,
-                  },
                   // Rough.js — shared between branch-visualizer and vcs-simulator
                   roughjs: {
                     test: /[\\/]node_modules[\\/]roughjs[\\/]/,
@@ -117,9 +101,7 @@ const config: Config = {
     faster: true, // Rspack/SWC/lightningcss build pipeline - smaller, faster bundles
   },
 
-  // Set the production url of your site here
   url: 'https://treq.dev',
-  // Set the /<baseUrl>/ pathname under which your site is served
   baseUrl: '/',
 
   // One canonical form per URL; /page 301s to /page/ instead of both being indexed.
@@ -162,6 +144,7 @@ const config: Config = {
             '/sign-in/**',
             '/auth/**',
             '/integrations/**',
+            '/search/**',
           ],
         },
       } satisfies Preset.Options,
@@ -251,7 +234,7 @@ const config: Config = {
       ],
     },
     footer: {
-      style: 'dark',
+      style: 'light',
       links: [
         {
           title: 'Product',

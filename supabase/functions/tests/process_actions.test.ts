@@ -15,6 +15,7 @@ import {
   parsePinRequest,
   parseUnpinRequest,
 } from "../_shared/remote/process-actions.ts";
+import { defined } from "./helpers/remote_fakes.ts";
 
 Deno.test("pin by pid or by pattern, with a default and a capped ttl", () => {
   assertEquals(parsePinRequest({ instance_id: "i", pid: 500 }), {
@@ -83,15 +84,15 @@ Deno.test("kill checks the live cmdline against the probe's command before signa
   assertEquals(cmd.slice(3), ["sh", "500"]);
   // The expected command goes in the environment, never into the script.
   assertEquals(env, { TREQ_KILL_EXPECTED: "node server.js" });
-  assert(!cmd[2].includes("node server.js"));
-  const script = cmd[2];
+  const script = defined(cmd[2]);
+  assert(!script.includes("node server.js"));
   assertStringIncludes(script, `/proc/$pid/cmdline`);
   assertStringIncludes(script, `[ "$actual" = "$TREQ_KILL_EXPECTED" ]`);
   assert(script.indexOf("TREQ_KILL_EXPECTED") < script.indexOf("kill -TERM"), "compare before kill");
 });
 
 Deno.test("kill refuses a pid a managed service's pidfile names", () => {
-  const script = killCommand(500, "x").cmd[2];
+  const script = defined(killCommand(500, "x").cmd[2]);
   assertStringIncludes(script, "/var/run/treq/*.pid");
   assert(script.indexOf("/var/run/treq/*.pid") < script.indexOf("kill -TERM"));
 });

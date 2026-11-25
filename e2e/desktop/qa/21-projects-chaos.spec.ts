@@ -8,13 +8,12 @@
 // log (`<fixture>/app.log`, see harness.ts) must have no `panicked`.
 // `QA_SEED` and `CHAOS_STEPS` vary the monkey; the seed and the trail print.
 import { execFileSync } from "node:child_process";
-import { readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readdirSync, readFileSync, renameSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { port } from "../env.ts";
 import { capture } from "./capture.ts";
-import { focusMain, home, popupBox, ready, row, settle, xPointer } from "./helpers.ts";
+import { focusMain, home, noteMiss, popupBox, ready, row, settle, xPointer } from "./helpers.ts";
 
 test.describe.configure({ mode: "serial" });
 
@@ -31,7 +30,11 @@ function random(): number {
   t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 }
-const pick = <T>(items: T[]): T => items[Math.floor(random() * items.length)];
+const pick = <T>(items: T[]): T => {
+  const item = items[Math.floor(random() * items.length)];
+  if (item === undefined) throw new Error("pick from an empty list");
+  return item;
+};
 
 /** This run's fixture: the parent of the app's HOME (see harness.ts). */
 function fixtureRoot(): string {
@@ -47,7 +50,9 @@ function appPid(): number {
     try {
       const env = readFileSync(`/proc/${d}/environ`, "utf8").split("\0");
       if (env.includes(`GPUI_PLAYWRIGHT=${port}`)) return Number(d);
-    } catch {}
+    } catch {
+      // ENOENT or EACCES: the process exited, or it belongs to another user.
+    }
   }
   throw new Error(`no app on port ${port}`);
 }
@@ -187,8 +192,8 @@ test("projects-chaos: targeted scenarios", async ({ page }) => {
   ]);
   const save = page.getByRole("button", { name: "Save", exact: true });
   if (await save.count()) {
-    await save.click({ timeout: 3000 }).catch(() => {});
-    await save.click({ timeout: 1000 }).catch(() => {});
+    await save.click({ timeout: 3000 }).catch(noteMiss(note, "save"));
+    await save.click({ timeout: 1000 }).catch(noteMiss(note, "second save"));
   }
   await settle(page, 2000);
   await alive(page);
@@ -278,9 +283,9 @@ async function step(page: Page): Promise<string> {
     case "homeTab": {
       await page.keyboard.press("Escape");
       const homeBtn = page.getByRole("button", { name: "Home", exact: true });
-      if (await homeBtn.count()) await homeBtn.first().click({ timeout: 3000 }).catch(() => {});
+      if (await homeBtn.count()) await homeBtn.first().click({ timeout: 3000 }).catch(noteMiss(note, "Home"));
       const tab = pick(["Code", "Changes", "Commits"]);
-      await page.getByRole("tab", { name: tab }).first().click({ timeout: 3000 }).catch(() => {});
+      await page.getByRole("tab", { name: tab }).first().click({ timeout: 3000 }).catch(noteMiss(note, `tab ${tab}`));
       return `home tab ${tab}`;
     }
     case "header": {
@@ -288,7 +293,7 @@ async function step(page: Page): Promise<string> {
       const n = await rows.count();
       if (!n) return "header none";
       const i = Math.floor(random() * n);
-      await rows.nth(i).click({ timeout: 3000 }).catch(() => {});
+      await rows.nth(i).click({ timeout: 3000 }).catch(noteMiss(note, `header ${i}`));
       return `header ${i}`;
     }
     case "card": {
@@ -296,7 +301,7 @@ async function step(page: Page): Promise<string> {
       const n = await cards.count();
       if (!n) return "card none";
       const i = Math.floor(random() * n);
-      await cards.nth(i).click({ timeout: 3000 }).catch(() => {});
+      await cards.nth(i).click({ timeout: 3000 }).catch(noteMiss(note, `card ${i}`));
       return `card ${i}`;
     }
     case "palette": {

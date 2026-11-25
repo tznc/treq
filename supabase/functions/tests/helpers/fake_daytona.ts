@@ -18,6 +18,7 @@ export interface FakeDaytonaSandbox {
   autoArchiveInterval: number;
   autoDeleteInterval: number;
   toolboxProxyUrl: string;
+  updatedAt?: string;
 }
 
 export interface RecordedRequest {
@@ -95,6 +96,7 @@ export class FakeDaytona {
       this.sandboxes.set(id, sandbox);
       return json(200, sandbox);
     }
+    if (parts[1] === undefined) return errorResponse(404, "sandbox not found");
     const sandbox = this.sandboxes.get(parts[1]);
     if (!sandbox) return errorResponse(404, "sandbox not found");
     const action = parts.slice(2).join("/");
@@ -127,6 +129,7 @@ export class FakeDaytona {
   private toolbox(method: string, path: string, body: unknown): Response {
     // `{toolboxProxyUrl}/{sandboxId}/process/execute`
     const parts = path.split("/").filter(Boolean).map(decodeURIComponent);
+    if (parts[1] === undefined) return errorResponse(404, "sandbox not found");
     const sandbox = this.sandboxes.get(parts[1]);
     if (!sandbox) return errorResponse(404, "sandbox not found");
     if (sandbox.state !== "started" && sandbox.state !== "creating") {

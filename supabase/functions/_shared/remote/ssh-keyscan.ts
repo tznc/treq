@@ -23,6 +23,7 @@
 import { parseOpenSshPublicKey, type ParsedPublicKey } from "./ssh-keys.ts";
 import { SshReader, SshWriter } from "./ssh-wire.ts";
 import { base64Encode } from "./ssh-wire.ts";
+import { errorMessage } from "../error-message.ts";
 
 const SSH_MSG_KEXINIT = 20;
 const SSH_MSG_KEX_ECDH_INIT = 30;
@@ -68,8 +69,9 @@ async function readLine(conn: Deno.Conn, deadline: number): Promise<string> {
     if (Date.now() > deadline) throw new KeyscanError("timed out reading SSH identification string", "timeout");
     const n = await conn.read(one);
     if (n === null) throw new KeyscanError("connection closed during identification exchange", "protocol_error");
-    if (one[0] === 0x0a) break;
-    if (one[0] !== 0x0d) bytes.push(one[0]);
+    const byte = new DataView(one.buffer).getUint8(0);
+    if (byte === 0x0a) break;
+    if (byte !== 0x0d) bytes.push(byte);
   }
   return new TextDecoder().decode(new Uint8Array(bytes));
 }
@@ -96,7 +98,7 @@ async function readPacket(conn: Deno.Conn, deadline: number): Promise<Uint8Array
     throw new KeyscanError(`implausible SSH packet length ${packetLength}`, "protocol_error");
   }
   const rest = await readExactly(conn, packetLength, deadline);
-  const paddingLength = rest[0];
+  const paddingLength = new DataView(rest.buffer, rest.byteOffset).getUint8(0);
   const payload = rest.subarray(1, rest.length - paddingLength);
   return payload;
 }
@@ -141,7 +143,7 @@ export async function scanHostKey(
   try {
     conn = await Deno.connect({ hostname, port, transport: "tcp" });
   } catch (err) {
-    throw new KeyscanError(`could not connect to ${hostname}:${port}: ${(err as Error).message}`, "connect_failed");
+    throw new KeyscanError(`could not connect to ${hostname}:${port}: ${errorMessage(err)}`, "connect_failed");
   }
 
   try {

@@ -27,7 +27,6 @@ test("the home Code tab's Agent button starts a session", async ({
 
 test("the palette's prompt dialog starts a session", async ({
   page,
-  context,
 }) => {
   await goHome(page);
   await page.keyboard.press(`${mod}+k`);

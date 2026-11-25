@@ -126,6 +126,11 @@ names.
 - **Values look like values**: a control showing a current value (target
   branch, agent, model) is an outline field with a trailing chevron. A
   command that opens a menu ("Add") has no chevron.
+- **Fold chevrons**: a header whose text must align with the rows around
+  it, with its children indented from that text, folds with
+  `ui::FoldToggle` after the name, never a leading chevron that offsets the
+  text. The name truncates so the chevron is never clipped or pushed out.
+  Other sections fold with `SectionHeader::collapsible`, chevron first.
 - **Colour means state**: counts are neutral grey pills. Red, amber and
   green appear only where that state is true, once per object. Status is a
   small dot after the name, never the name's colour.

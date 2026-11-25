@@ -1,9 +1,9 @@
 //! One tab strip for views and panels.
 
+use crate::SelectorExt as _;
 use std::rc::Rc;
 
 use gpui::{div, prelude::*, App, FocusHandle, KeyDownEvent, SharedString, Window};
-use gpui_kit::base::TestSupportExt as _;
 
 use crate::{badge::Tone, text, theme, theme::Palette, zpx, Badge, Count, Dot, TextSize};
 
@@ -217,15 +217,12 @@ impl RenderOnce for Tabs {
     let selected = self.selected;
     let disabled: Vec<bool> = self.tabs.iter().map(|tab| tab.disabled).collect();
     let on_key = self.on_select.clone();
-    let selector = self.id.to_string();
     let selected_fill = self.segment_fill(true);
     let segment_hover = self.segment_hover();
     let strip = div()
-      .id(self.id)
-      .debug_selector(move || selector)
+      .selector(self.id)
       .role(gpui::Role::TabList)
       .when_some(self.label, |el, label| el.aria_label(label))
-      .test_support()
       .flex()
       .items_center()
       .when_some(focus, |el, focus| {
@@ -265,7 +262,6 @@ impl RenderOnce for Tabs {
         let active = ix == selected;
         let on_select = self.on_select.clone().filter(|_| !tab.disabled);
         let on_double = self.on_double_click.clone().filter(|_| !tab.disabled);
-        let selector = tab.id.to_string();
         let id = tab.id.to_string();
         let fg = if tab.disabled {
           p.muted_foreground.opacity(0.6)
@@ -283,12 +279,10 @@ impl RenderOnce for Tabs {
         // Short label (['tab-bar tab label']): 11px is fine.
         // ast-grep-ignore: gpui-text-xs-short-label-only
         text(div(), if bar { TextSize::Xs } else { TextSize::Sm })
-          .id(tab.id)
-          .debug_selector(move || selector)
+          .selector(tab.id)
           .role(gpui::Role::Tab)
           .aria_label(tab.label.clone())
           .aria_selected(active)
-          .test_support()
           .flex()
           .items_center()
           .gap_1p5()
@@ -348,8 +342,7 @@ impl RenderOnce for Tabs {
             };
             el.child(
               div()
-                .id(SharedString::from(id.clone()))
-                .debug_selector(move || id)
+                .selector(SharedString::from(id.clone()))
                 .role(gpui::Role::Image)
                 .aria_label(aria)
                 .when(bar, |el| {
@@ -359,15 +352,14 @@ impl RenderOnce for Tabs {
                   Count::new(count, &p).tone(tone).on_selected(fg)
                 } else {
                   Count::new(count, &p).tone(tone)
-                })
-                .test_support(),
+                }),
             )
           })
           .when_some(tab.dot, |el, (tone, label)| {
             let id = format!("{id}-dot");
             el.child(
               div()
-                .debug_selector(move || id)
+                .selector(id)
                 .when(bar, |el| {
                   el.absolute().top(zpx(6.)).left(gpui::relative(0.6))
                 })

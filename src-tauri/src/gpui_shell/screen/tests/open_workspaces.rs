@@ -117,16 +117,12 @@ fn dialog_on(
   (h, host)
 }
 
-fn screen(h: &mut Harness) -> gpui_testing_library::Screen {
-  // Past the debounce, then every read the dialog started.
+/// The window past the dialog's debounce, after every read it started.
+fn settled(h: &mut Harness) -> gpui_testing_library::Screen {
   h.cx
     .background_executor
     .advance_clock(std::time::Duration::from_millis(400));
-  h.cx.run_until_parked();
-  let window = h.cx.update(|window, _| window.window_handle());
-  let screen = gpui_testing_library::Screen::new(&h.cx, window);
-  screen.redraw();
-  screen
+  h.rendered()
 }
 
 /// The footer's status line, not a pane's empty state.
@@ -144,9 +140,9 @@ fn footer_status(screen: &gpui_testing_library::Screen) -> gpui_testing_library:
 
 /// Opens the popover that lists each line.
 fn show_lines(h: &mut Harness) -> gpui_testing_library::Screen {
-  let screen = screen(h);
+  let screen = settled(h);
   screen.user().click(&footer_status(&screen));
-  self::screen(h)
+  settled(h)
 }
 
 fn with_branches(host: FakeHost) -> FakeHost {
@@ -166,7 +162,7 @@ fn pasted_lines_show_what_will_be_opened(cx: &mut TestAppContext) {
   let mut host = with_branches(FakeHost::default());
   host.github.workspaces = vec![workspace(7, "feat/b", Some("main"))];
   let (mut h, host) = dialog(host, cx);
-  let screen = screen(&mut h);
+  let screen = settled(&mut h);
   expect(screen.get_by_role(by::role(Role::Heading).name("New workspace"))).to_be_visible();
   assert_eq!(
     status(&screen),
@@ -177,7 +173,7 @@ fn pasted_lines_show_what_will_be_opened(cx: &mut TestAppContext) {
     &screen.get_by_label_text("Workspaces"),
     "feat/a\norigin/feat/b\nnope\nfeat/a\nmain",
   );
-  let screen = self::screen(&mut h);
+  let screen = settled(&mut h);
   assert_eq!(status(&screen), "Will create 2 workspaces, 1 already open");
   expect(screen.get_by_role(by::role(Role::Alert).name("1 line can't be opened"))).to_be_visible();
   // Each line shows in a popover from the summary.
@@ -203,7 +199,7 @@ fn pasted_lines_show_what_will_be_opened(cx: &mut TestAppContext) {
     "openWorkspaces.opened",
     serde_json::json!({"repoPath": "/repo", "id": 200}),
   )));
-  let screen = self::screen(&mut h);
+  let screen = settled(&mut h);
   assert!(screen
     .query_by_role(by::role(Role::Heading).name("New workspace"))
     .is_none());
@@ -215,7 +211,7 @@ fn pull_request_links_open_their_head_branch(cx: &mut TestAppContext) {
   host.github.remote = acme();
   host.github.pr = Some(pr(42, "feat/x", "release"));
   let (mut h, host) = dialog(host, cx);
-  let screen = screen(&mut h);
+  let screen = settled(&mut h);
 
   screen.user().type_text(
     &screen.get_by_label_text("Workspaces"),
@@ -247,7 +243,7 @@ fn the_pull_request_list_shows_the_users_own_first(cx: &mut TestAppContext) {
   host.open_workspaces.mine = vec![pr(5, "feat/mine", "main")];
   host.open_workspaces.all = vec![pr(5, "feat/mine", "main"), pr(6, "feat/theirs", "main")];
   let (mut h, host) = dialog(host, cx);
-  let screen = screen(&mut h);
+  let screen = settled(&mut h);
   expect(screen.get_by_role(by::role(Role::Heading).name("Your pull requests"))).to_be_visible();
   assert!(screen
     .query_by_role(by::role(Role::CheckBox).name("#6 Change 6"))
@@ -257,7 +253,7 @@ fn the_pull_request_list_shows_the_users_own_first(cx: &mut TestAppContext) {
   screen
     .user()
     .type_text(&screen.get_by_label_text("Search pull requests"), "6");
-  let screen = self::screen(&mut h);
+  let screen = settled(&mut h);
   expect(screen.get_by_role(by::role(Role::Heading).name("Matching pull requests")))
     .to_be_visible();
   expect(screen.get_by_role(by::role(Role::CheckBox).name("#6 Change 6"))).to_be_visible();
@@ -273,7 +269,7 @@ fn the_pull_request_list_hides_those_with_an_open_workspace(cx: &mut TestAppCont
   host.github.workspaces = vec![workspace(7, "feat/open", Some("main"))];
   host.open_workspaces.mine = vec![pr(5, "feat/open", "main"), pr(6, "feat/new", "main")];
   let (mut h, _) = dialog(host, cx);
-  let screen = screen(&mut h);
+  let screen = settled(&mut h);
   expect(screen.get_by_role(by::role(Role::CheckBox).name("#6 Change 6"))).to_be_visible();
   assert!(screen
     .query_by_role(by::role(Role::CheckBox).name("#5 Change 5"))
@@ -293,7 +289,7 @@ fn a_search_shows_a_spinner_until_its_results_arrive(cx: &mut TestAppContext) {
   host.github.remote = acme();
   host.open_workspaces.all = vec![pr(5, "feat/a", "main"), pr(6, "feat/b", "main")];
   let (mut h, _) = dialog(host, cx);
-  let screen = screen(&mut h);
+  let screen = settled(&mut h);
   assert!(!searching(&screen));
 
   // Typing shows the spinner at once, over the old list, before the debounce.
@@ -304,7 +300,7 @@ fn a_search_shows_a_spinner_until_its_results_arrive(cx: &mut TestAppContext) {
   assert!(searching(&screen));
   expect(screen.get_by_role(by::role(Role::CheckBox).name("#5 Change 5"))).to_be_visible();
 
-  let screen = self::screen(&mut h);
+  let screen = settled(&mut h);
   assert!(!searching(&screen));
   expect(screen.get_by_role(by::role(Role::CheckBox).name("#6 Change 6"))).to_be_visible();
   assert!(screen
@@ -318,11 +314,11 @@ fn a_search_with_no_matches_says_so(cx: &mut TestAppContext) {
   host.github.remote = acme();
   host.open_workspaces.all = vec![pr(5, "feat/a", "main")];
   let (mut h, _) = dialog(host, cx);
-  let screen = screen(&mut h);
+  let screen = settled(&mut h);
   screen
     .user()
     .type_text(&screen.get_by_label_text("Search pull requests"), "zzz");
-  let screen = self::screen(&mut h);
+  let screen = settled(&mut h);
   assert!(!searching(&screen));
   // The empty states carry no accessible text; their ids tell them apart.
   assert!(h
@@ -341,11 +337,11 @@ fn a_failed_search_shows_its_error(cx: &mut TestAppContext) {
   host.github.remote = acme();
   host.failing = vec!["open_prs"];
   let (mut h, _) = dialog(host, cx);
-  let screen = screen(&mut h);
+  let screen = settled(&mut h);
   screen
     .user()
     .type_text(&screen.get_by_label_text("Search pull requests"), "6");
-  let screen = self::screen(&mut h);
+  let screen = settled(&mut h);
   assert!(!searching(&screen));
   assert!(h.cx.debug_bounds("open-workspaces-prs-error").is_some());
   expect(screen.get_by_role(by::role(Role::Button).name("Retry"))).to_be_visible();
@@ -359,12 +355,12 @@ fn assigned_to_me_searches_the_users_assigned_pull_requests(cx: &mut TestAppCont
   host.open_workspaces.all = vec![pr(5, "feat/mine", "main"), pr(6, "feat/theirs", "main")];
   host.open_workspaces.assigned = vec![pr(6, "feat/theirs", "main"), pr(7, "feat/other", "main")];
   let (mut h, host) = dialog(host, cx);
-  let screen = screen(&mut h);
+  let screen = settled(&mut h);
   let toggle = || by::role(Role::Button).name("Assigned to me");
   expect(screen.get_by_role(toggle())).not().to_be_pressed();
 
   screen.user().click(&screen.get_by_role(toggle()));
-  let screen = self::screen(&mut h);
+  let screen = settled(&mut h);
   expect(screen.get_by_role(toggle())).to_be_pressed();
   expect(screen.get_by_role(by::role(Role::Heading).name("Assigned to you"))).to_be_visible();
   expect(screen.get_by_role(by::role(Role::CheckBox).name("#7 Change 7"))).to_be_visible();
@@ -379,7 +375,7 @@ fn assigned_to_me_searches_the_users_assigned_pull_requests(cx: &mut TestAppCont
   screen
     .user()
     .type_text(&screen.get_by_label_text("Search pull requests"), "6");
-  let screen = self::screen(&mut h);
+  let screen = settled(&mut h);
   expect(screen.get_by_role(by::role(Role::CheckBox).name("#6 Change 6"))).to_be_visible();
   assert!(screen
     .query_by_role(by::role(Role::CheckBox).name("#7 Change 7"))
@@ -390,7 +386,7 @@ fn assigned_to_me_searches_the_users_assigned_pull_requests(cx: &mut TestAppCont
 
   // Off again, the search covers everyone's.
   screen.user().click(&screen.get_by_role(toggle()));
-  let screen = self::screen(&mut h);
+  let screen = settled(&mut h);
   expect(screen.get_by_role(toggle())).not().to_be_pressed();
   assert_eq!(
     host.calls().last().map(String::as_str),
@@ -404,7 +400,7 @@ fn picked_pull_requests_are_opened(cx: &mut TestAppContext) {
   host.github.remote = acme();
   host.open_workspaces.all = vec![pr(5, "feat/five", "main"), pr(6, "feat/six", "main")];
   let (mut h, host) = dialog(host, cx);
-  let screen = screen(&mut h);
+  let screen = settled(&mut h);
   // The user has none, so everyone's show.
   expect(screen.get_by_role(by::role(Role::Heading).name("Open pull requests"))).to_be_visible();
 
@@ -413,7 +409,7 @@ fn picked_pull_requests_are_opened(cx: &mut TestAppContext) {
   screen
     .user()
     .click(&screen.get_by_role(by::role(Role::CheckBox).name("#5 Change 5")));
-  let screen = self::screen(&mut h);
+  let screen = settled(&mut h);
   expect(screen.get_by_role(by::role(Role::CheckBox).name("#6 Change 6"))).to_be_checked();
   assert_eq!(status(&screen), "Will create 2 workspaces");
 
@@ -433,15 +429,15 @@ fn a_failed_open_keeps_the_dialog_with_the_error(cx: &mut TestAppContext) {
     ..with_branches(FakeHost::default())
   };
   let (mut h, _) = dialog(host, cx);
-  let screen = screen(&mut h);
+  let screen = settled(&mut h);
   screen
     .user()
     .type_text(&screen.get_by_label_text("Workspaces"), "feat/a\nfeat/b");
-  let screen = self::screen(&mut h);
+  let screen = settled(&mut h);
   screen
     .user()
     .click(&screen.get_by_role(by::role(Role::Button).name("Create 2 workspaces")));
-  let screen = self::screen(&mut h);
+  let screen = settled(&mut h);
   expect(screen.get_by_role(by::role(Role::Alert).name("feat/b: create failed"))).to_be_visible();
   expect(screen.get_by_role(by::role(Role::Heading).name("New workspace"))).to_be_visible();
 }
@@ -449,7 +445,7 @@ fn a_failed_open_keeps_the_dialog_with_the_error(cx: &mut TestAppContext) {
 #[gpui::test]
 fn repositories_without_github_hide_the_pull_request_list(cx: &mut TestAppContext) {
   let (mut h, host) = dialog(FakeHost::default(), cx);
-  let screen = screen(&mut h);
+  let screen = settled(&mut h);
   assert!(screen.query_by_label_text("Search pull requests").is_none());
   assert!(!host.calls().iter().any(|c| c.starts_with("read open prs")));
 }
@@ -459,7 +455,7 @@ fn one_integration_shows_a_header_not_a_tab(cx: &mut TestAppContext) {
   let mut host = FakeHost::default();
   host.github.remote = acme();
   let (mut h, _host) = dialog(host, cx);
-  let screen = screen(&mut h);
+  let screen = settled(&mut h);
   expect(screen.get_by_role(by::role(Role::Heading).name("GitHub"))).to_be_visible();
   assert!(screen
     .query_by_role(by::role(Role::Tab).name("GitHub"))
@@ -475,7 +471,7 @@ fn two_integrations_show_tabs_over_a_divider(cx: &mut TestAppContext) {
   let mut host = linear_host();
   host.github.remote = acme();
   let (mut h, _host) = dialog_with(host, true, cx);
-  let screen = screen(&mut h);
+  let screen = settled(&mut h);
   expect(screen.get_by_role(by::role(Role::Tab).name("GitHub"))).to_be_visible();
   expect(screen.get_by_role(by::role(Role::Tab).name("Linear"))).to_be_visible();
   assert!(screen
@@ -504,13 +500,13 @@ fn linear_issues_are_picked_from_the_users_task_list(cx: &mut TestAppContext) {
   let mut host = linear_host();
   host.github.remote = acme();
   let (mut h, host) = dialog_with(host, true, cx);
-  let screen = screen(&mut h);
+  let screen = settled(&mut h);
   // GitHub's tab first; Linear's beside it.
   expect(screen.get_by_role(by::role(Role::Tab).name("GitHub"))).to_be_selected();
   screen
     .user()
     .click(&screen.get_by_role(by::role(Role::Tab).name("Linear")));
-  let screen = self::screen(&mut h);
+  let screen = settled(&mut h);
   expect(screen.get_by_role(by::role(Role::Heading).name("Your issues"))).to_be_visible();
   // Done issues and other people's are left out.
   assert!(screen
@@ -524,14 +520,14 @@ fn linear_issues_are_picked_from_the_users_task_list(cx: &mut TestAppContext) {
     .user()
     .click(&screen.get_by_role(by::role(Role::CheckBox).name("ENG-1 Issue 1")));
   let screen = show_lines(&mut h);
-  assert_eq!(status(&screen), "Will create eng-1 from ENG-1");
-  expect(screen.get_by_role(by::role(Role::ListItem).name("eng-1: new"))).to_be_visible();
+  assert_eq!(status(&screen), "Will create treq/eng-1 from ENG-1");
+  expect(screen.get_by_role(by::role(Role::ListItem).name("treq/eng-1: new"))).to_be_visible();
 
   // A search looks through everyone's.
   screen
     .user()
     .type_text(&screen.get_by_label_text("Search issues"), "ENG-3");
-  let screen = self::screen(&mut h);
+  let screen = settled(&mut h);
   expect(screen.get_by_role(by::role(Role::Heading).name("Matching issues"))).to_be_visible();
   expect(screen.get_by_role(by::role(Role::CheckBox).name("ENG-3 Issue 3"))).to_be_visible();
 
@@ -553,7 +549,7 @@ fn linear_issues_are_picked_from_the_users_task_list(cx: &mut TestAppContext) {
 #[gpui::test]
 fn linear_shows_without_github(cx: &mut TestAppContext) {
   let (mut h, _) = dialog_with(linear_host(), true, cx);
-  let screen = screen(&mut h);
+  let screen = settled(&mut h);
   expect(screen.get_by_role(by::role(Role::Heading).name("Linear"))).to_be_visible();
   assert!(screen
     .query_by_role(by::role(Role::Tab).name("Linear"))
@@ -575,7 +571,7 @@ fn sub_issue_host() -> FakeHost {
 }
 
 fn pick_issue(h: &mut Harness, name: &str) {
-  let screen = screen(h);
+  let screen = settled(h);
   screen
     .user()
     .click(&screen.get_by_role(by::role(Role::CheckBox).name(name)));
@@ -589,9 +585,9 @@ fn a_sub_issue_picked_with_its_parent_stacks_on_it(cx: &mut TestAppContext) {
   pick_issue(&mut h, "ENG-1 Issue 1");
 
   let screen = show_lines(&mut h);
-  expect(screen.get_by_role(by::role(Role::ListItem).name("eng-4: on eng-1 · new")))
+  expect(screen.get_by_role(by::role(Role::ListItem).name("treq/eng-4: on treq/eng-1 · new")))
     .to_be_visible();
-  expect(screen.get_by_role(by::role(Role::ListItem).name("eng-1: new"))).to_be_visible();
+  expect(screen.get_by_role(by::role(Role::ListItem).name("treq/eng-1: new"))).to_be_visible();
 
   screen
     .user()
@@ -618,8 +614,10 @@ fn a_sub_issue_stacks_on_its_parents_open_workspace(cx: &mut TestAppContext) {
   pick_issue(&mut h, "ENG-4 Issue 4");
 
   let screen = show_lines(&mut h);
-  expect(screen.get_by_role(by::role(Role::ListItem).name("eng-4: on octocat/eng-1-parent · new")))
-    .to_be_visible();
+  expect(
+    screen.get_by_role(by::role(Role::ListItem).name("treq/eng-4: on octocat/eng-1-parent · new")),
+  )
+  .to_be_visible();
 }
 
 #[gpui::test]
@@ -628,7 +626,7 @@ fn titles_and_new_branches_stack_on_the_picked_branch(cx: &mut TestAppContext) {
   host.github.workspaces = vec![workspace(7, "feat/base", Some("main"))];
   host.workspaces = vec![workspace(7, "feat/base", Some("main"))];
   let (mut h, host) = dialog_on(host, false, Some("feat/base"), cx);
-  let screen = screen(&mut h);
+  let screen = settled(&mut h);
   expect(screen.get_by_role(by::role(Role::Heading).name("New workspace"))).to_be_visible();
 
   screen.user().type_text(
@@ -665,7 +663,7 @@ fn titles_and_new_branches_stack_on_the_picked_branch(cx: &mut TestAppContext) {
 #[gpui::test]
 fn indented_lines_stack_in_order_on_the_line_above(cx: &mut TestAppContext) {
   let (mut h, host) = dialog(with_branches(FakeHost::default()), cx);
-  let screen = screen(&mut h);
+  let screen = settled(&mut h);
   screen.user().type_text(
     &screen.get_by_label_text("Workspaces"),
     "Fix the login flow\n  feat/a\n  Add tests\nfeat/b",
@@ -704,7 +702,7 @@ fn indented_lines_stack_in_order_on_the_line_above(cx: &mut TestAppContext) {
 #[gpui::test]
 fn tab_indents_the_selected_lines(cx: &mut TestAppContext) {
   let (mut h, _) = dialog(with_branches(FakeHost::default()), cx);
-  let screen = screen(&mut h);
+  let screen = settled(&mut h);
   let lines = screen.get_by_label_text("Workspaces");
   screen.user().type_text(&lines, "feat/a\nfeat/b\nfeat/x");
   screen.user().keyboard("{Shift>}{ArrowUp}{/Shift}");
@@ -734,11 +732,11 @@ fn reopening_the_dialog_does_not_draw_the_assigned_list_as_the_users_own(cx: &mu
   host.open_workspaces.mine = vec![pr(5, "feat/mine", "main")];
   host.open_workspaces.assigned = vec![pr(7, "feat/other", "main")];
   let (mut h, _) = dialog(host, cx);
-  let screen = screen(&mut h);
+  let screen = settled(&mut h);
   screen
     .user()
     .click(&screen.get_by_role(by::role(Role::Button).name("Assigned to me")));
-  let _ = self::screen(&mut h);
+  let _ = settled(&mut h);
 
   let modal = h.screen.read_with(&h.cx, |s, _| s.snapshot().modal.clone());
   h.update(|s| s.modal = None);
@@ -765,7 +763,7 @@ fn reopening_the_dialog_draws_the_pull_requests_it_read_last(cx: &mut TestAppCon
   host.github.remote = acme();
   host.open_workspaces.mine = vec![pr(5, "feat/mine", "main")];
   let (mut h, host) = dialog(host, cx);
-  let _ = screen(&mut h);
+  let _ = settled(&mut h);
   assert_eq!(reads(&host, "read open prs"), 1);
 
   let modal = h.screen.read_with(&h.cx, |s, _| s.snapshot().modal.clone());
@@ -780,7 +778,7 @@ fn reopening_the_dialog_draws_the_pull_requests_it_read_last(cx: &mut TestAppCon
   expect(first.get_by_role(by::role(Role::CheckBox).name("#5 Change 5"))).to_be_visible();
   assert!(!drawn_now(&mut h, "open-workspaces-prs-loading-shown"));
   // And the list is read again behind them.
-  let _ = screen(&mut h);
+  let _ = settled(&mut h);
   assert_eq!(reads(&host, "read open prs"), 2);
 }
 
@@ -877,17 +875,17 @@ mod dlg_scale {
       .collect();
     host.github.remote = acme();
     let (mut h, _) = dialog_with(host, true, cx);
-    let screen = screen(&mut h);
+    let screen = settled(&mut h);
     screen
       .user()
       .click(&screen.get_by_role(by::role(Role::Tab).name("Linear")));
-    let screen = self::screen(&mut h);
+    let screen = settled(&mut h);
     let mut f: Vec<_> = (0..10).map(|_| frame(&mut h)).collect();
     report(&format!("dialog linear tab, {n} issues"), &mut f);
     let mut keys: Vec<_> = (0..8)
       .map(|i| {
         timed(&mut h, |h| {
-          let s = self::screen(h);
+          let s = settled(h);
           s.user().type_text(
             &s.get_by_label_text("Workspaces"),
             if i % 2 == 0 { "a" } else { "\n" },
@@ -903,7 +901,7 @@ mod dlg_scale {
 #[gpui::test]
 fn the_dialog_closes_on_escape(cx: &mut TestAppContext) {
   let (mut h, _) = dialog(FakeHost::default(), cx);
-  let screen = screen(&mut h);
+  let screen = settled(&mut h);
   expect(screen.get_by_role(by::role(Role::Heading).name("New workspace"))).to_be_visible();
   h.cx.simulate_keystrokes("escape");
   h.cx.run_until_parked();
@@ -913,11 +911,11 @@ fn the_dialog_closes_on_escape(cx: &mut TestAppContext) {
 #[gpui::test]
 fn secondary_enter_in_the_lines_creates_the_workspaces(cx: &mut TestAppContext) {
   let (mut h, host) = dialog(with_branches(FakeHost::default()), cx);
-  let screen = screen(&mut h);
+  let screen = settled(&mut h);
   screen
     .user()
     .type_text(&screen.get_by_label_text("Workspaces"), "feat/a");
-  let _ = self::screen(&mut h);
+  let _ = settled(&mut h);
   h.cx.simulate_keystrokes("secondary-enter");
   h.cx.run_until_parked();
   assert!(
@@ -934,7 +932,7 @@ fn an_empty_pull_request_pane_says_why(cx: &mut TestAppContext) {
   let mut host = FakeHost::default();
   host.github.remote = acme();
   let (mut h, _) = dialog(host, cx);
-  let screen = screen(&mut h);
+  let screen = settled(&mut h);
   let pane = screen.get_by_role(by::role(Role::Status).name("No open pull requests"));
   expect(within(&pane).get_by_text(
     "This repository has no open pull requests. Type a line on the left to start a new branch.",
@@ -951,13 +949,13 @@ fn tab_reaches_assigned_to_me_and_the_pull_request_checkboxes(cx: &mut TestAppCo
   host.open_workspaces.mine = vec![pr(5, "feat/a", "main")];
   host.open_workspaces.assigned = vec![pr(5, "feat/a", "main")];
   let (mut h, host) = dialog(host, cx);
-  let screen = screen(&mut h);
+  let screen = settled(&mut h);
   screen
     .user()
     .click(&screen.get_by_label_text("Search pull requests"));
   screen.user().tab();
   screen.user().keyboard(" ");
-  let screen = self::screen(&mut h);
+  let screen = settled(&mut h);
   assert!(
     host
       .calls()
@@ -970,10 +968,10 @@ fn tab_reaches_assigned_to_me_and_the_pull_request_checkboxes(cx: &mut TestAppCo
 
   screen.user().tab();
   screen.user().keyboard(" ");
-  let screen = self::screen(&mut h);
+  let screen = settled(&mut h);
   expect(screen.get_by_role(by::role(Role::CheckBox).name("#5 Change 5"))).to_be_checked();
   screen.user().keyboard(" ");
-  let screen = self::screen(&mut h);
+  let screen = settled(&mut h);
   expect(screen.get_by_role(by::role(Role::CheckBox).name("#5 Change 5")))
     .not()
     .to_be_checked();
@@ -985,11 +983,11 @@ fn linear_without_pro_offers_manage_account(cx: &mut TestAppContext) {
   host.github.remote = acme();
   host.linear.pro_required = true;
   let (mut h, _) = dialog_with(host, true, cx);
-  let screen = screen(&mut h);
+  let screen = settled(&mut h);
   screen
     .user()
     .click(&screen.get_by_role(by::role(Role::Tab).name("Linear")));
-  let screen = self::screen(&mut h);
+  let screen = settled(&mut h);
   assert!(screen
     .query_by_role(by::role(Role::Button).name("Retry"))
     .is_none());

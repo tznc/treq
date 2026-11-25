@@ -2,9 +2,10 @@
 //! random sequences of commit, describe, abandon, bookmark set and undo,
 //! checked after every step against a plain model of the stack.
 
-use crate::common::{proptest_config, TestRepo};
+use crate::common::{proptest_config, wait_until, TestRepo};
 use proptest::prelude::*;
 use std::collections::BTreeMap;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use treq_lib::jj;
 
 #[derive(Debug, Clone)]
@@ -65,6 +66,13 @@ fn fail(e: impl ToString) -> TestCaseError {
   TestCaseError::fail(e.to_string())
 }
 
+fn unix_secs() -> u64 {
+  SystemTime::now()
+    .duration_since(UNIX_EPOCH)
+    .expect("clock after epoch")
+    .as_secs()
+}
+
 proptest! {
   #![proptest_config(proptest_config(12))]
 
@@ -123,12 +131,13 @@ proptest! {
         }
         Op::Undo => {
           let Some((op_id, prev)) = undo.take() else { continue; };
+          let undone_second = unix_secs();
           jj::jj_undo_operation(&ws, &op_id).map_err(fail)?;
           model = prev;
           // The git backend keeps committer time to the second, so redoing the
           // undone rewrite within the same second rebuilds the same commit id,
           // which jj-lib rejects as "already exists".
-          std::thread::sleep(std::time::Duration::from_millis(1100));
+          prop_assert!(wait_until(Duration::from_secs(2), || unix_secs() > undone_second));
         }
       }
       undo = if undoable {

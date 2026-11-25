@@ -139,6 +139,13 @@ pub trait ChangesHost: CommitsHost {
     repo_path: &str,
     workspace_id: i64,
   ) -> Result<Vec<AgentReviewComment>, String>;
+  /// Keeps a sent review's line comments on the workspace's diff.
+  fn keep_sent_comments(
+    &self,
+    repo_path: &str,
+    workspace_id: i64,
+    comments: &[crate::core::review::LineComment],
+  ) -> Result<(), String>;
   fn resolve_agent_comment(&self, repo_path: &str, id: &str) -> Result<(), String>;
   fn delete_agent_comment(&self, repo_path: &str, id: &str) -> Result<(), String>;
   /// Splices the comment's suggested change into its file.
@@ -330,6 +337,19 @@ impl ChangesHost for Backend {
     workspace_id: i64,
   ) -> Result<Vec<AgentReviewComment>, String> {
     crate::core::agent_review::workspace_comments(&self.state_scope(repo_path), workspace_id)
+  }
+
+  fn keep_sent_comments(
+    &self,
+    repo_path: &str,
+    workspace_id: i64,
+    comments: &[crate::core::review::LineComment],
+  ) -> Result<(), String> {
+    crate::core::agent_review::keep_sent_comments(
+      &self.state_scope(repo_path),
+      workspace_id,
+      comments,
+    )
   }
 
   fn resolve_agent_comment(&self, repo_path: &str, id: &str) -> Result<(), String> {
@@ -844,8 +864,7 @@ pub fn full_path(workspace_path: &str, path: &str) -> String {
 /// `computeHunksHash`: djb2 over each hunk's header and lines, in hex.
 pub fn hunks_hash(hunks: &[JjDiffHunk]) -> String {
   let mut hash: u64 = 5381;
-  // JavaScript's `charCodeAt` counts UTF-16 units. Hashed piece by piece,
-  // as the hunks' text joined with `|`, without building that string.
+  // Hashes UTF-16 units, as JS `charCodeAt` counts, over the `|`-joined hunks without joining.
   let mut add = |text: &str| {
     for unit in text.encode_utf16() {
       hash = (hash * 33 + u64::from(unit)) % (1 << 32);

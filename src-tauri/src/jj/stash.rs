@@ -109,9 +109,7 @@ pub fn jj_stash_working_copy(
 
   let new_repo = block_on(tx.commit("stash working copy"))
     .map_err(|e| JjError::IoError(format!("Failed to commit stash transaction: {}", e)))?;
-  // old_wc is None: snapshot_working_copy_tree already updated tree_state to the
-  // snapshotted disk tree, which may differ from wc_commit.tree(), so the
-  // ConcurrentCheckout guard would false-positive if we passed the pre-snapshot commit.
+  // No old_wc: tree_state is already the snapshot, so the old commit would trip ConcurrentCheckout.
   update_workspace_after_history_edit(&mut loaded, &new_repo, None, CheckoutMode::Immediate)?;
 
   let change_id = HexPrefix::from_id(stash_commit.change_id()).reverse_hex()[..12].to_string();

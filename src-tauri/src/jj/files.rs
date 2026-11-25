@@ -118,8 +118,7 @@ pub(super) fn tree_changes(
       .diff_stream(tree, &diff_matcher)
       .collect::<Vec<_>>(),
   );
-  // Hunks are read against all parents merged; with one parent that is the
-  // tree diffed here, so its values name what the hunks are read between.
+  // Hunks read against all parents merged, which is the tree diffed here only with one parent.
   let content_ids = wc_commit.parent_ids().len() <= 1;
 
   let mut changes = Vec::new();
@@ -287,9 +286,7 @@ pub fn jj_sync_working_copy_if_safe(
   let old_wc_commit = get_workspace_wc_commit(&loaded)?;
 
   let mut tx = loaded.repo.start_transaction();
-  // A new empty commit above the bookmark, never the bookmark itself: edits
-  // there would move it. `jj_working_copy_needs_sync` counts a bookmark below
-  // `@` as synced, so this does not loop.
+  // A new `@` above the bookmark, which edits would move, counts as synced, so this never loops.
   block_on(tx.repo_mut().check_out(workspace_name, &destination))
     .map_err(|e| JjError::IoError(format!("Failed to sync working copy to bookmark: {}", e)))?;
   // jj requires rebase_descendants() after any rewrite before committing the transaction.
@@ -515,8 +512,7 @@ pub(super) fn parse_git_diff_hunks(diff: &str) -> Result<Vec<JjDiffHunk>, JjErro
   let mut current_hunk: Option<(String, Vec<String>)> = None;
   let mut hunk_index = 0;
 
-  // Split on `\n` only: `lines()` would also strip a `\r` that is part of
-  // the line's text (the diff already dropped each line's own `\r\n`).
+  // Split on `\n` only: `lines()` would also strip a `\r` that belongs to the line's text.
   for line in diff.strip_suffix('\n').unwrap_or(diff).split('\n') {
     if line.starts_with("@@") {
       // Save previous hunk if exists
@@ -535,8 +531,7 @@ pub(super) fn parse_git_diff_hunks(diff: &str) -> Result<Vec<JjDiffHunk>, JjErro
       // Start new hunk
       current_hunk = Some((line.to_string(), Vec::new()));
     } else if let Some((_, ref mut lines)) = current_hunk {
-      // The input is hunks only (no file headers), so a line such as
-      // `--- end` is a removed `-- end`, not metadata.
+      // Hunks only, no file headers: `--- end` is a removed `-- end`, not metadata.
       lines.push(line.to_string());
     }
   }
@@ -741,9 +736,7 @@ pub fn jj_restore_file(workspace_path: &str, file_path: &str) -> Result<String, 
     Arc::clone(&loaded.repo)
   };
 
-  // old_wc is None: tree_state already reflects the snapshotted disk, which
-  // may differ from wc_commit.tree(), so the ConcurrentCheckout guard would
-  // false-positive if we passed the pre-snapshot commit.
+  // No old_wc: tree_state is already the snapshot, so the old commit would trip ConcurrentCheckout.
   update_workspace_after_history_edit(&mut loaded, &new_repo, None, CheckoutMode::Immediate)?;
   Ok(String::new())
 }

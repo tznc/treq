@@ -12,6 +12,7 @@ import {
 } from "../_shared/billing/store.ts";
 import { createStripeClient } from "../_shared/billing/stripe-api.ts";
 import { createPortal } from "./lib.ts";
+import { errorMessage } from "../_shared/error-message.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -78,7 +79,7 @@ Deno.serve(async (req) => {
   } catch (err) {
     console.error(
       "[billing-portal] failed:",
-      err instanceof Error ? err.message : String(err),
+      errorMessage(err),
     );
     return json({ error: "Billing portal failed" }, 500);
   }

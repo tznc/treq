@@ -13,7 +13,6 @@ use std::net::TcpListener;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 use std::thread;
-use std::time::Duration;
 use tempfile::TempDir;
 
 fn make_subcommand(name: &str) -> SubcommandMatches {
@@ -464,9 +463,13 @@ fn dispatch_agent_request_surfaces_ack_timeout_error() {
 
   let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
   let endpoint = listener.local_addr().unwrap().to_string();
+  let (gave_up, client_gave_up) = std::sync::mpsc::channel::<()>();
   let handle = thread::spawn(move || {
     let (_stream, _) = listener.accept().expect("accept");
-    thread::sleep(Duration::from_millis(900));
+    // Holds the connection open, never acking, until the client gives up.
+    client_gave_up
+      .recv()
+      .expect("the test reports the client's result");
   });
 
   let repo = temp.path().join("repo");
@@ -498,6 +501,9 @@ fn dispatch_agent_request_surfaces_ack_timeout_error() {
     "codex",
     "req-1",
   );
+  gave_up
+    .send(())
+    .expect("the server waits for the client's result");
   assert!(result.is_err());
   let error = result.unwrap_err();
   assert!(

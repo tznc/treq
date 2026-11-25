@@ -1,0 +1,11 @@
+id: no-stringified-error-tsx
+valid:
+  - |
+    try { run(); } catch (err) { setError(err instanceof Error ? err.message : "Request failed"); }
+  - |
+    const el = <span>{String(count)}</span>;
+invalid:
+  - |
+    try { run(); } catch (e) { setError(`Failed: ${e instanceof Error ? e.message : String(e)}`); }
+  - |
+    load().catch((e) => onError(`Failed: ${e}`));

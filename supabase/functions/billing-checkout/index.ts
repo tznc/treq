@@ -16,6 +16,7 @@ import {
 import { createStripeClient } from "../_shared/billing/stripe-api.ts";
 import { createCheckout } from "./lib.ts";
 import { corsHeaders, json } from "../_shared/http/json.ts";
+import { errorMessage } from "../_shared/error-message.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -85,7 +86,7 @@ Deno.serve(async (req) => {
   } catch (err) {
     console.error(
       "[billing-checkout] failed:",
-      err instanceof Error ? err.message : String(err),
+      errorMessage(err),
     );
     return json({ error: "Checkout failed" }, 500);
   }

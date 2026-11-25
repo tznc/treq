@@ -21,7 +21,7 @@ export function SkillPageSections({
   related,
   children,
 }: SkillPageProps & { children?: ReactNode }) {
-  const repoUrl = skill.url.split('/tree/')[0];
+  const repoUrl = skill.url.split('/tree/')[0] ?? skill.url;
   const repoName = repoUrl.replace('https://github.com/', '');
   const links = {
     blobBase: skill.url.replace('/tree/', '/blob/'),
@@ -126,7 +126,7 @@ export function SkillPageSections({
           <ul className={styles.related}>
             {related.map((item) => (
               <li key={item.route}>
-                <Link to={item.route} className={styles.relatedName}>{item.name}</Link>
+                <Link to={item.route} className={styles.relatedName ?? ''}>{item.name}</Link>
                 <span className={styles.relatedAuthor}> by {item.author}</span>
                 {item.description && <p className={styles.relatedDesc}>{item.description}</p>}
               </li>

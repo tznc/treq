@@ -28,10 +28,12 @@ function matchRoot(dir, pattern) {
   if (dir.length <= pattern.length) return null;
   const kept = [];
   for (const [i, part] of pattern.entries()) {
+    const name = dir[i];
+    if (name === undefined) return null;
     if (part === '*') {
-      if (dir[i].startsWith('.')) return null;
-      kept.push(dir[i]);
-    } else if (part !== dir[i]) {
+      if (name.startsWith('.')) return null;
+      kept.push(name);
+    } else if (part !== name) {
       return null;
     }
   }

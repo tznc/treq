@@ -123,10 +123,7 @@ pub(super) fn resolve_local_target_branch_revision(
     return Ok(format_revset_symbol(target_branch));
   }
 
-  // GitHub squash-and-merge replaces the remote tip with a commit that has
-  // the same tree as the old branch tip. Resolve that imported bookmark
-  // conflict to the squash commit before considering the (stale) git-local
-  // branch or timestamp heuristics.
+  // A GitHub squash commit has the old tip's tree, so it wins over the git-branch and time checks.
   let remote_symbol = RemoteRefSymbol {
     name: RefName::new(target_branch),
     remote: RemoteName::new("origin"),
@@ -659,8 +656,10 @@ pub fn jj_get_home_repo_diverged_log(
         .map(|c| c.id().hex()[..12].to_string())
     });
 
-  let workspace_branch =
-    get_workspace_branch(repo_path).unwrap_or_else(|_| current_branch.to_string());
+  let workspace_branch = get_workspace_branch(repo_path).unwrap_or_else(|error| {
+    tracing::debug!(%error, repo_path, "no workspace branch; using the current branch");
+    current_branch.to_string()
+  });
 
   let mut commits = branch_commits;
   let existing_ids: std::collections::HashSet<String> =

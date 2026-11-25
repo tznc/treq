@@ -29,8 +29,8 @@ import { createTestUser, deleteTestUser } from "../seed";
 const VIEWER = { data: { viewer: { id: "linear-user" } } };
 
 function stubLinear() {
-  return jest.fn(
-    async (_url: string | URL | Request, _init?: RequestInit) =>
+  return jest.fn<typeof globalThis.fetch>(
+    async () =>
       new Response(JSON.stringify(VIEWER), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -105,7 +105,7 @@ it("requires Pro for Linear OAuth and the Linear proxy", async () => {
       proxyLinearRequest(
         { query: "query { viewer { id } }" },
         {
-          fetch: fetch as unknown as typeof globalThis.fetch,
+          fetch,
           linearClient: null,
           hasPro: () => userHasPro(admin, userId),
           store: linearTokenStore(admin, userId),

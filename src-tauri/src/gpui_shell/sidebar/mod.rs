@@ -5,13 +5,14 @@
 
 use crate::gpui_shell::ui::{self, zpx, A11yDisabledExt as _, TextSize, Tone};
 use crate::result_ext::ResultExt;
+use gpui_kit::base::ObservedElement;
 use std::{
   cell::{Cell, RefCell},
   rc::Rc,
   time::Duration,
 };
+use treq_ui::SelectorExt as _;
 
-use gpui_kit::base::TestSupportExt as _;
 use serde::{Deserialize, Serialize};
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, px, svg, Animation, AnimationExt as _, AnyElement, App, ClickEvent,
@@ -709,6 +710,13 @@ const GROUP_INDENT: f32 = 4.;
 
 /// Indentation of a row's content: one 12px icon per level, so a child's
 /// icon starts past its parent's.
+/// The space between two workspace rows.
+const ROW_GAP: f32 = 0.;
+
+/// How far a nested row's elbow reaches above the row: across the gap and
+/// the parent row's space under its 12px icon, stopping 1px short of it.
+const ELBOW_REACH: f32 = ROW_GAP + (theme::ROW_HEIGHT_COMPACT - 12.) / 2. - 1.;
+
 fn row_indent(depth: u32) -> f32 {
   10. + depth as f32 * 12.
 }
@@ -782,8 +790,7 @@ impl Render for Sidebar {
       ));
 
     let mut sidebar = ui::text(div(), TextSize::Sm)
-      .id("sidebar")
-      .debug_selector(|| "sidebar".into())
+      .selector("sidebar")
       .relative()
       .flex()
       .flex_col()
@@ -806,7 +813,7 @@ impl Render for Sidebar {
     // row; a single repository keeps its home row up here.
     if !snapshot.repos.iter().any(|repo| repo.label.is_some()) {
       for repo in &snapshot.repos {
-        sidebar = sidebar.child(self.home_row(repo, &palette, cx));
+        sidebar = sidebar.child(self.home_row(repo, &palette, None, cx));
       }
     }
     if let Some(active) = snapshot.project_home {
@@ -842,8 +849,7 @@ impl Render for Sidebar {
     let grouped = snapshot.repos.iter().any(|repo| repo.label.is_some());
     let any_rows = self.items.iter().any(|item| matches!(item, Item::Row(..)));
     let list = div()
-      .id("workspaces")
-      .debug_selector(|| "workspaces".into())
+      .selector("workspaces")
       .flex_1()
       .min_h_0()
       // A click on the empty list clears the selection; it is not a control.
@@ -927,10 +933,9 @@ impl Render for Sidebar {
 
 /// The webview modal's backdrop, continued over the sidebar in the same
 /// translucent black. It takes every click and hover.
-fn modal_backdrop(palette: &Palette, opacity: f32) -> gpui::Stateful<gpui::Div> {
+fn modal_backdrop(palette: &Palette, opacity: f32) -> ObservedElement<gpui::Stateful<gpui::Div>> {
   div()
-    .id("modal-backdrop")
-    .debug_selector(|| "modal-backdrop".into())
+    .selector("modal-backdrop")
     .absolute()
     .inset_0()
     .bg(palette.scrim().alpha(opacity.clamp(0., 1.)))
@@ -1047,14 +1052,11 @@ impl Sidebar {
     let disabled = disabled_reason.is_some();
     let tip = disabled_reason.unwrap_or(tooltip).to_string();
     let key = id.clone();
-    let selector = id.to_string();
     div()
-      .id(id.clone())
-      .debug_selector(move || selector)
+      .a11y_disabled(disabled)
+      .selector(id.clone())
       .role(Role::Button)
       .aria_label(tooltip)
-      .a11y_disabled(disabled)
-      .test_support()
       .relative()
       .flex()
       .flex_none()
@@ -1153,10 +1155,12 @@ impl Sidebar {
     &self,
     repo: &RepoSection,
     palette: &Palette,
+    fold: Option<ui::FoldToggle>,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
     let label = repo.home_ref.clone().unwrap_or_else(|| "…".into());
     let key = SharedString::from(format!("home:{}", repo.path));
+    let group_header = fold.is_some();
     let title: gpui::AnyElement = match &repo.label {
       // Several repositories: the name over the checked-out branch.
       Some(name) => div()
@@ -1166,10 +1170,13 @@ impl Sidebar {
         .min_w_0()
         .child(
           div()
+            .flex()
+            .items_center()
+            .gap_1()
             .min_w_0()
-            .truncate()
             .font_weight(gpui::FontWeight::MEDIUM)
-            .child(name.clone()),
+            .child(div().min_w_0().truncate().child(name.clone()))
+            .children(fold),
         )
         .when_some(
           repo.home_ref.clone().filter(|_| !repo.missing),
@@ -1216,6 +1223,9 @@ impl Sidebar {
       .relative()
       .gap_1p5()
       .mx_2()
+      // A group header spans its rows' width, so its fold chevron ends
+      // where their status dots do; the padding keeps its name in place.
+      .when(group_header, |this| this.mx_0().pl_4())
       .rounded_md()
       .text_color(palette.sidebar_foreground)
       .when(repo.missing, |this| this.opacity(0.5))
@@ -1277,11 +1287,9 @@ impl Sidebar {
       .min_w_0()
       .child(
         div()
-          .id("project-button")
-          .debug_selector(|| "project-button".into())
+          .selector("project-button")
           .role(Role::Button)
           .aria_label(SharedString::from(format!("Project: {name}")))
-          .test_support()
           .flex()
           .items_center()
           .gap_1p5()
@@ -1367,8 +1375,9 @@ impl Sidebar {
       })
   }
 
-  /// A repository's group header in a window with several: a fold chevron,
-  /// then the repository's home row (its clone and checked-out branch).
+  /// A repository's group header in a window with several: the
+  /// repository's home row (its clone and checked-out branch), with a fold
+  /// chevron after the name.
   fn group_header(
     &self,
     repo: &RepoSection,
@@ -1376,42 +1385,16 @@ impl Sidebar {
     palette: &Palette,
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
-    let chevron = if repo.collapsed {
-      theme::ICON_CHEVRON_RIGHT
-    } else {
-      theme::ICON_CHEVRON_DOWN
-    };
-    let selector = format!("group-{name}");
-    div()
-      .flex()
-      .items_center()
-      .child(
-        div()
-          .id("group-label")
-          .debug_selector(move || selector)
-          .role(Role::Button)
-          .aria_label(SharedString::from(format!("Fold {name}")))
-          .test_support()
-          .flex()
-          .flex_none()
-          .items_center()
-          .justify_center()
-          .size(zpx(20.))
-          .rounded_md()
-          .cursor_pointer()
-          .hover(|style| style.bg(palette.hover()))
-          .child(icon(chevron, 14., palette.sidebar_foreground.opacity(0.7)))
-          .on_click(self.on_action(SidebarAction::ToggleRepo {
-            repo_path: repo.path.clone(),
-          })),
-      )
-      .child(
-        div()
-          .flex_1()
-          .min_w_0()
-          .ml_neg_1p5()
-          .child(self.home_row(repo, palette, cx)),
-      )
+    let fold = ui::FoldToggle::new(
+      format!("group-{name}"),
+      name.to_string(),
+      repo.collapsed,
+      palette,
+    )
+    .on_toggle(self.on_action(SidebarAction::ToggleRepo {
+      repo_path: repo.path.clone(),
+    }));
+    self.home_row(repo, palette, Some(fold), cx)
   }
 
   /// A row above the workspace list: GitHub or Linear.
@@ -1445,8 +1428,7 @@ impl Sidebar {
     let primary = palette.primary;
     let sink = self.sink.clone();
     div()
-      .id("resize-handle")
-      .debug_selector(|| "resize-handle".into())
+      .selector("resize-handle")
       .absolute()
       .top_0()
       .bottom_0()
@@ -1480,7 +1462,7 @@ impl Sidebar {
     let gap = match item {
       _ if ix == 0 => 0.,
       _ if first_of_repo => 2.,
-      _ => 4.,
+      _ => ROW_GAP,
     };
     let content = match item {
       Item::Label(_) => {
@@ -1550,8 +1532,13 @@ impl Sidebar {
       ui::spinner(("archiving", id as u64), 12., palette.muted_foreground).into_any_element()
     } else {
       // The React sidebar flips the branch icon vertically.
-      icon(theme::ICON_PR, 12., branch_color)
-        .with_transformation(Transformation::scale(gpui::size(1., -1.)))
+      div()
+        .selector(format!("{prefix}workspace-{id}-icon"))
+        .flex_none()
+        .child(
+          icon(theme::ICON_PR, 12., branch_color)
+            .with_transformation(Transformation::scale(gpui::size(1., -1.))),
+        )
         .into_any_element()
     };
 
@@ -1572,11 +1559,11 @@ impl Sidebar {
             .as_ref()
             .is_some_and(|s| s.color == StatusColor::Red),
         |this| {
-          this.child(
-            div()
-              .debug_selector(move || format!("conflict-{id}"))
-              .child(ui::Dot::new(Tone::Danger, "Conflict", palette)),
-          )
+          this.child(div().selector(format!("conflict-{id}")).child(ui::Dot::new(
+            Tone::Danger,
+            "Conflict",
+            palette,
+          )))
         },
       )
       .when_some(row.status.as_ref(), |this, status| {
@@ -1586,19 +1573,17 @@ impl Sidebar {
         } else {
           this.child(
             div()
-              .id(("status-dot", id as u64))
+              .selector(format!("status-{id}"))
               .role(Role::Image)
               .aria_label(match status.color {
                 StatusColor::Red => "Conflict",
                 StatusColor::Yellow => "Uncommitted changes",
                 StatusColor::Neutral => "Idle",
               })
-              .debug_selector(move || format!("status-{id}"))
               .flex_none()
               .size(zpx(8.))
               .rounded_full()
-              .bg(color)
-              .test_support(),
+              .bg(color),
           )
         }
       });
@@ -1612,7 +1597,7 @@ impl Sidebar {
     let row_el = ui::Row::new(selector, palette)
       .role(Role::Button)
       .label(label.clone())
-      .density(ui::RowDensity::Default)
+      .density(ui::RowDensity::Compact)
       .selected(row.selected)
       .interactive(!row.archiving)
       .group(group.clone())
@@ -1634,24 +1619,21 @@ impl Sidebar {
         // An elbow into the row, not a bar that reads as a selection marker.
         this.overlay(
           div()
+            .selector(format!("{prefix}workspace-{id}-elbow"))
             .absolute()
-            .top_0()
+            .top(zpx(-ELBOW_REACH))
             .left(zpx(guide_left(row.depth) + group_indent))
-            .h(zpx(16.))
+            .h(zpx(theme::ROW_HEIGHT_COMPACT / 2. + ELBOW_REACH))
             .w(zpx(6.))
             .border_l_1()
             .border_b_1()
-            .border_color(palette.stack_connector())
-            .rounded_bl(ui::radius::SM),
+            .border_color(palette.stack_connector()),
         )
       })
       .leading(leading)
       .child(
         div()
-          .debug_selector({
-            let selector = format!("{prefix}workspace-{id}-title");
-            move || selector
-          })
+          .selector(format!("{prefix}workspace-{id}-title"))
           .flex_1()
           .min_w_0()
           .truncate()
@@ -1768,7 +1750,7 @@ fn skeleton_row(index: usize, palette: &Palette) -> impl IntoElement {
   // Varying widths, like the React sidebar's skeleton.
   let width = [70., 55., 80., 60., 75., 50.][index % 6];
   div()
-    .debug_selector(move || format!("skeleton-{index}"))
+    .selector(format!("skeleton-{index}"))
     .flex()
     .items_center()
     .gap_2()
