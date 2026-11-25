@@ -1,10 +1,7 @@
 import { test, expect } from '@playwright/test';
 
 async function navigateToTools(page: import('@playwright/test').Page) {
-  await page.goto('/');
-  const nav = page.getByRole('navigation', { name: 'Main' });
-  await nav.getByRole('button', { name: 'Discover' }).hover();
-  await nav.getByRole('link', { name: 'Tools', exact: true }).click();
+  await page.goto('/tools/');
 }
 
 async function navigateToTool(

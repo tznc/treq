@@ -175,8 +175,8 @@ const config: Config = {
               label: 'Learn',
             },
             {
-              to: '/tools',
-              label: 'Tools',
+              to: '/skills',
+              label: 'Skills',
             },
           ],
         },
@@ -205,11 +205,6 @@ const config: Config = {
               label: 'Compare',
             },
           ],
-        },
-        {
-          to: '/skills',
-          label: 'Skills',
-          position: 'left',
         },
         {
           to: '/pricing',

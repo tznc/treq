@@ -278,10 +278,17 @@ test.describe('Navbar navigation', () => {
     await expect(page.getByRole('heading', { name: 'Roadmap', level: 1 })).toBeVisible();
   });
 
-  test('Tools link navigates to tools page', async ({ page }) => {
+  test('Discover holds Learn and Skills, and Skills navigates to the skills page', async ({ page }) => {
     await page.goto('/');
-    await clickNavDropdownItem(page, 'Discover', 'Tools');
-    await expect(page.getByRole('heading', { name: 'Tools', level: 1 })).toBeVisible();
+    await nav(page).getByRole('button', { name: 'Discover' }).hover();
+    const menu = nav(page)
+      .getByRole('list')
+      .filter({ has: page.getByRole('link', { name: 'Learn', exact: true }) });
+    await expect(menu.getByRole('link')).toHaveText(['Learn', 'Skills']);
+    await expect(nav(page).getByRole('link', { name: 'Skills', exact: true })).toHaveCount(1);
+    await menu.getByRole('link', { name: 'Skills', exact: true }).click();
+    await expect(page).toHaveURL(/\/skills\/$/);
+    await expect(page.getByRole('heading', { name: 'Skills Library', level: 1 })).toBeVisible();
   });
 
   test('Changelog link navigates to changelog page', async ({ page }) => {
