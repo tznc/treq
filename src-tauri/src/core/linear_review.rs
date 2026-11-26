@@ -310,10 +310,10 @@ mod tests {
 
   #[test]
   fn snapshot_dir_rejects_unknown_types_and_unsafe_ids() {
-    assert!(snapshot_dir("/r", "workspace_diff", "a").is_err());
-    assert!(snapshot_dir("/r", TARGET_LINEAR_ISSUE, "../x").is_err());
-    assert!(snapshot_dir("/r", TARGET_LINEAR_ISSUE, "").is_err());
-    assert!(snapshot_dir("/r", TARGET_LINEAR_PROJECT, "3f2a-b").is_ok());
+    snapshot_dir("/r", "workspace_diff", "a").unwrap_err();
+    snapshot_dir("/r", TARGET_LINEAR_ISSUE, "../x").unwrap_err();
+    snapshot_dir("/r", TARGET_LINEAR_ISSUE, "").unwrap_err();
+    snapshot_dir("/r", TARGET_LINEAR_PROJECT, "3f2a-b").unwrap();
   }
 
   #[test]
@@ -344,10 +344,10 @@ mod tests {
     };
     assert_eq!(quote("body.md", 2, 3).unwrap(), "Line two\nLine three");
     assert_eq!(quote("comments/c-1.md", 1, 1).unwrap(), "Is this right?");
-    assert!(quote("body.md", 3, 4).is_err());
-    assert!(quote("body.md", 0, 1).is_err());
-    assert!(quote("INDEX.md", 1, 1).is_err());
-    assert!(quote("comments/missing.md", 1, 1).is_err());
+    quote("body.md", 3, 4).unwrap_err();
+    quote("body.md", 0, 1).unwrap_err();
+    quote("INDEX.md", 1, 1).unwrap_err();
+    quote("comments/missing.md", 1, 1).unwrap_err();
     assert!(
       quote_snapshot_lines(repo, TARGET_LINEAR_ISSUE, "other", "body.md", 1, 1)
         .unwrap_err()
@@ -368,6 +368,6 @@ mod tests {
     assert!(splice_quoted("ab ab", "ab", "y")
       .unwrap_err()
       .contains("2 times"));
-    assert!(splice_quoted("ab", "", "y").is_err());
+    splice_quoted("ab", "", "y").unwrap_err();
   }
 }

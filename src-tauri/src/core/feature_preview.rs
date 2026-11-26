@@ -152,7 +152,7 @@ mod tests {
       provider: "boat".into(),
       generation: 1,
     };
-    assert!(require_remote_for_source(&db, &managed).is_ok());
+    require_remote_for_source(&db, &managed).unwrap();
   }
 
   #[test]
@@ -166,7 +166,7 @@ mod tests {
     let alias = SshEndpointSource::ExplicitAlias {
       alias: "box".into(),
     };
-    assert!(require_remote_for_source(&db, &alias).is_err());
+    require_remote_for_source(&db, &alias).unwrap_err();
   }
 
   #[test]
@@ -175,6 +175,6 @@ mod tests {
     let (_dir, db) = temp_db();
     db.set_setting(&PreviewFeature::RemoteSsh.setting_key(), "true")
       .expect("set");
-    assert!(require_remote_for_source(&db, &SshEndpointSource::UserManaged).is_ok());
+    require_remote_for_source(&db, &SshEndpointSource::UserManaged).unwrap();
   }
 }

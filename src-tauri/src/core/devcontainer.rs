@@ -698,10 +698,10 @@ mod tests {
   fn verifies_sha256sum_lines() {
     // sha256("abc")
     let digest = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
-    assert!(verify_sha256(b"abc", &format!("{digest}  treq-cli.tar.gz\n")).is_ok());
-    assert!(verify_sha256(b"abc", &digest.to_uppercase()).is_ok());
-    assert!(verify_sha256(b"abd", digest).is_err());
-    assert!(verify_sha256(b"abc", "").is_err());
+    verify_sha256(b"abc", &format!("{digest}  treq-cli.tar.gz\n")).unwrap();
+    verify_sha256(b"abc", &digest.to_uppercase()).unwrap();
+    verify_sha256(b"abd", digest).unwrap_err();
+    verify_sha256(b"abc", "").unwrap_err();
   }
 
   #[test]

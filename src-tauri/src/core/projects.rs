@@ -833,7 +833,7 @@ mod tests {
 
   #[test]
   fn set_owner_rejects_unknown_project() {
-    assert!(set_owner(&conn(), "missing", None).is_err());
+    set_owner(&conn(), "missing", None).unwrap_err();
   }
 
   #[test]
@@ -848,13 +848,13 @@ mod tests {
   #[test]
   fn rejects_blank_project_name() {
     let conn = conn();
-    assert!(save(&conn, "  ", &repos(&["/r/web"])).is_err());
+    save(&conn, "  ", &repos(&["/r/web"])).unwrap_err();
   }
 
   #[test]
   fn rejects_project_without_repos() {
     let conn = conn();
-    assert!(save(&conn, "Empty", &[]).is_err());
+    save(&conn, "Empty", &[]).unwrap_err();
   }
 
   #[test]
@@ -903,7 +903,7 @@ mod tests {
   fn rejects_blank_rename() {
     let conn = conn();
     let p = save(&conn, "Old", &repos(&["/r/a"])).expect("save");
-    assert!(rename(&conn, &p.id, "").is_err());
+    rename(&conn, &p.id, "").unwrap_err();
   }
 
   #[test]
@@ -994,7 +994,7 @@ mod tests {
       (listed[0].name.as_str(), listed[0].draft),
       ("Checkout", false)
     );
-    assert!(promote(&conn, &d.id, "  ").is_err());
+    promote(&conn, &d.id, "  ").unwrap_err();
   }
 
   #[test]
@@ -1024,9 +1024,9 @@ mod tests {
   #[test]
   fn changes_to_unknown_project_fail() {
     let conn = conn();
-    assert!(rename(&conn, "missing", "X").is_err());
-    assert!(add_repo(&conn, "missing", "/r/a").is_err());
-    assert!(mark_opened(&conn, "missing").is_err());
+    rename(&conn, "missing", "X").unwrap_err();
+    add_repo(&conn, "missing", "/r/a").unwrap_err();
+    mark_opened(&conn, "missing").unwrap_err();
   }
 
   #[test]
@@ -1064,7 +1064,7 @@ mod tests {
   #[test]
   fn setting_context_on_unknown_project_fails() {
     let conn = conn();
-    assert!(set_context(&conn, "missing", "x", &[]).is_err());
+    set_context(&conn, "missing", "x", &[]).unwrap_err();
   }
 
   #[test]
@@ -1289,7 +1289,7 @@ mod tests {
       ensure_repo(&url, root.path(), &[]),
       managed_clone_path(root.path(), &url).unwrap(),
     );
-    assert!(result.is_err());
+    result.unwrap_err();
     assert!(!dest.join(".git").exists());
   }
 
@@ -1670,11 +1670,11 @@ mod proptests {
       }
       Op::Unknown(name) => {
         let id = "no-such-project";
-        assert!(rename(conn, id, &format!("{name}x")).is_err());
-        assert!(add_repo(conn, id, "/r/web").is_err());
-        assert!(remove_repo(conn, id, "/r/web").is_err());
-        assert!(set_context(conn, id, name, &[]).is_err());
-        assert!(mark_opened(conn, id).is_err());
+        rename(conn, id, &format!("{name}x")).unwrap_err();
+        add_repo(conn, id, "/r/web").unwrap_err();
+        remove_repo(conn, id, "/r/web").unwrap_err();
+        set_context(conn, id, name, &[]).unwrap_err();
+        mark_opened(conn, id).unwrap_err();
         assert_eq!(get(conn, id).unwrap(), None);
         delete(conn, id).expect("deleting nothing is fine");
       }

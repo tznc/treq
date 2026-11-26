@@ -623,8 +623,8 @@ mod tests {
       oauth_callback("treq://auth/callback?error=access_denied&error_description=User+denied"),
       Err("User denied".into())
     );
-    assert!(oauth_callback("treq://auth/callback?token=abc").is_err());
-    assert!(oauth_callback("https://auth/callback?code=abc").is_err());
+    oauth_callback("treq://auth/callback?token=abc").unwrap_err();
+    oauth_callback("https://auth/callback?code=abc").unwrap_err();
   }
 
   #[tokio::test]

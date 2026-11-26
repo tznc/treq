@@ -219,18 +219,18 @@ mod tests {
   #[test]
   fn all_with_nobody_else_is_an_error() {
     let lonely = vec![peer("codex-1", "/src/app", Via::Local)];
-    assert!(resolve(&lonely, SENDER, None, true, None, None).is_err());
+    resolve(&lonely, SENDER, None, true, None, None).unwrap_err();
   }
 
   #[test]
   fn needs_exactly_one_of_a_handle_and_all() {
-    assert!(resolve(&peers(), SENDER, None, false, None, None).is_err());
-    assert!(resolve(&peers(), SENDER, Some("claude-2"), true, None, None).is_err());
+    resolve(&peers(), SENDER, None, false, None, None).unwrap_err();
+    resolve(&peers(), SENDER, Some("claude-2"), true, None, None).unwrap_err();
   }
 
   #[test]
   fn an_agent_cannot_message_itself() {
-    assert!(resolve(&peers(), SENDER, Some("codex-1"), false, None, None).is_err());
+    resolve(&peers(), SENDER, Some("codex-1"), false, None, None).unwrap_err();
   }
 
   const PROJECT: &[&str] = &["/src/app", "ssh:box:gen2:/srv/infra"];

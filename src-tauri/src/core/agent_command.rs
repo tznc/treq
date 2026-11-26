@@ -820,14 +820,14 @@ mod tests {
     )
     .unwrap();
     assert!(plan.contains("--permission-mode plan --model='opus'"));
-    assert!(build_auto_command(
+    build_auto_command(
       &opts("claude"),
       &AgentCliFiles {
         settings_path: None,
         ..files
-      }
+      },
     )
-    .is_err());
+    .unwrap_err();
   }
 
   #[test]

@@ -457,7 +457,7 @@ mod tests {
     let hub = hub();
     let mut lost = envelope("m-1", 0);
     lost.to_pty = "pty-gone".into();
-    assert!(hub.enqueue(lost).is_err());
+    hub.enqueue(lost).unwrap_err();
   }
 
   #[test]

@@ -1606,7 +1606,7 @@ mod tests {
       hash_alg: None,
     };
 
-    assert!(verifier.verify(&presented).is_ok());
+    verifier.verify(&presented).unwrap();
   }
 
   #[test]
@@ -1637,7 +1637,7 @@ mod tests {
 
     // No bypass flag exists: an endpoint with zero trusted keys rejects
     // every presented key rather than accepting on first use.
-    assert!(verifier.verify(&presented).is_err());
+    verifier.verify(&presented).unwrap_err();
   }
 
   // -- Pool key derivation ----------------------------------------------------
@@ -3349,7 +3349,7 @@ mod tests {
     pool
       .force_cutoff(&endpoint.id, CutoffReason::CertificateExpired)
       .await;
-    assert!(exec_command(
+    exec_command(
       &pool,
       &endpoint,
       &["repo".to_string(), "inspect".to_string()],
@@ -3357,7 +3357,7 @@ mod tests {
       &cancellation,
     )
     .await
-    .is_err());
+    .unwrap_err();
 
     // "The user regains access only by reauthenticating and obtaining a new
     // certificate": once that happens the caller clears the cutoff and
@@ -3415,7 +3415,7 @@ mod tests {
         ..
       })
     ));
-    assert!(run(&user_endpoint).await.is_ok());
+    run(&user_endpoint).await.unwrap();
 
     // Signing in again lifts the blanket block; the torn-down endpoint
     // still waits for its own reauthentication.
@@ -3423,10 +3423,10 @@ mod tests {
       id: "other-managed".to_string(),
       ..managed.clone()
     };
-    assert!(run(&fresh).await.is_err());
+    run(&fresh).await.unwrap_err();
     pool.set_relay_access_token(Some("token".to_string()));
-    assert!(run(&fresh).await.is_ok());
-    assert!(run(&managed).await.is_err());
+    run(&fresh).await.unwrap();
+    run(&managed).await.unwrap_err();
   }
 
   // -- Retrying after network loss (PRD "Structured command protocol" >

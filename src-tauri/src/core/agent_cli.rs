@@ -346,7 +346,7 @@ mod tests {
       .to_string_lossy()
       .into_owned();
     let result = cleanup_agent_cli_files(&[outside_path]);
-    assert!(result.is_err());
+    result.unwrap_err();
   }
 
   #[test]

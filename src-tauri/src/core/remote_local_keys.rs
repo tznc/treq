@@ -112,7 +112,7 @@ mod tests {
     // environment-dependent, so this just asserts the function does not
     // panic and returns a list (possibly empty) rather than erroring.
     let result = list_local_ssh_identities();
-    assert!(result.is_ok());
+    result.unwrap();
   }
 
   fn with_fake_home<F: FnOnce(&std::path::Path)>(f: F) {

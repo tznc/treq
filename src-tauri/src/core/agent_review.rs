@@ -436,10 +436,8 @@ mod tests {
     let absolute = outside.path().join("x.rs");
 
     for bad in [escape.as_str(), absolute.to_str().unwrap(), ".git/config"] {
-      assert!(
-        splice_lines(root_str, bad, 1, 1, None, "y").is_err(),
-        "'{bad}' should be refused"
-      );
+      splice_lines(root_str, bad, 1, 1, None, "y")
+        .expect_err(&format!("'{bad}' should be refused"));
     }
     assert_eq!(std::fs::read_to_string(&absolute).unwrap(), "x\n");
     assert_eq!(
@@ -458,7 +456,7 @@ mod tests {
 
     let result = splice_lines(root.path().to_str().unwrap(), "link/x.rs", 1, 1, None, "y");
 
-    assert!(result.is_err());
+    result.unwrap_err();
     assert_eq!(
       std::fs::read_to_string(outside.path().join("x.rs")).unwrap(),
       "x\n"

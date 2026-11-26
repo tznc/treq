@@ -986,18 +986,18 @@ mod tests {
 
   #[test]
   fn test_validate_filename_rejects_path_separators() {
-    assert!(validate_filename("sub/dir/ci.yaml").is_err());
-    assert!(validate_filename("../escape.yaml").is_err());
-    assert!(validate_filename("ci.yaml").is_ok());
-    assert!(validate_filename("ci.yml").is_ok());
+    validate_filename("sub/dir/ci.yaml").unwrap_err();
+    validate_filename("../escape.yaml").unwrap_err();
+    validate_filename("ci.yaml").unwrap();
+    validate_filename("ci.yml").unwrap();
   }
 
   #[test]
   fn test_validate_working_directory_rejects_absolute_and_traversal() {
-    assert!(validate_working_directory("/absolute/path").is_err());
-    assert!(validate_working_directory("../../etc").is_err());
-    assert!(validate_working_directory("sub/dir").is_ok());
-    assert!(validate_working_directory("frontend").is_ok());
+    validate_working_directory("/absolute/path").unwrap_err();
+    validate_working_directory("../../etc").unwrap_err();
+    validate_working_directory("sub/dir").unwrap();
+    validate_working_directory("frontend").unwrap();
   }
 
   // ── Post-workspace-create setup script ────────────────────────────────────

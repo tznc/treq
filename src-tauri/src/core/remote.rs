@@ -2198,15 +2198,12 @@ mod tests {
       ]
     );
     for outside in ["..", "../etc", "/etc", "src/../.."] {
-      assert!(
-        execute_local_request(TreqCommandRequest::ListFiles {
-          repo: repo.clone(),
-          workspace: None,
-          path: outside.into(),
-        })
-        .is_err(),
-        "{outside}"
-      );
+      execute_local_request(TreqCommandRequest::ListFiles {
+        repo: repo.clone(),
+        workspace: None,
+        path: outside.into(),
+      })
+      .expect_err(outside);
     }
   }
 
@@ -2248,7 +2245,7 @@ mod tests {
         .unwrap()
         .is_repo
     );
-    assert!(list_directories(dir.path().join("gone").to_str().unwrap()).is_err());
+    list_directories(dir.path().join("gone").to_str().unwrap()).unwrap_err();
   }
 
   #[test]
@@ -2371,7 +2368,7 @@ mod tests {
       repo.head_name().unwrap().unwrap().shorten().to_string(),
       "main"
     );
-    assert!(repo.find_remote("origin").is_ok());
+    repo.find_remote("origin").unwrap();
   }
 
   #[test]
@@ -2422,7 +2419,7 @@ mod tests {
 
     let destination = dir.path().join("clone");
     clone_repo_local(source.to_str().unwrap(), destination.to_str().unwrap()).unwrap();
-    assert!(gix::open(&destination).is_ok());
+    gix::open(&destination).unwrap();
   }
 
   #[test]
@@ -2458,7 +2455,7 @@ mod tests {
       "dev\tbox",
       "dev'box",
     ] {
-      assert!(build_ssh_shell_command(bad, None, None).is_err(), "{bad}");
+      build_ssh_shell_command(bad, None, None).expect_err(bad);
     }
     for good in [
       "devbox",
@@ -2466,7 +2463,7 @@ mod tests {
       "dev_box:2222",
       "10.0.0.1",
     ] {
-      assert!(build_ssh_shell_command(good, None, None).is_ok(), "{good}");
+      build_ssh_shell_command(good, None, None).expect(good);
     }
   }
 
@@ -3614,7 +3611,7 @@ mod tests {
       "kind": "RunArbitraryShell",
       "cmd": "rm -rf /"
     }));
-    assert!(parsed.is_err());
+    parsed.unwrap_err();
   }
 
   // -- CreateCommit verification uses a pre-commit marker -----------------------
@@ -3735,7 +3732,7 @@ mod tests {
       "workspace": null,
       "message": "m",
     }));
-    assert!(parsed.is_err());
+    parsed.unwrap_err();
   }
 
   #[test]

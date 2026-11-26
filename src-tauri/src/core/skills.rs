@@ -1320,7 +1320,7 @@ mod tests {
       ("SKILL.md".to_string(), b"new".to_vec()),
       ("../escape".to_string(), b"x".to_vec()),
     ];
-    assert!(write_skill_pack(&dest, &bad).is_err());
+    write_skill_pack(&dest, &bad).unwrap_err();
     assert_eq!(
       fs::read(dest.join("SKILL.md")).unwrap(),
       sample_files()[0].1

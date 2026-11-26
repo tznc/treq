@@ -714,7 +714,7 @@ mod tests {
     };
     let mut request = ask(Some("claude-2"), false);
     request.timeout_ms = 61_000;
-    assert!(coordinator.send(&request, 0).is_err());
+    coordinator.send(&request, 0).unwrap_err();
     assert!(ledger.inserted.borrow().is_empty());
   }
 
@@ -740,7 +740,7 @@ mod tests {
       origin_repo: "/src/app".into(),
     };
     coordinator.receive(envelope("pty-claude")).unwrap();
-    assert!(coordinator.receive(envelope("pty-gone")).is_err());
+    coordinator.receive(envelope("pty-gone")).unwrap_err();
     assert_eq!(hub.waiting("pty-claude", 0), 1);
   }
 
@@ -814,6 +814,6 @@ mod tests {
       ledger: &ledger,
       network: &network,
     };
-    assert!(coordinator.reply("pty-claude", "m-9", "?", 0).is_err());
+    coordinator.reply("pty-claude", "m-9", "?", 0).unwrap_err();
   }
 }

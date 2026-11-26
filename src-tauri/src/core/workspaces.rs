@@ -2218,7 +2218,7 @@ mod tests {
     assert!(super::list_workspaces(&repo_path)
       .expect("list workspaces")
       .is_empty());
-    assert!(crate::jj::jj_get_commit_id(&repo_path, "fix/rollback").is_err());
+    crate::jj::jj_get_commit_id(&repo_path, "fix/rollback").unwrap_err();
     assert!(gix::open(&repo_path)
       .expect("open git")
       .try_find_reference("refs/heads/fix/rollback")
@@ -2328,10 +2328,7 @@ mod tests {
       "@",
       "a@{b",
     ] {
-      assert!(
-        super::validate_branch_name(bad).is_err(),
-        "{bad:?} should be rejected"
-      );
+      super::validate_branch_name(bad).expect_err(&format!("{bad:?} should be rejected"));
     }
     for good in [
       "feat/x",
@@ -2341,10 +2338,8 @@ mod tests {
       "café",
       "a@b",
     ] {
-      assert!(
-        super::validate_branch_name(good).is_ok(),
-        "{good:?} should be accepted"
-      );
+      super::validate_branch_name(good)
+        .unwrap_or_else(|e| panic!("{good:?} should be accepted: {e}"));
     }
   }
 
@@ -2382,7 +2377,7 @@ mod tests {
         result.message
       );
     }
-    assert!(crate::jj::jj_get_commit_id(&repo_path, "feat/old").is_ok());
+    crate::jj::jj_get_commit_id(&repo_path, "feat/old").unwrap();
   }
 
   #[test]
@@ -2411,7 +2406,7 @@ mod tests {
       crate::jj::jj_get_commit_id(&repo_path, "feat/new").expect("new target"),
       before
     );
-    assert!(crate::jj::jj_get_commit_id(&repo_path, "feat/old").is_err());
+    crate::jj::jj_get_commit_id(&repo_path, "feat/old").unwrap_err();
     let child = crate::local_db::get_workspace_by_id(&repo_path, child.id)
       .expect("lookup")
       .expect("child");
@@ -2588,7 +2583,7 @@ mod tests {
     let repo_path = init_workspace_creation_repo(&temp);
     let first = super::create_workspace(&repo_path, "fix/keep", None, None, None, None, None)
       .expect("create workspace");
-    assert!(crate::jj::jj_get_commit_id(&repo_path, "fix/keep").is_ok());
+    crate::jj::jj_get_commit_id(&repo_path, "fix/keep").unwrap();
 
     super::archive_workspace(&repo_path, &first.id).expect("archive workspace");
 
@@ -2812,7 +2807,7 @@ mod tests {
       .expect("retry recovers the interrupted create");
 
     assert_eq!(created.workspace_path, format!("{}-fix-killed", created.id));
-    assert!(crate::jj::jj_get_commit_id(&repo_path, "fix/killed").is_ok());
+    crate::jj::jj_get_commit_id(&repo_path, "fix/killed").unwrap();
   }
 
   #[test]
@@ -2966,7 +2961,7 @@ mod tests {
   #[test]
   fn plan_merge_landing_errors_for_unknown_workspace() {
     let a = test_workspace(1, "feat/a", Some("main"));
-    assert!(plan_merge_landing(&[a], 99, "main", false).is_err());
+    plan_merge_landing(&[a], 99, "main", false).unwrap_err();
   }
 
   #[test]
@@ -3259,10 +3254,10 @@ mod tests {
 
   #[test]
   fn parse_hunk_spec_rejects_malformed_values() {
-    assert!(parse_hunk_spec("src/main.rs").is_err());
-    assert!(parse_hunk_spec("src/main.rs:10").is_err());
-    assert!(parse_hunk_spec("src/main.rs:abc-10").is_err());
-    assert!(parse_hunk_spec("src/main.rs:20-10").is_err());
+    parse_hunk_spec("src/main.rs").unwrap_err();
+    parse_hunk_spec("src/main.rs:10").unwrap_err();
+    parse_hunk_spec("src/main.rs:abc-10").unwrap_err();
+    parse_hunk_spec("src/main.rs:20-10").unwrap_err();
   }
 
   #[test]
@@ -3301,7 +3296,6 @@ mod tests {
       "https://linear.app/issue/ENG-123",
       "Test Issue",
     );
-    assert!(result.is_ok());
     let json = result.unwrap();
     let parsed: WorkspaceMetadata = serde_json::from_str(&json).unwrap();
     assert_eq!(parsed.linear_issue_key, Some("ENG-123".to_string()));
@@ -3321,7 +3315,6 @@ mod tests {
       "https://linear.app/issue/ENG-456",
       "Another Issue",
     );
-    assert!(result.is_ok());
     let json = result.unwrap();
     let parsed: WorkspaceMetadata = serde_json::from_str(&json).unwrap();
     assert_eq!(parsed.title, Some("My Workspace".to_string()));

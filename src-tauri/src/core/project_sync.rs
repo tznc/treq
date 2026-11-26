@@ -334,7 +334,9 @@ mod tests {
     tokio::task::yield_now().await;
     request();
     let woke = tokio::time::timeout(std::time::Duration::from_secs(2), waiter).await;
-    assert!(woke.is_ok(), "a request ends the wait");
+    woke
+      .expect("a request ends the wait")
+      .expect("the wait does not panic");
   }
 
   #[tokio::test]

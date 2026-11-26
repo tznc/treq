@@ -1099,12 +1099,12 @@ mod tests {
     let got_a = rx_a.recv_timeout(Duration::from_secs(2)).unwrap();
     assert_eq!(got_a, b"only-for-a\n");
     // Session B must never see A's echoed bytes.
-    assert!(rx_b.try_recv().is_err());
+    rx_b.try_recv().unwrap_err();
 
     manager.write("iso-b", b"only-for-b\n").await.unwrap();
     let got_b = rx_b.recv_timeout(Duration::from_secs(2)).unwrap();
     assert_eq!(got_b, b"only-for-b\n");
-    assert!(rx_a.try_recv().is_err());
+    rx_a.try_recv().unwrap_err();
 
     manager.close("iso-a").await.unwrap();
     manager.close("iso-b").await.unwrap();

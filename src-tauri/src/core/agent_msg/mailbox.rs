@@ -524,7 +524,7 @@ mod tests {
       },
       0,
     );
-    assert!(error.is_err());
+    error.unwrap_err();
   }
 
   #[test]

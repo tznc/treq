@@ -191,15 +191,12 @@ mod tests {
   fn quoting_takes_lines_of_the_body_only() {
     let dir = TempDir::new().unwrap();
     let repo = dir.path().to_str().unwrap();
-    assert!(
-      quote_lines(repo, BODY_FILE, 1, 1).is_err(),
-      "no snapshot yet"
-    );
+    quote_lines(repo, BODY_FILE, 1, 1).expect_err("no snapshot yet");
     write_snapshot(repo, Some("a\nb\nc")).unwrap();
     assert_eq!(quote_lines(repo, "./body.md", 2, 3).unwrap(), "b\nc");
-    assert!(quote_lines(repo, BODY_FILE, 3, 4).is_err());
-    assert!(quote_lines(repo, "../config.yaml", 1, 1).is_err());
-    assert!(quote_lines(repo, HISTORY_FILE, 1, 1).is_err());
+    quote_lines(repo, BODY_FILE, 3, 4).unwrap_err();
+    quote_lines(repo, "../config.yaml", 1, 1).unwrap_err();
+    quote_lines(repo, HISTORY_FILE, 1, 1).unwrap_err();
   }
 
   #[test]
