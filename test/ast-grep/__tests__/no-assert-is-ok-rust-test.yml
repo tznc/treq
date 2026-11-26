@@ -1,0 +1,70 @@
+id: no-assert-is-ok-rust
+valid:
+  - |
+    fn unwraps_the_result() {
+      parse("1").unwrap();
+    }
+  - |
+    fn expects_an_error() {
+      let err = parse("x").expect_err("x is not a number");
+      assert!(err.to_string().contains("invalid digit"));
+    }
+  - |
+    fn matches_the_variant() {
+      assert!(matches!(parse("x"), Err(ParseError::Invalid(..))));
+    }
+  - |
+    fn combines_conditions() {
+      assert!(ready && parse("1").is_ok());
+    }
+  - |
+    fn is_ok_is_not_the_whole_condition() {
+      assert!(parse("1").is_ok() && ready);
+    }
+  - |
+    fn is_ok_inside_a_closure() {
+      assert!(results.iter().all(|r| r.is_ok()));
+    }
+  - |
+    fn is_ok_in_the_message() {
+      assert!(ready, "parsed: {}", parse("1").is_ok());
+    }
+  - |
+    fn other_methods() {
+      assert!(value.is_some());
+      assert!(value.is_ok_and(|v| v > 1));
+    }
+invalid:
+  - |
+    fn asserts_ok() {
+      assert!(parse("1").is_ok());
+    }
+  - |
+    fn asserts_not_err() {
+      assert!(!parse("1").is_err());
+    }
+  - |
+    fn asserts_ok_with_message() {
+      assert!(result.is_ok(), "parse failed: {:?}", result);
+    }
+  - |
+    fn asserts_across_lines() {
+      assert!(
+        parse_with(&config, "x")
+          .await
+          .is_err(),
+        "x should be rejected"
+      );
+    }
+  - |
+    fn asserts_with_args_that_have_commas() {
+      assert!(resolve(&peers, "a", Some(1)).is_err());
+    }
+  - |
+    fn debug_asserts_err_with_message() {
+      debug_assert!(!state.advance(next).is_err(), "{state:?}");
+    }
+  - |
+    fn uses_a_path() {
+      std::assert!(parse("1").is_ok());
+    }

@@ -1,0 +1,114 @@
+id: no-assert-is-ok-rust
+language: rust
+severity: error
+message: >
+  Do not assert on `.is_ok()` or `.is_err()`. When it fails, it prints only
+  "assertion failed" and hides the error or value. In tests, call
+  `.unwrap()`/`.expect("…")` or `.unwrap_err()`/`.expect_err("…")` (and
+  assert on the error when it matters), or use
+  `assert!(matches!(x, Err(Error::Variant(..))))` when the variant is the
+  point. Outside tests, handle the Result instead of asserting on it.
+files:
+  - "src-tauri/**/*.rs"
+  - "crates/**/*.rs"
+ignores:
+  # Not fixed yet. The fix PRs stacked on this one remove these entries.
+  - "crates/treq-gateway/tests/gateway.rs"
+  - "src-tauri/src/cli/agent_msg_handlers.rs"
+  - "src-tauri/src/cli/agent_review_handlers.rs"
+  - "src-tauri/src/cli/project_handlers.rs"
+  - "src-tauri/src/cli/tests.rs"
+  - "src-tauri/src/commands/remote_control.rs"
+  - "src-tauri/src/commands/workspace.rs"
+  - "src-tauri/src/core/agent_cli.rs"
+  - "src-tauri/src/core/agent_command.rs"
+  - "src-tauri/src/core/agent_msg/coordinator.rs"
+  - "src-tauri/src/core/agent_msg/hub.rs"
+  - "src-tauri/src/core/agent_msg/ipc.rs"
+  - "src-tauri/src/core/agent_msg/mailbox.rs"
+  - "src-tauri/src/core/agent_msg/model.rs"
+  - "src-tauri/src/core/agent_msg/network.rs"
+  - "src-tauri/src/core/agent_msg/route.rs"
+  - "src-tauri/src/core/agent_msg/terminals.rs"
+  - "src-tauri/src/core/agent_review.rs"
+  - "src-tauri/src/core/auth.rs"
+  - "src-tauri/src/core/checks.rs"
+  - "src-tauri/src/core/checks_logs.rs"
+  - "src-tauri/src/core/cloud_catalog.rs"
+  - "src-tauri/src/core/config_sync.rs"
+  - "src-tauri/src/core/devcontainer.rs"
+  - "src-tauri/src/core/feature_preview.rs"
+  - "src-tauri/src/core/files.rs"
+  - "src-tauri/src/core/linear_review.rs"
+  - "src-tauri/src/core/project_sync.rs"
+  - "src-tauri/src/core/projects.rs"
+  - "src-tauri/src/core/pty_daemon.rs"
+  - "src-tauri/src/core/remote.rs"
+  - "src-tauri/src/core/remote_local_keys.rs"
+  - "src-tauri/src/core/remote_pty.rs"
+  - "src-tauri/src/core/remote_records.rs"
+  - "src-tauri/src/core/remote_ssh_transport.rs"
+  - "src-tauri/src/core/review_prompt.rs"
+  - "src-tauri/src/core/skills.rs"
+  - "src-tauri/src/core/stack_cycle.rs"
+  - "src-tauri/src/core/workspaces.rs"
+  - "src-tauri/src/github.rs"
+  - "src-tauri/src/gpui_shell/mod.rs"
+  - "src-tauri/src/gpui_shell/overlay/tests.rs"
+  - "src-tauri/src/gpui_shell/popup.rs"
+  - "src-tauri/src/gpui_shell/projects.rs"
+  - "src-tauri/src/gpui_shell/remote_repo.rs"
+  - "src-tauri/src/gpui_shell/screen/changes_data.rs"
+  - "src-tauri/src/gpui_shell/screen/commits_data.rs"
+  - "src-tauri/src/gpui_shell/screen/open_workspaces_data.rs"
+  - "src-tauri/src/gpui_shell/screen/terminal_send.rs"
+  - "src-tauri/src/gpui_shell/window/tests.rs"
+  - "src-tauri/src/jj.rs"
+  - "src-tauri/src/linear.rs"
+  - "src-tauri/src/local_db.rs"
+  - "src-tauri/src/local_db/agent_messages.rs"
+  - "src-tauri/src/local_db/pool.rs"
+  - "src-tauri/src/mobile/remote.rs"
+  - "src-tauri/src/mobile/ui/screens/add_host.rs"
+  - "src-tauri/src/pty.rs"
+  - "src-tauri/src/send_dispatch.rs"
+  - "src-tauri/src/unified_patch.rs"
+  - "src-tauri/tests/it/auto_rebase_chaos_test.rs"
+  - "src-tauri/tests/it/core_app_test.rs"
+  - "src-tauri/tests/it/core_changes_test.rs"
+  - "src-tauri/tests/it/core_commits_list_test.rs"
+  - "src-tauri/tests/it/core_commits_move_test.rs"
+  - "src-tauri/tests/it/core_commits_test.rs"
+  - "src-tauri/tests/it/core_commits_test_edit.rs"
+  - "src-tauri/tests/it/core_commits_timestamp_test.rs"
+  - "src-tauri/tests/it/core_repo_test.rs"
+  - "src-tauri/tests/it/core_workspaces_test.rs"
+  - "src-tauri/tests/it/core_workspaces_workspace_diff_test.rs"
+  - "src-tauri/tests/it/jj_lib_vs_cli_test.rs"
+  - "src-tauri/tests/it/pty_tests.rs"
+rule:
+  kind: macro_invocation
+  all:
+    - has:
+        field: macro
+        regex: ^((std|core)::)?(debug_)?assert$
+    # The first argument, after an optional `!`, ends in `.is_ok()` or
+    # `.is_err()`: the identifier follows a `.`, its `()` is followed by the
+    # end of the argument, and no top-level `,`, `&&`, `||`, `==` or `!=`
+    # comes before it.
+    - has:
+        kind: token_tree
+        has:
+          kind: identifier
+          regex: ^is_(ok|err)$
+          follows:
+            regex: ^\.$
+          precedes:
+            kind: token_tree
+            regex: ^\(\s*\)$
+            precedes:
+              regex: ^[,)]$
+          not:
+            follows:
+              stopBy: end
+              regex: ^(,|&&|\|\||==|!=)$
