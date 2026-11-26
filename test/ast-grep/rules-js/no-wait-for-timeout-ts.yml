@@ -1,0 +1,98 @@
+id: no-wait-for-timeout-ts
+language: typescript
+severity: error
+message: >
+  Do not wait a fixed time in tests (waitForTimeout, a setTimeout promise, a
+  sleep helper or timers/promises). A fixed wait is too long on a fast machine
+  and too short on a slow one, so the test is slow and flaky. Wait for the
+  condition instead: a web-first assertion (`await expect(locator).toBeVisible()`,
+  `toHaveText()`), `locator.waitFor()`, `expect.poll()`, `page.waitForResponse()`,
+  or `vi.waitFor()` / fake timers in unit tests.
+files:
+  - "e2e/**/*.ts"
+  - "web/e2e/**/*.ts"
+  - "test/**/*.ts"
+  - "scripts/service-qa/**/*.ts"
+ignores:
+  # service-qa's one poll-with-deadline helper (pollUntil). Its specs run on
+  # Jest, which has no `expect.poll`, and poll other processes (Mailpit, Edge
+  # Functions, Auth's clock) through it. Playwright specs use `expect.poll` or
+  # `toPass` instead, so e2e/** needs no helper of its own.
+  - "scripts/service-qa/poll.ts"
+  # Not fixed yet. The fix PRs stacked on this one remove these entries.
+  - "e2e/desktop/fixture.ts"
+  - "e2e/desktop/landing/capture.ts"
+  - "e2e/desktop/mobile/app.ts"
+  - "e2e/desktop/mobile/github.spec.ts"
+  - "e2e/desktop/qa/01-onboarding.spec.ts"
+  - "e2e/desktop/qa/09-dialogs.spec.ts"
+  - "e2e/desktop/qa/15-not-a-repository.spec.ts"
+  - "e2e/desktop/qa/18-merge-demo.spec.ts"
+  - "e2e/desktop/qa/18-ssh-remote.spec.ts"
+  - "e2e/desktop/qa/19-terminal-reattach.spec.ts"
+  - "e2e/desktop/qa/20-machines-chaos.spec.ts"
+  - "e2e/desktop/qa/20-sidebar-workspace-title.spec.ts"
+  - "e2e/desktop/qa/21-delete-account.spec.ts"
+  - "e2e/desktop/qa/21-projects-chaos.spec.ts"
+  - "e2e/desktop/qa/22-byos.spec.ts"
+  - "e2e/desktop/qa/22-changes-many-files.spec.ts"
+  - "e2e/desktop/qa/22-ssh-chaos.spec.ts"
+  - "e2e/desktop/qa/23-team-projects.spec.ts"
+  - "e2e/desktop/qa/27-tooltip-flicker.spec.ts"
+  - "e2e/desktop/qa/capture.ts"
+  - "e2e/desktop/qa/helpers.ts"
+  - "scripts/service-qa/specs/mobile-control-plane.spec.ts"
+  - "scripts/service-qa/specs/mobile-pkce-sign-in.spec.ts"
+  - "scripts/service-qa/specs/remote-instance-chaos.spec.ts"
+  - "scripts/service-qa/specs/web-signup-tracking.spec.ts"
+  - "web/e2e/search.spec.ts"
+rule:
+  any:
+    # page.waitForTimeout(ms), page?.waitForTimeout(ms), page.waitForTimeout.bind(page)
+    - kind: member_expression
+      has:
+        field: property
+        regex: "^waitForTimeout$"
+      # The one sanctioned fixed wait: `function settle` in
+      # e2e/desktop/qa/helpers.ts, which waits before a QA screenshot.
+      # gpui-playwright has no idle signal, the demo seed's pending checks
+      # spin forever (so frames never stop changing), and loads draw delayed
+      # placeholders (so a still accessibility tree does not mean loaded).
+      # Its 626 callers each need their own condition; that migration is a
+      # tracked follow-up. Only a waitForTimeout in a function declaration
+      # named settle is exempt, not a promise sleep there.
+      not:
+        inside:
+          stopBy: end
+          kind: function_declaration
+          has:
+            field: name
+            regex: "^settle$"
+    # page["waitForTimeout"](ms)
+    - kind: subscript_expression
+      has:
+        field: index
+        regex: "^['\"`]waitForTimeout['\"`]$"
+    # new Promise((r) => setTimeout(r, ms)) in any shape: a block body, a
+    # function expression, `() => r(value)` as the callback, a sleep helper
+    # that returns one, or a fixed deadline raced against another promise.
+    - kind: new_expression
+      all:
+        - has:
+            field: constructor
+            regex: "^Promise$"
+        - has:
+            stopBy: end
+            kind: call_expression
+            regex: "^((globalThis|window|global)\\.)?setTimeout\\s*\\("
+    # import { setTimeout as sleep } from "node:timers/promises"
+    - kind: import_statement
+      has:
+        field: source
+        regex: "^['\"](node:)?timers/promises['\"]$"
+    # require("node:timers/promises")
+    - kind: call_expression
+      regex: "^require\\(\\s*['\"](node:)?timers/promises['\"]\\s*\\)$"
+    # promisify(setTimeout), util.promisify(setTimeout)
+    - kind: call_expression
+      regex: "^(util\\.)?promisify\\(\\s*((globalThis|window|global)\\.)?setTimeout\\s*\\)$"
