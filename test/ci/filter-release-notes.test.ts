@@ -40,8 +40,42 @@ describe("filter-release-notes.sh", () => {
     );
   });
 
+  it("drops ci, test and build entries, scoped or not", () => {
+    const notes = [
+      "* ci: cache cargo by @a in https://x/pull/10",
+      "* test(lint): require testable node by @a in https://x/pull/11",
+      "* build(deps)!: bump tauri by @a in https://x/pull/12",
+      "* feat(sidebar): show PR state pill by @a in https://x/pull/1",
+      "",
+    ].join("\n");
+    expect(filter(notes).stdout).toBe(
+      "* feat(sidebar): show PR state pill by @a in https://x/pull/1\n",
+    );
+  });
+
+  it("drops feat(web) and fix(lint) but keeps other feat and fix scopes", () => {
+    const notes = [
+      "* feat(web): new landing page by @a in https://x/pull/20",
+      "* fix(lint): flag raw colors by @a in https://x/pull/21",
+      "* feat(web)!: drop legacy docs by @a in https://x/pull/22",
+      "* feat(webview): open links by @a in https://x/pull/23",
+      "* feat: add login by @a in https://x/pull/24",
+      "* fix(app): match button height by @a in https://x/pull/6",
+      "",
+    ].join("\n");
+    expect(filter(notes).stdout).toBe(
+      [
+        "* feat(webview): open links by @a in https://x/pull/23",
+        "* feat: add login by @a in https://x/pull/24",
+        "* fix(app): match button height by @a in https://x/pull/6",
+        "",
+      ].join("\n"),
+    );
+  });
+
   it("keeps entries that only mention the words later in the title", () => {
-    const line = "* fix(lint): style chore runner by @a in https://x/pull/7\n";
+    const line =
+      "* fix(app): style chore ci test build runner by @a in https://x/pull/7\n";
     expect(filter(line).stdout).toBe(line);
   });
 
