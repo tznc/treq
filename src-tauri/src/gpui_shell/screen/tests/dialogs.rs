@@ -343,6 +343,48 @@ fn agent_prompt_runs_the_default_agent_unless_changed(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn agent_prompt_picks_a_profile_mode_from_the_agent_list(cx: &mut TestAppContext) {
+  let host = FakeHost::with_settings(&[
+    ("agent_profiles", r#"[{"agent":"claude","name":"work"}]"#),
+    (
+      "agent_modes",
+      r#"[{"agent":"claude","profile":"work","modes":[{"name":"deep"}]}]"#,
+    ),
+  ]);
+  let (mut h, host) = modal_harness(cx, host, agent_modal());
+  h.click("task-agent");
+  for name in ["Claude", "Claude · work", "Claude · work · deep", "Codex"] {
+    assert!(h.shows(gpui::Role::MenuItem, name), "{name}");
+  }
+  h.click("task-agent-claude/work/deep");
+  // The toolbar names the account and mode; it's still Claude.
+  assert!(h.shows(gpui::Role::ComboBox, "Agent"));
+  assert_eq!(agent_view(&h, |v| v.target_label()), "Claude · work · deep");
+  assert!(!h.shows(gpui::Role::CheckBox, "Set as default for this repo"));
+  h.click("task-submit");
+  let start = &tasks(&mut h, &host)[0];
+  assert_eq!(start.agent, "claude");
+  assert_eq!(start.profile.as_deref(), Some("work/deep"));
+}
+
+#[gpui::test]
+fn agent_prompt_drops_the_profile_when_another_agent_is_picked(cx: &mut TestAppContext) {
+  let host =
+    FakeHost::with_settings(&[("agent_profiles", r#"[{"agent":"claude","name":"work"}]"#)]);
+  let (mut h, host) = modal_harness(cx, host, agent_modal());
+  h.click("task-agent");
+  h.click("task-agent-claude/work");
+  h.click("task-agent");
+  h.click("task-agent-codex");
+  h.click("task-submit");
+  let start = &tasks(&mut h, &host)[0];
+  assert_eq!(
+    (start.agent.as_str(), start.profile.as_deref()),
+    ("codex", None)
+  );
+}
+
+#[gpui::test]
 fn agent_prompt_picks_a_workspace(cx: &mut TestAppContext) {
   let (mut h, host) = modal_harness(cx, FakeHost::default(), agent_modal());
   h.click("agent-prompt-workspace");
