@@ -124,6 +124,30 @@ export async function drawn(page: Page, clip: Clip, before?: Buffer): Promise<Bu
 }
 
 /**
+ * Polls `probe` until it holds or `ms` passes, and says whether it held: for
+ * the chaos runs, which record a state that never comes as a finding rather
+ * than fail on it.
+ */
+export async function eventually(
+  probe: () => Promise<boolean>,
+  ms: number,
+  interval = 2000,
+): Promise<boolean> {
+  const deadline = Date.now() + ms;
+  let held = false;
+  await expect
+    .poll(
+      async () => {
+        held = await probe();
+        return held || Date.now() >= deadline;
+      },
+      { intervals: [interval], timeout: ms + 60_000 },
+    )
+    .toBe(true);
+  return held;
+}
+
+/**
  * The demo repository's home view. Only the selected repository's home row
  * has an accessible name (its branch, "main").
  */
