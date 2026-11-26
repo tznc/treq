@@ -3664,8 +3664,18 @@ mod tests {
       .execute_batch("BEGIN IMMEDIATE")
       .expect("hold the write lock");
 
-    let init = std::thread::spawn(move || init_new_workspace_state(&repo_path, id, None));
-    std::thread::sleep(std::time::Duration::from_millis(300));
+    let initializing = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let init = {
+      let initializing = initializing.clone();
+      std::thread::spawn(move || {
+        initializing.store(true, std::sync::atomic::Ordering::SeqCst);
+        init_new_workspace_state(&repo_path, id, None)
+      })
+    };
+    // The other write commits once init is under way.
+    crate::test_repo::wait_until(std::time::Duration::from_secs(5), || {
+      initializing.load(std::sync::atomic::Ordering::SeqCst)
+    });
     other
       .execute("UPDATE workspaces SET title = 'other' WHERE id = ?1", [id])
       .expect("other write");
@@ -4440,13 +4450,16 @@ mod tests {
     )
     .expect("save should succeed");
 
-    let first_review = get_pending_review(repo_path, workspace_id)
-      .expect("get should succeed")
-      .expect("review should exist");
-    let first_created_at = first_review.created_at;
-
-    // Wait a moment
-    std::thread::sleep(std::time::Duration::from_millis(10));
+    // Saved long ago, so the update's time differs from it.
+    let first_created_at = "2020-01-01T00:00:00+00:00".to_string();
+    let backdated = Connection::open(resolve_db_path(repo_path).expect("db path"))
+      .expect("open")
+      .execute(
+        "UPDATE pending_reviews SET created_at = ?1, updated_at = ?1 WHERE workspace_id = ?2",
+        params![first_created_at, workspace_id],
+      )
+      .expect("backdate the first review");
+    assert_eq!(backdated, 1, "review should exist");
 
     save_pending_review(
       repo_path,
@@ -4961,7 +4974,6 @@ mod tests {
       Some("claude"),
     )
     .expect("add_prompt_history should succeed");
-    std::thread::sleep(std::time::Duration::from_millis(2));
     let second_id = add_prompt_history(repo_path, None, None, "second prompt", None)
       .expect("add_prompt_history should succeed");
 
@@ -5048,7 +5060,6 @@ mod tests {
       Some("claude"),
     )
     .expect("add_prompt_history should succeed");
-    std::thread::sleep(std::time::Duration::from_millis(2));
     add_prompt_history(
       repo_path,
       Some(workspace_id),

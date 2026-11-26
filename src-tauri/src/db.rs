@@ -432,11 +432,19 @@ mod tests {
     let second = Database::new(path).expect("open second");
 
     first.conn.execute_batch("BEGIN IMMEDIATE").expect("begin");
-    let release = std::thread::spawn(move || {
-      std::thread::sleep(std::time::Duration::from_millis(200));
-      first.conn.execute_batch("COMMIT").expect("commit");
-    });
+    let writing = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let release = {
+      let writing = writing.clone();
+      std::thread::spawn(move || {
+        // Commits once the other handle's write is under way.
+        crate::test_repo::wait_until(std::time::Duration::from_secs(5), || {
+          writing.load(std::sync::atomic::Ordering::SeqCst)
+        });
+        first.conn.execute_batch("COMMIT").expect("commit");
+      })
+    };
 
+    writing.store(true, std::sync::atomic::Ordering::SeqCst);
     second
       .set_setting("theme", "dark")
       .expect("write retries while the other handle holds the lock");

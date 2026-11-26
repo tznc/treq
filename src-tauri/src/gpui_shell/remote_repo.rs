@@ -1191,8 +1191,10 @@ pub(crate) mod tests {
     pub reported: Mutex<Vec<&'static str>>,
     pub cutoffs: Mutex<Vec<(String, Cutoff)>>,
     pub reachability: Mutex<Vec<(String, bool)>>,
-    /// How long each read takes, to overlap reads in a test.
-    pub latency: Mutex<Duration>,
+    /// Reads of these kinds stay in flight until [`FakeTransport::release`],
+    /// to overlap reads in a test.
+    held: Mutex<Vec<&'static str>>,
+    released: Condvar,
     pub reading: std::sync::atomic::AtomicUsize,
     pub most_reading: std::sync::atomic::AtomicUsize,
     reads: Reads,
@@ -1206,6 +1208,23 @@ pub(crate) mod tests {
     pub fn sent(&self) -> Vec<TreqCommandRequest> {
       self.sent.lock().unwrap().clone()
     }
+
+    /// Keeps reads of `kind` in flight until [`Self::release`].
+    pub fn hold(&self, kind: &'static str) {
+      self.held.lock().unwrap().push(kind);
+    }
+
+    pub fn release(&self) {
+      self.held.lock().unwrap().clear();
+      self.released.notify_all();
+    }
+
+    /// Waits until at least `count` reads are in flight at once.
+    pub fn wait_for_reads(&self, count: usize) -> bool {
+      crate::test_repo::wait_until(Duration::from_secs(5), || {
+        self.reading.load(std::sync::atomic::Ordering::SeqCst) >= count
+      })
+    }
   }
 
   impl Transport for FakeTransport {
@@ -1215,8 +1234,14 @@ pub(crate) mod tests {
       self.sent.lock().unwrap().push(request);
       let now = self.reading.fetch_add(1, SeqCst) + 1;
       self.most_reading.fetch_max(now, SeqCst);
-      let latency = *self.latency.lock().unwrap();
-      std::thread::sleep(latency);
+      let held = self.held.lock().unwrap();
+      // Bounded, so a test that never releases fails rather than hangs.
+      drop(
+        self
+          .released
+          .wait_timeout_while(held, Duration::from_secs(10), |held| held.contains(&kind))
+          .unwrap(),
+      );
       self.reading.fetch_sub(1, SeqCst);
       self
         .answers
@@ -1436,16 +1461,9 @@ pub(crate) mod tests {
       .starts_with("workspace_not_found"));
   }
 
-  /// A remote whose every read takes `latency`.
-  fn slow_remote(latency: Duration) -> (Remote, Arc<FakeTransport>) {
-    let (remote, transport) = remote();
-    *transport.latency.lock().unwrap() = latency;
-    (remote, transport)
-  }
-
   #[test]
   fn a_hunk_batch_reads_a_few_files_at_once_in_order() {
-    let (remote, transport) = slow_remote(Duration::from_millis(30));
+    let (remote, transport) = remote();
     transport.answer("DiffFile", serde_json::json!([]));
     // An older host.
     transport.answers.lock().unwrap().insert(
@@ -1453,9 +1471,15 @@ pub(crate) mod tests {
       Err("unknown changes action 'diff-files'".into()),
     );
     let paths: Vec<String> = (0..12).map(|i| format!("f{i}.rs")).collect();
-    let batch = remote
-      .file_hunks_batch(Some(1), paths.clone(), None)
-      .unwrap();
+    transport.hold("DiffFile");
+    let batch = std::thread::scope(|scope| {
+      let batch = scope.spawn(|| remote.file_hunks_batch(Some(1), paths.clone(), None));
+      let overlapped = transport.wait_for_reads(2);
+      transport.release();
+      assert!(overlapped, "the file reads never overlapped");
+      batch.join().unwrap()
+    })
+    .unwrap();
     let got: Vec<&str> = batch.files.iter().map(|f| f.path.as_str()).collect();
     assert_eq!(got, paths.iter().map(String::as_str).collect::<Vec<_>>());
     assert_eq!(transport.sent().len(), 1 + 12);
@@ -1547,13 +1571,20 @@ pub(crate) mod tests {
 
   #[test]
   fn identical_reads_in_flight_share_one_round_trip() {
-    let (remote, transport) = slow_remote(Duration::from_millis(80));
+    let (remote, transport) = remote();
     transport.answer("WorkspaceDiff", serde_json::json!(null));
+    transport.hold("WorkspaceDiff");
     let asked = |remote: &Remote| remote.read::<Value>(workspace_diff_request());
     std::thread::scope(|scope| {
       let first = scope.spawn(|| asked(&remote));
-      std::thread::sleep(Duration::from_millis(20));
       let second = scope.spawn(|| asked(&remote));
+      // One leads the read; the other holds its flight too once it joins.
+      let joined = crate::test_repo::wait_until(Duration::from_secs(5), || {
+        let flights = transport.reads.flights.lock().unwrap();
+        flights.values().any(|flight| Arc::strong_count(flight) > 2)
+      });
+      transport.release();
+      assert!(joined, "the second read never joined the first");
       assert!(first.join().unwrap().is_ok());
       assert!(second.join().unwrap().is_ok());
     });
@@ -1565,14 +1596,18 @@ pub(crate) mod tests {
 
   #[test]
   fn a_change_ends_the_reads_in_flight() {
-    let (remote, transport) = slow_remote(Duration::from_millis(80));
+    let (remote, transport) = remote();
+    transport.hold("WorkspaceDiff");
     std::thread::scope(|scope| {
       let before = scope.spawn(|| remote.read::<Value>(workspace_diff_request()));
-      std::thread::sleep(Duration::from_millis(20));
+      assert!(transport.wait_for_reads(1));
       remote.delete_workspace(3).unwrap();
       // The change is over: this read must not join the one begun before it.
-      let after = remote.read::<Value>(workspace_diff_request());
-      assert!(after.is_ok());
+      let after = scope.spawn(|| remote.read::<Value>(workspace_diff_request()));
+      let apart = transport.wait_for_reads(2);
+      transport.release();
+      assert!(apart, "the read after the change joined the one before it");
+      assert!(after.join().unwrap().is_ok());
       assert!(before.join().unwrap().is_ok());
     });
     let reads = transport

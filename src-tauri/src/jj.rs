@@ -102,6 +102,8 @@ struct SharedReadState<T> {
   started: u64,
   finished: u64,
   result: Option<T>,
+  /// Callers waiting for a run to finish.
+  waiting: usize,
 }
 
 impl<T: Clone> SharedRead<T> {
@@ -112,6 +114,7 @@ impl<T: Clone> SharedRead<T> {
         started: 0,
         finished: 0,
         result: None,
+        waiting: 0,
       }),
       done: std::sync::Condvar::new(),
     }
@@ -161,10 +164,12 @@ impl<T: Clone> SharedRead<T> {
         drop(running);
         return result;
       }
+      state.waiting += 1;
       state = self
         .done
         .wait(state)
         .unwrap_or_else(std::sync::PoisonError::into_inner);
+      state.waiting -= 1;
     }
   }
 }
@@ -5085,16 +5090,14 @@ mod tests {
     use std::thread;
     let shared = SharedRead::new();
     let runs = AtomicUsize::new(0);
-    let arrived = AtomicUsize::new(0);
     thread::scope(|scope| {
       let first = scope.spawn(|| {
         shared.run(|| {
           let run = runs.fetch_add(1, Ordering::SeqCst) + 1;
-          // Hold run 1 until every waiter has asked.
-          while arrived.load(Ordering::SeqCst) < 6 {
-            thread::yield_now();
-          }
-          thread::sleep(std::time::Duration::from_millis(50));
+          // Hold run 1 until every waiter waits for it to finish.
+          crate::test_repo::wait_until(std::time::Duration::from_secs(5), || {
+            shared.state.lock().unwrap().waiting == 6
+          });
           run
         })
       });
@@ -5102,12 +5105,7 @@ mod tests {
         thread::yield_now();
       }
       let waiters: Vec<_> = (0..6)
-        .map(|_| {
-          scope.spawn(|| {
-            arrived.fetch_add(1, Ordering::SeqCst);
-            shared.run(|| runs.fetch_add(1, Ordering::SeqCst) + 1)
-          })
-        })
+        .map(|_| scope.spawn(|| shared.run(|| runs.fetch_add(1, Ordering::SeqCst) + 1)))
         .collect();
       assert_eq!(first.join().unwrap(), 1);
       for waiter in waiters {
@@ -5170,7 +5168,11 @@ mod tests {
           with_working_copy_lock("/tmp/shared-workspace", || {
             let now = CONCURRENT.fetch_add(1, Ordering::SeqCst) + 1;
             MAX.fetch_max(now, Ordering::SeqCst);
-            thread::sleep(std::time::Duration::from_millis(15));
+            // The workspace's lock is held for the whole call.
+            assert!(matches!(
+              working_copy_lock("/tmp/shared-workspace").try_lock(),
+              Err(std::sync::TryLockError::WouldBlock)
+            ));
             CONCURRENT.fetch_sub(1, Ordering::SeqCst);
           })
         })
@@ -5194,7 +5196,10 @@ mod tests {
           with_working_copy_lock(&format!("/tmp/distinct-workspace-{i}"), || {
             let now = CONCURRENT.fetch_add(1, Ordering::SeqCst) + 1;
             MAX.fetch_max(now, Ordering::SeqCst);
-            thread::sleep(std::time::Duration::from_millis(15));
+            // Stays until all four are in at once, which serializing forbids.
+            crate::test_repo::wait_until(std::time::Duration::from_secs(5), || {
+              CONCURRENT.load(Ordering::SeqCst) == 4
+            });
             CONCURRENT.fetch_sub(1, Ordering::SeqCst);
           })
         })

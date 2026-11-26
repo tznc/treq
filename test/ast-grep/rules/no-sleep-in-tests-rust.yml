@@ -18,14 +18,6 @@ ignores:
   - "**/tests/**"
   - "**/*_test.rs"
   - "**/tests.rs"
-  # Not fixed yet. The fix PRs stacked on this one remove these entries.
-  - "src-tauri/src/db.rs"
-  - "src-tauri/src/gpui_shell/remote_repo.rs"
-  - "src-tauri/src/jj.rs"
-  - "src-tauri/src/jj/oplog.rs"
-  - "src-tauri/src/local_db.rs"
-  - "src-tauri/src/pr_status.rs"
-  - "src-tauri/src/pty.rs"
 utils:
   test-attr:
     kind: attribute_item

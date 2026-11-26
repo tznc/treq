@@ -807,6 +807,7 @@ impl PtyManager {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use std::sync::atomic::AtomicBool;
   use std::sync::mpsc;
   use std::time::{Duration, Instant};
 
@@ -938,6 +939,8 @@ mod tests {
   #[test]
   fn runs_command_once_the_shell_hands_over_the_terminal() {
     let manager = PtyManager::new();
+    let printed = Arc::new(AtomicBool::new(false));
+    let shell_printed = printed.clone();
     manager
       .create_session(
         "fg".into(),
@@ -947,17 +950,19 @@ mod tests {
         vec!["-i".into()],
         None,
         None,
-        Box::new(|_| {}),
+        Box::new(move |_| shell_printed.store(true, Ordering::SeqCst)),
       )
       .unwrap();
-    thread::sleep(Duration::from_millis(200));
+    // The prompt is the shell's first output.
+    assert!(crate::test_repo::wait_until(Duration::from_secs(5), || {
+      printed.load(Ordering::SeqCst)
+    }));
     assert_eq!(manager.runs_command("fg"), Some(false));
 
     manager.write_to_session("fg", "sleep 5\r").unwrap();
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while manager.runs_command("fg") != Some(true) && Instant::now() < deadline {
-      thread::sleep(Duration::from_millis(20));
-    }
+    crate::test_repo::wait_until(Duration::from_secs(5), || {
+      manager.runs_command("fg") == Some(true)
+    });
     assert_eq!(manager.runs_command("fg"), Some(true));
     assert_eq!(manager.runs_command("missing"), None);
     manager.close_session("fg").unwrap();
@@ -985,10 +990,7 @@ mod tests {
     } else {
       Duration::from_secs(2)
     };
-    let deadline = Instant::now() + timeout;
-    while manager.session_exists("eof") && Instant::now() < deadline {
-      thread::sleep(Duration::from_millis(10));
-    }
+    crate::test_repo::wait_until(timeout, || !manager.session_exists("eof"));
     assert!(!manager.session_exists("eof"));
   }
 
@@ -1109,18 +1111,13 @@ mod tests {
 
     manager.close_session("descendant").unwrap();
 
-    let deadline = Instant::now() + Duration::from_secs(2);
-    let mut still_alive = true;
-    while Instant::now() < deadline {
+    let gone = crate::test_repo::wait_until(Duration::from_secs(2), || {
       // SAFETY: signal 0 only checks existence; `kill` touches no Rust memory.
-      if unsafe { libc::kill(grandchild_pid, 0) } != 0 {
-        still_alive = false;
-        break;
-      }
-      thread::sleep(Duration::from_millis(20));
-    }
+      let status = unsafe { libc::kill(grandchild_pid, 0) };
+      status != 0
+    });
     assert!(
-      !still_alive,
+      gone,
       "background descendant {grandchild_pid} survived session close"
     );
   }

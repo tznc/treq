@@ -288,6 +288,16 @@ mod tests {
     }
   }
 
+  /// A time in a later millisecond than every operation so far: pruning
+  /// compares operation times to the cutoff at millisecond precision.
+  fn after_every_operation() -> SystemTime {
+    let last = millis(SystemTime::now());
+    assert!(crate::test_repo::wait_until(Duration::from_secs(1), || {
+      millis(SystemTime::now()) > last
+    }));
+    SystemTime::now()
+  }
+
   fn repo_with_workspaces() -> (TempDir, Vec<std::path::PathBuf>) {
     let temp = TempDir::new().expect("tempdir");
     let home = temp.path().join("home");
@@ -319,9 +329,7 @@ mod tests {
       touch_all(&refs, round);
     }
     let before_cutoff = op_count(&dirs[0]);
-    std::thread::sleep(Duration::from_millis(50));
-    let cutoff = SystemTime::now();
-    std::thread::sleep(Duration::from_millis(50));
+    let cutoff = after_every_operation();
     touch_all(&refs, 100);
     let total_before = op_count(&dirs[0]);
     let recent = total_before - before_cutoff;
@@ -371,8 +379,7 @@ mod tests {
     for round in 1..5 {
       touch_all(&refs[..2], round);
     }
-    std::thread::sleep(Duration::from_millis(50));
-    let cutoff = SystemTime::now();
+    let cutoff = after_every_operation();
     touch_all(&refs[..2], 100);
     let total_before = op_count(&dirs[0]);
 
@@ -396,8 +403,7 @@ mod tests {
     let (_temp, dirs) = repo_with_workspaces();
     let refs: Vec<&Path> = dirs.iter().map(|d| d.as_path()).collect();
     touch_all(&refs, 0);
-    std::thread::sleep(Duration::from_millis(50));
-    let cutoff = SystemTime::now();
+    let cutoff = after_every_operation();
     touch_all(&refs, 1);
     let before = op_count(&dirs[0]);
     let outcome =
