@@ -16,7 +16,6 @@ import { recordOutcome } from "../record";
 import { createTestUser, deleteTestUser, signInWithEmailPassword } from "../seed";
 
 const admin = getServiceClient();
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 type Hooks = Partial<Pick<SandboxProvider, "createInstance" | "deleteInstance" | "getInstance">>;
 
@@ -72,27 +71,45 @@ async function rows(supabase: SupabaseClient, userId: string) {
   return data as Array<{ id: string; status: string; provider_resource_id: string | null }>;
 }
 
-async function waitForStatus(userId: string, status: string, timeoutMs = 5_000) {
-  const until = Date.now() + timeoutMs;
-  while (Date.now() < until) {
-    if ((await rows(admin, userId)).some((r) => r.status === status)) return;
-    await sleep(25);
-  }
-  throw new Error(`no row reached ${status}`);
+/**
+ * Holds a provider call until the test releases it, so the test can act
+ * while the call is in flight.
+ */
+function hold() {
+  let enter = () => {};
+  let release = () => {};
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve;
+  });
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return {
+    /** Resolves once a held call has started. */
+    entered,
+    release,
+    /** Called by the held call: marks it started, then waits for `release`. */
+    async here() {
+      enter();
+      await released;
+    },
+  };
 }
 
 it("a delete during provisioning stays deleted and removes the machine ensure created", async () => {
   const u = await createTestUser();
   try {
+    const held = hold();
     const chaos = chaosProvider((base) => ({
       createInstance: async (p) => {
-        await sleep(800);
+        await held.here();
         return base.createInstance(p);
       },
     }));
     const ensuring = ensure(u.user.id, chaos.make);
-    await sleep(300);
+    await held.entered;
     const deleted = await del(u.user.id);
+    held.release();
     expect(deleted.status).toBe(200);
     await ensuring;
 
@@ -115,15 +132,18 @@ it("a delete during provisioning stays deleted and removes the machine ensure cr
 it("a delete during bootstrapping stays deleted", async () => {
   const u = await createTestUser();
   try {
+    const held = hold();
     const chaos = chaosProvider((base) => ({
       getInstance: async (id) => {
-        await sleep(800);
+        await held.here();
         return base.getInstance(id);
       },
     }));
     const ensuring = ensure(u.user.id, chaos.make);
-    await waitForStatus(u.user.id, "bootstrapping");
+    await held.entered;
+    expect((await rows(admin, u.user.id)).map((r) => r.status)).toEqual(["bootstrapping"]);
     const deleted = await del(u.user.id);
+    held.release();
     expect(deleted.status).toBe(200);
     await ensuring;
 

@@ -10,6 +10,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { it, expect, afterEach } from "@jest/globals";
 import { getAnonKey, getServiceClient, resolveLocalKeys } from "../clients";
 import { createTestUser, deleteTestUser } from "../seed";
+import { pollUntil } from "../poll";
 import { recordOutcome } from "../record";
 
 const REDIRECT = "treq://auth/callback";
@@ -43,19 +44,16 @@ function exchange(code: string, verifier: string) {
 }
 
 async function magicLinkFor(email: string): Promise<string> {
-  for (let i = 0; i < 40; i++) {
+  return pollUntil("the magic link email", async () => {
     const list = await (
       await fetch(`${MAILPIT}/api/v1/search?query=${encodeURIComponent(`to:"${email}"`)}`)
     ).json();
     const id = list.messages?.[0]?.ID;
-    if (id) {
-      const msg = await (await fetch(`${MAILPIT}/api/v1/message/${id}`)).json();
-      const match = /href="([^"]*\/auth\/v1\/verify[^"]*)"/.exec(msg.HTML ?? "");
-      if (match) return match[1].replaceAll("&amp;", "&");
-    }
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  throw new Error("magic link email not received");
+    if (!id) return undefined;
+    const msg = await (await fetch(`${MAILPIT}/api/v1/message/${id}`)).json();
+    const match = /href="([^"]*\/auth\/v1\/verify[^"]*)"/.exec(msg.HTML ?? "");
+    return match?.[1].replaceAll("&amp;", "&");
+  });
 }
 
 // Google is the same GoTrue path; it needs its OIDC discovery document, which
