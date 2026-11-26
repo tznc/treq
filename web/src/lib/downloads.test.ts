@@ -51,6 +51,7 @@ describe('listPlatforms', () => {
       {
         id: 'macos',
         name: 'macOS',
+        preview: false,
         installers: [
           {href: release[2]?.url, label: 'Apple silicon', format: '.dmg'},
           {href: release[4]?.url, label: 'Intel', format: '.dmg'},
@@ -59,6 +60,7 @@ describe('listPlatforms', () => {
       {
         id: 'windows',
         name: 'Windows',
+        preview: false,
         installers: [
           {href: release[8]?.url, label: 'Installer', format: '.exe'},
           {href: release[9]?.url, label: 'MSI package', format: '.msi'},
@@ -67,6 +69,7 @@ describe('listPlatforms', () => {
       {
         id: 'linux',
         name: 'Linux',
+        preview: false,
         installers: [
           {href: release[5]?.url, label: 'AppImage', format: '.AppImage'},
           {href: release[6]?.url, label: 'Debian and Ubuntu', format: '.deb'},
@@ -76,6 +79,7 @@ describe('listPlatforms', () => {
       {
         id: 'android',
         name: 'Android',
+        preview: true,
         installers: [{href: release[0]?.url, label: 'arm64', format: '.apk'}],
       },
     ]);
