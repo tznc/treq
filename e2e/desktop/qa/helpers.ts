@@ -65,6 +65,36 @@ export function popupBox(): { x: number; y: number; w: number; h: number } | nul
   return best;
 }
 
+/** A box in the repo window's logical pixels, as `popupBox` returns. */
+type Box = { x: number; y: number; w: number; h: number };
+
+/** The X screen's raw RGB pixels in `box`, popup windows included. */
+export function screenPixels(box: Box): Buffer {
+  const [x, y, w, h] = [box.x, box.y, box.w, box.h].map((v) => Math.round(v * scale));
+  return execFileSync("import", ["-window", "root", "-crop", `${w}x${h}+${x}+${y}`, "rgb:-"]);
+}
+
+/**
+ * Waits until the X screen in `box` differs from `from` and holds still
+ * from one grab to the next: for what a popup window (a toast, a menu)
+ * draws, which Playwright does not reach. Returns the new pixels.
+ */
+export async function screenChanged(box: Box, from: Buffer): Promise<Buffer> {
+  let last = from;
+  await expect
+    .poll(
+      () => {
+        const now = screenPixels(box);
+        const still = !now.equals(from) && now.equals(last);
+        last = now;
+        return still;
+      },
+      { message: "the popup redraws and holds still", intervals: [100] },
+    )
+    .toBe(true);
+  return last;
+}
+
 /**
  * The demo repository's home view. Only the selected repository's home row
  * has an accessible name (its branch, "main").

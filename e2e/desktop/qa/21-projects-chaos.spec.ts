@@ -13,7 +13,7 @@ import { dirname, join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { port } from "../env.ts";
 import { capture } from "./capture.ts";
-import { focusMain, home, noteMiss, popupBox, ready, row, settle, xPointer } from "./helpers.ts";
+import { focusMain, home, loaded, noteMiss, popupBox, ready, row, settle, xPointer } from "./helpers.ts";
 
 test.describe.configure({ mode: "serial" });
 
@@ -123,6 +123,19 @@ async function rename(page: Page, name: string) {
   await settle(page, 1200);
 }
 
+/**
+ * Clicks an empty part of the header, which closes the open `menu` (the box
+ * `openMenu` returned), and waits for that popup to go. A toast may stay.
+ */
+async function dismissMenu(menu: ReturnType<typeof popupBox>) {
+  focusMain();
+  xPointer(760, 40, 1);
+  if (!menu) return;
+  await expect
+    .poll(() => JSON.stringify(popupBox()), { message: "the menu closes" })
+    .not.toBe(JSON.stringify(menu));
+}
+
 async function escAll(page: Page) {
   for (let i = 0; i < 3; i++) await page.keyboard.press("Escape");
   await settle(page, 300);
@@ -159,8 +172,7 @@ test("projects-chaos: targeted scenarios", async ({ page }) => {
   await capture(page, { name: "21-projects-chaos-02-menu", title: "Menu after double save", screen: true, rest: false, expectations: ["Exactly one '✓ Chaos one' row"] });
   if (!menu) throw new Error("no menu");
   await escAll(page);
-  focusMain();
-  xPointer(760, 40, 1);
+  await dismissMenu(menu);
 
   note("rename to the same name, then to empty, then to unicode");
   await rename(page, "Chaos one");
@@ -203,8 +215,13 @@ test("projects-chaos: targeted scenarios", async ({ page }) => {
   await escAll(page);
   await page.getByRole("button", { name: "Home", exact: true }).click();
   for (let i = 0; i < 15; i++) {
-    await page.getByRole("tab", { name: pick(["Code", "Changes", "Commits"]) }).click();
-    await page.waitForTimeout(pick([0, 20, 80, 200]));
+    const tab = pick(["Code", "Changes", "Commits"]);
+    await page.getByRole("tab", { name: tab }).click();
+    // Switch again at a random point of the tab's first read: at once,
+    // once the tab shows selected, or once the read has landed.
+    const at = pick(["now", "selected", "loaded"]);
+    if (at !== "now") await expect(page.getByRole("tab", { name: tab, selected: true })).toBeVisible();
+    if (at === "loaded") await loaded(page);
   }
   await settle(page, 3000);
   await alive(page);
@@ -257,9 +274,7 @@ async function step(page: Page): Promise<string> {
     case "menu": {
       const offset = pick([18, 18, 61, 93, 0]);
       if (offset === 0) {
-        await openMenu(page);
-        focusMain();
-        xPointer(760, 40, 1);
+        await dismissMenu(await openMenu(page));
         return "menu open+dismiss";
       }
       await menuRow(page, offset);
@@ -331,7 +346,6 @@ test("projects-chaos: seeded monkey", async ({ page }) => {
   await settle(page, 1500);
   for (let i = 0; i < STEPS; i++) {
     note(`#${i} ${await step(page)}`);
-    await page.waitForTimeout(150);
     await alive(page);
     if (i % 25 === 24) {
       await capture(page, { name: `21-projects-chaos-monkey-${seed0}-${i + 1}`, title: `Monkey step ${i + 1}`, rest: false, expectations: ["Window drawn, nothing overflows"] });

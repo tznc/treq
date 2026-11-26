@@ -11,6 +11,7 @@ import { capture } from "./capture.ts";
 import {
   focusMain,
   home,
+  loaded,
   mod,
   openWorkspace,
   popupBox,
@@ -147,7 +148,9 @@ test("dialogs: delete workspace", async ({ page }) => {
     ],
   });
   await remove.click();
-  await page.waitForTimeout(2500);
+  await expect(page.getByRole("button", { name: /qa-scratch/ })).toHaveCount(0);
+  await loaded(page);
+  await expect.poll(popupBox, { message: "the Workspace deleted toast shows" }).not.toBeNull();
   await capture(page, {
     name: "09-delete-workspace-deleted",
     title: "Workspace deleted: toast",

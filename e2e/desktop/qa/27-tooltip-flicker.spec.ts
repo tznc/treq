@@ -25,12 +25,18 @@ test("diff add-comment tooltip does not flicker", async ({ page }) => {
 
   // Sample the popup for 3s once it has opened: it must never close.
   await expect.poll(() => popupBox(), { timeout: 3000 }).not.toBeNull();
-  const samples: boolean[] = [];
-  for (let i = 0; i < 30; i++) {
-    samples.push(popupBox() !== null);
-    await page.waitForTimeout(100);
-  }
-  expect(samples.filter((s) => !s).length).toBe(0);
+  let samples = 0;
+  await expect
+    .poll(
+      () => {
+        // A closed popup ends the poll at once with this failure.
+        expect(popupBox(), `the tooltip closed after ${samples} samples`).not.toBeNull();
+        samples += 1;
+        return samples;
+      },
+      { message: "30 samples 100ms apart", intervals: [100], timeout: 10_000 },
+    )
+    .toBeGreaterThanOrEqual(30);
 
   await capture(page, {
     name: "27-tooltip-01-add-comment-steady",

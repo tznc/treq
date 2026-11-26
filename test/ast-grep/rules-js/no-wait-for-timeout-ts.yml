@@ -20,21 +20,9 @@ ignores:
   # `toPass` instead, so e2e/** needs no helper of its own.
   - "scripts/service-qa/poll.ts"
   # Not fixed yet. The fix PRs stacked on this one remove these entries.
-  - "e2e/desktop/qa/01-onboarding.spec.ts"
-  - "e2e/desktop/qa/09-dialogs.spec.ts"
-  - "e2e/desktop/qa/15-not-a-repository.spec.ts"
-  - "e2e/desktop/qa/18-merge-demo.spec.ts"
   - "e2e/desktop/qa/18-ssh-remote.spec.ts"
-  - "e2e/desktop/qa/19-terminal-reattach.spec.ts"
   - "e2e/desktop/qa/20-machines-chaos.spec.ts"
-  - "e2e/desktop/qa/20-sidebar-workspace-title.spec.ts"
-  - "e2e/desktop/qa/21-delete-account.spec.ts"
-  - "e2e/desktop/qa/21-projects-chaos.spec.ts"
-  - "e2e/desktop/qa/22-byos.spec.ts"
-  - "e2e/desktop/qa/22-changes-many-files.spec.ts"
   - "e2e/desktop/qa/22-ssh-chaos.spec.ts"
-  - "e2e/desktop/qa/23-team-projects.spec.ts"
-  - "e2e/desktop/qa/27-tooltip-flicker.spec.ts"
 rule:
   any:
     # page.waitForTimeout(ms), page?.waitForTimeout(ms), page.waitForTimeout.bind(page)
