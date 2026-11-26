@@ -40,8 +40,10 @@ describe("filter-release-notes.sh", () => {
     );
   });
 
-  it("drops ci, test and build entries, scoped or not", () => {
+  it("drops ci, test, build and refactor entries, scoped or not", () => {
     const notes = [
+      "* refactor(ui): split sidebar by @a in https://x/pull/13",
+      "* refactor: inline helper by @a in https://x/pull/14",
       "* ci: cache cargo by @a in https://x/pull/10",
       "* test(lint): require testable node by @a in https://x/pull/11",
       "* build(deps)!: bump tauri by @a in https://x/pull/12",
@@ -77,7 +79,7 @@ describe("filter-release-notes.sh", () => {
 
   it("keeps entries that only mention the words later in the title", () => {
     const line =
-      "* fix(app): style chore ci test build runner by @a in https://x/pull/7\n";
+      "* fix(app): style chore ci test build refactor runner by @a in https://x/pull/7\n";
     expect(filter(line).stdout).toBe(line);
   });
 
