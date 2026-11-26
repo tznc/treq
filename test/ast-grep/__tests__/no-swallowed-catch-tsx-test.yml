@@ -1,0 +1,20 @@
+id: no-swallowed-catch-tsx
+valid:
+  - |
+    function load(): Feature[] {
+      try { return JSON.parse(raw); } catch (err) {
+        if (err instanceof SyntaxError) return [];
+        throw err;
+      }
+    }
+  - |
+    const el = <input onFocus={() => getDb().then(setDb).catch(() => {
+      // Prefetch only: the first search retries and logs it.
+    })} />;
+invalid:
+  - |
+    function decode(raw: string): State | null {
+      try { return JSON.parse(raw); } catch { return null; }
+    }
+  - |
+    const el = <input onFocus={() => getDb().then(setDb).catch(() => {})} />;
