@@ -1,0 +1,40 @@
+id: no-sleep-in-tests-rust
+valid:
+  # Production code may sleep: backoff and debouncing.
+  - "fn retry(attempt: u64) { std::thread::sleep(Duration::from_millis(20 * attempt)); }"
+  - "async fn poll_until_ready(poll: Duration) { tokio::time::sleep(poll).await; }"
+  - "#[cfg(not(test))] fn production_only() { thread::sleep(d); }"
+  # A bare `sleep` that is injected, not imported from std or tokio.
+  - "fn wait_for_reply(sleep: &dyn Fn(Duration)) { sleep(POLL); }"
+  # Tests that wait on the condition itself.
+  - "#[cfg(test)] mod tests { #[test] fn waits() { assert!(rx.recv_timeout(d).is_ok()); } }"
+  # Spawning the `sleep` binary or a fake clock is not a thread sleep.
+  - "#[test] fn spawns() { Command::new(\"sleep\").spawn().unwrap(); clock.sleep(d); }"
+  # A test attribute on an earlier item does not make the next fn a test.
+  - |
+    #[test]
+    fn a_test() {}
+    fn production_after_a_test() { std::thread::sleep(d); }
+invalid:
+  - "#[test] fn t() { std::thread::sleep(d); }"
+  - "#[tokio::test(flavor = \"multi_thread\")] async fn t() { ::tokio::time::sleep(d).await; }"
+  # Other attributes and comments between the test attribute and the fn.
+  - |
+    #[test]
+    #[cfg(unix)]
+    // Needs a real pty.
+    fn t() { thread::sleep(d); }
+  # Helpers in test-only modules and functions.
+  - "#[cfg(test)] mod tests { fn wait_a_bit() { thread::sleep(d); } }"
+  - "#[cfg(all(test, feature = \"gui\"))] mod tests { async fn w() { tokio::time::sleep(d).await; } }"
+  - "#[cfg(test)] fn test_only_helper() { ::std::thread::sleep(d); }"
+  # A bare `sleep` imported from std::thread or tokio::time.
+  - "#[cfg(test)] mod tests { use std::thread::sleep; fn t() { sleep(d); } }"
+  - "use tokio::time::{sleep, Duration}; #[cfg(test)] mod tests { async fn t() { sleep(d).await; } }"
+  - "use std::thread::*; #[test] fn t() { sleep(d); }"
+  # Renamed on import, or called through its module.
+  - "use std::thread::sleep as nap; #[test] fn t() { nap(d); }"
+  - "use tokio::time::{sleep as pause_for, Duration}; #[test] fn t() { pause_for(d); }"
+  - "use tokio::time; #[tokio::test] async fn t() { time::sleep(d).await; }"
+  # Inside a macro body such as proptest! or tokio::select!, a token tree.
+  - "#[cfg(test)] mod tests { proptest! { fn p(x in 0..9u8) { std::thread::sleep(d); } } }"

@@ -1,0 +1,276 @@
+id: no-sleep-in-tests-rust
+snapshots:
+  '#[cfg(all(test, feature = "gui"))] mod tests { async fn w() { tokio::time::sleep(d).await; } }':
+    labels:
+    - source: tokio::time::sleep(d)
+      style: primary
+      start: 62
+      end: 83
+    - source: '#[cfg(all(test, feature = "gui"))]'
+      style: secondary
+      start: 0
+      end: 34
+    - source: mod tests { async fn w() { tokio::time::sleep(d).await; } }
+      style: secondary
+      start: 35
+      end: 94
+  '#[cfg(test)] fn test_only_helper() { ::std::thread::sleep(d); }':
+    labels:
+    - source: ::std::thread::sleep(d)
+      style: primary
+      start: 37
+      end: 60
+    - source: '#[cfg(test)]'
+      style: secondary
+      start: 0
+      end: 12
+    - source: fn test_only_helper() { ::std::thread::sleep(d); }
+      style: secondary
+      start: 13
+      end: 63
+  '#[cfg(test)] mod tests { fn wait_a_bit() { thread::sleep(d); } }':
+    labels:
+    - source: thread::sleep(d)
+      style: primary
+      start: 43
+      end: 59
+    - source: '#[cfg(test)]'
+      style: secondary
+      start: 0
+      end: 12
+    - source: mod tests { fn wait_a_bit() { thread::sleep(d); } }
+      style: secondary
+      start: 13
+      end: 64
+  '#[cfg(test)] mod tests { proptest! { fn p(x in 0..9u8) { std::thread::sleep(d); } } }':
+    labels:
+    - source: sleep
+      style: primary
+      start: 70
+      end: 75
+    - source: thread
+      style: secondary
+      start: 62
+      end: 68
+    - source: '::'
+      style: secondary
+      start: 68
+      end: 70
+    - source: '{ std::thread::sleep(d); }'
+      style: secondary
+      start: 55
+      end: 81
+    - source: (d)
+      style: secondary
+      start: 75
+      end: 78
+    - source: '#[cfg(test)]'
+      style: secondary
+      start: 0
+      end: 12
+    - source: mod tests { proptest! { fn p(x in 0..9u8) { std::thread::sleep(d); } } }
+      style: secondary
+      start: 13
+      end: 85
+  '#[cfg(test)] mod tests { use std::thread::sleep; fn t() { sleep(d); } }':
+    labels:
+    - source: sleep(d)
+      style: primary
+      start: 58
+      end: 66
+    - source: use std::thread::sleep;
+      style: secondary
+      start: 25
+      end: 48
+    - source: '{ use std::thread::sleep; fn t() { sleep(d); } }'
+      style: secondary
+      start: 23
+      end: 71
+    - source: '#[cfg(test)]'
+      style: secondary
+      start: 0
+      end: 12
+    - source: mod tests { use std::thread::sleep; fn t() { sleep(d); } }
+      style: secondary
+      start: 13
+      end: 71
+  ? |
+    #[test]
+    #[cfg(unix)]
+    // Needs a real pty.
+    fn t() { thread::sleep(d); }
+  : labels:
+    - source: thread::sleep(d)
+      style: primary
+      start: 51
+      end: 67
+    - source: '#[test]'
+      style: secondary
+      start: 0
+      end: 7
+    - source: fn t() { thread::sleep(d); }
+      style: secondary
+      start: 42
+      end: 70
+  '#[test] fn t() { std::thread::sleep(d); }':
+    labels:
+    - source: std::thread::sleep(d)
+      style: primary
+      start: 17
+      end: 38
+    - source: '#[test]'
+      style: secondary
+      start: 0
+      end: 7
+    - source: fn t() { std::thread::sleep(d); }
+      style: secondary
+      start: 8
+      end: 41
+  '#[tokio::test(flavor = "multi_thread")] async fn t() { ::tokio::time::sleep(d).await; }':
+    labels:
+    - source: ::tokio::time::sleep(d)
+      style: primary
+      start: 55
+      end: 78
+    - source: '#[tokio::test(flavor = "multi_thread")]'
+      style: secondary
+      start: 0
+      end: 39
+    - source: async fn t() { ::tokio::time::sleep(d).await; }
+      style: secondary
+      start: 40
+      end: 87
+  'use std::thread::*; #[test] fn t() { sleep(d); }':
+    labels:
+    - source: sleep(d)
+      style: primary
+      start: 37
+      end: 45
+    - source: use std::thread::*;
+      style: secondary
+      start: 0
+      end: 19
+    - source: 'use std::thread::*; #[test] fn t() { sleep(d); }'
+      style: secondary
+      start: 0
+      end: 48
+    - source: '#[test]'
+      style: secondary
+      start: 20
+      end: 27
+    - source: fn t() { sleep(d); }
+      style: secondary
+      start: 28
+      end: 48
+  'use std::thread::sleep as nap; #[test] fn t() { nap(d); }':
+    labels:
+    - source: nap(d)
+      style: primary
+      start: 48
+      end: 54
+    - source: std::thread::sleep
+      style: secondary
+      start: 4
+      end: 22
+    - source: nap
+      style: secondary
+      start: 26
+      end: 29
+    - source: std::thread::sleep as nap
+      style: secondary
+      start: 4
+      end: 29
+    - source: use std::thread::sleep as nap;
+      style: secondary
+      start: 0
+      end: 30
+    - source: 'use std::thread::sleep as nap; #[test] fn t() { nap(d); }'
+      style: secondary
+      start: 0
+      end: 57
+    - source: nap
+      style: secondary
+      start: 48
+      end: 51
+    - source: '#[test]'
+      style: secondary
+      start: 31
+      end: 38
+    - source: fn t() { nap(d); }
+      style: secondary
+      start: 39
+      end: 57
+  'use tokio::time::{sleep as pause_for, Duration}; #[test] fn t() { pause_for(d); }':
+    labels:
+    - source: pause_for(d)
+      style: primary
+      start: 66
+      end: 78
+    - source: sleep
+      style: secondary
+      start: 18
+      end: 23
+    - source: pause_for
+      style: secondary
+      start: 27
+      end: 36
+    - source: sleep as pause_for
+      style: secondary
+      start: 18
+      end: 36
+    - source: use tokio::time::{sleep as pause_for, Duration};
+      style: secondary
+      start: 0
+      end: 48
+    - source: 'use tokio::time::{sleep as pause_for, Duration}; #[test] fn t() { pause_for(d); }'
+      style: secondary
+      start: 0
+      end: 81
+    - source: pause_for
+      style: secondary
+      start: 66
+      end: 75
+    - source: '#[test]'
+      style: secondary
+      start: 49
+      end: 56
+    - source: fn t() { pause_for(d); }
+      style: secondary
+      start: 57
+      end: 81
+  'use tokio::time::{sleep, Duration}; #[cfg(test)] mod tests { async fn t() { sleep(d).await; } }':
+    labels:
+    - source: sleep(d)
+      style: primary
+      start: 76
+      end: 84
+    - source: use tokio::time::{sleep, Duration};
+      style: secondary
+      start: 0
+      end: 35
+    - source: 'use tokio::time::{sleep, Duration}; #[cfg(test)] mod tests { async fn t() { sleep(d).await; } }'
+      style: secondary
+      start: 0
+      end: 95
+    - source: '#[cfg(test)]'
+      style: secondary
+      start: 36
+      end: 48
+    - source: mod tests { async fn t() { sleep(d).await; } }
+      style: secondary
+      start: 49
+      end: 95
+  'use tokio::time; #[tokio::test] async fn t() { time::sleep(d).await; }':
+    labels:
+    - source: time::sleep(d)
+      style: primary
+      start: 47
+      end: 61
+    - source: '#[tokio::test]'
+      style: secondary
+      start: 17
+      end: 31
+    - source: async fn t() { time::sleep(d).await; }
+      style: secondary
+      start: 32
+      end: 70
