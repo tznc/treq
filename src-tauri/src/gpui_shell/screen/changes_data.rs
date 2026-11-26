@@ -1359,7 +1359,7 @@ mod tests {
   #[test]
   fn check_message_rejects_empty_and_long_messages() {
     assert_eq!(check_message("  "), Err("Enter a commit message."));
-    assert!(check_message(&"x".repeat(501)).is_err());
+    check_message(&"x".repeat(501)).unwrap_err();
     assert_eq!(check_message(" fix it \n"), Ok("fix it".into()));
   }
 

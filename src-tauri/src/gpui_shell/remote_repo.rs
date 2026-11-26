@@ -1296,9 +1296,9 @@ pub(crate) mod tests {
       Err("transport_error: ssh connection failed: Connection refused".into()),
     );
     let list = || remote.read::<Value>(TreqCommandRequest::ListDirectories { path: "~".into() });
-    assert!(list().is_err());
+    list().unwrap_err();
     transport.answer("ListDirectories", Value::Null);
-    assert!(list().is_ok());
+    list().unwrap();
     assert_eq!(
       *transport.reachability.lock().unwrap(),
       [("ep-1".to_string(), false), ("ep-1".to_string(), true)]
@@ -1554,12 +1554,12 @@ pub(crate) mod tests {
       let first = scope.spawn(|| asked(&remote));
       std::thread::sleep(Duration::from_millis(20));
       let second = scope.spawn(|| asked(&remote));
-      assert!(first.join().unwrap().is_ok());
-      assert!(second.join().unwrap().is_ok());
+      first.join().unwrap().unwrap();
+      second.join().unwrap().unwrap();
     });
     assert_eq!(transport.sent().len(), 1);
     // Once it has landed, the next read asks again.
-    assert!(asked(&remote).is_ok());
+    asked(&remote).unwrap();
     assert_eq!(transport.sent().len(), 2);
   }
 
@@ -1572,8 +1572,8 @@ pub(crate) mod tests {
       remote.delete_workspace(3).unwrap();
       // The change is over: this read must not join the one begun before it.
       let after = remote.read::<Value>(workspace_diff_request());
-      assert!(after.is_ok());
-      assert!(before.join().unwrap().is_ok());
+      after.unwrap();
+      before.join().unwrap().unwrap();
     });
     let reads = transport
       .sent()
@@ -1607,7 +1607,7 @@ pub(crate) mod tests {
     // A deleted workspace is forgotten, so it is read for again.
     transport.answer("ListWorkspaces", serde_json::json!([]));
     remote.delete_workspace(7).unwrap();
-    assert!(remote.location(path).is_err());
+    remote.location(path).unwrap_err();
     assert_eq!(transport.sent().len(), 3);
   }
 
@@ -1665,7 +1665,7 @@ pub(crate) mod tests {
       "ListWorkspaces",
       Err("credential_cut_off: endpoint ep-1 (client key revoked)".into()),
     );
-    assert!(remote.workspaces().is_err());
+    remote.workspaces().unwrap_err();
     assert_eq!(
       *transport.cutoffs.lock().unwrap(),
       vec![("ep-1".to_string(), Cutoff::KeyRevoked)]

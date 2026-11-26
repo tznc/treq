@@ -717,7 +717,7 @@ mod tests {
       stack_on_line(&child, &Err("bad".into())).unwrap_err(),
       "Stacks on a line that can't be opened"
     );
-    assert!(stack_on_line(&child, &Ok(target("/other", "feat/a"))).is_err());
+    stack_on_line(&child, &Ok(target("/other", "feat/a"))).unwrap_err();
     assert_eq!(
       stack_on_line(&Err("x".into()), &Ok(target("/r", "a"))).unwrap_err(),
       "x"

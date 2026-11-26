@@ -143,7 +143,7 @@ mod tests {
     // rejects an unknown tag rather than accepting it.
     let raw = serde_json::json!({ "kind": "ExecArbitraryShellCommand", "cmd": "rm -rf /" });
     let parsed = serde_json::from_value::<TreqCommandRequest>(raw);
-    assert!(parsed.is_err());
+    parsed.unwrap_err();
   }
 
   #[test]

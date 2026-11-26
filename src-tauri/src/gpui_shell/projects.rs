@@ -608,14 +608,14 @@ mod tests {
   fn save_for_fails_when_the_saved_project_is_gone() {
     let conn = conn();
     let mut windows = map(&[("w1", "gone".to_string())]);
-    assert!(save_for(&conn, &mut windows, "w1", &strings(&["/r/web"]), "New").is_err());
+    save_for(&conn, &mut windows, "w1", &strings(&["/r/web"]), "New").unwrap_err();
   }
 
   #[test]
   fn save_for_blank_name_fails_and_leaves_window_unsaved() {
     let conn = conn();
     let mut windows = HashMap::new();
-    assert!(save_for(&conn, &mut windows, "w1", &strings(&["/r/web"]), "  ").is_err());
+    save_for(&conn, &mut windows, "w1", &strings(&["/r/web"]), "  ").unwrap_err();
     assert!(windows.is_empty());
   }
 

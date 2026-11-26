@@ -862,7 +862,7 @@ mod block_on_tests {
       .spawn(|| super::block_on(async { 7 }))
       .expect("spawn")
       .join();
-    assert!(on_main.is_err());
+    on_main.unwrap_err();
   }
 }
 

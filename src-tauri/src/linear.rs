@@ -1547,7 +1547,12 @@ mod tests {
       ("comment", "commentUpdate")
     );
     assert_eq!(comment.id, "c-1");
-    assert!(review_text_location("workspace_diff", "1", &LinearTextRef::Body).is_err());
+    assert_eq!(
+      review_text_location("workspace_diff", "1", &LinearTextRef::Body)
+        .err()
+        .as_deref(),
+      Some("'workspace_diff' is not a Linear review target")
+    );
   }
 
   #[tokio::test]
@@ -1950,8 +1955,8 @@ mod tests {
     linear_delete_issue_impl(&api_key("k"), "issue-1")
       .await
       .unwrap();
-    assert!(linear_delete_issue_impl(&api_key("k"), "issue-1")
+    linear_delete_issue_impl(&api_key("k"), "issue-1")
       .await
-      .is_err());
+      .unwrap_err();
   }
 }

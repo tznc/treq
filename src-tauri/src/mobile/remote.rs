@@ -341,7 +341,7 @@ mod tests {
     let still = futures::executor::block_on(check_with(&delete, |r| {
       read(r, serde_json::json!([{ "id": 7 }]))
     }));
-    assert!(still.is_err(), "not applied: {still:?}");
+    still.expect_err("not applied");
     assert_eq!(*sent.borrow(), vec![false, false]);
 
     // With no state check for the request, nothing is sent at all.

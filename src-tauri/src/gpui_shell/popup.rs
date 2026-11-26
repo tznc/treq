@@ -1795,8 +1795,8 @@ mod tests {
       "trash-2",
     ];
     for name in names {
-      let parsed: Result<MenuIcon, _> = serde_json::from_value(serde_json::json!(name));
-      assert!(parsed.is_ok(), "{name} does not parse");
+      serde_json::from_value::<MenuIcon>(serde_json::json!(name))
+        .unwrap_or_else(|e| panic!("{name} does not parse: {e}"));
     }
   }
 

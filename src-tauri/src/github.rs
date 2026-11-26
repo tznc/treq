@@ -3963,7 +3963,7 @@ echo '[{"name":"build","bucket":"pass","link":"https://x/1"}]'"#,
   #[test]
   fn test_get_pr_info_via_gh_bad_binary_returns_err() {
     let result = get_pr_info_via_gh_impl("/nonexistent/gh", "/tmp", "feat", "/usr/bin:/bin");
-    assert!(result.is_err());
+    result.unwrap_err();
   }
 
   #[test]
@@ -4150,7 +4150,8 @@ esac
 
     let result = gh_list_pr_review_threads_impl(&gh_path, "owner", "repo", 1, "/usr/bin:/bin");
 
-    assert!(result.is_err());
+    let error = result.err().expect("gh's failure should propagate");
+    assert!(error.contains("GraphQL error"), "{error}");
   }
 
   #[test]
@@ -4242,7 +4243,7 @@ esac
   fn test_gh_pr_diff_propagates_error() {
     let bin_dir = TempDir::new().unwrap();
     let gh_path = write_fake_gh(&bin_dir, "echo nope >&2\nexit 1");
-    assert!(gh_pr_diff_impl(&gh_path, "o/r", 7, "/usr/bin:/bin").is_err());
+    gh_pr_diff_impl(&gh_path, "o/r", 7, "/usr/bin:/bin").unwrap_err();
   }
 
   #[test]

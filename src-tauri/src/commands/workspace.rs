@@ -252,11 +252,7 @@ mod tests {
     let result = crate::core::delete_workspace(repo_path, &workspace_id);
 
     // Assert: Should succeed (jj errors are non-fatal)
-    assert!(
-      result.is_ok(),
-      "delete_workspace should succeed: {:?}",
-      result
-    );
+    result.expect("delete_workspace should succeed");
 
     // Assert: DB entry should be removed
     let workspaces_after = local_db::get_workspaces(repo_path).unwrap();
@@ -299,11 +295,7 @@ mod tests {
     let result = crate::core::delete_workspace(repo_path, &workspace_id);
 
     // Assert: Should still succeed (core::delete_workspace handles missing directories)
-    assert!(
-      result.is_ok(),
-      "delete_workspace should succeed even when directory missing: {:?}",
-      result
-    );
+    result.expect("delete_workspace should succeed even when directory missing");
 
     // Assert: DB entry should be removed
     let workspaces_after = local_db::get_workspaces(repo_path).unwrap();
@@ -340,11 +332,7 @@ mod tests {
     let workspace_id = workspaces[0].id;
 
     let result = crate::core::archive_workspace_removing_directory_later(repo_path, workspace_id);
-    assert!(
-      result.is_ok(),
-      "archive_workspace should succeed: {:?}",
-      result
-    );
+    result.expect("archive_workspace should succeed");
 
     assert!(
       local_db::get_workspaces(repo_path).unwrap().is_empty(),

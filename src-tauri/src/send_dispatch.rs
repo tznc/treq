@@ -577,7 +577,7 @@ mod tests {
     let path = write_send_review_image_bytes(&repo, "a b.png", b"png").expect("write");
     assert_eq!(path, temp.path().join(".treq").join("send").join("a-b.png"));
     assert_eq!(std::fs::read(&path).unwrap(), b"png");
-    assert!(write_send_review_image_bytes(&repo, "a.png", b"").is_err());
+    write_send_review_image_bytes(&repo, "a.png", b"").unwrap_err();
   }
 
   #[test]

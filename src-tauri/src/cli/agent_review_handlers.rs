@@ -355,7 +355,7 @@ mod tests {
     core::review_prompt::write_snapshot(repo, Some("a\nb")).unwrap();
     let quoted = quoted_text_for(repo, "review_prompt", "repo", "body.md", 2, 2, None).unwrap();
     assert_eq!(quoted.as_deref(), Some("b"));
-    assert!(quoted_text_for(repo, "review_prompt", "repo", "x.md", 1, 1, None).is_err());
+    quoted_text_for(repo, "review_prompt", "repo", "x.md", 1, 1, None).unwrap_err();
   }
 
   #[test]
@@ -394,7 +394,7 @@ mod tests {
     .unwrap();
     resolve_comment(repo, &comment.id).unwrap();
     delete_comment(repo, &comment.id).unwrap();
-    assert!(delete_comment(repo, &comment.id).is_err());
+    delete_comment(repo, &comment.id).unwrap_err();
   }
 
   #[test]
@@ -465,10 +465,9 @@ mod tests {
       ("github_pr", "42", "../a.rs", 1),
       ("github_pr", "42", "/etc/passwd", 1),
     ] {
-      assert!(
-        check(target_type, target_id, file, end, None).is_err(),
+      check(target_type, target_id, file, end, None).expect_err(&format!(
         "{target_type} {target_id} {file}:{end} was accepted"
-      );
+      ));
     }
   }
 
@@ -483,7 +482,7 @@ mod tests {
 
   #[test]
   fn rejects_an_unknown_side() {
-    assert!(parse_side(Some("both")).is_err());
+    parse_side(Some("both")).unwrap_err();
     assert_eq!(parse_side(Some("old")).unwrap().as_deref(), Some("old"));
     assert_eq!(parse_side(None).unwrap(), None);
   }
