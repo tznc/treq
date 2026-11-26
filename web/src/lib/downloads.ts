@@ -69,6 +69,8 @@ export type InstallerLink = {href: string; label: string; format: string};
 export type PlatformDownloads = {
   id: PlatformId;
   name: string;
+  // An early build, labelled as such on the download page.
+  preview: boolean;
   installers: InstallerLink[];
 };
 
@@ -85,6 +87,7 @@ export function detectPlatform(userAgent: string): PlatformId | null {
 const PLATFORMS: {
   id: PlatformId;
   name: string;
+  preview?: boolean;
   installers: {ext: RegExp; format: string; label: string; arm?: boolean}[];
 }[] = [
   {
@@ -115,6 +118,7 @@ const PLATFORMS: {
   {
     id: 'android',
     name: 'Android',
+    preview: true,
     installers: [{ext: /\.apk$/i, format: '.apk', label: 'arm64'}],
   },
 ];
@@ -125,9 +129,10 @@ export function listPlatforms(
   assets: ReleaseAsset[],
   current: PlatformId | null,
 ): PlatformDownloads[] {
-  const platforms = PLATFORMS.map(({id, name, installers}) => ({
+  const platforms = PLATFORMS.map(({id, name, preview = false, installers}) => ({
     id,
     name,
+    preview,
     installers: installers.flatMap(({ext, format, label, arm}) => {
       const match = assets.find(
         (a) => ext.test(a.name) && (arm === undefined || ARM.test(a.name) === arm),
