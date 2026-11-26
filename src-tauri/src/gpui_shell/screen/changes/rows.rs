@@ -456,14 +456,78 @@ impl ChangesView {
     });
   }
 
-  /// The diff's list.
-  pub(super) fn diff_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
-    div().selector("changes-diff-list").size_full().child(
-      list(
-        self.diff.list.clone(),
-        cx.processor(|view, ix, window, cx| view.row(ix, window, cx)),
+  /// The diff's list, with the header of the card it is scrolled into
+  /// pinned over its top.
+  pub(super) fn diff_list(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+    div()
+      .selector("changes-diff-list")
+      .relative()
+      .size_full()
+      .child(
+        list(
+          self.diff.list.clone(),
+          cx.processor(|view, ix, window, cx| view.row(ix, window, cx)),
+        )
+        .size_full(),
       )
-      .size_full(),
+      .children(self.pinned_header(cx))
+  }
+
+  /// The card at the top of the list once its own header has scrolled
+  /// out of view, and how far below the list's top the card ends, when
+  /// that end is measured.
+  fn pinned_card(&self) -> Option<(usize, Option<Pixels>)> {
+    let list = &self.diff.list;
+    let top = list.logical_scroll_top();
+    let row = *self.diff.rows.get(top.item_ix)?;
+    let c = row.card()?;
+    // A head row starts with the `pt_4` gap above its card.
+    if matches!(row, Row::Head(..)) && top.offset_in_item <= self.diff.rem {
+      return None;
+    }
+    let end = top.item_ix
+      + self.diff.rows[top.item_ix..]
+        .iter()
+        .take_while(|r| r.card() == Some(c))
+        .count();
+    let room = list
+      .bounds_for_item(end)
+      .map(|b| (b.top() - list.viewport_bounds().top()).max(px(0.)));
+    Some((c, room))
+  }
+
+  /// The pinned card's header. It is cut to the room above the card's
+  /// end, so the next card pushes it up and out.
+  fn pinned_header(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    let (c, room) = self.pinned_card()?;
+    let p = theme::palette(self.dark);
+    let shut = self.diff.cards[c].shut;
+    let id = format!("pinned-file-header-{}", self.diff.cards[c].path);
+    let header = self.card_header(c, &p, cx);
+    Some(
+      div()
+        .selector(SharedString::from(id))
+        .absolute()
+        .top_0()
+        .left_0()
+        .right_0()
+        .when_some(room, |this, room| this.max_h(room))
+        .flex()
+        .flex_col()
+        .justify_end()
+        .overflow_hidden()
+        .block_mouse_except_scroll()
+        .child(
+          div()
+            .flex_none()
+            .border_x_1()
+            .border_t_1()
+            .when(shut, |this| this.border_b_1())
+            .border_color(p.border)
+            .bg(p.background)
+            .child(header),
+        )
+        .into_any_element(),
     )
   }
 

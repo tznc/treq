@@ -3172,24 +3172,8 @@ impl ChangesView {
   /// no line above its hunks, or what it shows in their place.
   fn card_head(&mut self, c: usize, p: &Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
     let card = &self.diff.cards[c];
-    let (path, status, old_path) = (
-      card.path.clone(),
-      card.status.clone(),
-      card.old_path.clone(),
-    );
-    let (committed, shut, kind, conflicted_file) =
-      (card.committed, card.shut, card.body, card.conflicted);
-    let counts = self.card_counts(c);
-    let header = self.file_header(
-      &path,
-      &status,
-      old_path.as_deref(),
-      committed,
-      shut,
-      counts,
-      p,
-      cx,
-    );
+    let (path, kind, conflicted_file) = (card.path.clone(), card.body, card.conflicted);
+    let header = self.card_header(c, p, cx);
     let card = div()
       .child(header)
       .children(self.file_comments(&path, p, cx));
@@ -3301,6 +3285,28 @@ impl ChangesView {
       Body::Collapsed => card,
     }
     .into_any_element()
+  }
+
+  /// A card's file header: its path, actions and counts.
+  fn card_header(&mut self, c: usize, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    let card = &self.diff.cards[c];
+    let (path, status, old_path) = (
+      card.path.clone(),
+      card.status.clone(),
+      card.old_path.clone(),
+    );
+    let (committed, shut) = (card.committed, card.shut);
+    let counts = self.card_counts(c);
+    self.file_header(
+      &path,
+      &status,
+      old_path.as_deref(),
+      committed,
+      shut,
+      counts,
+      p,
+      cx,
+    )
   }
 
   #[expect(

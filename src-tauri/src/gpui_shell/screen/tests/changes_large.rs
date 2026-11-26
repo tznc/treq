@@ -249,7 +249,10 @@ fn a_file_header_in_place_is_not_pinned(cx: &mut TestAppContext) {
 fn scrolling_into_a_file_pins_its_header_to_the_top(cx: &mut TestAppContext) {
   let mut h = expanded(cx);
   scroll_diff(&mut h, -600.);
-  assert!(!shows_line(&mut h, 0, 0), "the file's own header scrolled away");
+  assert!(
+    !shows_line(&mut h, 0, 0),
+    "the file's own header scrolled away"
+  );
   let pinned = h
     .cx
     .debug_bounds("pinned-file-header-src/module_0.rs")
@@ -271,7 +274,10 @@ fn the_next_file_pushes_the_pinned_header_up(cx: &mut TestAppContext) {
     .cx
     .debug_bounds("file-card-src/module_1.rs")
     .expect("next card");
-  assert!(pinned.bottom() <= next.top(), "{pinned:?} overlaps {next:?}");
+  assert!(
+    pinned.bottom() <= next.top(),
+    "{pinned:?} overlaps {next:?}"
+  );
 }
 
 #[gpui::test]
