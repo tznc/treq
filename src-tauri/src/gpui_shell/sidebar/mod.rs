@@ -1333,11 +1333,10 @@ impl Sidebar {
               .when(!saved, |this| this.text_color(palette.muted_foreground))
               .child(name),
           )
-          .child(icon(
-            theme::ICON_CHEVRON_DOWN,
-            14.,
-            palette.muted_foreground,
-          ))
+          .child(
+            icon(theme::ICON_CHEVRON_DOWN, 14., palette.muted_foreground)
+              .debug_selector(|| "project-chevron".into()),
+          )
           .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
             this.hover_tooltip(key.clone(), *hovered, cx)
           }))

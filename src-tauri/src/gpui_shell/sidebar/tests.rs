@@ -1224,6 +1224,21 @@ fn project_button_opens_the_project_menu(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn project_button_chevron_ends_the_button(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![]));
+  let button = h.bounds("project-button").expect("button");
+  let chevron = h.bounds("project-chevron").expect("chevron");
+  // A short name leaves room; the chevron still trails at the button's
+  // right edge (inside its border and padding), not after the name.
+  assert!(
+    button.right() - chevron.right() <= gpui::px(10.),
+    "chevron ends at {:?}, button at {:?}",
+    chevron.right(),
+    button.right()
+  );
+}
+
+#[gpui::test]
 fn project_button_sits_left_of_the_command_palette(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, snapshot(vec![]));
   let project = h.bounds("project-button").expect("project button");
