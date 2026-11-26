@@ -9,6 +9,7 @@
 import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
+import { errorMessage } from "../error-message.ts";
 import { fixture, mod } from "../fixture.ts";
 import { capture } from "./capture.ts";
 import { openWorkspace, ready, settle } from "./helpers.ts";
@@ -86,7 +87,7 @@ async function step(page: Page, what: string, run: () => Promise<void>): Promise
   try {
     await run();
   } catch (err) {
-    trail.push(`  miss: ${(String(err).split("\n")[0] ?? "").slice(0, 120)}`);
+    trail.push(`  miss: ${(errorMessage(err).split("\n")[0] ?? "").slice(0, 120)}`);
     await page.keyboard.press("Escape").catch(() => {});
   }
   await settle(page, 250);
