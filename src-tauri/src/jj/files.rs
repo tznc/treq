@@ -455,7 +455,7 @@ pub(super) fn file_hunks_between(
     return Err(JjError::IoError("Invalid file path".to_string()));
   }
   let target_repo_path = RepoPathBuf::from_internal_string(file_path)
-    .map_err(|_| JjError::IoError("Invalid file path".to_string()))?;
+    .map_err(|e| JjError::IoError(format!("Invalid file path: {e}")))?;
   let before = block_on(parent_tree.path_value(target_repo_path.as_ref()))
     .map_err(|e| JjError::IoError(format!("Failed to read parent path value: {}", e)))?;
   let after = block_on(tree.path_value(target_repo_path.as_ref()))
@@ -604,7 +604,7 @@ pub fn jj_get_file_lines(
     let parent_tree = block_on(wc_commit.parent_tree(loaded.repo.as_ref()))
       .map_err(|e| JjError::IoError(format!("Failed to read parent tree: {}", e)))?;
     let repo_path = RepoPathBuf::from_relative_path(relative)
-      .map_err(|_| JjError::IoError("Invalid file path".to_string()))?;
+      .map_err(|e| JjError::IoError(format!("Invalid file path: {e}")))?;
     let value = block_on(parent_tree.path_value(&repo_path))
       .map_err(|e| JjError::IoError(format!("Failed to read parent path value: {}", e)))?;
     let materialized = block_on(jj_lib::conflicts::materialize_tree_value(

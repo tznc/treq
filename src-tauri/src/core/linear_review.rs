@@ -198,9 +198,9 @@ pub fn quote_snapshot_lines(
     ));
   }
   let path = dir.join(file);
-  let content = std::fs::read_to_string(&path).map_err(|_| {
+  let content = std::fs::read_to_string(&path).map_err(|e| {
     format!(
-      "invalid_arguments: no snapshot file '{file}' for {target_type} {target_id}. Start the review from treq so it writes the snapshot"
+      "invalid_arguments: no snapshot file '{file}' for {target_type} {target_id} ({e}). Start the review from treq so it writes the snapshot"
     )
   })?;
   let lines: Vec<&str> = content.lines().collect();

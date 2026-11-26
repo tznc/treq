@@ -462,7 +462,7 @@ impl LogWriter {
     let conn = self
       .inner
       .lock()
-      .map_err(|_| "Log writer mutex poisoned".to_string())?;
+      .map_err(|e| format!("Log writer mutex poisoned: {e}"))?;
     conn
       .execute(
         "INSERT INTO logs (

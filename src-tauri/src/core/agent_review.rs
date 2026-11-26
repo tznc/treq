@@ -226,7 +226,7 @@ fn contained_path(root: &Path, file_path: &str) -> Result<PathBuf, String> {
       .map_err(|e| format!("Failed to read {file_path}: {e}"))?;
     requested
       .strip_prefix(&root)
-      .map_err(|_| format!("'{file_path}' is outside the workspace"))?
+      .map_err(|e| format!("'{file_path}' is outside the workspace: {e}"))?
       .to_string_lossy()
       .into_owned()
   } else {

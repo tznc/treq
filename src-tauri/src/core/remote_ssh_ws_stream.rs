@@ -160,7 +160,7 @@ pub async fn connect_relay(
     .into_client_request()
     .map_err(|error| format!("invalid relay url: {error}"))?;
   let mut authorization = HeaderValue::from_str(&format!("Bearer {access_token}"))
-    .map_err(|_| "relay access token is not a valid header value".to_string())?;
+    .map_err(|e| format!("relay access token is not a valid header value: {e}"))?;
   authorization.set_sensitive(true);
   request.headers_mut().insert("authorization", authorization);
 

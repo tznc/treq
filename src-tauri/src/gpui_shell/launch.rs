@@ -102,7 +102,7 @@ impl LaunchStore for Store<'_> {
       IssueSource::Github => {
         let number: u64 = id
           .parse()
-          .map_err(|_| format!("Invalid GitHub issue number: {id}"))?;
+          .map_err(|e| format!("Invalid GitHub issue number: {id}: {e}"))?;
         crate::core::github_issues::open_or_create_workspace_from_github_issue(
           repo, number, title, url,
         )

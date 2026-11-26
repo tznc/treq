@@ -180,7 +180,7 @@ pub async fn token_for(
     return Ok(token.to_string());
   }
   let config = read_config(config_path)?;
-  let now_secs = u64::try_from(now).map_err(|_| "clock is before 1970".to_string())?;
+  let now_secs = u64::try_from(now).map_err(|e| format!("clock is before 1970: {e}"))?;
   let tokens = fetch_tokens(client, &config, &[repository.to_string()], now_secs).await?;
   cache.insert(&tokens);
   let token = cache

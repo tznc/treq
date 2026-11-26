@@ -797,7 +797,7 @@ pub(crate) fn parse_remote_command_request(
       label: require_target("session label")?,
       since: require_value("event number")?
         .parse()
-        .map_err(|_| "msg-poll needs a whole number of events".to_string())?,
+        .map_err(|e| format!("msg-poll needs a whole number of events: {e}"))?,
     }),
     ("pty-remote", "stop") => Ok(TreqCommandRequest::PtyStop {
       backend: pty_backend(matches)?,
@@ -1102,7 +1102,7 @@ pub(super) fn parse_gateway_args(matches: &Matches) -> Result<GatewayArgs, Strin
         .ok_or_else(|| format!("invalid_arguments: --allow {v} is not host:port"))?;
       let port = port
         .parse()
-        .map_err(|_| format!("invalid_arguments: --allow {v} has a bad port"))?;
+        .map_err(|e| format!("invalid_arguments: --allow {v} has a bad port: {e}"))?;
       Ok((host.to_string(), port))
     })
     .collect::<Result<_, String>>()?;

@@ -1883,7 +1883,12 @@ fn undo_target_operation(
     }
     let parents = block_on(operation.parents())
       .map_err(|e| JjError::IoError(format!("Failed to load operation parents: {}", e)))?;
-    let [parent] = <[Operation; 1]>::try_from(parents).map_err(|_| changed())?;
+    let [parent] = <[Operation; 1]>::try_from(parents).map_err(|parents| {
+      JjError::IoError(format!(
+        "Cannot undo: the repository has changed since this action ({} parent operations)",
+        parents.len()
+      ))
+    })?;
     operation = parent;
   }
   Ok(operation)
@@ -4296,9 +4301,9 @@ fn resolve_target_branch_symbol(
   workspace_path: &str,
   target_branch: &str,
 ) -> Result<String, JjError> {
-  resolve_local_target_branch_revision(loaded, workspace_path, target_branch).map_err(|_| {
+  resolve_local_target_branch_revision(loaded, workspace_path, target_branch).map_err(|e| {
     JjError::IoError(format!(
-      "Target branch '{}' could not be resolved",
+      "Target branch '{}' could not be resolved: {e}",
       target_branch
     ))
   })
