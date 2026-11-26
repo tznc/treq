@@ -1238,6 +1238,42 @@ fn project_button_chevron_ends_the_button(cx: &mut TestAppContext) {
   );
 }
 
+/// Whether the project button reads as expanded, its menu open.
+fn project_expanded(h: &mut Harness) -> Option<bool> {
+  use gpui_testing_library::prelude::*;
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  screen
+    .get_by_role(gpui_testing_library::by::role(Role::Button).name("Project: Unsaved"))
+    .snapshot()
+    .expanded()
+}
+
+#[gpui::test]
+fn project_button_is_expanded_while_its_menu_is_open(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![]));
+  assert_eq!(project_expanded(&mut h), Some(false), "closed at first");
+  h.click("project-button");
+  assert_eq!(project_expanded(&mut h), Some(true));
+  h.sidebar
+    .update_in(&mut h.cx, |s, _, cx| s.menu_closed(s.menu_generation(), cx));
+  assert_eq!(project_expanded(&mut h), Some(false), "the menu closed");
+}
+
+#[gpui::test]
+fn an_earlier_menu_closing_leaves_the_project_menu_open(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![]));
+  h.click("project-button");
+  let first = h.sidebar.read_with(&h.cx, |s, _| s.menu_generation());
+  // Clicked again: the first menu's close lands after the second opens.
+  h.click("project-button");
+  h.sidebar
+    .update_in(&mut h.cx, |s, _, cx| s.menu_closed(first, cx));
+  assert_eq!(project_expanded(&mut h), Some(true));
+}
+
 #[gpui::test]
 fn project_button_sits_left_of_the_command_palette(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, snapshot(vec![]));

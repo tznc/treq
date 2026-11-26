@@ -1245,6 +1245,8 @@ thread_local! {
   static WINDOWS: RefCell<HashMap<String, PopupWindow>> = RefCell::default();
   /// A menu is open, so tooltips stay hidden, as under a React context menu.
   static MENU_OPEN: Cell<bool> = const { Cell::new(false) };
+  /// What runs when the open menu closes, for its owner's button.
+  static MENU_CLOSED: RefCell<Option<Box<dyn FnOnce()>>> = RefCell::default();
 }
 
 /// A dropdown's box below `anchor` with their right edges lined up, or their
@@ -1421,10 +1423,34 @@ fn show(
   window.show().ignore_closed();
 }
 
+/// A menu opens, in place of any open one, which counts as closed. Main
+/// thread only.
+fn menu_opened() {
+  run_menu_closed();
+  MENU_OPEN.with(|open| open.set(true));
+}
+
+/// Runs `f` once the open menu closes, or at once when none is open. Main
+/// thread only.
+pub fn on_menu_closed(f: impl FnOnce() + 'static) {
+  if MENU_OPEN.with(Cell::get) {
+    MENU_CLOSED.with(|closed| *closed.borrow_mut() = Some(Box::new(f)));
+  } else {
+    f();
+  }
+}
+
+fn run_menu_closed() {
+  if let Some(f) = MENU_CLOSED.with(|closed| closed.borrow_mut().take()) {
+    f();
+  }
+}
+
 /// Hides the popup for `slot` (a tooltip or menu). Main thread only.
 fn hide(slot: Slot) {
   if slot == Slot::Menu {
     MENU_OPEN.with(|open| open.set(false));
+    run_menu_closed();
   }
   hide_label(&slot.label());
 }
@@ -1581,7 +1607,7 @@ pub fn show_menu(
   else {
     return;
   };
-  MENU_OPEN.with(|open| open.set(true));
+  menu_opened();
   hide(Slot::Tooltip);
   hide(Slot::Submenu);
   // base-ui's context menu: 2px right of and 5px above the pointer.
@@ -1612,7 +1638,7 @@ pub fn show_dropdown(
   else {
     return;
   };
-  MENU_OPEN.with(|open| open.set(true));
+  menu_opened();
   hide(Slot::Tooltip);
   hide(Slot::Submenu);
   let anchor = Bounds::new(anchor.origin + client.origin, anchor.size);
@@ -1632,6 +1658,49 @@ mod tests {
 
   fn bounds(x: f32, y: f32, w: f32, h: f32) -> Bounds<Pixels> {
     Bounds::new(gpui::point(px(x), px(y)), gpui::size(px(w), px(h)))
+  }
+
+  /// A close hook and how many times it ran.
+  fn counter() -> (Rc<Cell<u32>>, impl FnOnce() + 'static) {
+    let ran = Rc::new(Cell::new(0));
+    let hook = {
+      let ran = ran.clone();
+      move || ran.set(ran.get() + 1)
+    };
+    (ran, hook)
+  }
+
+  #[test]
+  fn a_menu_tells_its_owner_once_when_it_closes() {
+    let (ran, hook) = counter();
+    menu_opened();
+    on_menu_closed(hook);
+    assert_eq!(ran.get(), 0, "still open");
+    hide(Slot::Menu);
+    assert_eq!(ran.get(), 1);
+    hide(Slot::Menu);
+    assert_eq!(ran.get(), 1, "only once");
+  }
+
+  #[test]
+  fn a_menu_replaced_by_another_counts_as_closed() {
+    let (first, hook) = counter();
+    menu_opened();
+    on_menu_closed(hook);
+    let (second, hook) = counter();
+    menu_opened();
+    on_menu_closed(hook);
+    assert_eq!((first.get(), second.get()), (1, 0));
+    hide(Slot::Menu);
+    assert_eq!((first.get(), second.get()), (1, 1));
+  }
+
+  #[test]
+  fn a_menu_that_never_opened_closes_at_once() {
+    let (ran, hook) = counter();
+    hide(Slot::Menu);
+    on_menu_closed(hook);
+    assert_eq!(ran.get(), 1);
   }
 
   #[test]
