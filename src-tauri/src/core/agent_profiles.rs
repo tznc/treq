@@ -151,23 +151,34 @@ pub fn session_profile(
   )
 }
 
-/// A leading `@name` in a prompt: the profile it names, preferring
-/// `agent`'s, and the prompt after it. `None` when no single profile has
+/// A leading `@name` or `@name/mode` in a prompt: the profile it names,
+/// preferring `agent`'s, the session's target (`name` or `name/mode`), and
+/// the prompt after it. `None` when no single profile has
 /// that name, so other `@` text is left alone.
 pub fn mention<'a>(
   profiles: &[AgentProfile],
   agent: &str,
   prompt: &'a str,
-) -> Option<(AgentProfile, &'a str)> {
+) -> Option<(AgentProfile, String, &'a str)> {
   let rest = prompt.trim_start().strip_prefix('@')?;
   let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
-  let (name, rest) = rest.split_at(end);
+  let (token, rest) = rest.split_at(end);
+  // `@profile/mode`; a part after `/` that is no valid name (a path) is
+  // no mention.
+  let (name, mode) = super::agent_modes::split_target(token);
+  if mode.is_some_and(|m| validate_name(m).as_deref() != Ok(m)) {
+    return None;
+  }
   let named: Vec<_> = profiles.iter().filter(|p| p.name == name).collect();
   let found = named
     .iter()
     .find(|p| p.agent == agent)
     .or_else(|| (named.len() == 1).then(|| &named[0]))?;
-  Some(((*found).clone(), rest.trim_start()))
+  let target = match mode {
+    Some(mode) => format!("{name}/{mode}"),
+    None => name.to_string(),
+  };
+  Some(((*found).clone(), target, rest.trim_start()))
 }
 
 #[cfg(test)]
@@ -322,16 +333,32 @@ mod tests {
     ];
     assert_eq!(
       mention(&profiles, "claude", "  @work fix the bug"),
-      Some((profile("claude", "work"), "fix the bug"))
+      Some((profile("claude", "work"), "work".into(), "fix the bug"))
     );
     assert_eq!(
       mention(&profiles, "codex", "@work fix"),
-      Some((profile("codex", "work"), "fix"))
+      Some((profile("codex", "work"), "work".into(), "fix"))
     );
     // Only Codex has it: the prompt goes to Codex.
     assert_eq!(
       mention(&profiles, "claude", "@personal\nfix"),
-      Some((profile("codex", "personal"), "fix"))
+      Some((profile("codex", "personal"), "personal".into(), "fix"))
+    );
+  }
+
+  #[test]
+  fn mention_routes_to_a_profile_mode() {
+    let profiles = vec![profile("claude", "work"), profile("src", "x")];
+    assert_eq!(
+      mention(&profiles, "claude", "@work/deep fix"),
+      Some((profile("claude", "work"), "work/deep".into(), "fix"))
+    );
+    // A path is not a mode: only a valid mode name counts.
+    let with_src = vec![profile("claude", "src")];
+    assert_eq!(mention(&with_src, "claude", "@src/main.rs is broken"), None);
+    assert_eq!(
+      mention(&profiles, "claude", "@work/ fix"),
+      Some((profile("claude", "work"), "work".into(), "fix"))
     );
   }
 
