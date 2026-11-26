@@ -45,6 +45,30 @@ test.describe('Download page', () => {
     });
   }
 
+  test.describe('on Android', () => {
+    test.use({ userAgent: UA.android });
+
+    test('focuses Android and labels it a preview', async ({ page }) => {
+      await page.goto('/download/');
+      const focus = page.getByRole('region', { name: 'Download for Android' });
+      await expect(focus.getByText('Your system')).toBeVisible();
+      await expect(focus.getByText('Preview', { exact: true })).toBeVisible();
+      await expect(focus.getByRole('link').first()).toHaveAttribute('href', /\.apk$/);
+    });
+  });
+
+  test.describe('on macOS, the Android card', () => {
+    test.use({ userAgent: UA.mac });
+
+    test('is labelled a preview', async ({ page }) => {
+      await page.goto('/download/');
+      const android = page.getByRole('listitem').filter({ has: page.getByRole('heading', { name: 'Android' }) });
+      await expect(android.getByText('Preview', { exact: true })).toBeVisible();
+      const windows = page.getByRole('listitem').filter({ has: page.getByRole('heading', { name: 'Windows' }) });
+      await expect(windows.getByText('Preview', { exact: true })).toHaveCount(0);
+    });
+  });
+
   test.describe('on an iPhone', () => {
     test.use({ userAgent: UA.iphone });
 
