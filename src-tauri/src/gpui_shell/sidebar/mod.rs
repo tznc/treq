@@ -1327,6 +1327,7 @@ impl Sidebar {
           )
           .child(
             ui::text(div(), TextSize::Sm)
+              .flex_1()
               .min_w_0()
               .truncate()
               .font_weight(gpui::FontWeight::MEDIUM)
