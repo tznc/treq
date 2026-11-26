@@ -3,7 +3,10 @@
 
 use std::collections::HashMap;
 
-use crate::core::agent_profiles::{self, AgentProfile};
+use crate::core::{
+  agent_modes,
+  agent_profiles::{self, AgentProfile},
+};
 
 use super::{account_data::AccountHost, checklist::ToolsHost, settings::RepositoryFields};
 use crate::{
@@ -416,6 +419,8 @@ pub struct AppFields {
   pub profiles: Vec<AgentProfile>,
   /// Each profile agent's default profile name, `""` for its own sign-in.
   pub default_profiles: Vec<(String, String)>,
+  /// Every profile's modes.
+  pub modes: agent_modes::Modes,
 }
 
 /// The agents that take account profiles, in `AGENTS` order.
@@ -440,7 +445,10 @@ pub fn app_keys() -> Vec<String> {
   ]
   .into_iter()
   .map(str::to_string)
-  .chain([agent_profiles::PROFILES_SETTING.to_string()])
+  .chain([
+    agent_profiles::PROFILES_SETTING.to_string(),
+    agent_modes::MODES_SETTING.to_string(),
+  ])
   .chain(profile_agents().map(agent_profiles::default_setting))
   .chain(PREVIEW_FEATURES.iter().map(|(f, _, _)| f.setting_key()))
   .collect()
@@ -480,6 +488,7 @@ impl AppFields {
           (agent.to_string(), name.unwrap_or_default())
         })
         .collect(),
+      modes: agent_modes::parse(string(values, agent_modes::MODES_SETTING).as_deref()),
     }
   }
 
@@ -509,6 +518,10 @@ impl AppFields {
         .iter()
         .map(|(agent, name)| (agent_profiles::default_setting(agent), name.clone())),
     )
+    .chain([(
+      agent_modes::MODES_SETTING.to_string(),
+      agent_modes::to_json(&self.modes),
+    )])
     .collect()
   }
 }
@@ -715,8 +728,11 @@ pub fn save_timing(field: &str) -> Option<SaveTiming> {
     | "app.conflictMarkerStyle"
     | "app.notifyAgentFinished"
     | "app.setupScriptAlwaysRun"
-    | "app.profiles" => Some(SaveTiming::Now),
-    f if f.starts_with("app.defaultProfile.") => Some(SaveTiming::Now),
+    | "app.profiles"
+    | "app.modes" => Some(SaveTiming::Now),
+    f if f.starts_with("app.defaultProfile.") || f.starts_with("app.defaultMode.") => {
+      Some(SaveTiming::Now)
+    }
     _ => None,
   }
 }

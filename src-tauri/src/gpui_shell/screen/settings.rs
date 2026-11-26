@@ -41,6 +41,7 @@ use super::{
 };
 use crate::{
   core::{
+    agent_modes,
     app_setup_script::AppSetupScriptStatus,
     feature_preview::PreviewFeature,
     skills::{
@@ -268,6 +269,45 @@ pub struct Application {
   pub new_profile_agent: String,
   pub new_profile_name: String,
   pub profile_error: Option<String>,
+  pub modes: Vec<ModeRow>,
+  pub default_modes: Vec<DefaultMode>,
+  pub mode_draft: ModeDraft,
+  pub mode_error: Option<String>,
+  pub mode_profile_options: Vec<SelectOption>,
+  pub effort_options: Vec<SelectOption>,
+  pub permission_options: Vec<SelectOption>,
+}
+
+/// A profile mode in the Application tab.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModeRow {
+  /// `agent/profile/mode`, what Edit and Remove name.
+  pub key: String,
+  pub label: String,
+  /// What it sets, such as `opus · high effort`.
+  pub summary: String,
+  pub default: bool,
+}
+
+/// The default mode of one profile that has modes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DefaultMode {
+  /// `agent/profile`.
+  pub profile: String,
+  pub label: String,
+  pub value: String,
+  pub options: Vec<SelectOption>,
+}
+
+/// The mode form's fields; `profile` is `agent/profile`.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ModeDraft {
+  pub profile: String,
+  pub name: String,
+  pub model: String,
+  pub effort: String,
+  pub permission: String,
+  pub instructions: String,
 }
 
 /// An agent account profile in the Application tab.
@@ -368,6 +408,52 @@ fn agent_options(default: &str) -> Vec<SelectOption> {
     ("devin", "Devin"),
     ("gemini", "Gemini"),
   ])
+}
+
+/// The mode form's profile: the one chosen, else the first profile.
+fn mode_profile(
+  draft: &ModeDraft,
+  profiles: &[crate::core::agent_profiles::AgentProfile],
+) -> String {
+  if !draft.profile.is_empty() {
+    return draft.profile.clone();
+  }
+  profiles
+    .first()
+    .map(|p| format!("{}/{}", p.agent, p.name))
+    .unwrap_or_default()
+}
+
+/// What a mode sets, such as `opus · high effort · Plan`.
+fn mode_summary(mode: &agent_modes::Mode) -> String {
+  let parts: Vec<String> = [
+    mode.model.clone(),
+    mode.effort.as_ref().map(|e| format!("{e} effort")),
+    mode
+      .permission_mode
+      .as_deref()
+      .map(|p| permission_label(p).to_string()),
+    mode
+      .instructions
+      .as_ref()
+      .map(|_| "instructions".to_string()),
+  ]
+  .into_iter()
+  .flatten()
+  .collect();
+  if parts.is_empty() {
+    "Agent defaults".into()
+  } else {
+    parts.join(" · ")
+  }
+}
+
+fn permission_label(mode: &str) -> &str {
+  match mode {
+    "plan" => "Plan",
+    "acceptEdits" => "Accept edits",
+    other => other,
+  }
 }
 
 /// An agent's name as the user sees it.
@@ -539,6 +625,9 @@ pub struct SettingsView {
   app_again: Vec<String>,
   /// The account profile being added, and why the last add was refused.
   new_profile: (String, String),
+  /// The mode being added or edited, and why the last save was refused.
+  mode_draft: ModeDraft,
+  mode_error: Option<String>,
   profile_error: Option<String>,
   /// Fields edited while a Repository save ran.
   repo_again: Vec<String>,
@@ -603,6 +692,8 @@ impl SettingsView {
       app_again: Vec::new(),
       new_profile: ("claude".into(), String::new()),
       profile_error: None,
+      mode_draft: ModeDraft::default(),
+      mode_error: None,
       repo_again: Vec::new(),
     };
     this.load_app(cx);
@@ -1518,6 +1609,14 @@ impl SettingsView {
           let skill = skill.to_string();
           self.press_skill(action, &skill, cx);
         }
+        Some(("app.editMode", key)) => {
+          let key = key.to_string();
+          self.edit_mode(&key);
+        }
+        Some(("app.removeMode", key)) => {
+          let key = key.to_string();
+          self.remove_mode(&key, cx);
+        }
         Some(("app.removeProfile", key)) => {
           let key = key.to_string();
           self.remove_profile(&key, cx);
@@ -1538,6 +1637,7 @@ impl SettingsView {
           }
           "app.setupScript.run" => self.run_setup(cx),
           "app.addProfile" => self.add_profile(cx),
+          "app.saveMode" => self.save_mode(cx),
           "repo.reviewPrompt.tune" => self.tune_review_prompt(cx),
           "repo.promptEdits.dismissAll" => self.dismiss_all_prompt_edits(cx),
           "repo.yaml.reload" => self.load_repo(cx),
@@ -1639,6 +1739,15 @@ impl SettingsView {
           "app.notifyAgentFinished" => app.notify_agent_finished = value.as_bool().unwrap_or(true),
           "app.agentInstructions" => app.agent_instructions = text,
           "app.newProfileAgent" => self.new_profile.0 = text,
+          "app.modeProfile" => self.mode_draft.profile = text,
+          "app.modeName" => {
+            self.mode_draft.name = text;
+            self.mode_error = None;
+          }
+          "app.modeModel" => self.mode_draft.model = text,
+          "app.modeEffort" => self.mode_draft.effort = text,
+          "app.modePermission" => self.mode_draft.permission = text,
+          "app.modeInstructions" => self.mode_draft.instructions = text,
           "app.newProfileName" => {
             self.new_profile.1 = text;
             self.profile_error = None;
@@ -1647,6 +1756,14 @@ impl SettingsView {
             if let Some(agent) = field.strip_prefix("app.defaultProfile.") {
               if let Some((_, name)) = app.default_profiles.iter_mut().find(|(a, _)| a == agent) {
                 *name = text;
+              }
+            } else if let Some((agent, profile)) = field
+              .strip_prefix("app.defaultMode.")
+              .and_then(|key| key.split_once('/'))
+            {
+              let name = Some(text.as_str()).filter(|t| !t.is_empty());
+              if let Ok(modes) = agent_modes::set_default(&app.modes, agent, profile, name) {
+                app.modes = modes;
               }
             }
           }
@@ -1675,12 +1792,86 @@ impl SettingsView {
     }
   }
 
+  /// Saves the mode form as a mode of its profile, adding or replacing it.
+  fn save_mode(&mut self, cx: &mut Context<Self>) {
+    let Some(app) = &mut self.app else {
+      return;
+    };
+    let draft = ModeDraft {
+      profile: mode_profile(&self.mode_draft, &app.profiles),
+      ..self.mode_draft.clone()
+    };
+    let Some((agent, profile)) = draft.profile.split_once('/') else {
+      self.mode_error = Some("Choose a profile for the mode".into());
+      return;
+    };
+    let mode = agent_modes::Mode {
+      name: draft.name.clone(),
+      model: Some(draft.model.clone()),
+      effort: Some(draft.effort.clone()),
+      permission_mode: Some(draft.permission.clone()),
+      instructions: Some(draft.instructions.clone()),
+    };
+    match agent_modes::save(&app.modes, agent, profile, mode) {
+      Ok(modes) => {
+        app.modes = modes;
+        self.mode_draft = ModeDraft {
+          profile: draft.profile.clone(),
+          ..Default::default()
+        };
+        self.mode_error = None;
+        self.save_fields(vec!["app.modes".into()], cx);
+      }
+      Err(err) => self.mode_error = Some(err),
+    }
+  }
+
+  /// Loads `agent/profile/mode` into the mode form.
+  fn edit_mode(&mut self, key: &str) {
+    let Some(app) = &self.app else {
+      return;
+    };
+    let mut parts = key.splitn(3, '/');
+    let (Some(agent), Some(profile), Some(name)) = (parts.next(), parts.next(), parts.next())
+    else {
+      return;
+    };
+    let Some(mode) = agent_modes::modes_for(&app.modes, agent, profile)
+      .iter()
+      .find(|m| m.name == name)
+    else {
+      return;
+    };
+    let text = |v: &Option<String>| v.clone().unwrap_or_default();
+    self.mode_draft = ModeDraft {
+      profile: format!("{agent}/{profile}"),
+      name: mode.name.clone(),
+      model: text(&mode.model),
+      effort: text(&mode.effort),
+      permission: text(&mode.permission_mode),
+      instructions: text(&mode.instructions),
+    };
+    self.mode_error = None;
+  }
+
+  fn remove_mode(&mut self, key: &str, cx: &mut Context<Self>) {
+    let Some(app) = &mut self.app else {
+      return;
+    };
+    let mut parts = key.splitn(3, '/');
+    if let (Some(agent), Some(profile), Some(name)) = (parts.next(), parts.next(), parts.next()) {
+      app.modes = agent_modes::remove(&app.modes, agent, profile, name);
+      self.save_fields(vec!["app.modes".into()], cx);
+    }
+  }
+
   /// Removes `agent/name`, and clears it where it was the default.
   fn remove_profile(&mut self, key: &str, cx: &mut Context<Self>) {
     let (Some(app), Some((agent, name))) = (&mut self.app, key.split_once('/')) else {
       return;
     };
     app.profiles = crate::core::agent_profiles::remove(&app.profiles, agent, name);
+    app.modes = agent_modes::remove_profile(&app.modes, agent, name);
     for (a, default) in &mut app.default_profiles {
       if a == agent && default == name {
         default.clear();
@@ -1794,6 +1985,67 @@ impl SettingsView {
         new_profile_agent: self.new_profile.0.clone(),
         new_profile_name: self.new_profile.1.clone(),
         profile_error: self.profile_error.clone(),
+        modes: app
+          .modes
+          .iter()
+          .flat_map(|entry| {
+            entry.modes.iter().map(move |mode| ModeRow {
+              key: format!("{}/{}/{}", entry.agent, entry.profile, mode.name),
+              label: format!(
+                "{} · {} · {}",
+                agent_label(&entry.agent),
+                entry.profile,
+                mode.name
+              ),
+              summary: mode_summary(mode),
+              default: entry.default.as_deref() == Some(mode.name.as_str()),
+            })
+          })
+          .collect(),
+        default_modes: app
+          .modes
+          .iter()
+          .map(|entry| DefaultMode {
+            profile: format!("{}/{}", entry.agent, entry.profile),
+            label: format!("{} · {}", agent_label(&entry.agent), entry.profile),
+            value: entry.default.clone().unwrap_or_default(),
+            options: std::iter::once(SelectOption {
+              value: String::new(),
+              label: "No mode".into(),
+            })
+            .chain(entry.modes.iter().map(|m| SelectOption {
+              value: m.name.clone(),
+              label: m.name.clone(),
+            }))
+            .collect(),
+          })
+          .collect(),
+        mode_draft: ModeDraft {
+          profile: mode_profile(&self.mode_draft, &app.profiles),
+          ..self.mode_draft.clone()
+        },
+        mode_error: self.mode_error.clone(),
+        mode_profile_options: app
+          .profiles
+          .iter()
+          .map(|p| SelectOption {
+            value: format!("{}/{}", p.agent, p.name),
+            label: format!("{} · {}", agent_label(&p.agent), p.name),
+          })
+          .collect(),
+        effort_options: options(&[
+          ("", "Default effort"),
+          ("low", "Low"),
+          ("medium", "Medium"),
+          ("high", "High"),
+          ("xhigh", "Extra high"),
+          ("max", "Max"),
+        ]),
+        permission_options: options(&[
+          ("", "Default permissions"),
+          ("acceptEdits", "Accept edits"),
+          ("plan", "Plan"),
+        ]),
         checklist: checklist::from_statuses(
           "Command-line tools",
           self.statuses.as_deref(),
@@ -2447,6 +2699,184 @@ impl SettingsView {
           ),
       )
       .children(app.profile_error.as_ref().map(|err| {
+        ui::text(div(), TextSize::Sm)
+          .text_color(p.destructive)
+          .child(err.clone())
+      }))
+      .children((!app.profiles.is_empty()).then(|| self.profile_modes(app, p, window, cx)))
+  }
+
+  /// Modes: each profile's default mode, its modes, and a form that adds a
+  /// mode or saves an edited one.
+  fn profile_modes(
+    &mut self,
+    app: &Application,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> gpui::Div {
+    let mut block = div().flex().flex_col().gap_3().mt_3().child(label("Modes")).child(help(
+      "Presets on a profile's account: model, effort, permission mode and instructions. Pick one in the prompt's agent list, or start a prompt with @profile/mode.",
+      p,
+      0.,
+    ));
+    for default in &app.default_modes {
+      let field = format!("app.defaultMode.{}", default.profile);
+      let select = self
+        .controls
+        .select(&field, &default.options, &default.value, window, cx);
+      let name = format!("Default mode for {}", default.label);
+      block = block.child(saved_field_block(
+        &name,
+        form::select_field(
+          format!("settings-default-mode-{}", default.profile),
+          &name,
+          &select,
+          false,
+        ),
+        None,
+        self.mark_of(&field),
+        p,
+      ));
+    }
+    for mode in &app.modes {
+      let name = if mode.default {
+        format!("{} (default)", mode.label)
+      } else {
+        mode.label.clone()
+      };
+      block = block.child(
+        div()
+          .flex()
+          .items_center()
+          .justify_between()
+          .gap_2()
+          .child(
+            div()
+              .min_w_0()
+              .child(ui::text(div(), TextSize::Sm).child(name))
+              .child(
+                ui::text(div(), TextSize::Sm)
+                  .text_color(p.muted_foreground)
+                  .child(mode.summary.clone()),
+              ),
+          )
+          .child(
+            div()
+              .flex()
+              .gap_1()
+              .child(
+                Button::new(
+                  SharedString::from(format!("settings-mode-edit-{}", mode.key)),
+                  p,
+                )
+                .variant(Variant::Ghost)
+                .size(Size::Sm)
+                .label("Edit")
+                .on_click(self.press(&format!("app.editMode:{}", mode.key))),
+              )
+              .child(
+                Button::new(
+                  SharedString::from(format!("settings-mode-remove-{}", mode.key)),
+                  p,
+                )
+                .variant(Variant::Ghost)
+                .size(Size::Sm)
+                .label("Remove")
+                .on_click(self.press(&format!("app.removeMode:{}", mode.key))),
+              ),
+          ),
+      );
+    }
+    let draft = &app.mode_draft;
+    let profile = self.controls.select(
+      "app.modeProfile",
+      &app.mode_profile_options,
+      &draft.profile,
+      window,
+      cx,
+    );
+    let name = self
+      .controls
+      .input("app.modeName", &draft.name, "deep", window, cx);
+    let model = self.controls.input(
+      "app.modeModel",
+      &draft.model,
+      "Model, such as opus",
+      window,
+      cx,
+    );
+    let effort = self.controls.select(
+      "app.modeEffort",
+      &app.effort_options,
+      &draft.effort,
+      window,
+      cx,
+    );
+    let permission = self.controls.select(
+      "app.modePermission",
+      &app.permission_options,
+      &draft.permission,
+      window,
+      cx,
+    );
+    let instructions = self.controls.textarea(
+      "app.modeInstructions",
+      &draft.instructions,
+      "Added to the agent's system prompt in this mode",
+      2,
+      window,
+      cx,
+    );
+    let row = || div().flex().items_center().gap_2();
+    block
+      .child(
+        row()
+          .child(div().w(zpx(200.)).flex_none().child(form::select_field(
+            "settings-mode-profile",
+            "Mode profile",
+            &profile,
+            false,
+          )))
+          .child(div().flex_1().min_w_0().child(form::input_field(
+            "settings-mode-name",
+            &name,
+            false,
+            false,
+          ))),
+      )
+      .child(
+        row()
+          .child(div().flex_1().min_w_0().child(form::input_field(
+            "settings-mode-model",
+            &model,
+            false,
+            false,
+          )))
+          .child(div().w(zpx(150.)).flex_none().child(form::select_field(
+            "settings-mode-effort",
+            "Effort",
+            &effort,
+            false,
+          )))
+          .child(div().w(zpx(150.)).flex_none().child(form::select_field(
+            "settings-mode-permission",
+            "Permission mode",
+            &permission,
+            false,
+          ))),
+      )
+      .child(form::textarea_field(&instructions, false, false))
+      .child(
+        row().justify_end().child(
+          Button::new("settings-mode-save", p)
+            .variant(Variant::Outline)
+            .size(Size::Sm)
+            .label("Save mode")
+            .on_click(self.press("app.saveMode")),
+        ),
+      )
+      .children(app.mode_error.as_ref().map(|err| {
         ui::text(div(), TextSize::Sm)
           .text_color(p.destructive)
           .child(err.clone())
