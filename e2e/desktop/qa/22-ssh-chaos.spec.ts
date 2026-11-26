@@ -452,7 +452,7 @@ test("ssh chaos: switch local and remote, save project", async () => {
   // The menu is a popup: "Save Project…" is its first row, clicked through X.
   const menu = popupBox();
   if (!menu) throw new Error("no project menu");
-  await xPointer(page, menu.x + 60, menu.y + 18, 1);
+  xPointer(menu.x + 60, menu.y + 18, 1);
   await page.waitForTimeout(1200);
   await shot("save-project", "Save project with the remote repository", [
     "The Save project dialog lists the remote repository",

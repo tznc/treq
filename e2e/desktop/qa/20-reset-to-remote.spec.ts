@@ -54,7 +54,7 @@ test("reset-to-remote: More menu item and its question", async ({ page }) => {
     ],
   });
   // The first row.
-  await xPointer(page, menu.x + menu.w / 2, menu.y + 18, 1);
+  xPointer(menu.x + menu.w / 2, menu.y + 18, 1);
   const question = page.getByRole("dialog", { name: `Reset ${BRANCH} to origin?`, exact: true });
   await expect(question).toBeVisible();
   await expect(page.getByTestId("confirm-confirm")).toHaveAccessibleName("Reset to remote");

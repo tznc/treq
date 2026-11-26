@@ -205,7 +205,7 @@ test("dialogs: rename workspace from the context menu", async ({ page }) => {
   const menu = popupBox();
   if (!menu) throw new Error("no context menu");
   // "Open in…" (the sixth row) opens a submenu on hover.
-  await xPointer(page, menu.x + 100, menu.y + 190);
+  xPointer(menu.x + 100, menu.y + 190);
   await settle(page, 900);
   await capture(page, {
     name: "09-context-menu-submenu",
@@ -218,7 +218,7 @@ test("dialogs: rename workspace from the context menu", async ({ page }) => {
     ],
   });
   // "Rename workspace" is the third row.
-  await xPointer(page, menu.x + 100, menu.y + 85, 1);
+  xPointer(menu.x + 100, menu.y + 85, 1);
   const name = (p: Page) => p.getByRole("textbox", { name: "e.g., feat/new-name" });
   await expect(name(page)).toBeVisible();
   const dialog = page;

@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 import { chromium, expect as baseExpect, type Page } from "@playwright/test";
 import { port } from "../env.ts";
 import { agentCalls, fixture } from "../fixture.ts";
+import { serverUp } from "../harness.ts";
 import {
   CACHE,
   CACHE_EDIT,
@@ -338,21 +339,6 @@ async function capture(page: Page): Promise<void> {
   expect([...written].sort()).toEqual([...expected].sort());
 }
 
-/** Resolves once gpui-playwright accepts connections on `port`. */
-async function waitForApp(app: ReturnType<typeof spawn>): Promise<void> {
-  const deadline = Date.now() + 180_000;
-  for (;;) {
-    if (app.exitCode !== null) throw new Error(`launch.ts exited (${app.exitCode})`);
-    try {
-      await fetch(`http://127.0.0.1:${port}/`);
-      return;
-    } catch {
-      if (Date.now() > deadline) throw new Error("the app did not start in 3 minutes");
-      await new Promise((r) => setTimeout(r, 500));
-    }
-  }
-}
-
 mkdirSync(outDir, { recursive: true });
 const app = spawn(process.execPath, [join(here, "launch.ts")], {
   cwd: resolve(here, ".."),
@@ -362,7 +348,8 @@ const app = spawn(process.execPath, [join(here, "launch.ts")], {
 let page: Page | undefined;
 let failed = false;
 try {
-  await waitForApp(app);
+  // launch.ts exits with the app, so its exit ends the wait too.
+  await serverUp(app, port, 180_000);
   mark("app ready");
   const browser = await chromium.connect(`ws://127.0.0.1:${port}/`);
   page = await (await browser.newContext()).newPage();

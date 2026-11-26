@@ -24,7 +24,7 @@ test("switch-branch-supporting: unselected repo menu opens its switcher", async 
 
   const menu = popupBox();
   if (!menu) throw new Error("no menu");
-  await xPointer(page, menu.x + 40, menu.y + 18, 1);
+  xPointer(menu.x + 40, menu.y + 18, 1);
   await settle(page, 1500);
   await expect(page.getByPlaceholder("Search branches…")).toBeVisible();
   await capture(page, {

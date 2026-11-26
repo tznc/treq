@@ -37,11 +37,14 @@ export interface Capture {
   rest?: boolean;
 }
 
-/** Moves the pointer to the sidebar's empty foot, so no hover state shows. */
+/**
+ * Moves the pointer to the sidebar's empty foot, so no hover state shows.
+ * gpui-playwright draws the window before the move resolves, so the hover
+ * is gone by then.
+ */
 export async function rest(page: Page): Promise<void> {
   const size = page.viewportSize() ?? { width: 1400, height: 900 };
   await page.mouse.move(140, size.height - 20, { steps: 8 });
-  await page.waitForTimeout(300);
 }
 
 function themed(name: string): string {
@@ -129,7 +132,7 @@ export async function capture(page: Page, shot: Capture): Promise<string> {
   const png = join(outDir, `${name}.png`);
   let issue = shot.issue;
   if (shot.screen) {
-    await page.waitForTimeout(300);
+    // The caller waits for the popup it shows (`settle`, or an assertion).
     screenShot(png);
     // A blank, mapped window over the repo window turns the X screen
     // black while the page's own screenshot still looks right.

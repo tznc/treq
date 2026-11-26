@@ -20,10 +20,6 @@ ignores:
   # `toPass` instead, so e2e/** needs no helper of its own.
   - "scripts/service-qa/poll.ts"
   # Not fixed yet. The fix PRs stacked on this one remove these entries.
-  - "e2e/desktop/fixture.ts"
-  - "e2e/desktop/landing/capture.ts"
-  - "e2e/desktop/mobile/app.ts"
-  - "e2e/desktop/mobile/github.spec.ts"
   - "e2e/desktop/qa/01-onboarding.spec.ts"
   - "e2e/desktop/qa/09-dialogs.spec.ts"
   - "e2e/desktop/qa/15-not-a-repository.spec.ts"
@@ -39,8 +35,6 @@ ignores:
   - "e2e/desktop/qa/22-ssh-chaos.spec.ts"
   - "e2e/desktop/qa/23-team-projects.spec.ts"
   - "e2e/desktop/qa/27-tooltip-flicker.spec.ts"
-  - "e2e/desktop/qa/capture.ts"
-  - "e2e/desktop/qa/helpers.ts"
   - "scripts/service-qa/specs/mobile-control-plane.spec.ts"
   - "scripts/service-qa/specs/mobile-pkce-sign-in.spec.ts"
   - "scripts/service-qa/specs/remote-instance-chaos.spec.ts"

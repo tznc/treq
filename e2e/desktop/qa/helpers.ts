@@ -76,7 +76,7 @@ export async function home(page: Page): Promise<void> {
   // several repositories it heads that repository's group.
   await row(page, "main").first().click();
   await expect(page.getByRole("tab", { name: "Code" })).toBeVisible();
-  await page.waitForTimeout(800);
+  await loaded(page);
 }
 
 export async function openWorkspace(page: Page, branch: string): Promise<void> {
@@ -85,13 +85,22 @@ export async function openWorkspace(page: Page, branch: string): Promise<void> {
   await expect(
     page.getByRole("button", { name: branch, exact: true, selected: true }),
   ).toBeVisible();
-  await page.waitForTimeout(800);
+  await loaded(page);
 }
 
 export async function openTab(page: Page, name: string): Promise<void> {
   await page.getByRole("tab", { name }).click();
   await expect(page.getByRole("tab", { name, selected: true })).toBeVisible();
-  await page.waitForTimeout(1500);
+  await loaded(page);
+}
+
+/**
+ * Waits for the screen's first reads to land. While a read runs, a screen
+ * shows a progress indicator (`ui::Loading`, or "Loading workspace" over a
+ * tab's stand-in), from the first frame on, even before it fades in.
+ */
+export async function loaded(page: Page): Promise<void> {
+  await expect(page.getByRole("progressbar")).toHaveCount(0);
 }
 
 /** Opens the palette (Ctrl+K), drawn over the repo window. */
@@ -110,18 +119,13 @@ export function settle(page: Page, ms = 1200): Promise<void> {
  * the repo window's logical pixels. Menus, popovers and tooltips are popup
  * windows `page.mouse` does not reach, so hovering or clicking inside one
  * goes through `xdotool`. Assumes the repo window sits at the screen's
- * origin, as it does under Xvfb with no window manager.
+ * origin, as it does under Xvfb with no window manager. The app handles the
+ * event on its own time: the caller waits for what it changes.
  */
-export async function xPointer(
-  page: Page,
-  x: number,
-  y: number,
-  click: false | 1 | 3 = false,
-): Promise<void> {
+export function xPointer(x: number, y: number, click: false | 1 | 3 = false): void {
   const args = ["mousemove", String(Math.round(x * scale)), String(Math.round(y * scale))];
   if (click) args.push("click", String(click));
   execFileSync("xdotool", args);
-  await page.waitForTimeout(600);
 }
 
 /**
@@ -132,16 +136,21 @@ export async function xPointer(
  */
 export async function dismissPopover(page: Page): Promise<void> {
   await page.keyboard.press("Escape");
-  const visible = execFileSync("xdotool", ["search", "--onlyvisible", "--name", "."])
+  const open = namedWindows().length;
+  if (open > 1) {
+    focusMain();
+    xPointer(760, 40, 1);
+    await expect.poll(() => namedWindows().length, { message: "the menu closes" }).toBeLessThan(open);
+  }
+}
+
+/** The visible X windows with a name. */
+function namedWindows(): string[] {
+  return execFileSync("xdotool", ["search", "--onlyvisible", "--name", "."])
     .toString()
     .trim()
     .split("\n")
     .filter(Boolean);
-  if (visible.length > 1) {
-    focusMain();
-    await xPointer(page, 760, 40, 1);
-  }
-  await page.waitForTimeout(500);
 }
 
 

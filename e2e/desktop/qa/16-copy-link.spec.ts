@@ -30,7 +30,7 @@ for (const [name, what, suffix] of [
         "A context menu opens at the pointer with 'Copy GitHub link' first (plus 'Copy Treq link' for a PR), each with a link icon",
       ],
     });
-    await xPointer(page, menu.x + menu.w / 2, menu.y + menu.h / 4, 1);
+    xPointer(menu.x + menu.w / 2, menu.y + menu.h / 4, 1);
     await settle(page, 600);
     await capture(page, {
       name: `16-copy-link-${what}-toast`,

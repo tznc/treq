@@ -15,7 +15,7 @@ test("new window: the project menu opens a window on the start screen", async ({
   const menu = popupBox();
   if (!menu) throw new Error("no project menu");
   // New Window… is the last row.
-  await xPointer(page, menu.x + 60, menu.y + menu.h - 18, 1);
+  xPointer(menu.x + 60, menu.y + menu.h - 18, 1);
   const second = await windowPage(context);
   await second.setViewportSize({ width: 1400, height: 900 });
   await expect(second.getByRole("button", { name: "Open repository…" })).toBeVisible({

@@ -21,7 +21,7 @@ test("diff add-comment tooltip does not flicker", async ({ page }) => {
     .first();
   const box = await button.boundingBox();
   expect(box).not.toBeNull();
-  await xPointer(page, box!.x + box!.width / 2, box!.y + box!.height / 2);
+  xPointer(box!.x + box!.width / 2, box!.y + box!.height / 2);
 
   // Sample the popup for 3s once it has opened: it must never close.
   await expect.poll(() => popupBox(), { timeout: 3000 }).not.toBeNull();

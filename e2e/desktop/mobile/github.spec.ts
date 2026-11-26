@@ -25,15 +25,21 @@ test.afterAll(async () => {
   m?.app.kill("SIGTERM");
 });
 
-/** Taps a sheet's entry and waits for that sheet to close: the app guards
- * taps for a moment as a sheet closes, as a person's next tap would wait. */
+/** Waits out the tap guard: the app ignores taps for a moment after a
+ * sheet closes, as a person's next tap would wait. */
+async function tapsAccepted(): Promise<void> {
+  await expect(page.getByTestId("sheet-tap-guard")).toHaveCount(0);
+}
+
+/** Taps a sheet's entry and waits for that sheet to close. */
 async function pick(name: string): Promise<void> {
-  await page.getByRole("menuitem", { name, exact: true }).click();
-  await page.waitForTimeout(800);
+  const entry = page.getByRole("menuitem", { name, exact: true });
+  await entry.click();
+  await expect(entry).toHaveCount(0);
+  await tapsAccepted();
 }
 
 async function shot(name: string, title: string, expectations: string[]): Promise<void> {
-  await page.waitForTimeout(1500);
   if (process.env.QA_DEBUG) console.log(`--- ${name}\n${await page.ariaSnapshot()}`);
   await capture(page, { name: `mobile-github-${name}-light`, title, expectations });
 }
@@ -91,7 +97,8 @@ test("issue detail and composer", async () => {
   ]);
   // A tap on the dimmed page above the sheet closes it; the text stays.
   await page.mouse.click(210, 60);
-  await page.waitForTimeout(800);
+  await expect(send).toHaveCount(0);
+  await tapsAccepted();
   await expect(page.getByRole("button", { name: /^Continue comment: Shipped a fix/ })).toBeVisible();
   await shot("02c-unsent", "Unsent comment kept", [
     "The bar shows the start of the unsent comment in body colour",
@@ -113,13 +120,16 @@ test("pull requests list", async () => {
   ]);
   // A tap on the dimmed page above a sheet closes it.
   await page.mouse.click(210, 60);
-  await page.waitForTimeout(800);
+  await expect(page.getByRole("menuitem", { name: "Only mine: Off" })).toHaveCount(0);
+  await tapsAccepted();
 });
 
 test("pull request detail and review", async () => {
   await page.getByText("feat: handle empty event messages").click();
   await expect(page.getByRole("button", { name: "Review changes" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Add a comment…" })).toBeVisible();
+  // The checks card is titled "Checks · <summary>" once its own read lands.
+  await expect(page.getByText(/^Checks · /)).toBeVisible();
   await shot("04-pr", "Pull request #418", [
     "The 'Add a comment…' bar sits above Review changes; no comment box in the page",
     "The title, state and review tags, feat/empty-event-message → feat/event-ingest, and the checks summary with one failing",

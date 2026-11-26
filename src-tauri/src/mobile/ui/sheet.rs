@@ -4,6 +4,7 @@
 
 use std::{rc::Rc, time::Duration};
 
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   div, AnyView, App, AppContext, Context, Entity, Global, InteractiveElement, IntoElement,
@@ -96,9 +97,15 @@ pub(super) fn dismiss(root: &mut super::Root, cx: &mut Context<super::Root>) {
   cx.notify();
 }
 
-/// Swallows taps while [`TAP_GUARD`] runs.
+/// Swallows taps while [`TAP_GUARD`] runs. Observed, so an e2e test can wait
+/// for it to go before its next tap.
 pub(super) fn tap_guard() -> impl IntoElement {
-  div().id("sheet-tap-guard").absolute().inset_0().occlude()
+  div()
+    .id("sheet-tap-guard")
+    .absolute()
+    .inset_0()
+    .occlude()
+    .test_support()
 }
 
 /// The sheet over `content`: a scrim that closes it and a panel along the

@@ -23,7 +23,7 @@ test("review history: Logs → Reviews", async ({ page }) => {
   focusMain();
   const menu = popupBox();
   if (!menu) throw new Error("no source menu");
-  await xPointer(page, menu.x + menu.w / 2, menu.y + (menu.h * 2.5) / 5, 1);
+  xPointer(menu.x + menu.w / 2, menu.y + (menu.h * 2.5) / 5, 1);
   await settle(page, 1200);
   await expect(page.getByRole("textbox", { name: "Search reviews…" })).toBeVisible();
   await capture(page, {
