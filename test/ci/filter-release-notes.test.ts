@@ -53,10 +53,12 @@ describe("filter-release-notes.sh", () => {
     );
   });
 
-  it("drops feat(web) and fix(lint) but keeps other feat and fix scopes", () => {
+  it("drops feat(web), feat(lint), fix(lint) and fix(deps) only", () => {
     const notes = [
       "* feat(web): new landing page by @a in https://x/pull/20",
       "* fix(lint): flag raw colors by @a in https://x/pull/21",
+      "* feat(lint): require 13px minimum by @a in https://x/pull/25",
+      "* fix(deps): bump serde by @a in https://x/pull/26",
       "* feat(web)!: drop legacy docs by @a in https://x/pull/22",
       "* feat(webview): open links by @a in https://x/pull/23",
       "* feat: add login by @a in https://x/pull/24",
