@@ -2703,6 +2703,184 @@ impl SettingsView {
           .text_color(p.destructive)
           .child(err.clone())
       }))
+      .children((!app.profiles.is_empty()).then(|| self.profile_modes(app, p, window, cx)))
+  }
+
+  /// Modes: each profile's default mode, its modes, and a form that adds a
+  /// mode or saves an edited one.
+  fn profile_modes(
+    &mut self,
+    app: &Application,
+    p: &Palette,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> gpui::Div {
+    let mut block = div().flex().flex_col().gap_3().mt_3().child(label("Modes")).child(help(
+      "Presets on a profile's account: model, effort, permission mode and instructions. Pick one in the prompt's agent list, or start a prompt with @profile/mode.",
+      p,
+      0.,
+    ));
+    for default in &app.default_modes {
+      let field = format!("app.defaultMode.{}", default.profile);
+      let select = self
+        .controls
+        .select(&field, &default.options, &default.value, window, cx);
+      let name = format!("Default mode for {}", default.label);
+      block = block.child(saved_field_block(
+        &name,
+        form::select_field(
+          format!("settings-default-mode-{}", default.profile),
+          &name,
+          &select,
+          false,
+        ),
+        None,
+        self.mark_of(&field),
+        p,
+      ));
+    }
+    for mode in &app.modes {
+      let name = if mode.default {
+        format!("{} (default)", mode.label)
+      } else {
+        mode.label.clone()
+      };
+      block = block.child(
+        div()
+          .flex()
+          .items_center()
+          .justify_between()
+          .gap_2()
+          .child(
+            div()
+              .min_w_0()
+              .child(ui::text(div(), TextSize::Sm).child(name))
+              .child(
+                ui::text(div(), TextSize::Sm)
+                  .text_color(p.muted_foreground)
+                  .child(mode.summary.clone()),
+              ),
+          )
+          .child(
+            div()
+              .flex()
+              .gap_1()
+              .child(
+                Button::new(
+                  SharedString::from(format!("settings-mode-edit-{}", mode.key)),
+                  p,
+                )
+                .variant(Variant::Ghost)
+                .size(Size::Sm)
+                .label("Edit")
+                .on_click(self.press(&format!("app.editMode:{}", mode.key))),
+              )
+              .child(
+                Button::new(
+                  SharedString::from(format!("settings-mode-remove-{}", mode.key)),
+                  p,
+                )
+                .variant(Variant::Ghost)
+                .size(Size::Sm)
+                .label("Remove")
+                .on_click(self.press(&format!("app.removeMode:{}", mode.key))),
+              ),
+          ),
+      );
+    }
+    let draft = &app.mode_draft;
+    let profile = self.controls.select(
+      "app.modeProfile",
+      &app.mode_profile_options,
+      &draft.profile,
+      window,
+      cx,
+    );
+    let name = self
+      .controls
+      .input("app.modeName", &draft.name, "deep", window, cx);
+    let model = self.controls.input(
+      "app.modeModel",
+      &draft.model,
+      "Model, such as opus",
+      window,
+      cx,
+    );
+    let effort = self.controls.select(
+      "app.modeEffort",
+      &app.effort_options,
+      &draft.effort,
+      window,
+      cx,
+    );
+    let permission = self.controls.select(
+      "app.modePermission",
+      &app.permission_options,
+      &draft.permission,
+      window,
+      cx,
+    );
+    let instructions = self.controls.textarea(
+      "app.modeInstructions",
+      &draft.instructions,
+      "Added to the agent's system prompt in this mode",
+      2,
+      window,
+      cx,
+    );
+    let row = || div().flex().items_center().gap_2();
+    block
+      .child(
+        row()
+          .child(div().w(zpx(200.)).flex_none().child(form::select_field(
+            "settings-mode-profile",
+            "Mode profile",
+            &profile,
+            false,
+          )))
+          .child(div().flex_1().min_w_0().child(form::input_field(
+            "settings-mode-name",
+            &name,
+            false,
+            false,
+          ))),
+      )
+      .child(
+        row()
+          .child(div().flex_1().min_w_0().child(form::input_field(
+            "settings-mode-model",
+            &model,
+            false,
+            false,
+          )))
+          .child(div().w(zpx(150.)).flex_none().child(form::select_field(
+            "settings-mode-effort",
+            "Effort",
+            &effort,
+            false,
+          )))
+          .child(div().w(zpx(150.)).flex_none().child(form::select_field(
+            "settings-mode-permission",
+            "Permission mode",
+            &permission,
+            false,
+          ))),
+      )
+      .child(form::textarea_field(&instructions, false, false))
+      .child(
+        row().justify_end().child(
+          Button::new("settings-mode-save", p)
+            .variant(Variant::Outline)
+            .size(Size::Sm)
+            .label("Save mode")
+            .on_click(self.press("app.saveMode")),
+        ),
+      )
+      .children(app.mode_error.as_ref().map(|err| {
+        ui::text(div(), TextSize::Sm)
+          .text_color(p.destructive)
+          .child(err.clone())
+      }))
   }
 
   fn application(
