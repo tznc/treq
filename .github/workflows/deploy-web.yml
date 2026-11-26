@@ -182,7 +182,7 @@ jobs:
         # Matches the root lockfile's @ast-grep/cli, without a root npm ci.
         run: |
           uvx --from ast-grep-cli==0.38.7 ast-grep test --skip-snapshot-tests
-          uvx --from ast-grep-cli==0.38.7 ast-grep scan web/e2e web/docs web/learn web/compare
+          uvx --from ast-grep-cli==0.38.7 ast-grep scan --error web/e2e web/docs web/learn web/compare
       - name: Lint (Biome)
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         working-directory: ${{ github.workspace }}
