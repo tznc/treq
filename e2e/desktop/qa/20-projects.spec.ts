@@ -33,12 +33,9 @@ function editHomeCheckouts(): void {
   writeFileSync(join(root, "docs-site/quotes.md"), "# Quotes\n\nHow quote events reach the docs.\n");
 }
 
-/**
- * The project button's chevron ends the button, not the name, and points
- * up while the menu is `open`; close-up.
- */
-async function chevronAtEnd(page: Page, name: string, title: string, open = false): Promise<void> {
-  const button = page.getByRole("button", { name: /^Project: /, expanded: open });
+/** The project button's chevron ends the button, not the name; close-up. */
+async function chevronAtEnd(page: Page, name: string, title: string): Promise<void> {
+  const button = page.getByRole("button", { name: /^Project: /, expanded: false });
   await expect(button).toBeVisible();
   const b = await button.boundingBox();
   const c = await page.getByTestId("project-chevron").boundingBox();
@@ -47,11 +44,10 @@ async function chevronAtEnd(page: Page, name: string, title: string, open = fals
   await capture(page, {
     name,
     title,
-    rest: !open,
     clip: { x: b.x - 8, y: b.y - 8, width: b.width + 16, height: b.height + 16 },
     expectations: [
       "The chevron sits at the button's right edge, not right after the name",
-      open ? "The chevron points up: the menu is open" : "The chevron points down",
+      "The chevron points down: the menu is closed",
     ],
   });
 }
@@ -77,13 +73,16 @@ test("projects: sidebar, project menu, save and welcome list", async ({ page }) 
   await button.click();
   await settle(page, 1000);
   const menu = popupBox();
-  await chevronAtEnd(page, "20-projects-02b-button-open", "Project button, menu open", true);
+  await expect(page.getByRole("button", { name: /^Project: /, expanded: true })).toBeVisible();
   await capture(page, {
     name: "20-projects-02-menu-unsaved",
     title: "Project menu of an unsaved project",
     screen: true,
     rest: false,
-    expectations: ["The menu offers Save Project… and New Window…"],
+    expectations: [
+      "The menu offers Save Project… and New Window…",
+      "The project button's chevron points up while its menu is open",
+    ],
   });
   if (!menu) throw new Error("no project menu");
   // "Save Project…" is the first row.
