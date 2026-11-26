@@ -26,6 +26,8 @@ pub struct AgentPaths<'a> {
   pub app_instructions: Option<&'a str>,
   /// Instructions from the repository's settings.
   pub repo_instructions: Option<&'a str>,
+  /// Instructions from the session's profile mode.
+  pub mode_instructions: Option<&'a str>,
 }
 
 /// What a project adds to its agents (`core::projects`).
@@ -106,6 +108,7 @@ pub fn system_prompt(paths: &AgentPaths<'_>) -> String {
   for (label, text) in [
     ("Application", paths.app_instructions),
     ("Repository", paths.repo_instructions),
+    ("Mode", paths.mode_instructions),
   ] {
     let text = one_line(text.unwrap_or_default());
     if !text.is_empty() {
@@ -254,6 +257,10 @@ pub struct AutoCommand<'a> {
   pub treq_bin_dir: Option<&'a str>,
   /// Exported inside the agent's subshell, such as a profile's config dir.
   pub env: &'a [(String, String)],
+  /// A profile mode's model, over the session's; Codex gets it too.
+  pub model: Option<&'a str>,
+  /// A profile mode's reasoning effort.
+  pub effort: Option<&'a str>,
 }
 
 /// The PTY auto-command for an agent CLI.
@@ -277,10 +284,18 @@ pub fn build_auto_command(
 
   let mut command = match options.agent {
     "codex" => {
-      let command = format!(
-        "codex -c \"developer_instructions={}\"",
+      let mut command = "codex".to_string();
+      if let Some(model) = options.model.filter(|m| !m.is_empty()) {
+        command.push_str(&format!(" -m {}", shell_quote(model)));
+      }
+      if let Some(effort) = options.effort.filter(|e| !e.is_empty()) {
+        let setting = format!("model_reasoning_effort={effort}");
+        command.push_str(&format!(" -c {}", shell_quote(&setting)));
+      }
+      command.push_str(&format!(
+        " -c \"developer_instructions={}\"",
         shell_cat(&files.prompt_path)
-      );
+      ));
       with_task(command)
     }
     "cursor" => {
@@ -327,8 +342,12 @@ pub fn build_auto_command(
         "acceptEdits"
       };
       let mut command = format!("claude --permission-mode {mode}");
-      if let Some(model) = options.session_model.filter(|m| !m.is_empty()) {
+      let model = options.model.or(options.session_model);
+      if let Some(model) = model.filter(|m| !m.is_empty()) {
         command.push_str(&format!(" --model={}", shell_quote(model)));
+      }
+      if let Some(effort) = options.effort.filter(|e| !e.is_empty()) {
+        command.push_str(&format!(" --effort {}", shell_quote(effort)));
       }
       let settings = files
         .settings_path
@@ -492,10 +511,64 @@ mod tests {
       pending_prompt: None,
       treq_bin_dir: None,
       env: &[],
+      model: None,
+      effort: None,
     }
   }
 
   const NONE: &[String] = &[];
+
+  #[test]
+  fn a_mode_sets_claudes_model_and_effort() {
+    let command = build_auto_command(
+      &AutoCommand {
+        session_model: Some("sonnet"),
+        model: Some("opus"),
+        effort: Some("high"),
+        ..opts("claude")
+      },
+      &files(),
+    )
+    .unwrap();
+    assert!(
+      command.contains(" --model='opus' --effort 'high' "),
+      "{command}"
+    );
+    assert!(!command.contains("sonnet"));
+    let plain = build_auto_command(&opts("claude"), &files()).unwrap();
+    assert!(!plain.contains("--effort"));
+  }
+
+  #[test]
+  fn a_mode_sets_codexs_model_and_effort() {
+    let command = build_auto_command(
+      &AutoCommand {
+        // The session model names a Claude model; Codex ignores it.
+        session_model: Some("sonnet"),
+        model: Some("gpt-6"),
+        effort: Some("xhigh"),
+        ..opts("codex")
+      },
+      &files(),
+    )
+    .unwrap();
+    assert!(
+      command.contains("codex -m 'gpt-6' -c 'model_reasoning_effort=xhigh' -c "),
+      "{command}"
+    );
+    let plain = build_auto_command(
+      &AutoCommand {
+        session_model: Some("sonnet"),
+        ..opts("codex")
+      },
+      &files(),
+    )
+    .unwrap();
+    assert!(
+      plain.contains("codex -c \"developer_instructions="),
+      "{plain}"
+    );
+  }
 
   #[test]
   fn exports_profile_env_inside_the_agent_subshell() {
@@ -538,6 +611,7 @@ mod tests {
       project: None,
       app_instructions: None,
       repo_instructions: None,
+      mode_instructions: None,
     });
     assert!(prompt.contains("You are operating inside a Treq workspace."));
     assert!(prompt.contains(
@@ -559,6 +633,7 @@ mod tests {
       project: None,
       app_instructions: None,
       repo_instructions: None,
+      mode_instructions: None,
     });
     assert!(prompt.contains("You are operating in the Treq home repository."));
     assert!(!prompt.contains("sibling workspaces"));
@@ -577,6 +652,7 @@ mod tests {
         project: None,
         app_instructions: None,
         repo_instructions: None,
+        mode_instructions: None,
       }),
       json!({
         "denyRead": ["/repos/app"],
@@ -592,6 +668,7 @@ mod tests {
         project: None,
         app_instructions: None,
         repo_instructions: None,
+        mode_instructions: None,
       }),
       json!({ "allowRead": ["/repos/app"], "allowWrite": ["/repos/app"] })
     );
@@ -615,6 +692,7 @@ mod tests {
       project: Some(&project),
       app_instructions: None,
       repo_instructions: None,
+      mode_instructions: None,
     });
     assert!(prompt.contains("Treq project \"Checkout\""));
     assert!(prompt.contains("treq project status"));
@@ -633,6 +711,7 @@ mod tests {
       project: None,
       app_instructions: None,
       repo_instructions: None,
+      mode_instructions: None,
     });
     assert!(!prompt.contains("Treq project"));
     assert!(!prompt.contains("treq project status"));
@@ -649,6 +728,7 @@ mod tests {
       project: Some(&project),
       app_instructions: Some("Be terse.\nPrefer TDD."),
       repo_instructions: Some("Use cargo nextest."),
+      mode_instructions: Some("Think it\nthrough."),
     });
     let app = prompt
       .find("Application instructions: Be terse. Prefer TDD.")
@@ -657,7 +737,8 @@ mod tests {
       .find("Repository instructions: Use cargo nextest.")
       .unwrap();
     let proj = prompt.find("Project instructions:").unwrap();
-    assert!(app < repo && repo < proj);
+    let mode = prompt.find("Mode instructions: Think it through.").unwrap();
+    assert!(app < repo && repo < mode && mode < proj);
     assert!(!prompt.contains('\n'));
   }
 
@@ -670,6 +751,7 @@ mod tests {
       project: None,
       app_instructions: Some(" \n "),
       repo_instructions: None,
+      mode_instructions: None,
     });
     assert!(!prompt.contains("Application instructions"));
     assert!(!prompt.contains("Repository instructions"));
@@ -689,6 +771,7 @@ mod tests {
       project: Some(&project),
       app_instructions: None,
       repo_instructions: None,
+      mode_instructions: None,
     });
     assert!(prompt.contains("Treq project \"Checkout\""));
     assert!(!prompt.contains("Project instructions"));
@@ -731,6 +814,7 @@ mod tests {
         project: Some(&project),
         app_instructions: None,
         repo_instructions: None,
+        mode_instructions: None,
       },
       &opts("claude"),
     )
@@ -771,6 +855,7 @@ mod tests {
         project: Some(&project),
         app_instructions: None,
         repo_instructions: None,
+        mode_instructions: None,
       }),
       json!({ "allowRead": ["/repos/app", "/docs/style.md"], "allowWrite": ["/repos/app"] })
     );
@@ -945,6 +1030,7 @@ mod tests {
         project: None,
         app_instructions: None,
         repo_instructions: None,
+        mode_instructions: None,
       },
       &AutoCommand {
         pending_prompt: Some("hi"),
@@ -977,6 +1063,7 @@ mod tests {
       project: None,
       app_instructions: None,
       repo_instructions: None,
+      mode_instructions: None,
     };
     for _ in 0..2 {
       let prepared = prepare_auto_command(&paths, &opts("codex")).unwrap();
@@ -1005,6 +1092,7 @@ mod tests {
           project: None,
           app_instructions: None,
           repo_instructions: None,
+          mode_instructions: None,
         },
         &AutoCommand {
           pending_prompt: Some(&task),
@@ -1058,6 +1146,7 @@ mod tests {
         project: None,
         app_instructions: None,
         repo_instructions: None,
+        mode_instructions: None,
       },
       &AutoCommand {
         pending_prompt: Some("fix the bug"),
@@ -1087,6 +1176,7 @@ mod tests {
         project: None,
         app_instructions: None,
         repo_instructions: None,
+        mode_instructions: None,
       },
       &opts("claude"),
     )
@@ -1111,6 +1201,7 @@ mod tests {
         project: None,
         app_instructions: None,
         repo_instructions: None,
+        mode_instructions: None,
       },
       &AutoCommand {
         pending_prompt: Some(prompt),

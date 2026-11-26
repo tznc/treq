@@ -95,6 +95,58 @@ fn terminal_pane_starts_the_agent_with_its_profile(cx: &mut TestAppContext) {
   );
 }
 
+/// Calls a Claude session on `profile` makes, with `work` and its `fast` mode the defaults.
+fn start_in_mode(cx: &mut TestAppContext, profile: Option<&str>) -> Vec<String> {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  host.settings.lock().unwrap().extend([
+    (
+      "agent_profiles".to_string(),
+      Some(r#"[{"agent":"claude","name":"work"}]"#.into()),
+    ),
+    (
+      "agent_modes".to_string(),
+      Some(
+        r#"[{"agent":"claude","profile":"work","default":"fast","modes":[{"name":"fast"},{"name":"deep","effort":"high","permissionMode":"plan"}]}]"#
+          .into(),
+      ),
+    ),
+    ("default_profile_claude".to_string(), Some("work".into())),
+  ]);
+  host.pending.lock().unwrap().insert(
+    3,
+    launch_data::PendingSession {
+      agent: Some("claude".into()),
+      profile: profile.map(str::to_string),
+      ..Default::default()
+    },
+  );
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  host.calls()
+}
+
+#[gpui::test]
+fn terminal_pane_starts_the_agent_in_the_chosen_mode(cx: &mut TestAppContext) {
+  let calls = start_in_mode(cx, Some("work/deep"));
+  assert!(
+    calls.contains(&"prepare profile claude work".to_string()),
+    "{calls:?}"
+  );
+  // The mode's permission mode wins over the request's.
+  assert!(
+    calls.contains(&"prepare mode deep Some(\"plan\")".to_string()),
+    "{calls:?}"
+  );
+}
+
+#[gpui::test]
+fn terminal_pane_starts_the_agent_in_its_profiles_default_mode(cx: &mut TestAppContext) {
+  let calls = start_in_mode(cx, None);
+  assert!(
+    calls.contains(&"prepare mode fast None".to_string()),
+    "{calls:?}"
+  );
+}
+
 /// A supporting repository on screen: the backend numbers its sessions
 /// relative to the window's main repository, so the pane must too.
 #[gpui::test]

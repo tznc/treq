@@ -1386,6 +1386,12 @@ impl terminal_data::TerminalHost for FakeHost {
     if let Some(p) = &start.profile {
       self.record(format!("prepare profile {} {}", p.agent, p.name));
     }
+    if let Some(m) = &start.mode {
+      self.record(format!(
+        "prepare mode {} {:?}",
+        m.name, start.permission_mode
+      ));
+    }
     Ok(terminal_data::Prepared {
       command: format!("{} --start", start.agent),
       skill_write_warning: None,
