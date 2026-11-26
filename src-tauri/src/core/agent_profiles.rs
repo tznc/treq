@@ -155,7 +155,17 @@ mod tests {
   fn validates_names() {
     assert_eq!(validate_name(" work ").unwrap(), "work");
     assert_eq!(validate_name("side_job-2").unwrap(), "side_job-2");
-    for bad in ["", "Work", "a b", "../x", &"a".repeat(33), "-", "_", "-p", "_work"] {
+    for bad in [
+      "",
+      "Work",
+      "a b",
+      "../x",
+      &"a".repeat(33),
+      "-",
+      "_",
+      "-p",
+      "_work",
+    ] {
       assert!(validate_name(bad).is_err(), "{bad:?} should be refused");
     }
   }
