@@ -21,8 +21,10 @@ function encodeState(state: GraphState): string {
 function decodeState(raw: string): GraphState | null {
   try {
     return JSON.parse(decodeURIComponent(atob(raw)));
-  } catch {
-    return null;
+  } catch (err) {
+    // A truncated or hand-edited share link: atob, decodeURIComponent or JSON.parse rejects it.
+    if (err instanceof DOMException || err instanceof URIError || err instanceof SyntaxError) return null;
+    throw err;
   }
 }
 

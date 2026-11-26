@@ -71,7 +71,7 @@ export function HeroLines({
     const hero = heroRef.current;
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
     if (hero) observer?.observe(hero);
-    document.fonts?.ready.then(measure).catch(() => {});
+    document.fonts?.ready.then(measure);
     return () => observer?.disconnect();
   }, [heroRef, measure]);
 

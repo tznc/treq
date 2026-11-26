@@ -121,7 +121,9 @@ class PlacementProvider implements SandboxProvider {
       return await fn(provider);
     } catch (err) {
       if (err instanceof ProviderError && err.kind === "unauthorized" && credentialId && key) {
-        await this.store.markInvalid(credentialId, key).catch(() => {});
+        await this.store.markInvalid(credentialId, key).catch((markErr: unknown) =>
+          console.warn("[byos] could not mark the rejected credential invalid:", markErr)
+        );
       }
       throw err;
     }

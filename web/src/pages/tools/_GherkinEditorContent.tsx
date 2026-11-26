@@ -35,8 +35,10 @@ function loadFeatures(): Feature[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     return raw ? (JSON.parse(raw) as Feature[]) : [];
-  } catch {
-    return [];
+  } catch (err) {
+    // Storage unavailable (a DOMException) or a corrupt entry (a SyntaxError): start empty.
+    if (err instanceof DOMException || err instanceof SyntaxError) return [];
+    throw err;
   }
 }
 

@@ -68,6 +68,7 @@ async function fetchStars(source) {
     const data = await res.json();
     return typeof data.stargazers_count === 'number' ? data.stargazers_count : null;
   } catch {
+    // A network failure or a non-JSON body: list the skill without a star count.
     return null;
   }
 }

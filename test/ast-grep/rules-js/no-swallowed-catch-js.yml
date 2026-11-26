@@ -9,10 +9,6 @@ message: >
   words inside the catch that says why and which error is expected.
 # Same rule as no-swallowed-catch-ts; see its note.
 files: ["**/*.js", "**/*.mjs", "**/*.cjs", "**/*.jsx"]
-ignores:
-  # Not fixed yet. The fix PRs stacked on this one remove these entries.
-  - "web/scripts/fetch-skills-catalog.mjs"
-  - "web/scripts/serve-e2e.mjs"
 utils:
   silent-block:
     kind: statement_block

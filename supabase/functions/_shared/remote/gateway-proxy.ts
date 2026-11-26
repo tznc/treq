@@ -79,7 +79,7 @@ export function openProxy(
       try {
         socket.close(1000);
       } catch {
-        // Already closed.
+        // Already closed: the handshake has failed either way, so only reject.
       }
       reject(new UpstreamError(message));
     };

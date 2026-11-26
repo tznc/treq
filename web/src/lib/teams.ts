@@ -36,8 +36,10 @@ export function inviteTokenFromInput(value: string): string | null {
   try {
     const url = new URL(trimmed);
     return inviteTokenFromHash(url.hash) ?? validToken(url.searchParams.get("invite"));
-  } catch {
-    return null;
+  } catch (err) {
+    // Neither a bare token nor a URL: new URL rejects it with a TypeError.
+    if (err instanceof TypeError) return null;
+    throw err;
   }
 }
 
@@ -90,8 +92,10 @@ export function pendingInviteToken(page: InvitePage): string | null {
   if (fromHash) return fromHash;
   try {
     return validToken(page.sessionStorage().getItem(INVITE_STASH_KEY));
-  } catch {
-    return null;
+  } catch (err) {
+    // Storage unavailable (a SecurityError): nothing was stashed.
+    if (err instanceof DOMException) return null;
+    throw err;
   }
 }
 

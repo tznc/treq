@@ -11,6 +11,7 @@ import {
   organizationBillingFor,
 } from "../_shared/billing/store.ts";
 import { createStripeClient } from "../_shared/billing/stripe-api.ts";
+import { jsonBodyOrNull } from "../_shared/http/json.ts";
 import { createPortal } from "./lib.ts";
 import { errorMessage } from "../_shared/error-message.ts";
 
@@ -58,7 +59,7 @@ Deno.serve(async (req) => {
   }
 
   // An empty body opens the user's own portal.
-  const body = (await req.json().catch(() => null)) as {
+  const body = (await jsonBodyOrNull(req)) as {
     organization_id?: unknown;
   } | null;
 

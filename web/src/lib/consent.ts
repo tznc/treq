@@ -16,8 +16,10 @@ export function shouldAskForConsent(timeZone: string, stored: string | null): bo
 export function readConsent(): string | null {
   try {
     return localStorage.getItem(CONSENT_STORAGE_KEY);
-  } catch {
-    return null;
+  } catch (err) {
+    // Storage unavailable (a SecurityError): treat consent as not given yet.
+    if (err instanceof DOMException) return null;
+    throw err;
   }
 }
 

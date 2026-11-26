@@ -71,7 +71,11 @@ function SearchBarInner() {
         onChange={e => setQuery(e.target.value)}
         onKeyDown={handleKeyDown}
         onFocus={() => {
-          if (!db) getDb().then(setDb).catch(() => {});
+          if (!db) {
+            getDb().then(setDb).catch(() => {
+              // Prefetch only: getDb resets after a failure, and runQuery retries and logs it.
+            });
+          }
           if (results.length > 0) setOpen(true);
         }}
         aria-label="Search..."

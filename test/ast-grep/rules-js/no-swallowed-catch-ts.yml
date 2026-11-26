@@ -13,26 +13,6 @@ note: >
   more words in the body marks a deliberate ignore and is allowed.
 # Every TypeScript file in the repo. .tsx files have their own -tsx rule.
 files: ["**/*.ts", "**/*.mts", "**/*.cts"]
-ignores:
-  # Not fixed yet. The fix PRs stacked on this one remove these entries.
-  - "scripts/service-qa/specs/billing-abuse.spec.ts"
-  - "scripts/service-qa/specs/delete-account.spec.ts"
-  - "scripts/service-qa/specs/desktop-token-exchange.spec.ts"
-  - "scripts/service-qa/specs/gtm-metrics.spec.ts"
-  - "scripts/service-qa/specs/mobile-control-plane.spec.ts"
-  - "scripts/service-qa/specs/mobile-pkce-sign-in.spec.ts"
-  - "supabase/functions/_shared/billing/stripe-api.ts"
-  - "supabase/functions/_shared/remote/byos.ts"
-  - "supabase/functions/_shared/remote/gateway-proxy.ts"
-  - "supabase/functions/_shared/remote/instance-actions.ts"
-  - "supabase/functions/_shared/remote/ssh-relay.ts"
-  - "supabase/functions/billing-portal/index.ts"
-  - "supabase/functions/exchange-desktop-token/index.ts"
-  - "web/src/lib/billing.ts"
-  - "web/src/lib/consent.ts"
-  - "web/src/lib/pro-required.ts"
-  - "web/src/lib/teams.ts"
-  - "web/src/utils/searchDb.ts"
 utils:
   # A block that is empty, or holds only `return;`, `return <empty value>;`
   # or `void err;`, with no explaining comment of four or more words.

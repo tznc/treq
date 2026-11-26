@@ -68,6 +68,13 @@ export interface Reply {
 
 const ok = (body: unknown): Reply => ({ status: 200, body });
 
+/**
+ * A .catch handler for a cleanup step on a path that is already failing: the
+ * caller rethrows its own error, so this one is logged rather than lost.
+ */
+const logCleanupFailure = (correlationId: string, step: string) => (err: unknown) =>
+  logWithCorrelation(correlationId, "warn", `${step} failed: ${err instanceof Error ? err.message : "non-Error rejection"}`);
+
 /** Thrown for a request the caller got wrong; lib.ts answers it with `status`. */
 export class HttpError extends Error {
   constructor(message: string, readonly status: number, readonly code: string | undefined = "validation_error") {
@@ -220,7 +227,8 @@ function sshCaConfigured(): boolean {
   try {
     caKeyMaterialFromEnv();
     return true;
-  } catch {
+  } catch (err) {
+    console.warn(`SSH CA is not usable, so new machines are refused: ${errorMessage(err)}`);
     return false;
   }
 }
@@ -268,7 +276,9 @@ async function tracked(
   } catch (err) {
     // Nothing was recorded, so nothing would ever finish this instance. A
     // concurrent request with the same key owns it instead.
-    if (!(err instanceof OperationExists)) await onFailure?.().catch(() => {});
+    if (!(err instanceof OperationExists)) {
+      await onFailure?.().catch(logCleanupFailure(correlationId, "cleanup after an unrecorded operation"));
+    }
     throw err;
   }
   const audit = auditFor(supabase, { ownerUserId, instanceId: instance.id, correlationId });
@@ -454,7 +464,10 @@ async function ensureOnce(body: Record<string, unknown>, deps: RemoteInstanceDep
           if (status) await setInstanceStatus(supabase, target, status);
           return;
         }
-        if (createdId) await provider.deleteInstance(createdId, { placementId: target.active_placement_id }).catch(() => {});
+        if (createdId) {
+          await provider.deleteInstance(createdId, { placementId: target.active_placement_id })
+            .catch(logCleanupFailure(deps.correlationId, `deleting half-provisioned machine ${createdId}`));
+        }
         throw new HttpError("The instance was deleted while it was being provisioned", 409, "instance_deleted");
       };
       const created = await provider.createInstance({
@@ -693,7 +706,9 @@ export async function handleDelete(body: Record<string, unknown>, deps: RemoteIn
     },
     // 'deleting' keeps billing open (046_placements_and_usage.sql). The machine is
     // still there, so the instance goes back to the state it was in.
-    () => setInstanceStatus(supabase, instance, instance.status).catch(() => {}),
+    () =>
+      setInstanceStatus(supabase, instance, instance.status)
+        .catch(logCleanupFailure(deps.correlationId, "restoring the instance status")),
   );
   return ok({ operation_id: opId, status: "succeeded" });
 }

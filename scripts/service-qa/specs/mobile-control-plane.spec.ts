@@ -12,7 +12,7 @@
 import { it, expect, afterEach } from "@jest/globals";
 import { getAnonClient, getAnonKey, getFunctionsBaseUrl, getServiceClient } from "../clients";
 import { FEATURES } from "../features";
-import { createTestUser, deleteTestUser, type TestUser } from "../seed";
+import { createTestUser, cleanUpTestUser, type TestUser } from "../seed";
 import { clearBilling, grantPro } from "../billing";
 import { recordOutcome } from "../record";
 
@@ -23,11 +23,7 @@ afterEach(async () => {
   while (usersToDelete.length > 0) {
     const id = usersToDelete.pop()!;
     await clearBilling(admin, [id]);
-    try {
-      await deleteTestUser(admin, id);
-    } catch {
-      // already deleted
-    }
+    await cleanUpTestUser(admin, id);
   }
 });
 
@@ -71,7 +67,11 @@ async function invoke(
     },
     body: JSON.stringify({ action, ...body }),
   });
-  const json = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  const json = (await response.json().catch((err: unknown) => {
+    // A gateway error page is not JSON; the status still tells the test what happened.
+    if (err instanceof SyntaxError) return {};
+    throw err;
+  })) as Record<string, unknown>;
   return { status: response.status, json };
 }
 

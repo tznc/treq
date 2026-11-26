@@ -66,6 +66,21 @@ export async function deleteTestUser(
 }
 
 /**
+ * deleteTestUser for cleanup, where the test may have deleted the user
+ * itself: a missing user (404) is fine. Any other failure is logged, not
+ * thrown, so cleanup cannot mask the test's own error.
+ */
+export async function cleanUpTestUser(
+  admin: SupabaseClient,
+  userId: string,
+): Promise<void> {
+  const { error } = await admin.auth.admin.deleteUser(userId);
+  if (error && error.status !== 404) {
+    console.warn(`cleanup: could not delete test user ${userId}:`, error);
+  }
+}
+
+/**
  * Email/password sign-in returning a fresh anon client that holds the session.
  */
 export async function signInWithEmailPassword(

@@ -11,7 +11,7 @@ import { afterEach, expect, it } from "@jest/globals";
 import { getFunctionsBaseUrl, getServiceClient } from "../clients";
 import {
   createTestUser,
-  deleteTestUser,
+  cleanUpTestUser,
   linkGithubRepo,
   signInWithEmailPassword,
 } from "../seed";
@@ -47,11 +47,7 @@ afterEach(async () => {
       .in("id", installationsToDelete.splice(0));
   }
   while (usersToDelete.length > 0) {
-    try {
-      await deleteTestUser(admin, usersToDelete.pop()!);
-    } catch {
-      // already deleted
-    }
+    await cleanUpTestUser(admin, usersToDelete.pop()!);
   }
 });
 

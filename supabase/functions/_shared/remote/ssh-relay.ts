@@ -297,7 +297,7 @@ export function pipeSockets(
         try {
           socket.close(forwarded, reason);
         } catch {
-          // Already closing.
+          // Already closing or closed: the relay is done with it either way.
         }
       }
       resolve(stats);

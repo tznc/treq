@@ -17,6 +17,7 @@ import { clearBilling, grantPro } from "../billing";
 import { getAnonClient, getServiceClient } from "../clients";
 import { recordOutcome } from "../record";
 import {
+  cleanUpTestUser,
   createTestUser,
   deleteTestUser,
   signInWithEmailPassword,
@@ -665,7 +666,7 @@ it("sends an account's remaining usage, then cancels with a final invoice, befor
   } finally {
     if (!deleted) {
       await admin.from("remote_instances").delete().eq("owner_user_id", id);
-      await deleteTestUser(admin, id).catch(() => {});
+      await cleanUpTestUser(admin, id);
     }
     await clearBilling(admin, [id]);
   }
