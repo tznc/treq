@@ -46,7 +46,7 @@ fn move_commit_into_its_own_workspace_is_refused() {
 
   let result = move_commit(&repo.repo_path, source.id, &change_id, source.id);
 
-  assert!(result.is_err());
+  result.unwrap_err();
   assert!(TestRepo::jj_working_copy_is_clean(&source_path));
   assert!(JjVerifier::file_exists_in_workspace(
     &source_path,

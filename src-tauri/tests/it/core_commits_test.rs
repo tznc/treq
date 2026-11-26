@@ -1182,7 +1182,7 @@ fn test_commit_diff_invalid_change_id() {
     "-r malicious",
     "git",
   );
-  assert!(result.is_err(), "Should reject change_id starting with '-'");
+  result.expect_err("Should reject change_id starting with '-'");
 
   // Try with empty change_id
   let result = treq_lib::core::get_commit_diff_with_conflict_style(
@@ -1191,7 +1191,7 @@ fn test_commit_diff_invalid_change_id() {
     "",
     "git",
   );
-  assert!(result.is_err(), "Should reject empty change_id");
+  result.expect_err("Should reject empty change_id");
 }
 
 #[test]

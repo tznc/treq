@@ -329,8 +329,7 @@ fn ensure_workspace_rebased_errors_on_missing_bookmark() {
 
   let result = treq_lib::core::ensure_workspace_rebased(&repo.repo_path, ws.id, "diff");
 
-  assert!(result.is_err(), "missing bookmark should return an error");
-  let msg = result.unwrap_err();
+  let msg = result.expect_err("missing bookmark should return an error");
   assert!(
     msg.contains("not found in repo"),
     "error should mention 'not found in repo', got: {msg}"
@@ -422,12 +421,9 @@ fn ensure_workspace_rebased_errors_but_preserves_on_truly_missing_bookmark() {
 
   let result = treq_lib::core::ensure_workspace_rebased(&repo.repo_path, ws.id, "diff");
 
+  let msg = result.expect_err("truly missing bookmark should return an Err");
   assert!(
-    result.is_err(),
-    "truly missing bookmark should return an Err"
-  );
-  assert!(
-    result.unwrap_err().contains("not found in repo"),
+    msg.contains("not found in repo"),
     "error should describe the problem"
   );
 
@@ -510,8 +506,6 @@ fn launch_pass_sees_default_branch_moved_only_in_git() {
 
   // And the launch pass itself still rebases it.
   treq_lib::core::init(&repo.repo_path).expect("second init");
-  assert!(
-    treq_lib::core::ensure_workspace_rebased(&repo.repo_path, ws.id, "diff").is_ok(),
-    "workspace stays usable"
-  );
+  treq_lib::core::ensure_workspace_rebased(&repo.repo_path, ws.id, "diff")
+    .expect("workspace stays usable");
 }

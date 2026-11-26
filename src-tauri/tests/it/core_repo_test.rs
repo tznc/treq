@@ -184,11 +184,7 @@ fn test_repo_status_no_remote_has_no_fetch_error() {
 fn test_jj_git_fetch_no_remote_is_noop() {
   let repo = TestRepo::new().expect("Failed to create test repo");
   let result = treq_lib::jj::jj_git_fetch(&repo.repo_path);
-  assert!(
-    result.is_ok(),
-    "fetch with no remote should be a no-op, got: {:?}",
-    result
-  );
+  result.expect("fetch with no remote should be a no-op");
 }
 
 #[test]
@@ -436,8 +432,7 @@ fn test_switch_repo_branch_switches_to_existing_branch() {
     .expect("Failed to return to default branch");
 
   let result = switch_repo_branch(&repo.repo_path, "feature-x");
-  assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
-  let msg = result.unwrap();
+  let msg = result.expect("Expected Ok");
   assert!(
     msg.contains("feature-x") || msg.contains("Switched") || msg.contains("Already"),
     "unexpected message: {}",
@@ -450,7 +445,7 @@ fn test_switch_repo_branch_already_on_branch() {
   let repo = TestRepo::new().expect("Failed to create test repo");
 
   let result = switch_repo_branch(&repo.repo_path, repo.default_branch());
-  assert!(result.is_ok(), "Expected Ok even when already on branch");
+  result.expect("Expected Ok even when already on branch");
 }
 
 #[test]
@@ -458,7 +453,7 @@ fn test_switch_repo_branch_invalid_branch_returns_error() {
   let repo = TestRepo::new().expect("Failed to create test repo");
 
   let result = switch_repo_branch(&repo.repo_path, "nonexistent-branch-xyz");
-  assert!(result.is_err(), "Expected Err for nonexistent branch");
+  result.expect_err("Expected Err for nonexistent branch");
 }
 
 #[test]
@@ -640,7 +635,7 @@ fn rename_bookmark_onto_existing_bookmark_fails() {
   treq_lib::jj::jj_set_bookmark(path, "dst", "@").unwrap();
   let dst_before = treq_lib::jj::jj_get_commit_id(path, "dst").unwrap();
 
-  assert!(treq_lib::jj::jj_rename_bookmark(path, "src", "dst").is_err());
+  treq_lib::jj::jj_rename_bookmark(path, "src", "dst").unwrap_err();
 
   assert_eq!(
     treq_lib::jj::jj_get_commit_id(path, "dst").unwrap(),

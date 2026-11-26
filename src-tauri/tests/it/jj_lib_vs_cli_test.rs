@@ -80,11 +80,7 @@ fn jj_git_init_bare_matches_cli_jj_git_init() {
 
   // The CLI must recognize this as a valid, working jj repo.
   let status = TestRepo::run_jj_cli(&path, &["status"]);
-  assert!(
-    status.is_ok(),
-    "CLI `jj status` should succeed against a repo created by jj_git_init_bare, got: {:?}",
-    status
-  );
+  status.expect("CLI `jj status` should succeed against a repo created by jj_git_init_bare");
 }
 
 #[test]

@@ -5,10 +5,7 @@ fn test_list_commits_invalid_workspace() {
   let repo = TestRepo::new().expect("Failed to create test repo");
 
   let result = treq_lib::core::list_commits(&repo.repo_path, Some(99999), false, None, None);
-  assert!(
-    result.is_err(),
-    "Should return error for non-existent workspace"
-  );
+  result.expect_err("Should return error for non-existent workspace");
 }
 
 #[test]

@@ -486,12 +486,9 @@ fn test_push_workspace_to_remote() {
 
   // Test 1: Invalid workspace_id fails
   let result = treq_lib::core::push_workspace_to_remote(&repo.repo_path, Some(99999));
+  let error = result.expect_err("Push with invalid workspace_id should fail");
   assert!(
-    result.is_err(),
-    "Push with invalid workspace_id should fail"
-  );
-  assert!(
-    result.unwrap_err().to_lowercase().contains("not found"),
+    error.to_lowercase().contains("not found"),
     "Error should indicate workspace not found"
   );
 
@@ -524,11 +521,7 @@ fn test_push_workspace_to_remote() {
 
   // Test 4: Push workspace to remote (should succeed now)
   let result_push = treq_lib::core::push_workspace_to_remote(&repo.repo_path, Some(workspace.id));
-  assert!(
-    result_push.is_ok(),
-    "Push should succeed with proper remote setup, got: {:?}",
-    result_push.err()
-  );
+  result_push.expect("Push should succeed with proper remote setup");
 
   // Test 5: Verify file was pushed to remote by checking remote branch
   let remote_dir = repo.remote_path();
@@ -575,11 +568,7 @@ fn test_push_home_repo_to_remote() {
 
   // Test 2: Test push home repo (None workspace_id) succeeds with remote setup
   let result_push = treq_lib::core::push_workspace_to_remote(&repo.repo_path, None);
-  assert!(
-    result_push.is_ok(),
-    "Push home repo to remote should succeed with proper remote setup, got: {:?}",
-    result_push.err()
-  );
+  result_push.expect("Push home repo to remote should succeed with proper remote setup");
 
   // Test 3: Verify home repo push didn't affect workspace flags
   let workspace_after_push = treq_lib::local_db::get_workspace_by_id(&repo.repo_path, workspace.id)
