@@ -1094,7 +1094,12 @@ pub fn full_path(workspace: &Workspace) -> String {
 /// The settings that name agent profiles and each agent's default profile.
 pub fn profile_setting_keys() -> impl Iterator<Item = String> {
   use crate::core::agent_profiles;
-  std::iter::once(agent_profiles::PROFILES_SETTING.to_string()).chain(
+  [
+    agent_profiles::PROFILES_SETTING.to_string(),
+    crate::core::agent_modes::MODES_SETTING.to_string(),
+  ]
+  .into_iter()
+  .chain(
     crate::core::agent_launch::AGENTS
       .iter()
       .filter(|(id, _)| agent_profiles::supports_profiles(id))
