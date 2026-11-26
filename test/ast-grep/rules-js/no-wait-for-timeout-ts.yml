@@ -20,7 +20,6 @@ ignores:
   # `toPass` instead, so e2e/** needs no helper of its own.
   - "scripts/service-qa/poll.ts"
   # Not fixed yet. The fix PRs stacked on this one remove these entries.
-  - "e2e/desktop/qa/18-ssh-remote.spec.ts"
   - "e2e/desktop/qa/20-machines-chaos.spec.ts"
   - "e2e/desktop/qa/22-ssh-chaos.spec.ts"
 rule:
