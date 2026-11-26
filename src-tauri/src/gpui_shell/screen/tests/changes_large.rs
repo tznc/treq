@@ -223,6 +223,76 @@ fn a_large_diff_finds_text_on_rows_not_drawn(cx: &mut TestAppContext) {
   assert!(!shows_line(&mut h, 0, 0));
 }
 
+/// Scrolls the diff by `dy`; a negative `dy` scrolls down.
+fn scroll_diff(h: &mut Harness, dy: f32) {
+  let list = h.cx.debug_bounds("changes-diff-list").expect("list");
+  h.cx.simulate_event(gpui::ScrollWheelEvent {
+    position: list.center(),
+    delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), gpui::px(dy))),
+    modifiers: Modifiers::none(),
+    touch_phase: gpui::TouchPhase::Moved,
+  });
+  h.cx.run_until_parked();
+  h.cx.update(|window, cx| window.draw(cx).clear(cx));
+}
+
+#[gpui::test]
+fn a_file_header_in_place_is_not_pinned(cx: &mut TestAppContext) {
+  let mut h = expanded(cx);
+  assert!(h
+    .cx
+    .debug_bounds("pinned-file-header-src/module_0.rs")
+    .is_none());
+}
+
+#[gpui::test]
+fn scrolling_into_a_file_pins_its_header_to_the_top(cx: &mut TestAppContext) {
+  let mut h = expanded(cx);
+  scroll_diff(&mut h, -600.);
+  assert!(!shows_line(&mut h, 0, 0), "the file's own header scrolled away");
+  let pinned = h
+    .cx
+    .debug_bounds("pinned-file-header-src/module_0.rs")
+    .expect("pinned header");
+  let list = h.cx.debug_bounds("changes-diff-list").expect("list");
+  assert_eq!(pinned.top(), list.top());
+}
+
+#[gpui::test]
+fn the_next_file_pushes_the_pinned_header_up(cx: &mut TestAppContext) {
+  let mut h = expanded(cx);
+  h.click("file-row-src/module_1.rs");
+  scroll_diff(&mut h, 10.);
+  let pinned = h
+    .cx
+    .debug_bounds("pinned-file-header-src/module_0.rs")
+    .expect("pinned header");
+  let next = h
+    .cx
+    .debug_bounds("file-card-src/module_1.rs")
+    .expect("next card");
+  assert!(pinned.bottom() <= next.top(), "{pinned:?} overlaps {next:?}");
+}
+
+#[gpui::test]
+fn the_pinned_header_marks_its_file_viewed(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, large_host(), changes_route());
+  if h.drawn("view-large-changeset") {
+    h.click("view-large-changeset");
+  }
+  h.click("file-row-src/module_0.rs");
+  scroll_diff(&mut h, -600.);
+  h.click("viewed-src/module_0.rs");
+  assert!(
+    host
+      .writes()
+      .iter()
+      .any(|w| w.starts_with("mark viewed src/module_0.rs ")),
+    "{:?}",
+    host.writes()
+  );
+}
+
 /// `large_host` under review: a kept review of `COMMENTS` line comments and
 /// `THREADS` GitHub review threads on every file.
 pub(super) fn reviewed_host() -> FakeHost {
