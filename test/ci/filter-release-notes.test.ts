@@ -63,6 +63,7 @@ describe("filter-release-notes.sh", () => {
       "* fix(deps): bump serde by @a in https://x/pull/26",
       "* fix(e2e): wait for sidebar by @a in https://x/pull/27",
       "* fix(test): stabilise clock by @a in https://x/pull/28",
+      "* fix(web): broken docs link by @a in https://x/pull/29",
       "* feat(web)!: drop legacy docs by @a in https://x/pull/22",
       "* feat(webview): open links by @a in https://x/pull/23",
       "* feat: add login by @a in https://x/pull/24",
