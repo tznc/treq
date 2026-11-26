@@ -1,0 +1,26 @@
+id: no-swallowed-catch-js
+snapshots:
+  ? |
+    function isDir(p) {
+      try { return fs.statSync(p).isDirectory(); } catch { return false; }
+    }
+  : labels:
+    - source: catch { return false; }
+      style: primary
+      start: 67
+      end: 90
+    - source: '{ return false; }'
+      style: secondary
+      start: 73
+      end: 90
+  ? |
+    main().catch(() => {});
+  : labels:
+    - source: main().catch(() => {})
+      style: primary
+      start: 0
+      end: 22
+    - source: '{}'
+      style: secondary
+      start: 19
+      end: 21

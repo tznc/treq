@@ -1,0 +1,16 @@
+id: no-swallowed-catch-js
+valid:
+  - |
+    function isDir(p) {
+      try { return fs.statSync(p).isDirectory(); } catch (err) {
+        if (err.code === 'ENOENT') return false;
+        throw err;
+      }
+    }
+invalid:
+  - |
+    function isDir(p) {
+      try { return fs.statSync(p).isDirectory(); } catch { return false; }
+    }
+  - |
+    main().catch(() => {});

@@ -1,0 +1,45 @@
+id: no-swallowed-catch-js
+language: javascript
+severity: error
+message: >
+  This catch hides the error: it is empty, or it only returns null, undefined,
+  [], {}, false or nothing. Let the error propagate, or handle it: log it with
+  context, or narrow to the error you expect (for example ENOENT) and rethrow
+  the rest. If ignoring it really is correct, keep a comment of at least four
+  words inside the catch that says why and which error is expected.
+# Same rule as no-swallowed-catch-ts; see its note.
+files: ["**/*.js", "**/*.mjs", "**/*.cjs", "**/*.jsx"]
+ignores:
+  # Not fixed yet. The fix PRs stacked on this one remove these entries.
+  - "web/scripts/fetch-skills-catalog.mjs"
+  - "web/scripts/serve-e2e.mjs"
+utils:
+  silent-block:
+    kind: statement_block
+    regex: '^\{\s*(?:(?://[^\n]*|/\*[\s\S]*?\*/)\s*)*(?:(?:return(?:\s+void\s+0|\s*\(?\s*(?:null|undefined|false|\[\s*\]|\{\s*\})\s*\)?)?|void\s+[\w$]+)\s*;?\s*(?:(?://[^\n]*|/\*[\s\S]*?\*/)\s*)*)?\}$'
+    not:
+      has:
+        kind: comment
+        regex: '\w+\W+\w+\W+\w+\W+\w+'
+  silent-callback:
+    any:
+      - kind: arrow_function
+        has:
+          field: body
+          any:
+            - matches: silent-block
+            - regex: '^\(?\s*(?:null|undefined|false|void\s+0|\[\s*\]|\{\s*\})\s*\)?$'
+      - kind: function_expression
+        has:
+          field: body
+          matches: silent-block
+rule:
+  any:
+    - kind: catch_clause
+      has:
+        field: body
+        matches: silent-block
+    - pattern: $P.catch($CB)
+constraints:
+  CB:
+    matches: silent-callback
