@@ -188,9 +188,9 @@ fn settings_saves_the_application_itself(cx: &mut TestAppContext) {
     [
       "set theme=dark",
       "notify settingsChanged",
-      "set default_model= default_agent= conflict_marker_style=git notify_agent_finished=true agent_instructions= terminal_font_size=16 ui_zoom=120 agent_profiles=[] default_profile_claude= default_profile_codex=",
+      "set default_model= default_agent= conflict_marker_style=git notify_agent_finished=true agent_instructions= terminal_font_size=16 ui_zoom=120 agent_profiles=[] default_profile_claude= default_profile_codex= default_profile_gemini=",
       "notify settingsChanged",
-      "set default_model= default_agent=codex conflict_marker_style=git notify_agent_finished=true agent_instructions= terminal_font_size=16 ui_zoom=120 agent_profiles=[] default_profile_claude= default_profile_codex=",
+      "set default_model= default_agent=codex conflict_marker_style=git notify_agent_finished=true agent_instructions= terminal_font_size=16 ui_zoom=120 agent_profiles=[] default_profile_claude= default_profile_codex= default_profile_gemini=",
       "notify settingsChanged",
     ]
   );
