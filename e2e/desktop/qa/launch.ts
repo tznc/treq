@@ -52,6 +52,9 @@ while :; do sleep 0.2; done
 `,
 );
 
+// A second agent CLI, so the agent pickers list more than Claude.
+writeBin(fixture.bin, "opencode", "#!/bin/sh\nexec claude \"$@\"\n");
+
 // The app reads agents' PATH from the login shell, whose system profile
 // can put a real `claude` ahead of the fixture's: a shell that skips the
 // profiles keeps the run on the fake agent.
