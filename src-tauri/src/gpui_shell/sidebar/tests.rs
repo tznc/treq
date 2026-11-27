@@ -1213,13 +1213,14 @@ fn project_button_opens_the_project_menu(cx: &mut TestAppContext) {
   assert!(h.bounds("project-button").is_some());
   h.click("project-button");
   assert_eq!(h.sent(), vec![SidebarAction::ProjectMenu]);
-  // The menu opens under the button, as wide as it.
+  // The menu opens under the button, not over it.
   let button = h.bounds("project-button").expect("button");
-  let anchor = h.sidebar.read_with(&h.cx, |s, _| s.menu_anchor());
-  let MenuAnchor::Button(at) = anchor else {
-    panic!("{anchor:?}: not under the button");
-  };
-  assert_eq!(at, button);
+  let at = h.sidebar.read_with(&h.cx, |s, _| s.menu_anchor());
+  assert!(at.y >= button.bottom(), "{at:?} below {button:?}");
+  assert!(
+    (at.x - button.left()).abs() <= gpui::px(2.),
+    "{at:?} {button:?}"
+  );
 }
 
 #[gpui::test]

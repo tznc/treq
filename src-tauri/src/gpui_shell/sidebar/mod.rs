@@ -16,12 +16,12 @@ use treq_ui::SelectorExt as _;
 use serde::{Deserialize, Serialize};
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, px, svg, Animation, AnimationExt as _, AnyElement, App, ClickEvent,
-  Context, Entity, Hsla, ListAlignment, ListState, MouseButton, MouseDownEvent, Pixels, Role,
-  SharedString, StyleRefinement, Transformation, Window,
+  Context, Entity, Hsla, ListAlignment, ListState, MouseButton, MouseDownEvent, Pixels, Point,
+  Role, SharedString, StyleRefinement, Transformation, Window,
 };
 
 use super::{
-  popup::{MenuAnchor, PopupRequest, PopupSink, Side, TooltipContent},
+  popup::{PopupRequest, PopupSink, Side, TooltipContent},
   screen::prefetch,
   theme::{self, Palette},
   title_bar,
@@ -346,7 +346,7 @@ pub struct Sidebar {
   /// The element whose tooltip popup is open.
   tooltip_sent: Rc<RefCell<Option<SharedString>>>,
   /// Where the last right-click was, for placing its menu.
-  menu_anchor: Rc<Cell<MenuAnchor>>,
+  menu_anchor: Rc<Cell<Point<Pixels>>>,
   /// The project button's last painted bounds, for its menu's anchor.
   project_button_bounds: Rc<Cell<gpui::Bounds<Pixels>>>,
   /// The project menu is open, so the button's chevron points up.
@@ -484,7 +484,7 @@ impl Sidebar {
   }
 
   /// Where the last right-click was, in the window's coordinates.
-  pub fn menu_anchor(&self) -> MenuAnchor {
+  pub fn menu_anchor(&self) -> Point<Pixels> {
     self.menu_anchor.get()
   }
 
@@ -601,7 +601,7 @@ impl Sidebar {
     let anchor = self.menu_anchor.clone();
     move |event, _, cx| {
       cx.stop_propagation();
-      anchor.set(MenuAnchor::Pointer(event.position));
+      anchor.set(event.position);
       sidebar
         .update(cx, |this, cx| {
           if this.tooltip.take().is_some() {
@@ -1378,28 +1378,27 @@ impl Sidebar {
           .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
             this.hover_tooltip(key.clone(), *hovered, cx)
           }))
-          .on_click({
+          // Where the button is, so its menu opens under it.
+          .child({
             let bounds = bounds.clone();
-            move |_, _, cx| {
-              anchor.set(MenuAnchor::Button(bounds.get()));
-              this
-                .update(cx, |this, cx| {
-                  this.menu_generation += 1;
-                  this.project_menu_open = true;
-                  cx.notify();
-                })
-                .ignore_closed();
-              sink(SidebarAction::ProjectMenu, cx);
-            }
+            gpui::canvas(move |b, _, _| bounds.set(b), |_, _, _, _| {})
+              .absolute()
+              .top_0()
+              .left_0()
+              .size_full()
+          })
+          .on_click(move |_, _, cx| {
+            let b = bounds.get();
+            anchor.set(gpui::point(b.left(), b.bottom() + gpui::px(4.)));
+            this
+              .update(cx, |this, cx| {
+                this.menu_generation += 1;
+                this.project_menu_open = true;
+                cx.notify();
+              })
+              .ignore_closed();
+            sink(SidebarAction::ProjectMenu, cx);
           }),
-      )
-      // The button's outer edge, so its menu opens under it at its width.
-      .child(
-        gpui::canvas(move |b, _, _| bounds.set(b), |_, _, _, _| {})
-          .absolute()
-          .top_0()
-          .left_0()
-          .size_full(),
       )
       .when(self.tooltip_shown("project-button"), |this| {
         this.child(
