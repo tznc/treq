@@ -606,6 +606,8 @@ impl RenderOnce for Button {
       })
       .debug_selector(move || selector)
       .whitespace_nowrap()
+      // Sans, even under a mono parent such as a diff row.
+      .font_family(theme::SANS_FONT)
       .font_weight(gpui::FontWeight::MEDIUM)
       .rounded(zpx(theme::RADIUS_MD))
       .p_0()

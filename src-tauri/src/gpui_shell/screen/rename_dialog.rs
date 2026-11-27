@@ -4,8 +4,8 @@
 use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
-use gpui_kit::base::TestSupportExt as _;
 use std::{sync::Arc, time::Duration};
+use treq_ui::SelectorExt as _;
 
 use gpui_kit::component::input::{InputEvent, InputState};
 use serde::Deserialize;
@@ -302,23 +302,17 @@ impl Render for RenameDialog {
                   .child("Branch name"),
               )
               .child(
-                div()
-                  .id("rename-branch-name")
-                  .debug_selector(|| "rename-branch-name".into())
-                  .w_full()
-                  .child(
-                    Styled::h(ui::input(&input).disabled(pending), zpx(40.))
-                      .when_some(status, |this, icon| this.suffix(div().pr_1().child(icon))),
-                  ),
+                div().selector("rename-branch-name").w_full().child(
+                  Styled::h(ui::input(&input).disabled(pending), zpx(40.))
+                    .when_some(status, |this, icon| this.suffix(div().pr_1().child(icon))),
+                ),
               )
               .when_some(invalid, |this, v| {
                 this.child(
                   ui::text(div(), TextSize::Sm)
-                    .id("rename-invalid")
-                    .debug_selector(|| "rename-invalid".into())
+                    .selector("rename-invalid")
                     .role(tauri_plugin_gpui::gpui::Role::Alert)
                     .aria_label(v.message.clone())
-                    .test_support()
                     .flex()
                     .items_center()
                     .gap_2()
@@ -331,7 +325,7 @@ impl Render for RenameDialog {
           .when(!self.error.is_empty(), |this| {
             this.child(
               ui::text(div(), TextSize::Sm)
-                .debug_selector(|| "rename-error".into())
+                .selector("rename-error")
                 .text_color(p.destructive)
                 .child(self.error.clone()),
             )
