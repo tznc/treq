@@ -1,5 +1,6 @@
 // The workspace header's right group: checks, PR pill, sync and Merge share
-// one control height, and the sync pip reads clearly in both themes.
+// one control height, sync always shows, and its pip reads clearly in both
+// themes when the branch and its remote differ.
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -21,13 +22,16 @@ test("toolbar: header controls share one height", async ({ page }) => {
   await ready(page);
   await openWorkspace(page, "feat/empty-event-message");
   await settle(page, 1500);
+  await expect(
+    page.getByRole("button", { name: "Sync with remote: Not on remote" }),
+  ).toBeVisible();
   await capture(page, {
     name: "25-toolbar-heights",
     title: "Workspace header controls",
     clip: await headerClip(page),
     expectations: [
       "Checks, the PR pill, sync, Merge and the menu share one height and vertical centre",
-      "The sync pip is a solid amber dot, not clipped and clear of the button border",
+      "The sync button shows only its icon, with no amber pip: the branch is not on the remote",
     ],
   });
 });
@@ -57,6 +61,11 @@ test("toolbar: header with the sync button", async ({ page }) => {
   }
   const db = new DatabaseSync(join(repo, ".treq", "local.db"));
   db.prepare("UPDATE workspaces SET not_on_remote = 0 WHERE branch_name = ?").run(branch);
+  // A rebase onto the target three hours ago, for the sync tooltip.
+  const rebasedAt = new Date(Date.now() - 3 * 3600_000).toISOString();
+  db.prepare(
+    "UPDATE workspaces SET metadata = json_set(COALESCE(metadata, '{}'), '$.last_rebased_at', ?) WHERE branch_name = ?",
+  ).run(rebasedAt, branch);
   db.close();
   await openWorkspace(page, branch);
   await settle(page, 2000);
@@ -68,6 +77,18 @@ test("toolbar: header with the sync button", async ({ page }) => {
     expectations: [
       "The PR pill, the ahead count with the sync icon, Merge and the menu share one height and vertical centre",
       "A solid amber pip sits on the sync button's top-right corner, ringed in the background, not clipped",
+    ],
+  });
+  await page.getByRole("button", { name: /^Sync with remote/ }).hover();
+  await settle(page, 1500);
+  await capture(page, {
+    name: "25-toolbar-sync-tooltip",
+    title: "Sync tooltip with the last rebase",
+    screen: true,
+    rest: false,
+    expectations: [
+      "Hovering sync shows a tooltip reading '<n> to push. Last rebased on main 3 hours ago. Sync with remote (fetch and push)'",
+      "The tooltip is fully on screen and not clipped",
     ],
   });
 });

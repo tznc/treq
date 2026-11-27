@@ -9,7 +9,7 @@ use super::{
   checklist::ToolsHost,
   workspace::{
     Checks, CommitsLabel, CreatePr, Disabled, Header, HomeTarget, Linear, Loc, Merge, Pill,
-    PrState, Rebase, Sync, Tab, TabRow, Target, Tone, Tooltip, ViewPr,
+    PrState, Rebase, Rebased, Sync, Tab, TabRow, Target, Tone, Tooltip, ViewPr,
   },
 };
 use crate::{
@@ -783,9 +783,19 @@ pub fn workspace_view(
         draft: p.is_draft,
       }),
     create_pr,
-    sync: (!not_on_remote && (ahead > 0 || behind > 0)).then_some(Sync {
+    sync: Some(Sync {
       ahead: ahead as u32,
       behind: behind as u32,
+      not_on_remote,
+      rebased: workspace.and_then(|w| {
+        Some(Rebased {
+          target: w
+            .target_branch
+            .clone()
+            .unwrap_or_else(|| route.default_target().to_string()),
+          at: local_db::last_rebased_at_of(w)?,
+        })
+      }),
       disabled: busy,
       spinning: matches!(pending, Pending::Sync | Pending::Reset),
     }),
