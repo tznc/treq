@@ -911,6 +911,17 @@ fn an_edit_on_disk_during_a_review_waits_behind_the_stale_banner(cx: &mut TestAp
 }
 
 #[gpui::test]
+fn an_edit_on_disk_after_the_last_comment_goes_shows_at_once(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  comment_line(&mut h, "Nit");
+  click_named(&mut h, gpui::Role::Button, "Delete comment");
+  h.cx.run_until_parked();
+  edit_a_rs(&mut h, &host);
+  assert!(!shows_stale_banner(&mut h), "no comments, no review");
+  assert_eq!(shown_lines(&mut h, "a.rs"), [" a", "+b", "+e"]);
+}
+
+#[gpui::test]
 fn arrow_keys_move_and_extend_the_line_selection(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
   // a.rs: " a", "+b", "+c"; b.rs: "+d".
