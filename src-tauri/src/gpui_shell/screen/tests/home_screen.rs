@@ -173,6 +173,56 @@ fn workspace_header_syncs_itself(cx: &mut TestAppContext) {
   assert_eq!(reads, 1);
 }
 
+fn refreshed_prs(host: &FakeHost) -> Vec<String> {
+  host
+    .calls()
+    .into_iter()
+    .filter(|c| c.starts_with("refresh pr status"))
+    .collect()
+}
+
+/// A sync's push starts new checks on GitHub a moment later: the poller
+/// reads the branch's pull request again then, not on its next round.
+#[gpui::test]
+fn workspace_header_reads_checks_again_a_moment_after_a_sync(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    synced: true,
+    ..feature_host()
+  };
+  let (mut h, host) = workspace_harness(cx, host, workspace_route());
+  h.click("workspace-sync");
+  h.cx.run_until_parked();
+  assert!(
+    refreshed_prs(&host).is_empty(),
+    "GitHub has no new checks yet"
+  );
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_secs(5));
+  h.cx.run_until_parked();
+  assert_eq!(refreshed_prs(&host), ["refresh pr status feature/login"]);
+}
+
+#[gpui::test]
+fn workspace_header_leaves_checks_after_a_failed_or_remote_sync(cx: &mut TestAppContext) {
+  // A local sync that fails, then a remote repository's that succeeds.
+  for remote in [false, true] {
+    let host = FakeHost {
+      synced: remote,
+      react_actions: remote,
+      ..feature_host()
+    };
+    let (mut h, host) = workspace_harness(cx, host, workspace_route());
+    h.click("workspace-sync");
+    h.cx.run_until_parked();
+    h.cx
+      .executor()
+      .advance_clock(std::time::Duration::from_secs(5));
+    h.cx.run_until_parked();
+    assert!(refreshed_prs(&host).is_empty());
+  }
+}
+
 #[gpui::test]
 fn workspace_header_reads_again_when_the_model_refreshes(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, feature_host(), workspace_route());

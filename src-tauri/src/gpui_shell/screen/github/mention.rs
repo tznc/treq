@@ -1,8 +1,10 @@
 //! `@` mentions in the comment box: the issue's or pull request's
 //! participants, suggested as a login is typed after `@`.
 
+use gpui_kit::base::ObservedElement;
 use gpui_kit::component::input::{Enter, Escape, IndentInline, MoveDown, MoveUp};
 use tauri_plugin_gpui::gpui::{self, div, prelude::*, Context, Div, SharedString, Window};
+use treq_ui::SelectorExt as _;
 
 use super::GithubView;
 use crate::{
@@ -126,11 +128,11 @@ impl GithubView {
     mention: CommentMention,
     p: &Palette,
     cx: &mut Context<Self>,
-  ) -> Div {
+  ) -> ObservedElement<gpui::Stateful<Div>> {
     let selected = self.mention_index % mention.logins.len();
     let anchor = mention.anchor;
     div()
-      .debug_selector(|| "github-mentions".into())
+      .selector("github-mentions")
       .rounded(radius::LG)
       .border_1()
       .border_color(p.border)

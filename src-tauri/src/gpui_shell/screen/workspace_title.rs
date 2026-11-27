@@ -5,6 +5,7 @@
 
 use crate::gpui_shell::native::Toast;
 use std::sync::Arc;
+use treq_ui::SelectorExt as _;
 
 use gpui_kit::base::{SelectableText, TextSelection, TextSelectionHandle};
 use gpui_kit::component::input::{Enter, Escape, InputEvent, Textarea, TextareaState};
@@ -238,7 +239,7 @@ impl Render for TitleEditor {
         .text_color(p.foreground)
     };
     let panel = div()
-      .debug_selector(|| "workspace-title".into())
+      .selector("workspace-title")
       .flex()
       .items_center()
       .gap_1()
@@ -249,7 +250,7 @@ impl Render for TitleEditor {
           heading(div())
             .min_w_0()
             .truncate()
-            .debug_selector(|| "workspace-title-text".into())
+            .selector("workspace-title-text")
             .track_focus(&self.focus)
             .on_key_down(|e: &KeyDownEvent, window, cx| {
               let held = crate::gpui_shell::keys::held(e.keystroke.modifiers);
@@ -297,7 +298,7 @@ impl Render for TitleEditor {
       .child(
         heading(div())
           .w(zpx(320.))
-          .debug_selector(|| "workspace-title-input".into())
+          .selector("workspace-title-input")
           .child(Textarea::new(&draft)),
       )
       .child(
