@@ -727,7 +727,6 @@ impl ChangesView {
         if sent { "Sent" } else { "Agent" },
         comment.file_path
       ))
-      .font_family(theme::MONO_FONT)
       .rounded(radius::MD)
       .border_1()
       .border_color(violet(p, 0.4))
@@ -762,7 +761,7 @@ impl ChangesView {
           ),
       )
       .child(
-        div()
+        ui::text(div(), TextSize::Sm)
           .whitespace_normal()
           .child(comment.comment_text.clone()),
       );
