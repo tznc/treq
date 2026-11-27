@@ -34,6 +34,7 @@ pub mod db;
 pub mod file_indexer;
 pub mod github;
 pub mod github_filters;
+pub mod github_stack;
 #[cfg(feature = "gpui-shell")]
 #[cfg(desktop)]
 mod gpui_shell;
