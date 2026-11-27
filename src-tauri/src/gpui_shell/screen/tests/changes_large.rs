@@ -223,72 +223,100 @@ fn a_large_diff_finds_text_on_rows_not_drawn(cx: &mut TestAppContext) {
   assert!(!shows_line(&mut h, 0, 0));
 }
 
-/// Scrolls the diff by `dy`; a negative `dy` scrolls down.
-fn scroll_diff(h: &mut Harness, dy: f32) {
-  let list = h.cx.debug_bounds("changes-diff-list").expect("list");
-  h.cx.simulate_event(gpui::ScrollWheelEvent {
-    position: list.center(),
-    delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), gpui::px(dy))),
-    modifiers: Modifiers::none(),
-    touch_phase: gpui::TouchPhase::Moved,
-  });
+/// The one element of `role` named `name` that the user sees.
+fn seen(h: &mut Harness, role: gpui::Role, name: &str) -> gpui_testing_library::Node {
+  use gpui_testing_library::{by, prelude::*};
+  h.rendered()
+    .get_by_role(by::role(role).name(name.to_string()))
+}
+
+/// Clicks the element of `role` named `name` that the user sees.
+fn click_seen(h: &mut Harness, role: gpui::Role, name: &str) {
+  let node = seen(h, role, name);
+  h.rendered().user().click(&node);
   h.cx.run_until_parked();
-  h.cx.update(|window, cx| window.draw(cx).clear(cx));
+}
+
+/// The line of file `f` in the middle of those the user sees.
+fn a_line_of(h: &mut Harness, f: usize) -> gpui_testing_library::Node {
+  use gpui_testing_library::{by, prelude::*};
+  let file = format!("compute_{f}(");
+  let mut lines: Vec<_> = h
+    .rendered()
+    .query_all_by_role(by::role(gpui::Role::Row))
+    .into_iter()
+    .filter(|row| row.name().is_some_and(|name| name.contains(&file)))
+    .collect();
+  assert!(!lines.is_empty(), "no line of file {f} on screen");
+  lines.sort_by(|a, b| a.bounds().top().partial_cmp(&b.bounds().top()).unwrap());
+  lines.swap_remove(lines.len() / 2)
+}
+
+/// Scrolls the diff by `dy` with the pointer over a line of file `f`; a
+/// negative `dy` scrolls down.
+fn scroll_diff(h: &mut Harness, f: usize, dy: f32) {
+  let line = a_line_of(h, f);
+  h.rendered().fire_event().scroll(
+    &line,
+    gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), gpui::px(dy))),
+  );
+  h.cx.run_until_parked();
 }
 
 #[gpui::test]
 fn a_file_header_in_place_is_not_pinned(cx: &mut TestAppContext) {
   let mut h = expanded(cx);
-  assert!(h
-    .cx
-    .debug_bounds("pinned-file-header-src/module_0.rs")
-    .is_none());
+  let card = seen(&mut h, gpui::Role::Group, "src/module_0.rs");
+  let header = seen(&mut h, gpui::Role::Heading, "src/module_0.rs");
+  assert!(
+    card.contains(&header),
+    "the one header shown is the card's own"
+  );
 }
 
 #[gpui::test]
-fn scrolling_into_a_file_pins_its_header_to_the_top(cx: &mut TestAppContext) {
+fn scrolling_through_a_file_keeps_its_header_in_place(cx: &mut TestAppContext) {
   let mut h = expanded(cx);
-  scroll_diff(&mut h, -600.);
+  scroll_diff(&mut h, 0, -600.);
   assert!(
     !shows_line(&mut h, 0, 0),
-    "the file's own header scrolled away"
+    "the card's own header scrolled away"
   );
-  let pinned = h
-    .cx
-    .debug_bounds("pinned-file-header-src/module_0.rs")
-    .expect("pinned header");
-  let list = h.cx.debug_bounds("changes-diff-list").expect("list");
-  assert_eq!(pinned.top(), list.top());
+  let header = seen(&mut h, gpui::Role::Heading, "src/module_0.rs").bounds();
+  let line = a_line_of(&mut h, 0);
+  let below = line.bounds();
+  scroll_diff(&mut h, 0, -200.);
+  assert!(line.bounds().top() < below.top(), "the lines scrolled");
+  assert_eq!(
+    seen(&mut h, gpui::Role::Heading, "src/module_0.rs").bounds(),
+    header,
+    "the header stays put"
+  );
 }
 
 #[gpui::test]
-fn the_next_file_pushes_the_pinned_header_up(cx: &mut TestAppContext) {
+fn the_next_file_pushes_the_pinned_header_out(cx: &mut TestAppContext) {
   let mut h = expanded(cx);
-  h.click("file-row-src/module_1.rs");
-  scroll_diff(&mut h, 10.);
-  let pinned = h
-    .cx
-    .debug_bounds("pinned-file-header-src/module_0.rs")
-    .expect("pinned header");
-  let next = h
-    .cx
-    .debug_bounds("file-card-src/module_1.rs")
-    .expect("next card");
+  click_seen(&mut h, gpui::Role::Button, "src/module_1.rs");
+  // The first file's last lines come back above the second file's card.
+  scroll_diff(&mut h, 1, 60.);
+  assert!(h.shows(gpui::Role::Heading, "src/module_0.rs"), "pinned");
+  scroll_diff(&mut h, 1, -56.);
   assert!(
-    pinned.bottom() <= next.top(),
-    "{pinned:?} overlaps {next:?}"
+    !h.shows(gpui::Role::Heading, "src/module_0.rs"),
+    "the second file's card pushed it out"
   );
+  assert!(h.shows(gpui::Role::Heading, "src/module_1.rs"));
 }
 
 #[gpui::test]
 fn the_pinned_header_marks_its_file_viewed(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, large_host(), changes_route());
-  if h.drawn("view-large-changeset") {
-    h.click("view-large-changeset");
-  }
-  h.click("file-row-src/module_0.rs");
-  scroll_diff(&mut h, -600.);
-  h.click("viewed-src/module_0.rs");
+  // Past the large-changeset gate, then the first file's diff.
+  click_seen(&mut h, gpui::Role::Button, "View changes");
+  click_seen(&mut h, gpui::Role::Button, "src/module_0.rs");
+  scroll_diff(&mut h, 0, -600.);
+  click_seen(&mut h, gpui::Role::CheckBox, "Viewed");
   assert!(
     host
       .writes()
