@@ -1437,7 +1437,10 @@ impl ChangesView {
       .draft
       .as_ref()
       .is_some_and(|d| d.file_path == path && d.at == Some((h, l)) && d.hunk_id == hunks[h].id);
-    if here {
+    // A quote's box sits under the thread it quotes, which `line_threads` drew.
+    let (number, side) = number_and_side(numbers, l);
+    let key = (path.to_string(), hunks[h].id.clone(), number, side);
+    if here && self.quoted_thread(path, Some(&key)).is_none() {
       out.push(self.comment_input(p, cx).into_any_element());
     }
     out

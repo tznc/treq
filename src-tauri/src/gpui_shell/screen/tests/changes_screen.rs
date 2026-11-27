@@ -1348,6 +1348,43 @@ fn changes_tab_quotes_a_review_thread(cx: &mut TestAppContext) {
   assert_eq!(saved[0]["start_line"], 2);
 }
 
+/// Whether the comment box sits between the first and the second thread.
+fn quote_box_follows_the_first_thread(h: &mut Harness) -> bool {
+  h.cx.run_until_parked();
+  let first = h
+    .cx
+    .debug_bounds("github-comment-card-t1-c")
+    .expect("first");
+  let second = h
+    .cx
+    .debug_bounds("github-comment-card-t2-c")
+    .expect("second");
+  let input = h.cx.debug_bounds("comment-input").expect("comment box");
+  input.top() >= first.bottom() && input.bottom() <= second.top()
+}
+
+/// Quote opens the comment box under the thread it quotes, not under the
+/// last thread on its line, where it can be off screen.
+#[gpui::test]
+fn quote_opens_the_comment_box_under_the_quoted_thread(cx: &mut TestAppContext) {
+  let mut host = changes_host();
+  host.threads = vec![gh_thread("t1", 2, false), gh_thread("t2", 2, false)];
+  let (mut h, _) = workspace_harness(cx, host, changes_route());
+  h.click("github-comment-quote");
+  assert!(quote_box_follows_the_first_thread(&mut h));
+}
+
+/// The same for threads above the file, whose line is not in the diff.
+#[gpui::test]
+fn quote_opens_the_comment_box_under_a_quoted_thread_above_the_file(cx: &mut TestAppContext) {
+  let mut host = changes_host();
+  host.threads = vec![gh_thread("t1", 40, false), gh_thread("t2", 50, false)];
+  let (mut h, _) = workspace_harness(cx, host, changes_route());
+  assert!(h.shows(gpui::Role::Group, "Outdated threads on a.rs"));
+  h.click("github-comment-quote");
+  assert!(quote_box_follows_the_first_thread(&mut h));
+}
+
 #[gpui::test]
 fn changes_tab_draws_a_github_suggestion_as_a_diff(cx: &mut TestAppContext) {
   let mut host = changes_host();
