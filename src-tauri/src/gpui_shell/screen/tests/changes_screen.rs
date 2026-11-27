@@ -238,15 +238,27 @@ fn changes_host_committed_only() -> FakeHost {
   host
 }
 
-/// With nothing uncommitted there is nothing to commit: no commit box, one
-/// muted line where the Changes group would be.
+/// With nothing uncommitted there is nothing to commit: no commit box, and
+/// the "No changes" placeholder where the Changes group would be, whether
+/// the Committed group's files are shown or hidden.
 #[gpui::test]
 fn changes_tab_offers_no_commit_box_with_nothing_to_commit(cx: &mut TestAppContext) {
-  let (mut h, _) = workspace_harness(cx, changes_host_committed_only(), committed_route(true));
-  assert!(h.shows(gpui::Role::Button, "Collapse Committed"));
-  assert!(!h.shows(gpui::Role::Button, "Commit"));
-  assert!(!h.shows(gpui::Role::MultilineTextInput, "Message"));
-  assert!(h.shows(gpui::Role::Status, "Nothing to commit"));
+  for show in [true, false] {
+    let (mut h, _) = workspace_harness(cx, changes_host_committed_only(), committed_route(show));
+    let toggle = if show {
+      "Collapse Committed"
+    } else {
+      "Expand Committed"
+    };
+    assert!(h.shows(gpui::Role::Button, toggle), "show: {show}");
+    assert!(!h.shows(gpui::Role::Button, "Commit"), "show: {show}");
+    assert!(
+      !h.shows(gpui::Role::MultilineTextInput, "Message"),
+      "show: {show}"
+    );
+    assert!(h.shows(gpui::Role::Status, "No changes"), "show: {show}");
+    assert!(!h.shows(gpui::Role::Status, "Nothing to commit"), "show: {show}");
+  }
 }
 
 /// The commit box sits in the Changes group: under its header, above its

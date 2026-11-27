@@ -129,14 +129,14 @@ enum SideRow {
     error: bool,
     pending: bool,
   },
-  /// Where the uncommitted groups would be, when nothing is uncommitted.
+  /// Where the uncommitted groups would be, when only conflicts are.
   NothingToCommit,
   /// By index into the list's files in [`SideData`].
   File(List, usize),
   CommittedHeader,
   /// By index into [`SideData::committed`].
   Committed(usize),
-  /// Nothing changed, nothing committed.
+  /// Nothing uncommitted and no conflicts.
   Empty,
 }
 
@@ -2058,7 +2058,7 @@ impl ChangesView {
       error: self.message_error.is_some(),
       pending: self.pending.is_some(),
     };
-    if listed.is_empty() && (committed == 0 || committed_hidden) && data.conflicted.is_empty() {
+    if listed.is_empty() && data.conflicted.is_empty() {
       rows.push(SideRow::Empty);
     } else if listed.is_empty() {
       // The filter button shares the "Nothing to commit" row.
@@ -2284,7 +2284,7 @@ impl ChangesView {
         .children(self.filter_row(p, cx))
         .into_any_element(),
       SideRow::CommittedHeader => {
-        // Flush under "Nothing to commit": no gap above the header.
+        // Flush under the "No changes" placeholder: no gap above the header.
         let d = &self.side_data;
         let flush = d.staged.is_empty() && d.unstaged.is_empty() && d.conflicted.is_empty();
         self
