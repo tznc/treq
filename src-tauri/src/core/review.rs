@@ -433,6 +433,109 @@ pub fn carry_lines(before: &str, after: &str, (start, end): (u32, u32)) -> Optio
   Some((moved(start)?, moved(end)?))
 }
 
+/// Where a line comment shows, as GitHub places a review thread.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Placement {
+  /// Under its last line.
+  Line,
+  /// Its lines changed after it was written.
+  Outdated,
+  /// It follows its lines, but the diff no longer shows them.
+  OffDiff,
+}
+
+/// Where `comment` shows among `hunks`, the diff of its file at the
+/// version `content_id` names. One that followed its file to that version
+/// ([`carry`]) stands on its lines alone; others go by [`is_outdated`].
+pub fn placement(
+  comment: &LineComment,
+  hunks: &[JjDiffHunk],
+  content_id: Option<&str>,
+) -> Placement {
+  if comment.is_file() {
+    return Placement::Line;
+  }
+  if comment.outdated {
+    return Placement::Outdated;
+  }
+  let shown = content_id
+    .zip(comment.line_side)
+    .and_then(|(id, side)| side_version(id, side));
+  if comment.version.is_some() && comment.version.as_deref() == shown {
+    return if holds(comment, hunks) {
+      Placement::Line
+    } else {
+      Placement::OffDiff
+    };
+  }
+  if is_outdated(comment, Some(hunks)) {
+    Placement::Outdated
+  } else {
+    Placement::Line
+  }
+}
+
+/// GitHub carrying `comment` to a newer version of its file: `from` is the
+/// text of the version it kept (`None` once gone), `to` that of `version`,
+/// whose diff is `hunks`. It moves to its lines there, or is outdated for
+/// good, keeping the last version it followed.
+pub fn carry(
+  comment: &mut LineComment,
+  from: Option<&str>,
+  to: &str,
+  version: &str,
+  hunks: &[JjDiffHunk],
+) {
+  let lines = from.and_then(|from| carry_lines(from, to, (comment.start_line, comment.end_line)));
+  let Some((start, end)) = lines else {
+    comment.outdated = true;
+    return;
+  };
+  (comment.start_line, comment.end_line) = (start, end);
+  comment.version = Some(version.to_string());
+  let side = comment.line_side.unwrap_or(Side::New);
+  let last = |h: &&JjDiffHunk| {
+    numbered(h)
+      .enumerate()
+      .any(|(l, n)| number_and_side(n, l) == (end, side))
+  };
+  if let Some(hunk) = hunks.iter().find(last) {
+    comment.hunk_id = hunk.id.clone();
+  }
+  let code: Vec<String> = lines_on(comment, hunks).map(str::to_string).collect();
+  if code.len() == (end - start + 1) as usize {
+    comment.line_content = code;
+  }
+}
+
+/// Line `l` of a hunk, numbered `n`, is one of the comment's.
+fn covers(comment: &LineComment, l: usize, n: (Option<u32>, Option<u32>)) -> bool {
+  let (number, side) = number_and_side(n, l);
+  (comment.start_line..=comment.end_line).contains(&number)
+    && comment.line_side.is_none_or(|s| s == side)
+}
+
+/// The comment's hunk is there and has one of its lines.
+fn holds(comment: &LineComment, hunks: &[JjDiffHunk]) -> bool {
+  hunks
+    .iter()
+    .find(|h| h.id == comment.hunk_id)
+    .is_some_and(|h| numbered(h).enumerate().any(|(l, n)| covers(comment, l, n)))
+}
+
+/// The diff lines on the comment's lines, from any of `hunks`.
+fn lines_on<'a>(
+  comment: &'a LineComment,
+  hunks: &'a [JjDiffHunk],
+) -> impl Iterator<Item = &'a str> + 'a {
+  hunks.iter().flat_map(move |h| {
+    numbered(h)
+      .enumerate()
+      .filter(move |&(l, n)| covers(comment, l, n))
+      .map(move |(l, _)| h.lines[l].as_str())
+  })
+}
+
 /// `isCommentOutdated`: its hunk is gone, no longer holds its lines, or
 /// holds other code on them than it was written on.
 /// `hunks` is `None` while the file is loading, when nothing is outdated.
@@ -446,15 +549,7 @@ pub fn is_outdated(comment: &LineComment, hunks: Option<&[JjDiffHunk]>) -> bool 
   let Some(hunks) = hunks else {
     return false;
   };
-  let Some(hunk) = hunks.iter().find(|h| h.id == comment.hunk_id) else {
-    return true;
-  };
-  let covers = |&(l, n): &(usize, (Option<u32>, Option<u32>))| {
-    let (number, side) = number_and_side(n, l);
-    (comment.start_line..=comment.end_line).contains(&number)
-      && comment.line_side.is_none_or(|s| s == side)
-  };
-  if !numbered(hunk).enumerate().any(|n| covers(&n)) {
+  if !holds(comment, hunks) {
     return true;
   }
   // A quoted GitHub comment keeps the quote, not the code, in `line_content`;
@@ -465,13 +560,7 @@ pub fn is_outdated(comment: &LineComment, hunks: Option<&[JjDiffHunk]>) -> bool 
   {
     return false;
   }
-  let code = hunks.iter().flat_map(|h| {
-    numbered(h)
-      .enumerate()
-      .filter(covers)
-      .map(move |(l, _)| h.lines[l].as_str())
-  });
-  !code.eq(comment.line_content.iter().map(String::as_str))
+  !lines_on(comment, hunks).eq(comment.line_content.iter().map(String::as_str))
 }
 
 /// The comments drawn under line `l` of `hunk`: those that end on it.
@@ -966,6 +1055,65 @@ mod tests {
     assert!(!is_outdated(&c, Some(&hunks)));
     c.outdated = true;
     assert!(is_outdated(&c, Some(&hunks)));
+  }
+
+  #[test]
+  fn a_comment_that_followed_its_file_stands_on_its_lines_alone() {
+    let hunks = [hunk("h", "@@ -1,1 +1,3 @@", &[" a", "+b", "+c"])];
+    // Its kept code (`+x`) differs from line 2's now.
+    let mut c = comment("h", 2, 2, Side::New);
+    c.version = Some("fv1".into());
+    let at = |id| placement(&c, &hunks, Some(id));
+    assert_eq!(at("fbase>fv1:git"), Placement::Line);
+    // Not carried to the shown version yet: its code decides.
+    assert_eq!(at("fbase>fv2:git"), Placement::Outdated);
+    (c.start_line, c.end_line) = (9, 9);
+    let at = |id| placement(&c, &hunks, Some(id));
+    assert_eq!(at("fbase>fv1:git"), Placement::OffDiff);
+    c.outdated = true;
+    assert_eq!(
+      placement(&c, &hunks, Some("fbase>fv1:git")),
+      Placement::Outdated
+    );
+  }
+
+  #[test]
+  fn carrying_a_comment_moves_it_with_its_line_or_outdates_it() {
+    let before = [hunk("h1", "@@ -1,1 +1,3 @@", &[" a", "+b", "+c"])];
+    let mut c =
+      pending_for_line("a.rs", &before, (0, 1))
+        .unwrap()
+        .comment("fix", "1".into(), "now".into());
+    c.version = Some("fv1".into());
+    let after = [hunk("h2", "@@ -1,1 +1,4 @@", &["+new", " a", "+b", "+c"])];
+    carry(&mut c, Some("a\nb\nc\n"), "new\na\nb\nc\n", "fv2", &after);
+    assert_eq!((c.start_line, c.end_line), (3, 3));
+    assert_eq!(
+      (c.hunk_id.as_str(), c.version.as_deref()),
+      ("h2", Some("fv2"))
+    );
+    assert_eq!(
+      (c.line_content.as_slice(), c.outdated),
+      (&["+b".to_string()][..], false)
+    );
+    carry(
+      &mut c,
+      Some("new\na\nb\nc\n"),
+      "new\na\nB\nc\n",
+      "fv3",
+      &after,
+    );
+    assert!(c.outdated);
+    assert_eq!(c.version.as_deref(), Some("fv2"));
+  }
+
+  #[test]
+  fn a_comment_whose_version_is_gone_is_outdated() {
+    let hunks = [hunk("h", "@@ -1,1 +1,2 @@", &[" a", "+x"])];
+    let mut c = comment("h", 2, 2, Side::New);
+    c.version = Some("fv1".into());
+    carry(&mut c, None, "a\nx\n", "fv2", &hunks);
+    assert!(c.outdated);
   }
 
   #[test]

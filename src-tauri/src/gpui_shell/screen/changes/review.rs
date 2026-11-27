@@ -15,10 +15,11 @@ use super::*;
 use crate::core::review::{selected_range, selected_row, selected_text, word_at, TextPoint};
 use crate::gpui_shell::screen::{
   changes_review::{
-    commented_text, comments_under, compose_suggestion_comment, count_label, is_outdated,
+    carry, commented_text, comments_under, compose_suggestion_comment, count_label,
     line_has_comment, line_location, number_and_side, outdated_label, outdated_markdown,
-    parse_suggestion, pending_for_line, pending_for_selection, review_markdown, side_version,
-    stale_names, suggestion_lines, ConflictNote, LineComment, Pending, Side, Stored, FILE_HUNK,
+    parse_suggestion, pending_for_line, pending_for_selection, placement, review_markdown,
+    side_version, stale_names, suggestion_lines, ConflictNote, LineComment, Pending, Placement,
+    Side, Stored, FILE_HUNK,
   },
   commits_data::{selection, LineRef},
 };
@@ -160,7 +161,7 @@ impl ChangesView {
     self.review.hydrated = Some(key);
     self.run(
       move |host, parent| host.load_review(&parent.repo_path, id),
-      |view, result, _| match result {
+      |view, result, cx| match result {
         Ok(Some(review)) => {
           let stored = Stored::parse(&review);
           if !stored.is_empty() {
@@ -168,6 +169,7 @@ impl ChangesView {
             view.review.summary = stored.summary;
             view.review.notes = stored.notes;
             view.review.user_added = true;
+            view.carry_comments(cx);
           }
         }
         Ok(None) => {}
@@ -913,6 +915,81 @@ impl ChangesView {
     self.apply(snapshot, cx);
   }
 
+  /// GitHub's carry-forward: a comment that kept an older version of a file
+  /// now shown at another moves to its lines in it, or goes outdated.
+  pub(super) fn carry_comments(&mut self, cx: &mut Context<Self>) {
+    let due: Vec<(String, String, String, String)> = self
+      .review
+      .comments
+      .iter()
+      .filter(|c| !c.outdated && !c.is_file())
+      .filter_map(|c| {
+        let from = c.version.as_deref()?;
+        let shown = self.hunks.get(&c.file_path).filter(|d| !d.loading)?;
+        let to = side_version(shown.content_id.as_deref()?, c.line_side?)?;
+        (to != from).then(|| (c.id.clone(), c.file_path.clone(), from.into(), to.into()))
+      })
+      .collect();
+    if due.is_empty() {
+      return;
+    }
+    self.run(
+      move |host, parent| {
+        let mut texts: HashMap<(String, String), Result<Option<String>, String>> = HashMap::new();
+        for (_, path, from, to) in &due {
+          for version in [from, to] {
+            texts
+              .entry((path.clone(), version.clone()))
+              .or_insert_with(|| {
+                host.file_version(&parent.repo_path, parent.workspace_id(), path, version)
+              });
+          }
+        }
+        (due, texts)
+      },
+      |view, (due, texts), cx| {
+        let mut carried = false;
+        for (id, path, from, to) in due {
+          // Read where it cannot be (a remote host): its code decides.
+          let (Some(Ok(from_text)), Some(Ok(Some(to_text)))) = (
+            texts.get(&(path.clone(), from.clone())),
+            texts.get(&(path.clone(), to.clone())),
+          ) else {
+            continue;
+          };
+          let Some(shown) = view.hunks.get(&path) else {
+            continue;
+          };
+          let (hunks, content_id) = (shown.hunks.clone(), shown.content_id.clone());
+          let Some(comment) = view
+            .review
+            .comments
+            .iter_mut()
+            .find(|c| c.id == id && c.version.as_deref() == Some(from.as_str()))
+          else {
+            continue;
+          };
+          // The file may have moved on again while these were read.
+          let now = content_id
+            .as_deref()
+            .zip(comment.line_side)
+            .and_then(|(id, side)| side_version(id, side));
+          if now != Some(to.as_str()) {
+            continue;
+          }
+          carry(comment, from_text.as_deref(), to_text, &to, &hunks);
+          carried = true;
+        }
+        if carried {
+          view.layout_gen += 1;
+          view.save_review(cx);
+          cx.notify();
+        }
+      },
+      cx,
+    );
+  }
+
   /// After a Reload's diffs are read: comments whose file or hunk is gone.
   pub(super) fn prune_comments(&mut self, cx: &mut Context<Self>) {
     if !std::mem::take(&mut self.review.prune) {
@@ -921,9 +998,11 @@ impl ChangesView {
     let listed: HashSet<String> = self.files().iter().map(|f| f.path.clone()).collect();
     let before = self.review.comments.len();
     let hunks = self.hunks.clone();
+    // One that follows its file stays, outdated or off the diff, as on GitHub.
     self.review.comments.retain(|c| {
       listed.contains(&c.file_path)
         && (c.is_file()
+          || c.version.is_some()
           || hunks
             .get(&c.file_path)
             .is_some_and(|d| d.hunks.iter().any(|h| h.id == c.hunk_id)))
@@ -943,14 +1022,23 @@ impl ChangesView {
     }
   }
 
-  fn outdated(&self, path: &str) -> Vec<&LineComment> {
-    let data = self.file_hunks(path).filter(|d| !d.loading);
+  /// Where `comment` shows; on its line while its file loads.
+  fn placed(&self, comment: &LineComment) -> Placement {
+    match self.file_hunks(&comment.file_path).filter(|d| !d.loading) {
+      Some(d) => placement(comment, &d.hunks, d.content_id.as_deref()),
+      None => Placement::Line,
+    }
+  }
+
+  /// The file's comments not under a line: outdated, or off the diff.
+  fn outdated(&self, path: &str) -> Vec<(&LineComment, Placement)> {
     self
       .review
       .comments
       .iter()
       .filter(|c| c.file_path == path)
-      .filter(|c| is_outdated(c, data.as_ref().map(|d| d.hunks.as_slice())))
+      .map(|c| (c, self.placed(c)))
+      .filter(|(_, at)| *at != Placement::Line)
       .collect()
   }
 
@@ -959,16 +1047,7 @@ impl ChangesView {
       .review
       .comments
       .iter()
-      .filter(|c| {
-        is_outdated(
-          c,
-          self
-            .file_hunks(&c.file_path)
-            .filter(|d| !d.loading)
-            .as_ref()
-            .map(|d| d.hunks.as_slice()),
-        )
-      })
+      .filter(|c| self.placed(c) == Placement::Outdated)
       .collect();
     cx.write_to_clipboard(ClipboardItem::new_string(outdated_markdown(&all)));
     super::tell(
@@ -1141,7 +1220,11 @@ impl ChangesView {
         return outdated;
       }
     }
-    let outdated = is_outdated(comment, Some(hunks));
+    let content_id = self
+      .hunks
+      .get(&comment.file_path)
+      .and_then(|d| d.content_id.as_deref());
+    let outdated = placement(comment, hunks, content_id) != Placement::Line;
     self
       .review
       .outdated
@@ -1928,7 +2011,7 @@ impl ChangesView {
       .flex()
       .flex_col()
       .gap_3();
-    for c in outdated {
+    for (c, at) in outdated {
       let id = c.id.clone();
       section = section.child(
         div()
@@ -1958,7 +2041,11 @@ impl ChangesView {
                       .bg(tone.tint(p))
                       .text_color(tone.text(p))
                       .font_weight(FontWeight::MEDIUM)
-                      .child("Outdated"),
+                      .child(if at == Placement::OffDiff {
+                        "Not in diff"
+                      } else {
+                        "Outdated"
+                      }),
                   )
                   .child(
                     // Short label (status label). ast-grep-ignore: gpui-text-xs-short-label-only
@@ -2201,16 +2288,7 @@ impl ChangesView {
       .review
       .comments
       .iter()
-      .filter(|c| {
-        is_outdated(
-          c,
-          self
-            .file_hunks(&c.file_path)
-            .filter(|d| !d.loading)
-            .as_ref()
-            .map(|d| d.hunks.as_slice()),
-        )
-      })
+      .filter(|c| self.placed(c) == Placement::Outdated)
       .count();
     let fg = tone.text(p);
     let button = |id: &'static str, icon: &'static str, label: String| {

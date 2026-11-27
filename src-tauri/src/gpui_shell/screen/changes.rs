@@ -891,6 +891,7 @@ impl ChangesView {
         if batches.is_empty() {
           view.prune_comments(cx);
         }
+        view.carry_comments(cx);
         let last = batches.is_empty();
         view.load_batches(generation, batches, token, cx);
         let drawn = !changed.is_empty() || marks != (view.viewed.len(), view.review.comments.len());
