@@ -6,7 +6,9 @@ use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 
-use crate::github::{check_gh_output, check_graphql_errors, spawn_with_etxtbsy_retry};
+use crate::github::{
+  check_gh_output, check_graphql_errors, spawn_with_etxtbsy_retry, GhMergeMethod,
+};
 use crate::lock_ext::LockExt as _;
 
 /// A stack of pull requests on GitHub.
@@ -140,6 +142,94 @@ pub fn gh_pr_stack_impl(
       .and_then(|pr| pr.stack)
       .map(GhStack::from),
   )
+}
+
+/// The `gh stack` extension's repository.
+const EXTENSION: &str = "github/gh-stack";
+
+/// Runs `gh args` in `dir` (when given); its output.
+fn run(
+  gh_path: &str,
+  dir: Option<&str>,
+  args: &[&str],
+  extended_path: &str,
+) -> Result<Vec<u8>, String> {
+  let mut cmd = std::process::Command::new(gh_path);
+  cmd.args(args).env("PATH", extended_path);
+  if let Some(dir) = dir {
+    cmd.current_dir(dir);
+  }
+  check_gh_output(spawn_with_etxtbsy_retry(cmd)?)
+}
+
+/// Whether the `gh stack` extension is installed.
+pub fn gh_stack_installed_impl(gh_path: &str, extended_path: &str) -> Result<bool, String> {
+  let out = run(gh_path, None, &["extension", "list"], extended_path)?;
+  Ok(
+    String::from_utf8_lossy(&out)
+      .lines()
+      .any(|line| line.split_whitespace().any(|field| field == EXTENSION)),
+  )
+}
+
+/// Installs the `gh stack` extension.
+pub fn gh_stack_install_impl(gh_path: &str, extended_path: &str) -> Result<(), String> {
+  run(
+    gh_path,
+    None,
+    &["extension", "install", EXTENSION],
+    extended_path,
+  )
+  .map(drop)
+}
+
+/// Puts pull requests `prs`, bottom first, in one stack on GitHub. Adds to
+/// a stack they are already in; never takes one out.
+pub fn gh_stack_link_impl(
+  gh_path: &str,
+  repo_path: &str,
+  prs: &[u64],
+  extended_path: &str,
+) -> Result<(), String> {
+  let numbers: Vec<String> = prs.iter().map(u64::to_string).collect();
+  let mut args = vec!["stack", "link"];
+  args.extend(numbers.iter().map(String::as_str));
+  run(gh_path, Some(repo_path), &args, extended_path).map(drop)
+}
+
+/// Takes the open pull requests of stack `number` out of it on GitHub.
+pub fn gh_stack_unstack_impl(
+  gh_path: &str,
+  repo_path: &str,
+  number: u64,
+  extended_path: &str,
+) -> Result<(), String> {
+  let number = number.to_string();
+  run(
+    gh_path,
+    Some(repo_path),
+    &["stack", "unstack", &number],
+    extended_path,
+  )
+  .map(drop)
+}
+
+/// Merges all of stack `number` at once, without asking.
+pub fn gh_stack_merge_impl(
+  gh_path: &str,
+  repo_path: &str,
+  number: u64,
+  method: GhMergeMethod,
+  extended_path: &str,
+) -> Result<(), String> {
+  let number = number.to_string();
+  run(
+    gh_path,
+    Some(repo_path),
+    &["stack", "merge", &number, method.flag(), "--yes"],
+    extended_path,
+  )
+  .map(drop)
 }
 
 type Kept = (Instant, Option<GhStack>);
@@ -334,5 +424,127 @@ mod tests {
     let err = gh_pr_stack_impl(&gh, "/", 42, "/usr/bin:/bin").unwrap_err();
 
     assert!(err.contains("Field 'stack' doesn't exist"), "{err}");
+  }
+}
+
+#[cfg(test)]
+#[cfg(unix)]
+mod cli_tests {
+  use super::*;
+  use std::fs;
+  use tempfile::TempDir;
+
+  /// A fake `gh` running `body` after recording its arguments
+  /// (`\0`-separated) and working directory.
+  fn fake_gh(dir: &TempDir, body: &str) -> String {
+    use std::os::unix::fs::PermissionsExt;
+    let gh = dir.path().join("gh");
+    fs::write(
+      &gh,
+      format!(
+        "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\0' \"$a\"; done > '{args}'\npwd > '{cwd}'\n{body}\n",
+        args = dir.path().join("args").display(),
+        cwd = dir.path().join("cwd").display(),
+      ),
+    )
+    .unwrap();
+    fs::set_permissions(&gh, fs::Permissions::from_mode(0o755)).unwrap();
+    gh.to_str().unwrap().to_string()
+  }
+
+  fn args(dir: &TempDir) -> Vec<String> {
+    fs::read_to_string(dir.path().join("args"))
+      .unwrap()
+      .split('\0')
+      .filter(|a| !a.is_empty())
+      .map(str::to_string)
+      .collect()
+  }
+
+  fn ran_in(dir: &TempDir, repo: &TempDir) -> bool {
+    let cwd = fs::read_to_string(dir.path().join("cwd")).unwrap();
+    fs::canonicalize(cwd.trim()).unwrap() == fs::canonicalize(repo.path()).unwrap()
+  }
+
+  const PATH: &str = "/usr/bin:/bin";
+
+  #[test]
+  fn the_extension_is_installed_when_gh_lists_it() {
+    let bin = TempDir::new().unwrap();
+    let gh = fake_gh(
+      &bin,
+      "printf 'gh dash\\tdlvhdr/gh-dash\\tv4.0.0\\ngh stack\\tgithub/gh-stack\\tv0.4.1\\n'",
+    );
+
+    assert_eq!(gh_stack_installed_impl(&gh, PATH), Ok(true));
+    assert_eq!(args(&bin), ["extension", "list"]);
+  }
+
+  #[test]
+  fn the_extension_is_missing_when_gh_does_not_list_it() {
+    let bin = TempDir::new().unwrap();
+    let gh = fake_gh(&bin, "printf 'gh dash\\tdlvhdr/gh-dash\\tv4.0.0\\n'");
+
+    assert_eq!(gh_stack_installed_impl(&gh, PATH), Ok(false));
+  }
+
+  #[test]
+  fn installs_the_extension() {
+    let bin = TempDir::new().unwrap();
+    let gh = fake_gh(&bin, "");
+
+    gh_stack_install_impl(&gh, PATH).unwrap();
+
+    assert_eq!(args(&bin), ["extension", "install", "github/gh-stack"]);
+  }
+
+  #[test]
+  fn links_pull_requests_bottom_first_in_the_repository() {
+    let (bin, repo) = (TempDir::new().unwrap(), TempDir::new().unwrap());
+    let gh = fake_gh(&bin, "");
+
+    gh_stack_link_impl(&gh, repo.path().to_str().unwrap(), &[40, 41, 42], PATH).unwrap();
+
+    assert_eq!(args(&bin), ["stack", "link", "40", "41", "42"]);
+    assert!(ran_in(&bin, &repo));
+  }
+
+  #[test]
+  fn unstacks_the_stack_on_github() {
+    let (bin, repo) = (TempDir::new().unwrap(), TempDir::new().unwrap());
+    let gh = fake_gh(&bin, "");
+
+    gh_stack_unstack_impl(&gh, repo.path().to_str().unwrap(), 12, PATH).unwrap();
+
+    assert_eq!(args(&bin), ["stack", "unstack", "12"]);
+    assert!(ran_in(&bin, &repo));
+  }
+
+  #[test]
+  fn merges_the_whole_stack_without_prompting() {
+    let (bin, repo) = (TempDir::new().unwrap(), TempDir::new().unwrap());
+    let gh = fake_gh(&bin, "");
+
+    gh_stack_merge_impl(
+      &gh,
+      repo.path().to_str().unwrap(),
+      12,
+      GhMergeMethod::Squash,
+      PATH,
+    )
+    .unwrap();
+
+    assert_eq!(args(&bin), ["stack", "merge", "12", "--squash", "--yes"]);
+    assert!(ran_in(&bin, &repo));
+  }
+
+  #[test]
+  fn a_failed_command_reports_what_gh_said() {
+    let bin = TempDir::new().unwrap();
+    let gh = fake_gh(&bin, "echo 'stack 12 has merge conflicts' >&2; exit 1");
+
+    let err = gh_stack_unstack_impl(&gh, "/", 12, PATH).unwrap_err();
+
+    assert!(err.contains("stack 12 has merge conflicts"), "{err}");
   }
 }

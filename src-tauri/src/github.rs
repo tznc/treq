@@ -1390,7 +1390,7 @@ pub enum GhMergeMethod {
 }
 
 impl GhMergeMethod {
-  fn flag(self) -> &'static str {
+  pub(crate) fn flag(self) -> &'static str {
     match self {
       GhMergeMethod::Merge => "--merge",
       GhMergeMethod::Squash => "--squash",
