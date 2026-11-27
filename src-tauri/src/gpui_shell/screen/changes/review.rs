@@ -17,8 +17,8 @@ use crate::gpui_shell::screen::{
   changes_review::{
     commented_text, comments_under, compose_suggestion_comment, count_label, is_outdated,
     line_has_comment, line_location, number_and_side, outdated_label, outdated_markdown,
-    parse_suggestion, pending_for_line, pending_for_selection, review_markdown, stale_names,
-    suggestion_lines, ConflictNote, LineComment, Pending, Side, Stored, FILE_HUNK,
+    parse_suggestion, pending_for_line, pending_for_selection, review_markdown, side_version,
+    stale_names, suggestion_lines, ConflictNote, LineComment, Pending, Side, Stored, FILE_HUNK,
   },
   commits_data::{selection, LineRef},
 };
@@ -518,10 +518,14 @@ impl ChangesView {
     let Some(draft) = self.review.draft.take() else {
       return;
     };
-    self
-      .review
-      .comments
-      .push(draft.comment(&text, new_id(), now()));
+    let mut comment = draft.comment(&text, new_id(), now());
+    comment.version = self
+      .hunks
+      .get(&draft.file_path)
+      .and_then(|d| d.content_id.as_deref())
+      .and_then(|id| side_version(id, draft.side))
+      .map(str::to_string);
+    self.review.comments.push(comment);
     self.review.user_added = true;
     self.review.draft_input = None;
     self.review.draft_text.clear();

@@ -586,6 +586,8 @@ impl<'a, H: HunkList> Placer<'a, H> {
         github_author: None,
         github_avatar_url: None,
         github_comment_url: None,
+        version: None,
+        outdated: false,
       },
       row: row.clone(),
       line_hash,

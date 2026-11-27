@@ -5,6 +5,7 @@
 
 use std::{ops::Range, sync::LazyLock};
 
+use imara_diff::{diff, intern::InternedInput, Algorithm};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
@@ -223,6 +224,15 @@ pub struct LineComment {
   pub github_avatar_url: Option<String>,
   #[serde(default, skip_serializing_if = "Option::is_none")]
   pub github_comment_url: Option<String>,
+  /// The version of its side's file its lines are numbered in, as
+  /// [`side_version`] names it (GitHub's `commit_id`); `None` on comments
+  /// from before versions were kept, and where no single file version exists.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub version: Option<String>,
+  /// Its lines changed after it was written (GitHub's `isOutdated`): it no
+  /// longer follows the file, even if they change back.
+  #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+  pub outdated: bool,
 }
 
 impl LineComment {
@@ -296,6 +306,8 @@ impl Pending {
       github_author: self.quote.as_ref().map(|q| q.author.clone()),
       github_avatar_url: self.quote.as_ref().and_then(|q| q.avatar_url.clone()),
       github_comment_url: self.quote.as_ref().map(|q| q.url.clone()),
+      version: None,
+      outdated: false,
     }
   }
 
@@ -379,12 +391,57 @@ pub fn pending_for_selection(
   })
 }
 
+/// The file version one side of a `content_id` (`before>after`, then the
+/// diff's `:style`) names: `None` when that side is absent, conflicted or
+/// not a file.
+pub fn side_version(content_id: &str, side: Side) -> Option<&str> {
+  let ids = content_id.split(':').next()?;
+  let (before, after) = ids.split_once('>')?;
+  let id = match side {
+    Side::Old => before,
+    Side::New => after,
+  };
+  (id.starts_with(['f', 'x']) && !id.contains(',')).then_some(id)
+}
+
+/// GitHub's rule for carrying a comment to a newer version of its file:
+/// lines `start..=end` (from 1) of `before`, numbered as they are in
+/// `after`; `None` once the diff between them changes any of those lines or
+/// adds one between them, when the comment is outdated.
+pub fn carry_lines(before: &str, after: &str, (start, end): (u32, u32)) -> Option<(u32, u32)> {
+  let first = start.checked_sub(1)?;
+  let input = InternedInput::new(before, after);
+  if end < start || end as usize > input.before.len() {
+    return None;
+  }
+  let (mut shift, mut changed) = (0_i64, false);
+  diff(
+    Algorithm::Histogram,
+    &input,
+    |old: Range<u32>, new: Range<u32>| {
+      if old.start < end && old.end > first {
+        changed = true;
+      } else if old.end <= first {
+        shift += i64::from(new.end - new.start) - i64::from(old.end - old.start);
+      }
+    },
+  );
+  if changed {
+    return None;
+  }
+  let moved = |line: u32| u32::try_from(i64::from(line) + shift).ok();
+  Some((moved(start)?, moved(end)?))
+}
+
 /// `isCommentOutdated`: its hunk is gone, no longer holds its lines, or
 /// holds other code on them than it was written on.
 /// `hunks` is `None` while the file is loading, when nothing is outdated.
 pub fn is_outdated(comment: &LineComment, hunks: Option<&[JjDiffHunk]>) -> bool {
   if comment.is_file() {
     return false;
+  }
+  if comment.outdated {
+    return true;
   }
   let Some(hunks) = hunks else {
     return false;
@@ -863,6 +920,52 @@ mod tests {
     // The same hunk and line numbers now hold other code.
     let after = [hunk("h", "@@ -1,1 +1,3 @@", &[" a", "+new", "+c"])];
     assert!(is_outdated(&c, Some(&after)));
+  }
+
+  #[test]
+  fn a_comment_follows_its_lines_when_others_change() {
+    let before = "a\nb\nc\nd\n";
+    // Lines added or removed around it move it.
+    assert_eq!(
+      carry_lines(before, "new\na\nb\nc\nd\n", (2, 3)),
+      Some((3, 4))
+    );
+    assert_eq!(carry_lines(before, "b\nc\nd\n", (2, 3)), Some((1, 2)));
+    assert_eq!(
+      carry_lines(before, "a\nb\nc\nnew\nd\n", (2, 3)),
+      Some((2, 3))
+    );
+    // A change to any of its lines, or between them, outdates it.
+    assert_eq!(carry_lines(before, "a\nB\nc\nd\n", (2, 3)), None);
+    assert_eq!(carry_lines(before, "a\nb\nnew\nc\nd\n", (2, 3)), None);
+    // Lines the file never had.
+    assert_eq!(carry_lines(before, before, (4, 5)), None);
+  }
+
+  #[test]
+  fn a_line_deleted_and_added_again_elsewhere_is_a_change() {
+    assert_eq!(carry_lines("a\nb\nc\n", "b\nc\na\n", (1, 1)), None);
+  }
+
+  #[test]
+  fn each_side_names_its_file_version() {
+    assert_eq!(side_version("fold>fnew", Side::New), Some("fnew"));
+    // The diff's conflict marker style follows the ids.
+    assert_eq!(side_version("fold>fnew:git", Side::New), Some("fnew"));
+    assert_eq!(side_version("fold>xnew", Side::Old), Some("fold"));
+    // Absent, conflicted, or not a file: no version to follow.
+    assert_eq!(side_version("->fnew", Side::Old), None);
+    assert_eq!(side_version("fa,fb>fnew", Side::Old), None);
+    assert_eq!(side_version("fold>lnew", Side::New), None);
+  }
+
+  #[test]
+  fn an_outdated_comment_stays_outdated() {
+    let hunks = [hunk("h", "@@ -1,1 +1,2 @@", &[" a", "+x"])];
+    let mut c = comment("h", 2, 2, Side::New);
+    assert!(!is_outdated(&c, Some(&hunks)));
+    c.outdated = true;
+    assert!(is_outdated(&c, Some(&hunks)));
   }
 
   #[test]
