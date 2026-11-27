@@ -1051,6 +1051,27 @@ fn a_suggested_change_is_drawn_and_applied_to_the_file(cx: &mut TestAppContext) 
 }
 
 #[gpui::test]
+fn a_commit_during_a_review_lists_what_is_left_at_once(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  comment_line(&mut h, "Nit");
+  // The commit takes b.rs out of the working copy.
+  let mut committed = host.working.clone().expect("working");
+  committed.committed_files = vec![committed.uncommitted_files.remove(1)];
+  *host.edited.lock().unwrap() = Some(committed);
+  h.click("commit-message");
+  h.cx.simulate_input("Fix");
+  h.click("commit-button");
+  h.cx.run_until_parked();
+  assert!(!shows_stale_banner(&mut h), "its own write shows at once");
+  assert!(!h.shows(gpui::Role::Button, "b.rs"), "b.rs left the list");
+  assert!(h.shows(gpui::Role::Button, "a.rs"));
+  assert!(
+    has_comment(&mut h, "^Comments on a.rs line \\d+$"),
+    "the review stays"
+  );
+}
+
+#[gpui::test]
 fn changes_tab_comments_a_line_and_keeps_the_review(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
   assert!(!h.shows(gpui::Role::Toolbar, "Review"));

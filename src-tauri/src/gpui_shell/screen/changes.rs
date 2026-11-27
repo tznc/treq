@@ -1357,6 +1357,8 @@ impl ChangesView {
                   .into(),
               );
               view.committed_collapsed = true;
+              // Its own write: the read after it is not stale.
+              view.review.apply_next = true;
               if action == CommitAction::Pr {
                 view.send_react(
                   ScreenAction::Press {
