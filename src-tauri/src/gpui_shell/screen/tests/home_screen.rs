@@ -205,12 +205,13 @@ fn workspace_header_reads_checks_again_a_moment_after_a_sync(cx: &mut TestAppCon
 
 #[gpui::test]
 fn workspace_header_leaves_checks_after_a_failed_or_remote_sync(cx: &mut TestAppContext) {
-  let remote = FakeHost {
-    synced: true,
-    react_actions: true,
-    ..feature_host()
-  };
-  for host in [feature_host(), remote] {
+  // A local sync that fails, then a remote repository's that succeeds.
+  for remote in [false, true] {
+    let host = FakeHost {
+      synced: remote,
+      react_actions: remote,
+      ..feature_host()
+    };
     let (mut h, host) = workspace_harness(cx, host, workspace_route());
     h.click("workspace-sync");
     h.cx.run_until_parked();
