@@ -475,6 +475,17 @@ pub fn placement(
   }
 }
 
+/// The versions carrying `comment` to its file at `content_id` reads: the
+/// one it kept and the shown one; `None` when it has none to carry.
+pub fn carry_due<'a>(comment: &'a LineComment, content_id: &'a str) -> Option<(&'a str, &'a str)> {
+  if comment.outdated || comment.is_file() {
+    return None;
+  }
+  let from = comment.version.as_deref()?;
+  let to = side_version(content_id, comment.line_side?)?;
+  (from != to).then_some((from, to))
+}
+
 /// GitHub carrying `comment` to a newer version of its file: `from` is the
 /// text of the version it kept (`None` once gone), `to` that of `version`,
 /// whose diff is `hunks`. It moves to its lines there, or is outdated for
@@ -1114,6 +1125,17 @@ mod tests {
     c.version = Some("fv1".into());
     carry(&mut c, None, "a\nx\n", "fv2", &hunks);
     assert!(c.outdated);
+  }
+
+  #[test]
+  fn a_comment_is_due_a_carry_once_its_file_shows_another_version() {
+    let mut c = comment("h", 2, 2, Side::New);
+    assert_eq!(carry_due(&c, "fbase>fv2:git"), None);
+    c.version = Some("fv1".into());
+    assert_eq!(carry_due(&c, "fbase>fv2:git"), Some(("fv1", "fv2")));
+    assert_eq!(carry_due(&c, "fbase>fv1:git"), None);
+    c.outdated = true;
+    assert_eq!(carry_due(&c, "fbase>fv2:git"), None);
   }
 
   #[test]

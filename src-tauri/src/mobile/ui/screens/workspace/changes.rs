@@ -92,8 +92,14 @@ impl WorkspaceScreen {
     load::run(
       cx,
       remote::read::<WorkspaceFileHunksBatch>(request),
-      |this, result, _| match result {
+      |this, result, cx| match result {
         Ok(batch) => {
+          let shown = this
+            .diff
+            .ready()
+            .map(|diff| shown_files(diff, &batch))
+            .unwrap_or_default();
+          this.review.update(cx, |review, cx| review.show(shown, cx));
           for file in batch.files {
             this.hunks.files.insert(
               file.path,
@@ -350,5 +356,61 @@ impl WorkspaceScreen {
       .iter()
       .find(|f| f.path == path)
       .map(|f| f.hunks.clone())
+  }
+}
+
+/// The files of `batch` with the content id `diff` lists for them, which
+/// review comments follow; none when the batch was read at another diff.
+pub(super) fn shown_files(
+  diff: &JjRevisionDiff,
+  batch: &WorkspaceFileHunksBatch,
+) -> Vec<(String, Vec<JjDiffHunk>, String)> {
+  if diff.working_copy_token.as_deref() != Some(batch.snapshot_token.as_str()) {
+    return Vec::new();
+  }
+  batch
+    .files
+    .iter()
+    .filter(|f| f.error.is_none())
+    .filter_map(|f| {
+      let listed = diff.uncommitted_files.iter().find(|c| c.path == f.path)?;
+      Some((f.path.clone(), f.hunks.clone(), listed.content_id.clone()?))
+    })
+    .collect()
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn shown_files_carry_the_listed_content_ids_of_the_same_diff() {
+    let diff: JjRevisionDiff = serde_json::from_value(serde_json::json!({
+      "committed_files": [],
+      "uncommitted_files": [
+        {"path": "a.rs", "status": "M", "previous_path": null, "changed_line_count": 1,
+         "diff_deferred": false, "content_id": "fbase>fv1:git"},
+        {"path": "b.rs", "status": "M", "previous_path": null, "changed_line_count": 1,
+         "diff_deferred": false}
+      ],
+      "hunks_by_file": [],
+      "too_large_to_render": false,
+      "working_copy_token": "t1"
+    }))
+    .unwrap();
+    let batch = |token: &str| -> WorkspaceFileHunksBatch {
+      serde_json::from_value(serde_json::json!({
+        "snapshotToken": token,
+        "files": [{"path": "a.rs", "hunks": []}, {"path": "b.rs", "hunks": []}]
+      }))
+      .unwrap()
+    };
+    let shown = shown_files(&diff, &batch("t1"));
+    assert_eq!(shown.len(), 1);
+    assert_eq!(
+      (shown[0].0.as_str(), shown[0].2.as_str()),
+      ("a.rs", "fbase>fv1:git")
+    );
+    assert!(shown_files(&diff, &batch("t2")).is_empty());
   }
 }

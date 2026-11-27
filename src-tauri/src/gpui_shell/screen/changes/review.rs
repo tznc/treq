@@ -15,7 +15,7 @@ use super::*;
 use crate::core::review::{selected_range, selected_row, selected_text, word_at, TextPoint};
 use crate::gpui_shell::screen::{
   changes_review::{
-    carry, commented_text, comments_under, compose_suggestion_comment, count_label,
+    carry, carry_due, commented_text, comments_under, compose_suggestion_comment, count_label,
     line_has_comment, line_location, number_and_side, outdated_label, outdated_markdown,
     parse_suggestion, pending_for_line, pending_for_selection, placement, review_markdown,
     side_version, stale_names, suggestion_lines, ConflictNote, LineComment, Pending, Placement,
@@ -922,12 +922,10 @@ impl ChangesView {
       .review
       .comments
       .iter()
-      .filter(|c| !c.outdated && !c.is_file())
       .filter_map(|c| {
-        let from = c.version.as_deref()?;
         let shown = self.hunks.get(&c.file_path).filter(|d| !d.loading)?;
-        let to = side_version(shown.content_id.as_deref()?, c.line_side?)?;
-        (to != from).then(|| (c.id.clone(), c.file_path.clone(), from.into(), to.into()))
+        let (from, to) = carry_due(c, shown.content_id.as_deref()?)?;
+        Some((c.id.clone(), c.file_path.clone(), from.into(), to.into()))
       })
       .collect();
     if due.is_empty() {

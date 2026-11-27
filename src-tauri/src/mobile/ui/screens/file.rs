@@ -228,7 +228,7 @@ impl FileScreen {
     for (i, line) in self.lines.iter().enumerate() {
       rows.push(self.line_row(i, line, cx).into_any_element());
       for c in comments.iter().filter(|c| c.end_line as usize == i + 1) {
-        rows.push(review::comment_card(&review, c, false, cx));
+        rows.push(review::comment_card(&review, c, None, cx));
       }
     }
     v_flex()
