@@ -250,6 +250,11 @@ impl StackCache {
     }
   }
 
+  /// Forgets every stack, as after changing one on GitHub.
+  pub fn clear(&self) {
+    self.entries.lock_or_recover().clear();
+  }
+
   /// The stack kept for pull request `number` in `repo_path` as of `now`,
   /// else what `read` finds, kept from `now`.
   pub fn get_or(
@@ -296,6 +301,17 @@ mod cache_tests {
 
     assert_eq!(kept, stack(12));
     assert_eq!(fresh, stack(14));
+  }
+
+  #[test]
+  fn clearing_reads_every_stack_again() {
+    let cache = StackCache::new(Duration::from_secs(60));
+    let now = Instant::now();
+    cache.get_or("/repo", 42, now, || stack(12));
+
+    cache.clear();
+
+    assert_eq!(cache.get_or("/repo", 42, now, || None), None);
   }
 
   #[test]

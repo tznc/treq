@@ -242,3 +242,109 @@ fn stack_rows_show_their_pull_requests(cx: &mut TestAppContext) {
     );
   }
 }
+
+/// `prs_host` with both pull requests open.
+fn open_prs_host() -> FakeHost {
+  let mut host = prs_host();
+  host
+    .branch_prs
+    .insert("feat/beta".into(), pr(41, "feat/beta", "OPEN"));
+  host
+}
+
+fn changes(host: &FakeHost) -> Vec<String> {
+  host
+    .calls()
+    .into_iter()
+    .filter(|c| c.starts_with("change github stack"))
+    .collect()
+}
+
+fn choose(h: &mut Harness, item: &str) {
+  h.click("workspace-stack-level");
+  h.cx.run_until_parked();
+  click_named(h, gpui::Role::MenuItem, item);
+  h.cx.run_until_parked();
+}
+
+#[gpui::test]
+fn the_stack_menu_creates_the_stack_on_github_bottom_first(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, open_prs_host(), code_route());
+  choose(&mut h, "Create stack on GitHub");
+  assert_eq!(changes(&host), ["change github stack Link([40, 41])"]);
+}
+
+#[gpui::test]
+fn creating_the_stack_waits_for_every_pull_request(cx: &mut TestAppContext) {
+  let mut host = open_prs_host();
+  host.branch_prs.insert("feat/beta".into(), None);
+  let (mut h, host) = workspace_harness(cx, host, code_route());
+  choose(&mut h, "Create stack on GitHub");
+  assert!(changes(&host).is_empty(), "{:?}", changes(&host));
+}
+
+#[gpui::test]
+fn the_stack_menu_links_pull_requests_missing_from_the_github_stack(cx: &mut TestAppContext) {
+  let mut host = open_prs_host();
+  let mut stack = github_stack(12);
+  stack.entries = vec![crate::github_stack::GhStackEntry {
+    number: 40,
+    head_ref_name: "feat/alpha".into(),
+    state: "OPEN".into(),
+  }];
+  host.gh_stack = Some(stack);
+  let (mut h, host) = workspace_harness(cx, host, code_route());
+  choose(&mut h, "Add missing pull requests");
+  assert_eq!(changes(&host), ["change github stack Link([40, 41])"]);
+}
+
+#[gpui::test]
+fn the_stack_menu_unstacks_on_github(cx: &mut TestAppContext) {
+  let mut host = open_prs_host();
+  host.gh_stack = Some(github_stack(12));
+  let (mut h, host) = workspace_harness(cx, host, code_route());
+  choose(&mut h, "Unstack on GitHub");
+  assert_eq!(changes(&host), ["change github stack Unstack(12)"]);
+}
+
+#[gpui::test]
+fn merging_the_stack_asks_first(cx: &mut TestAppContext) {
+  let mut host = open_prs_host();
+  host.gh_stack = Some(github_stack(12));
+  let (mut h, host) = workspace_harness(cx, host, code_route());
+  choose(&mut h, "Merge stack…");
+  assert!(
+    changes(&host).is_empty(),
+    "nothing merges before the answer"
+  );
+  h.answer("Merge stack");
+  assert_eq!(changes(&host), ["change github stack Merge(12)"]);
+}
+
+#[gpui::test]
+fn the_stack_menu_installs_gh_stack_first(cx: &mut TestAppContext) {
+  let mut host = open_prs_host();
+  host.stack_cli_missing = true;
+  let (mut h, host) = workspace_harness(cx, host, code_route());
+  h.click("workspace-stack-level");
+  h.cx.run_until_parked();
+  assert!(!h.shows(gpui::Role::MenuItem, "Create stack on GitHub"));
+  click_named(&mut h, gpui::Role::MenuItem, "Install gh stack");
+  assert_eq!(changes(&host), ["change github stack Install"]);
+}
+
+#[gpui::test]
+fn a_failed_stack_change_says_why(cx: &mut TestAppContext) {
+  let mut host = open_prs_host();
+  host.gh_stack = Some(github_stack(12));
+  host.stack_change_error = Some("stack 12 has merge conflicts".into());
+  let (mut h, host) = workspace_harness(cx, host, code_route());
+  choose(&mut h, "Unstack on GitHub");
+  assert!(
+    host
+      .calls()
+      .contains(&"notify toast Failed to change the stack on GitHub".to_string()),
+    "{:?}",
+    host.calls()
+  );
+}

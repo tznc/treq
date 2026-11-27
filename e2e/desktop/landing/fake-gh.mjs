@@ -341,6 +341,10 @@ const [group, command] = args;
 const branch = args[args.indexOf("--") + 1];
 
 if (group === "--version") out("gh version 2.60.0 (fake)");
+if (group === "extension" && command === "list") {
+  process.stdout.write("gh stack\tgithub/gh-stack\tv0.4.1\n");
+  process.exit(0);
+}
 if (group === "auth") {
   process.stdout.write(
     "github.com\n  ✓ Logged in to github.com account octocat\n",

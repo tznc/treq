@@ -41,7 +41,7 @@ use super::{
   code_data::{
     self, description, diff_stats, display_title, group_by_day, headline, history_commits,
     looks_like_markdown, task_settings, workspace_stack, Agent, AlertState, CodeAlert, CodeHost,
-    Overview, TaskSettings, REMOTE_FILE_TREE_REASON,
+    Overview, StackChange, TaskSettings, REMOTE_FILE_TREE_REASON,
   },
   merge::full_path,
   prefetch, ActionSink, ScreenAction,
@@ -57,6 +57,7 @@ use crate::{
   github_stack::GhStack,
   gpui_shell::{
     checks_run,
+    confirm::{self, Question},
     native::NativeEvent,
     popup::{PopupSink, Side, TooltipContent},
     theme::{self, Palette},
@@ -350,6 +351,12 @@ pub struct CodeView {
   pub(super) stack: Option<Vec<StackRow>>,
   /// The native GitHub stack the stack's pull requests are in.
   github_stack: Option<GhStack>,
+  /// Whether `gh stack` is installed, once read.
+  stack_cli: Option<bool>,
+  /// A change to the GitHub stack is running.
+  stack_busy: bool,
+  /// The open confirmation, such as merging the stack.
+  confirm: Option<confirm::Pending<Self>>,
   pub(super) settings: Option<TaskSettings>,
   pub(super) menu: Option<Menu>,
   /// The title being edited, and its editor.
@@ -449,6 +456,9 @@ impl CodeView {
       status_open: false,
       stack: None,
       github_stack: None,
+      stack_cli: None,
+      stack_busy: false,
+      confirm: None,
       settings: None,
       menu: None,
       chrome,
@@ -640,12 +650,19 @@ impl CodeView {
     };
     let (host, parent) = (self.host.clone(), self.parent.clone());
     let key = parent.key();
+    let read_cli = self.stack_cli.is_none();
     cx.spawn(async move |this, cx| {
-      let stack = cx
-        .background_spawn(async move { host.github_stack(&parent.repo_path, number) })
+      let (stack, cli) = cx
+        .background_spawn(async move {
+          let cli = read_cli.then(|| host.stack_cli_installed());
+          (host.github_stack(&parent.repo_path, number), cli)
+        })
         .await;
       this
         .update(cx, |view, cx| {
+          if cli.is_some() {
+            view.stack_cli = cli;
+          }
           if view.parent.key() == key && view.github_stack != stack {
             view.github_stack = stack;
             cx.notify();
@@ -1344,6 +1361,7 @@ impl Render for CodeView {
           .bg(p.muted.opacity(0.2))
           .child(self.history(&p, window, cx)),
       )
+      .children(confirm::render(Self::confirm_slot, self, window, &p, cx))
       .test_support()
   }
 }
@@ -2162,20 +2180,16 @@ impl CodeView {
       .px_2()
       .font_weight(FontWeight::NORMAL)
       .aria_label(format!("Stack level {level} of {total}, {status}"))
-      .disabled(number.is_none())
+      .disabled(self.stack_busy)
       .icon(icon, 14.)
       .label(format!("{level}/{total}"))
       .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Stack, cx)));
     let panel = menu_panel("workspace-stack-menu", p)
       .top(zpx(28.))
       .right_0()
-      .w(zpx(240.))
-      .child(
-        ui::MenuItem::new("workspace-stack-open", "Open on GitHub", p)
-          .description("See the stack on its pull request")
-          .on_click(cx.listener(|view, _, _, cx| view.open_stack_on_github(cx))),
-      );
-    let open = self.menu == Some(Menu::Stack) && number.is_some();
+      .w(zpx(260.))
+      .children(self.stack_menu_items(p, cx));
+    let open = self.menu == Some(Menu::Stack) && !self.stack_busy;
     let el = div().relative().child(button).when(open, |this| {
       this.child(deferred(self.close_menu_on_outside(panel, cx)).with_priority(1))
     });
@@ -2189,6 +2203,138 @@ impl CodeView {
         cx,
       ))
       .into_any_element()
+  }
+
+  /// The stack menu: open, create, extend, unstack or merge the stack on
+  /// GitHub, once `gh stack` is installed.
+  fn stack_menu_items(&self, p: &Palette, cx: &mut Context<Self>) -> Vec<ui::MenuItem> {
+    let rows = self.stack.as_deref().unwrap_or_default();
+    // Rows are tip first; GitHub wants the bottom first.
+    let open: Vec<u64> = rows
+      .iter()
+      .rev()
+      .filter_map(|r| r.pr.as_ref())
+      .filter(|pr| pr.state.eq_ignore_ascii_case("open"))
+      .map(|pr| pr.number)
+      .collect();
+    let change = |change: StackChange| {
+      cx.listener(
+        move |view: &mut Self, _: &gpui::ClickEvent, _: &mut Window, cx| {
+          view.change_stack(change.clone(), cx)
+        },
+      )
+    };
+    let mut items = Vec::new();
+    if let Some(stack) = &self.github_stack {
+      items.push(
+        ui::MenuItem::new("workspace-stack-open", "Open on GitHub", p)
+          .description(format!("See stack #{} on its pull request", stack.number))
+          .on_click(cx.listener(|view, _, _, cx| view.open_stack_on_github(cx))),
+      );
+    }
+    if self.stack_cli == Some(false) {
+      items.push(
+        ui::MenuItem::new("workspace-stack-install", "Install gh stack", p)
+          .description("The GitHub CLI extension that changes stacks")
+          .on_click(change(StackChange::Install)),
+      );
+      return items;
+    }
+    let Some(stack) = &self.github_stack else {
+      let ready = !open.is_empty() && open.len() == rows.len();
+      items.push(
+        ui::MenuItem::new("workspace-stack-create", "Create stack on GitHub", p)
+          .description(if ready {
+            "Stack these pull requests on GitHub, in this order"
+          } else {
+            "Each workspace needs an open pull request first"
+          })
+          .disabled(!ready)
+          // A disabled item still hears clicks.
+          .when(ready, |item| item.on_click(change(StackChange::Link(open)))),
+      );
+      return items;
+    };
+    let missing = open
+      .iter()
+      .any(|n| !stack.entries.iter().any(|e| e.number == *n));
+    if missing {
+      items.push(
+        ui::MenuItem::new("workspace-stack-link", "Add missing pull requests", p)
+          .description(format!(
+            "Add this stack's other pull requests to #{}",
+            stack.number
+          ))
+          .on_click(change(StackChange::Link(open))),
+      );
+    }
+    let number = stack.number;
+    items.push(
+      ui::MenuItem::new("workspace-stack-unstack", "Unstack on GitHub", p)
+        .description("Keep the pull requests, without the stack")
+        .on_click(change(StackChange::Unstack(number))),
+    );
+    items.push(
+      ui::MenuItem::new("workspace-stack-merge", "Merge stack…", p)
+        .description("Merge every pull request in it at once")
+        .on_click(cx.listener(move |view, _, _, cx| view.ask_merge_stack(number, cx))),
+    );
+    items
+  }
+
+  fn ask_merge_stack(&mut self, number: u64, cx: &mut Context<Self>) {
+    self.menu = None;
+    let key = self.parent.key();
+    let question = Question::new(
+      format!("Merge stack #{number}?"),
+      "Every pull request in it merges on GitHub at once, with the repository's default merge method.",
+      "Merge stack",
+    );
+    confirm::ask(
+      &mut self.confirm,
+      question,
+      move |view: &mut Self, cx| {
+        if view.parent.key() == key {
+          view.change_stack(StackChange::Merge(number), cx);
+        }
+      },
+      cx,
+    );
+  }
+
+  /// Runs `change` on GitHub, then reads the stack again.
+  fn change_stack(&mut self, change: StackChange, cx: &mut Context<Self>) {
+    if self.stack_busy {
+      return;
+    }
+    self.stack_busy = true;
+    self.menu = None;
+    let install = change == StackChange::Install;
+    self.read(
+      move |host, parent| host.change_github_stack(&parent.repo_path, change),
+      move |view, result, cx| {
+        view.stack_busy = false;
+        match result {
+          Ok(()) => {
+            if install {
+              view.stack_cli = Some(true);
+            }
+            view.load_github_stack(cx);
+          }
+          Err(err) => tell(
+            view.host.as_ref(),
+            Toast::error("Failed to change the stack on GitHub")
+              .description(err)
+              .into(),
+          ),
+        }
+      },
+      cx,
+    );
+  }
+
+  fn confirm_slot(view: &mut Self) -> &mut Option<confirm::Pending<Self>> {
+    &mut view.confirm
   }
 
   fn open_stack_on_github(&mut self, cx: &mut Context<Self>) {

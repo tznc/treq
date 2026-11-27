@@ -119,6 +119,42 @@ pub fn pr_stack(repo_path: &str, number: u64) -> Result<Option<GhStack>, String>
   crate::github_stack::gh_pr_stack_impl(&gh, repo_path, number, &path)
 }
 
+/// Whether the `gh stack` extension is installed.
+pub fn stack_installed() -> Result<bool, String> {
+  let (gh, path) = gh()?;
+  crate::github_stack::gh_stack_installed_impl(&gh, &path)
+}
+
+pub fn install_stack() -> Result<(), String> {
+  let (gh, path) = gh()?;
+  crate::github_stack::gh_stack_install_impl(&gh, &path)
+}
+
+/// Puts pull requests `prs`, bottom first, in one stack on GitHub.
+pub fn link_stack(repo_path: &str, prs: &[u64]) -> Result<(), String> {
+  let (gh, path) = gh()?;
+  crate::github_stack::gh_stack_link_impl(&gh, repo_path, prs, &path)
+}
+
+pub fn unstack(repo_path: &str, number: u64) -> Result<(), String> {
+  let (gh, path) = gh()?;
+  crate::github_stack::gh_stack_unstack_impl(&gh, repo_path, number, &path)
+}
+
+/// Merges stack `number` with the merge method GitHub preselects for the
+/// viewer, else squash.
+pub fn merge_stack(repo_path: &str, number: u64) -> Result<(), String> {
+  let (gh, path) = gh()?;
+  let method = remote(repo_path)?
+    .and_then(|r| {
+      github::gh_repo_merge_settings_impl(&gh, &r.full_name, &path)
+        .inspect_err(|err| log::warn!("merge stack: repo merge settings: {err}"))
+        .ok()
+    })
+    .map_or(github::GhMergeMethod::Squash, |s| s.default_method);
+  crate::github_stack::gh_stack_merge_impl(&gh, repo_path, number, method, &path)
+}
+
 pub fn pr_checks(repo: &str, number: u64) -> Result<Option<PrCiStatus>, String> {
   let (gh, path) = gh()?;
   github::get_pr_checks_for_pr_impl(&gh, repo, number, &path)

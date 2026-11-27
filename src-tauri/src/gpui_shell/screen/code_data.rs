@@ -29,6 +29,19 @@ use crate::{
   local_db::Workspace,
 };
 
+/// What the stack card changes on GitHub.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StackChange {
+  /// Installs the `gh stack` extension.
+  Install,
+  /// Puts these pull requests, bottom first, in one stack.
+  Link(Vec<u64>),
+  /// Takes stack `n`'s open pull requests out of it.
+  Unstack(u64),
+  /// Merges all of stack `n` with the repository's default merge method.
+  Merge(u64),
+}
+
 /// The agents treq launches (`lib/agents.ts`'s `AGENTS`), in picker order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Agent {
@@ -165,6 +178,10 @@ pub trait CodeHost: WorkspaceHost + SettingsHost {
   fn workspaces(&self, repo_path: &str) -> Result<Vec<Workspace>, String>;
   /// The native GitHub stack pull request `pr_number` is in, if any.
   fn github_stack(&self, repo_path: &str, pr_number: u64) -> Option<GhStack>;
+  /// Whether the `gh stack` extension, which changes GitHub stacks, is installed.
+  fn stack_cli_installed(&self) -> bool;
+  /// Changes the repository's stacks on GitHub through `gh stack`.
+  fn change_github_stack(&self, repo_path: &str, change: StackChange) -> Result<(), String>;
   fn set_submodule_synced(&self, repo_path: &str, path: &str, enabled: bool) -> Result<(), String>;
   fn set_description(
     &self,
@@ -232,6 +249,10 @@ pub trait CodeHost: WorkspaceHost + SettingsHost {
   ) -> Result<Vec<crate::core::checks::JobResult>, String>;
 }
 
+/// Each pull request's GitHub stack, for a minute.
+static STACKS: std::sync::LazyLock<StackCache> =
+  std::sync::LazyLock::new(|| StackCache::new(std::time::Duration::from_secs(60)));
+
 impl CodeHost for Backend {
   fn overview(&self, repo_path: &str, workspace_id: Option<i64>) -> Result<Overview, String> {
     if self.remote_containing(repo_path).is_some() {
@@ -271,14 +292,32 @@ impl CodeHost for Backend {
     if self.remote_containing(repo_path).is_some() {
       return None;
     }
-    static CACHE: std::sync::LazyLock<StackCache> =
-      std::sync::LazyLock::new(|| StackCache::new(std::time::Duration::from_secs(60)));
-    CACHE.get_or(repo_path, pr_number, std::time::Instant::now(), || {
+    STACKS.get_or(repo_path, pr_number, std::time::Instant::now(), || {
       core::github_cli::pr_stack(repo_path, pr_number)
         .inspect_err(|err| log::warn!("stack card: GitHub stack of #{pr_number}: {err}"))
         .ok()
         .flatten()
     })
+  }
+
+  fn stack_cli_installed(&self) -> bool {
+    core::github_cli::stack_installed()
+      .inspect_err(|err| log::warn!("stack card: gh extension list: {err}"))
+      .unwrap_or(false)
+  }
+
+  fn change_github_stack(&self, repo_path: &str, change: StackChange) -> Result<(), String> {
+    if self.remote_containing(repo_path).is_some() {
+      return Err(unsupported("Changing a GitHub stack"));
+    }
+    let changed = match change {
+      StackChange::Install => core::github_cli::install_stack(),
+      StackChange::Link(prs) => core::github_cli::link_stack(repo_path, &prs),
+      StackChange::Unstack(n) => core::github_cli::unstack(repo_path, n),
+      StackChange::Merge(n) => core::github_cli::merge_stack(repo_path, n),
+    };
+    STACKS.clear();
+    changed
   }
 
   fn set_submodule_synced(&self, repo_path: &str, path: &str, enabled: bool) -> Result<(), String> {
