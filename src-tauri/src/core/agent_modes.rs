@@ -211,6 +211,14 @@ pub fn cli_args(agent: &str, mode: &Mode) -> Vec<String> {
       config("developer_instructions", &mode.instructions),
     ]
     .concat(),
+    // Gemini takes no effort or instructions at launch.
+    "gemini" => {
+      let approval = mode.permission_mode.as_ref().map(|p| match p.as_str() {
+        "plan" => "plan".to_string(),
+        _ => "auto_edit".to_string(),
+      });
+      [set("-m", &mode.model), set("--approval-mode", &approval)].concat()
+    }
     _ => Vec::new(),
   }
 }
@@ -346,7 +354,7 @@ mod tests {
   }
 
   #[test]
-  fn turns_a_mode_into_claude_and_codex_arguments() {
+  fn turns_a_mode_into_agent_arguments() {
     assert_eq!(
       cli_args("claude", &deep()),
       [
@@ -371,7 +379,17 @@ mod tests {
         "developer_instructions=Think it through.",
       ]
     );
+    // Gemini: the model and approval mode; no effort or instructions flag.
+    assert_eq!(
+      cli_args("gemini", &deep()),
+      ["-m", "opus", "--approval-mode", "plan"]
+    );
+    let edits = Mode {
+      permission_mode: Some("acceptEdits".into()),
+      ..mode("edits")
+    };
+    assert_eq!(cli_args("gemini", &edits), ["--approval-mode", "auto_edit"]);
     assert!(cli_args("claude", &mode("plain")).is_empty());
-    assert!(cli_args("gemini", &deep()).is_empty());
+    assert!(cli_args("cursor", &deep()).is_empty());
   }
 }

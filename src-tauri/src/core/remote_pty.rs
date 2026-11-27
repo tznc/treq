@@ -237,6 +237,7 @@ fn profile_export(agent: RemoteAgentId, profile: Option<&str>) -> Option<String>
   let id = match agent {
     RemoteAgentId::Claude => "claude",
     RemoteAgentId::Codex => "codex",
+    RemoteAgentId::Gemini => "gemini",
     _ => return None,
   };
   let profile = AgentProfile {
@@ -884,6 +885,22 @@ mod tests {
     // A name that isn't a valid profile never reaches the command line.
     assert_eq!(run(Some("$(touch pwned)")), "\n");
     assert!(!home.path().join("pwned").exists());
+  }
+
+  #[test]
+  fn gemini_launch_exports_gemini_cli_home() {
+    let spec = PtyLaunchSpec::Agent {
+      agent: RemoteAgentId::Gemini,
+      args: Vec::new(),
+      profile: Some("work".into()),
+    };
+    let program = build_launch_program(&spec);
+    assert!(
+      program.contains(
+        "export GEMINI_CLI_HOME=\"$HOME\"/'\\''.treq/agent-profiles/gemini/work'\\''; exec"
+      ),
+      "{program}"
+    );
   }
 
   #[test]
