@@ -379,7 +379,8 @@ pub fn pending_for_selection(
   })
 }
 
-/// `isCommentOutdated`: its hunk is gone, or no longer holds its lines.
+/// `isCommentOutdated`: its hunk is gone, no longer holds its lines, or
+/// holds other code on them than it was written on.
 /// `hunks` is `None` while the file is loading, when nothing is outdated.
 pub fn is_outdated(comment: &LineComment, hunks: Option<&[JjDiffHunk]>) -> bool {
   if comment.is_file() {
@@ -391,11 +392,29 @@ pub fn is_outdated(comment: &LineComment, hunks: Option<&[JjDiffHunk]>) -> bool 
   let Some(hunk) = hunks.iter().find(|h| h.id == comment.hunk_id) else {
     return true;
   };
-  !numbered(hunk).enumerate().any(|(l, n)| {
+  let covers = |&(l, n): &(usize, (Option<u32>, Option<u32>))| {
     let (number, side) = number_and_side(n, l);
     (comment.start_line..=comment.end_line).contains(&number)
       && comment.line_side.is_none_or(|s| s == side)
-  })
+  };
+  if !numbered(hunk).enumerate().any(|n| covers(&n)) {
+    return true;
+  }
+  // A quoted GitHub comment keeps the quote, not the code, in `line_content`;
+  // one without a side could match lines on both.
+  if comment.line_content.is_empty()
+    || comment.line_side.is_none()
+    || comment.source.as_deref() == Some("github")
+  {
+    return false;
+  }
+  let code = hunks.iter().flat_map(|h| {
+    numbered(h)
+      .enumerate()
+      .filter(covers)
+      .map(move |(l, _)| h.lines[l].as_str())
+  });
+  !code.eq(comment.line_content.iter().map(String::as_str))
 }
 
 /// The comments drawn under line `l` of `hunk`: those that end on it.
