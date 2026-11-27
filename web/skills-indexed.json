@@ -1,5 +1,5 @@
 {
-  "$comment": "Skill pages that stay in search; every other skill page renders noindex. These had Search Console impressions from 2026-08-23 to 2026-11-21 (biz-tools kw_research_data).",
+  "$comment": "Skill pages that stay in search; every other skill page renders noindex. These had Search Console impressions from 2026-08-23 to 2026-11-23 (biz-tools kw_research_data).",
   "routes": [
     "/skills/caveman/caveman-help",
     "/skills/caveman/caveman-learn",
@@ -11,6 +11,7 @@
     "/skills/google/cloud/bigquery-basics",
     "/skills/google/cloud/firebase-basics",
     "/skills/huggingface/huggingface-community-evals",
+    "/skills/k-dense/polars-bio",
     "/skills/k-dense/rowan",
     "/skills/mattpocock/engineering/code-review",
     "/skills/mattpocock/engineering/wizard",
