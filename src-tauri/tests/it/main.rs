@@ -36,6 +36,7 @@ mod core_jj_sync_status_test;
 mod core_logging_test;
 mod core_remote_dispatch_test;
 mod core_repo_test;
+mod core_stack_order_test;
 mod core_resolve_test;
 mod core_stash_test;
 mod core_workspaces_archive_workspace_test;
