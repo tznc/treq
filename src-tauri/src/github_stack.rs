@@ -6,7 +6,9 @@ use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 
-use crate::github::{check_gh_output, check_graphql_errors, spawn_with_etxtbsy_retry};
+use crate::github::{
+  check_gh_output, check_graphql_errors, spawn_with_etxtbsy_retry, GhMergeMethod,
+};
 use crate::lock_ext::LockExt as _;
 
 /// A stack of pull requests on GitHub.
@@ -142,14 +144,6 @@ pub fn gh_pr_stack_impl(
   )
 }
 
-/// How `gh stack merge` lands the stack.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MergeMethod {
-  Merge,
-  Squash,
-  Rebase,
-}
-
 /// The `gh stack` extension's repository.
 const EXTENSION: &str = "github/gh-stack";
 
@@ -225,19 +219,14 @@ pub fn gh_stack_merge_impl(
   gh_path: &str,
   repo_path: &str,
   number: u64,
-  method: MergeMethod,
+  method: GhMergeMethod,
   extended_path: &str,
 ) -> Result<(), String> {
   let number = number.to_string();
-  let method = match method {
-    MergeMethod::Merge => "merge",
-    MergeMethod::Squash => "squash",
-    MergeMethod::Rebase => "rebase",
-  };
   run(
     gh_path,
     Some(repo_path),
-    &["stack", "merge", &number, "--merge-method", method, "--yes"],
+    &["stack", "merge", &number, method.flag(), "--yes"],
     extended_path,
   )
   .map(drop)
@@ -540,15 +529,12 @@ mod cli_tests {
       &gh,
       repo.path().to_str().unwrap(),
       12,
-      MergeMethod::Squash,
+      GhMergeMethod::Squash,
       PATH,
     )
     .unwrap();
 
-    assert_eq!(
-      args(&bin),
-      ["stack", "merge", "12", "--merge-method", "squash", "--yes"]
-    );
+    assert_eq!(args(&bin), ["stack", "merge", "12", "--squash", "--yes"]);
     assert!(ran_in(&bin, &repo));
   }
 
