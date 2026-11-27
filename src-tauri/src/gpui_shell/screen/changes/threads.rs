@@ -21,8 +21,8 @@ use crate::{
   gpui_shell::screen::{
     changes_review::{count_label, number_and_side, Pending, Quote, Side},
     changes_threads::{
-      agent_by_line, comment_date, github_suggestion_original, original_text, place_threads,
-      preview, suggestion_diff, suggestion_span, Placed, RowKind,
+      comment_date, github_suggestion_original, original_text, place_agent, place_threads, preview,
+      suggestion_diff, suggestion_span, AgentPlaced, Placed, RowKind,
     },
     commits_data::LineRef,
     reactions::{self, Reacts},
@@ -47,8 +47,7 @@ pub(in crate::gpui_shell::screen) struct Threads {
   /// Agent comments with an action running.
   busy: HashSet<String>,
   placed: Placed,
-  /// Indices into `agent`.
-  agent_lines: HashMap<(String, u32, Side), Vec<usize>>,
+  agent_placed: AgentPlaced,
   /// Bumped when `github` or `agent` reads back changed.
   pub(in crate::gpui_shell::screen) revision: u64,
   /// The rows' and the threads' revisions `placed` was derived from.
@@ -161,12 +160,13 @@ impl ChangesView {
       return;
     }
     self.threads.placed_for = Some(key);
-    // Only the files a thread is on are looked at.
+    // Only the files a thread or comment is on are looked at.
     let paths: HashSet<&str> = self
       .threads
       .github
       .iter()
       .map(|t| t.path.as_str())
+      .chain(self.threads.agent.iter().map(|c| c.file_path.as_str()))
       .collect();
     fn on<'a>(
       files: &'a HashMap<String, FileHunks>,
@@ -189,7 +189,7 @@ impl ChangesView {
       .map(|s| on(&s.committed_hunks, &paths))
       .unwrap_or_default();
     self.threads.placed = place_threads(&self.threads.github, &[&working, &committed]);
-    self.threads.agent_lines = agent_by_line(&self.threads.agent);
+    self.threads.agent_placed = place_agent(&self.threads.agent, &[&working, &committed]);
   }
 
   /// Resolve, Delete or Apply, then a fresh read.
@@ -341,7 +341,8 @@ impl ChangesView {
     let mut out = Vec::new();
     if let Some(comments) = self
       .threads
-      .agent_lines
+      .agent_placed
+      .by_line
       .get(&(path.to_string(), number, side))
     {
       let mut list = div()
@@ -379,14 +380,20 @@ impl ChangesView {
     out
   }
 
-  /// Threads whose line is not in the diff, at the top of the file.
+  /// Threads whose line is not in the diff, and agent comments whose code
+  /// changed, at the top of the file.
   pub(super) fn unplaced_threads(
     &self,
     path: &str,
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> Option<impl IntoElement> {
-    let threads = self.threads.placed.unplaced.get(path)?;
+    let none = Vec::new();
+    let threads = self.threads.placed.unplaced.get(path);
+    let agent = self.threads.agent_placed.outdated.get(path);
+    if threads.is_none() && agent.is_none() {
+      return None;
+    }
     let mut section = div()
       .selector(SharedString::from(format!(
         "github-outdated-threads-{path}"
@@ -401,9 +408,20 @@ impl ChangesView {
       .flex()
       .flex_col()
       .gap_3();
-    for t in threads.iter().filter_map(|&i| self.threads.github.get(i)) {
+    for t in threads
+      .unwrap_or(&none)
+      .iter()
+      .filter_map(|&i| self.threads.github.get(i))
+    {
       let line = t.line.and_then(|n| u32::try_from(n).ok()).unwrap_or(0);
       section = section.child(self.thread_card(t, path, None, line, Side::New, p, cx));
+    }
+    for c in agent
+      .unwrap_or(&none)
+      .iter()
+      .filter_map(|&i| self.threads.agent.get(i))
+    {
+      section = section.child(self.agent_card(c, None, p, cx));
     }
     let drafting = self
       .review
