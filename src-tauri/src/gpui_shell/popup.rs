@@ -36,9 +36,9 @@ use super::{
 
 /// A dropdown's gap below its button: `sideOffset={4}`.
 const DROPDOWN_OFFSET: f32 = 4.;
-/// Between a button and the menu it opens: tighter, so the two read as one
-/// control.
-const BUTTON_MENU_OFFSET: f32 = 2.;
+/// Between a button and the menu it opens: the design system's full-width
+/// dropdown gap.
+const BUTTON_MENU_OFFSET: f32 = ui::picker::MENU_GAP;
 /// A popup's corners: `rounded-md`.
 const POPUP_RADIUS: gpui::Rems = gpui::Rems(0.375);
 /// Room around a popup's box for its shadow.

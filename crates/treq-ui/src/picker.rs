@@ -1,10 +1,20 @@
 //! The control that shows a value and opens a menu to change it.
 
-use std::rc::Rc;
+use std::{rc::Rc, time::Duration};
 
-use gpui::{div, prelude::*, App, ClickEvent, SharedString, Window};
+use gpui::{
+  div, prelude::*, Animation, AnimationExt as _, App, ClickEvent, ElementId, SharedString,
+  Transformation, Window,
+};
 
 use crate::{icon, text, theme, theme::Palette, zpx, Button, OnClick, Size, TextSize, Variant};
+
+/// The gap between a [`Picker::full_width`] and its menu: tighter than a
+/// dropdown's 4px, so the two read as one control.
+pub const MENU_GAP: f32 = 2.;
+
+/// How long a [`Picker::full_width`]'s chevron takes to turn over.
+pub const CHEVRON_TURN: Duration = Duration::from_millis(150);
 
 /// Where a [`Picker`] sits, which sets its height.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -37,6 +47,7 @@ pub struct Picker {
   label: Option<SharedString>,
   icon: Option<&'static str>,
   placement: PickerPlacement,
+  full_width: bool,
   open: bool,
   disabled: bool,
   on_click: Option<OnClick>,
@@ -52,6 +63,7 @@ impl Picker {
       label: None,
       icon: None,
       placement: PickerPlacement::default(),
+      full_width: false,
       open: false,
       disabled: false,
       on_click: None,
@@ -87,6 +99,24 @@ impl Picker {
     self
   }
 
+  /// A full-width dropdown, such as the sidebar's project switcher: it
+  /// fills its container, and it and its menu read as one control.
+  ///
+  /// - The value takes the free space, so the chevron ends the control.
+  /// - While the menu is open the chevron points up, turning over in
+  ///   [`CHEVRON_TURN`] (ease-in-out) as the menu opens and closes, and the
+  ///   control reads out as expanded. It holds still until the menu first
+  ///   opens.
+  /// - The menu opens [`MENU_GAP`] under it, left-aligned and at least as
+  ///   wide, wider only when a row needs it, with the control's corners
+  ///   ([`crate::radius::MD`]). A popup-window menu gets this from the app's
+  ///   `popup::MenuAnchor::Button`; an in-view menu spans it with
+  ///   `left_0().right_0()`.
+  pub fn full_width(mut self) -> Self {
+    self.full_width = true;
+    self
+  }
+
   /// Whether its menu is open, which draws it pressed.
   pub fn open(mut self, open: bool) -> Self {
     self.open = open;
@@ -115,8 +145,28 @@ impl Picker {
 }
 
 impl RenderOnce for Picker {
-  fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+  fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
     let p = self.palette;
+    let chevron = icon(theme::ICON_CHEVRON_DOWN, 14., p.muted_foreground);
+    let chevron = if self.full_width {
+      let turns = menu_turns(&self.id, self.open, window, cx);
+      let (from, to) = chevron_turn(self.open, turns);
+      chevron
+        .with_animation(
+          // A new id each time the menu opens or closes starts the turn.
+          ElementId::NamedInteger(format!("{}-chevron", self.id).into(), turns),
+          Animation::new(CHEVRON_TURN).with_easing(gpui::ease_in_out),
+          move |svg, delta| {
+            svg.with_transformation(Transformation::rotate(gpui::percentage(
+              from + (to - from) * delta,
+            )))
+          },
+        )
+        .into_any_element()
+    } else {
+      chevron.into_any_element()
+    };
+    let (full_width, open) = (self.full_width, self.open);
     let name = self.accessible_name();
     let empty = self.value.is_none();
     let value = self.value.unwrap_or(self.placeholder);
@@ -141,16 +191,96 @@ impl RenderOnce for Picker {
           .when(empty, |el| el.text_color(p.muted_foreground))
           .child(value),
       )
-      .child(icon(theme::ICON_CHEVRON_DOWN, 14., p.muted_foreground))
+      .child(chevron)
+      .when(full_width, |b| b.w_full().expanded(open))
       .when_some(self.on_click, |b, f| {
         b.on_click(move |e, w, cx| f(e, w, cx))
       })
   }
 }
 
+/// Where a full-width picker's chevron turns from and to, in turns, given
+/// whether its menu is `open` and how many times that has changed.
+fn chevron_turn(open: bool, turns: u64) -> (f32, f32) {
+  let to = if open { 0.5 } else { 0. };
+  let from = if turns == 0 { to } else { 0.5 - to };
+  (from, to)
+}
+
+/// How many times picker `id`'s menu has opened or closed, kept across
+/// frames.
+fn menu_turns(id: &SharedString, open: bool, window: &mut Window, cx: &mut App) -> u64 {
+  let key = ElementId::Name(format!("{id}-menu-turns").into());
+  let state = window.use_keyed_state(key, cx, |_, _| (open, 0u64));
+  let (was, turns) = *state.read(cx);
+  if was == open {
+    return turns;
+  }
+  state.update(cx, |state, _| *state = (open, turns + 1));
+  turns + 1
+}
+
 #[cfg(test)]
 mod tests {
+  use gpui::{px, Context, Render, TestAppContext};
+  use gpui_testing_library::{prelude::*, Screen};
+
   use super::*;
+
+  /// A full-width picker in a 300px row, which sizes its children to their
+  /// content unless they fill it.
+  struct Column {
+    open: bool,
+  }
+
+  impl Render for Column {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+      let p = theme::palette(false);
+      div().flex().w(px(300.)).child(
+        Picker::new("project", &p)
+          .label("Project")
+          .value("Event platform")
+          .full_width()
+          .open(self.open),
+      )
+    }
+  }
+
+  #[gpui::test]
+  fn a_full_width_picker_fills_its_container(cx: &mut TestAppContext) {
+    cx.update(theme::init);
+    let (_, cx) = cx.add_window_view(|_, _| Column { open: false });
+    cx.run_until_parked();
+    let bounds = cx.debug_bounds("project").expect("the picker is drawn");
+    assert_eq!(bounds.size.width, px(300.));
+  }
+
+  #[gpui::test]
+  fn a_full_width_picker_reports_whether_its_menu_is_open(cx: &mut TestAppContext) {
+    cx.update(theme::init);
+    for open in [false, true] {
+      let (_, cx) = cx.add_window_view(move |_, _| Column { open });
+      cx.run_until_parked();
+      let window = cx.update(|window, _| window.window_handle());
+      let screen = Screen::new(cx, window);
+      screen.redraw();
+      let picker = screen
+        .get_by_role(by::role(gpui::Role::Button).name("Project: Event platform"))
+        .snapshot();
+      assert_eq!(picker.expanded(), Some(open));
+    }
+  }
+
+  #[test]
+  fn a_full_width_pickers_chevron_turns_over_with_its_menu() {
+    assert_eq!(
+      chevron_turn(false, 0),
+      (0., 0.),
+      "still until the menu first opens"
+    );
+    assert_eq!(chevron_turn(true, 1), (0., 0.5), "half a turn as it opens");
+    assert_eq!(chevron_turn(false, 2), (0.5, 0.), "and back as it closes");
+  }
 
   #[test]
   fn test_picker_builder() {
