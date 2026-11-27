@@ -965,6 +965,23 @@ fn a_review_recheck_reads_only_files_whose_content_changed(cx: &mut TestAppConte
   assert!(shows_stale_banner(&mut h));
 }
 
+/// A review reads a moved working copy whose diffs held once, not again on
+/// every refresh after.
+#[gpui::test]
+fn a_review_reads_a_moved_working_copy_once(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, tokened_changes_host(), changes_route());
+  comment_line(&mut h, "Nit");
+  let mut moved = host.working.clone().expect("working");
+  moved.working_copy_token = Some("t2".into());
+  *host.edited.lock().unwrap() = Some(moved);
+  bump_changes_revision(&mut h);
+  let reads = count_calls(&host, "read hunks");
+  bump_changes_revision(&mut h);
+  bump_changes_revision(&mut h);
+  assert_eq!(count_calls(&host, "read hunks"), reads);
+  assert!(!shows_stale_banner(&mut h));
+}
+
 #[gpui::test]
 fn an_edit_on_disk_during_a_review_waits_behind_the_stale_banner(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
