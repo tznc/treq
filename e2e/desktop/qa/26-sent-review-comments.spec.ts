@@ -1,5 +1,5 @@
 // Sent review comments: a Changes-tab review sent to an agent leaves its
-// comments on the diff, marked with a send icon, until resolved.
+// comments on the diff, marked with a robot icon, until resolved.
 import { expect, test } from "@playwright/test";
 import { capture } from "./capture.ts";
 import { openTab, openWorkspace, settle } from "./helpers.ts";
@@ -30,7 +30,7 @@ test("sent review comments stay on the diff until resolved", async ({ page }) =>
     name: "26-sent-review-01-card",
     title: "A sent review comment stays on its line",
     expectations: [
-      "Under the commented line a card shows a paper-plane icon and 'Sent to agent' in blue",
+      "Under the commented line a card shows a robot icon and 'Sent to agent' in blue",
       "The card holds the comment text 'Log the level in upper case' and the file:line label",
       "Its only action is Resolve: no Send to agent, no Delete",
     ],
@@ -45,7 +45,7 @@ test("sent review comments stay on the diff until resolved", async ({ page }) =>
     name: "26-sent-review-02-resolved",
     title: "A resolved sent comment folds to one line",
     expectations: [
-      "Under the commented line a one-line row shows a chevron, a paper-plane, 'Resolved' and the comment text, all muted",
+      "Under the commented line a one-line row shows a chevron, a robot icon, 'Resolved' and the comment text, all muted",
       "No Resolve button and no full card",
     ],
   });
