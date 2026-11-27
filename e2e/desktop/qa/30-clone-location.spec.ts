@@ -22,9 +22,10 @@ function seedProjects(): void {
   );
   add.run("qa-checkout", "Checkout", at, at);
   add.run("qa-billing", "Billing", at, at);
-  // A project's folder is a local-only app setting, not a project column.
-  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(
-    "project_clone_directory:qa-checkout",
+  // A project's folder is a local-only setting scoped to that project.
+  db.prepare("INSERT OR REPLACE INTO settings (key, project_id, value) VALUES (?, ?, ?)").run(
+    "clone_directory",
+    "qa-checkout",
     "~/work",
   );
   const repos = db.prepare("INSERT OR IGNORE INTO project_repos VALUES (?, ?, 0)");
@@ -92,7 +93,9 @@ test("clone directory: projects tab", async ({ page }) => {
   const db = appDb();
   const dir = (id: string) =>
     (
-      db.prepare("SELECT value AS d FROM settings WHERE key = ?").get(`project_clone_directory:${id}`) as
+      db
+        .prepare("SELECT value AS d FROM settings WHERE key = 'clone_directory' AND project_id = ?")
+        .get(id) as
         | { d: string }
         | undefined
     )?.d ?? "";
