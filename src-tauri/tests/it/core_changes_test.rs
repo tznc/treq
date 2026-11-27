@@ -759,6 +759,46 @@ fn get_file_lines_reads_parent_revision_in_workspace() {
 }
 
 #[test]
+fn read_file_version_reads_a_kept_version_after_the_file_moves_on() {
+  use treq_lib::core::review::{side_version, Side};
+  let repo = TestRepo::new().expect("Failed to create test repo");
+  let workspace = repo
+    .create_workspace_with_commit("feat/read-version", "a.txt", "committed\n", None)
+    .expect("create workspace with commit");
+  let ws_dir = repo.workspace_full_path(&workspace);
+  TestRepo::write_workspace_file(&ws_dir, "a.txt", "first edit\n").expect("edit a.txt");
+  let content_id = treq_lib::core::workspace_cli_diff(&repo.repo_path, workspace.id)
+    .expect("diff")
+    .uncommitted_files
+    .into_iter()
+    .find(|f| f.path == "a.txt")
+    .and_then(|f| f.content_id)
+    .expect("content id");
+  TestRepo::write_workspace_file(&ws_dir, "a.txt", "second edit\n").expect("edit again");
+  treq_lib::core::workspace_cli_diff(&repo.repo_path, workspace.id).expect("diff again");
+
+  let read = |side| {
+    let version = side_version(&content_id, side).expect("version");
+    treq_lib::core::changes::read_file_version(
+      &repo.repo_path,
+      Some(workspace.id),
+      "a.txt",
+      version,
+    )
+  };
+  assert_eq!(read(Side::New), Ok(Some("first edit\n".to_string())));
+  assert_eq!(read(Side::Old), Ok(Some("committed\n".to_string())));
+  // One the store no longer has, as after jj's gc.
+  let gone = treq_lib::core::changes::read_file_version(
+    &repo.repo_path,
+    Some(workspace.id),
+    "a.txt",
+    "f0123456789abcdef0123456789abcdef01234567",
+  );
+  assert_eq!(gone, Ok(None));
+}
+
+#[test]
 fn get_file_lines_reads_parent_revision_in_home_repo() {
   let repo = TestRepo::new().expect("Failed to create test repo");
   repo
