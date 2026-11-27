@@ -151,6 +151,25 @@ pub fn session_profile(
   )
 }
 
+/// A leading `@name` in a prompt: the profile it names, preferring
+/// `agent`'s, and the prompt after it. `None` when no single profile has
+/// that name, so other `@` text is left alone.
+pub fn mention<'a>(
+  profiles: &[AgentProfile],
+  agent: &str,
+  prompt: &'a str,
+) -> Option<(AgentProfile, &'a str)> {
+  let rest = prompt.trim_start().strip_prefix('@')?;
+  let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+  let (name, rest) = rest.split_at(end);
+  let named: Vec<_> = profiles.iter().filter(|p| p.name == name).collect();
+  let found = named
+    .iter()
+    .find(|p| p.agent == agent)
+    .or_else(|| (named.len() == 1).then(|| &named[0]))?;
+  Some(((*found).clone(), rest.trim_start()))
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -292,5 +311,36 @@ mod tests {
       Some(profile("claude", "personal"))
     );
     assert_eq!(session_profile(app, repo, "codex", None), None);
+  }
+
+  #[test]
+  fn mention_routes_to_the_named_profile() {
+    let profiles = vec![
+      profile("claude", "work"),
+      profile("codex", "work"),
+      profile("codex", "personal"),
+    ];
+    assert_eq!(
+      mention(&profiles, "claude", "  @work fix the bug"),
+      Some((profile("claude", "work"), "fix the bug"))
+    );
+    assert_eq!(
+      mention(&profiles, "codex", "@work fix"),
+      Some((profile("codex", "work"), "fix"))
+    );
+    // Only Codex has it: the prompt goes to Codex.
+    assert_eq!(
+      mention(&profiles, "claude", "@personal\nfix"),
+      Some((profile("codex", "personal"), "fix"))
+    );
+  }
+
+  #[test]
+  fn mention_leaves_other_prompts_alone() {
+    let profiles = vec![profile("claude", "work"), profile("codex", "work")];
+    assert_eq!(mention(&profiles, "claude", "fix @work later"), None);
+    assert_eq!(mention(&profiles, "claude", "@src/main.rs is broken"), None);
+    // Two other agents share the name: ambiguous.
+    assert_eq!(mention(&profiles, "gemini", "@work fix"), None);
   }
 }
