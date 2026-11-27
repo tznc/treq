@@ -32,6 +32,7 @@ test("sent review comments stay on the diff until resolved", async ({ page }) =>
     expectations: [
       "Under the commented line a card shows a paper-plane icon and 'Sent to agent' in blue",
       "The card holds the comment text 'Log the level in upper case' and the file:line label",
+      "The card's label, path, comment text and Resolve button are in the sans font, not mono",
       "Its only action is Resolve: no Send to agent, no Delete",
     ],
   });
