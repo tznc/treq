@@ -1359,44 +1359,33 @@ fn changes_tab_draws_a_github_suggestion_as_a_diff(cx: &mut TestAppContext) {
   assert!(h.shows(gpui::Role::Heading, "Suggested change"));
 }
 
-/// Text in a review comment selects with a drag, and Quote quotes only the
-/// selection.
+/// Text in a review comment selects like any other text, and Quote then
+/// quotes only the selection.
 #[gpui::test]
 fn changes_tab_quotes_the_selected_text_of_a_review_comment(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  // One line, longer than half the card, so its middle is a word.
+  const BODY: &str =
+    "Why two lines here, when a single line reads the same and keeps the diff smaller?";
   let mut host = changes_host();
   let mut thread = gh_thread("t1", 2, false);
-  thread.comments[0].body = "Why two lines here?".into();
+  thread.comments[0].body = BODY.into();
   host.threads = vec![thread];
   let (mut h, host) = workspace_harness(cx, host, changes_route());
-  h.cx.run_until_parked();
-  let body = h.cx.debug_bounds("github-comment-body").expect("body");
-  let y = body.top() + gpui::px(8.);
-  let (from, to) = (
-    gpui::point(body.left() + gpui::px(1.), y),
-    gpui::point(body.left() + gpui::px(40.), y),
-  );
-  h.cx
-    .simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
-  h.cx
-    .simulate_mouse_move(to, Some(MouseButton::Left), Modifiers::none());
-  h.cx
-    .simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
-  h.cx.run_until_parked();
-  let selected = h.cx.update(gpui_kit::base::TextSelection::selected_text);
-  let selected = selected.trim().to_string();
-  assert!(
-    !selected.is_empty() && selected != "Why two lines here?",
-    "{selected:?}"
-  );
-  h.click("github-comment-quote");
-  h.click("comment-input");
-  h.cx.simulate_input("Agreed");
-  h.click("comment-submit");
+  let screen = a11y_screen(&mut h);
+  let user = screen.user();
+  user.dbl_click(&screen.get_by_role(by::role(gpui::Role::Article).name(BODY)));
+  let word = user.copy().expect("a word is selected");
+  assert!(BODY.contains(&word) && word != BODY, "{word:?}");
+  user.click(&screen.get_by_role(by::role(gpui::Role::Button).name("Quote")));
+  let input = screen.get_by_role(by::role(gpui::Role::MultilineTextInput).name("Add a comment…"));
+  user.type_text(&input, "Agreed");
+  user.click(&screen.get_by_role(by::role(gpui::Role::Button).name("Add comment")));
   settle_save(&mut h);
   let saved: serde_json::Value =
     serde_json::from_str(&host.review.lock().unwrap().clone().unwrap_or_default())
       .expect("saved review");
-  assert_eq!(saved[0]["line_content"], serde_json::json!([selected]));
+  assert_eq!(saved[0]["line_content"], serde_json::json!([word]));
 }
 
 #[gpui::test]
@@ -1431,30 +1420,20 @@ fn changes_tab_resolves_an_agent_comment(cx: &mut TestAppContext) {
   assert!(!h.shows(gpui::Role::Group, "Agent comment on a.rs line 2"));
 }
 
-/// A local review comment's text selects with a drag.
+/// A local review comment's text selects like any other text.
 #[gpui::test]
 fn changes_tab_selects_the_text_of_a_local_review_comment(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  const TEXT: &str = "Use one line here, since the second only repeats the check above.";
   let host = changes_host();
-  *host.agent.lock().unwrap() = vec![agent_comment(None)];
+  let mut comment = agent_comment(None);
+  comment.comment_text = TEXT.into();
+  *host.agent.lock().unwrap() = vec![comment];
   let (mut h, _) = workspace_harness(cx, host, changes_route());
-  h.cx.run_until_parked();
-  let text = h
-    .cx
-    .debug_bounds("agent-review-comment-text-ag")
-    .expect("text");
-  let (from, to) = (
-    gpui::point(text.left() + gpui::px(1.), text.center().y),
-    gpui::point(text.right() - gpui::px(1.), text.center().y),
-  );
-  h.cx
-    .simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
-  h.cx
-    .simulate_mouse_move(to, Some(MouseButton::Left), Modifiers::none());
-  h.cx
-    .simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
-  h.cx.run_until_parked();
-  let selected = h.cx.update(gpui_kit::base::TextSelection::selected_text);
-  assert_eq!(selected.trim(), "Use one line");
+  let screen = a11y_screen(&mut h);
+  let user = screen.user();
+  user.triple_click(&screen.get_by_role(by::role(gpui::Role::Paragraph).name(TEXT)));
+  assert_eq!(user.copy().as_deref(), Some(TEXT));
 }
 
 #[gpui::test]

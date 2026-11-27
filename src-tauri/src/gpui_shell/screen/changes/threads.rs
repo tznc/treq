@@ -101,6 +101,11 @@ impl ChangesView {
   pub(super) fn end_pointer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     self.end_drag(cx);
     self.threads.selected = gpui_kit::base::TextSelection::selected_text(window, cx);
+    // Selected text without a copy of its own (a local comment's) copies
+    // through the diff's keys.
+    if !self.threads.selected.trim().is_empty() {
+      window.focus(&self.focus, cx);
+    }
   }
 
   fn read_threads(&mut self, github: bool, cx: &mut Context<Self>) {
@@ -611,7 +616,10 @@ impl ChangesView {
         self.dark,
       )
     };
-    let body = div().selector("github-comment-body");
+    let body = div()
+      .selector("github-comment-body")
+      .role(gpui::Role::Article)
+      .aria_label(preview(&comment.body));
     let Some(s) = crate::core::review::parse_suggestion(&comment.body) else {
       return body.child(md("", &comment.body));
     };
@@ -777,6 +785,8 @@ impl ChangesView {
         let id = SharedString::from(format!("agent-review-comment-text-{}", comment.id));
         div()
           .selector(id.clone())
+          .role(gpui::Role::Paragraph)
+          .aria_label(comment.comment_text.clone())
           .whitespace_normal()
           .child(gpui_kit::base::SelectableText::new(
             id,
