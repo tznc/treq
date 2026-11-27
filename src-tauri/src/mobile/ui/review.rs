@@ -4,15 +4,16 @@
 //! and dropped connections. Shared by the Changes tab and the file viewer.
 
 use crate::mobile::ui::widgets::TouchButton as _;
-use std::rc::Rc;
+use std::{collections::HashMap, rc::Rc};
 
 use crate::{
   core::{
     remote::{ReviewScope, TreqCommandRequest},
     remote_pty::RemoteAgentId,
     review::{
-      commented_text, comments_under, count_label, is_outdated, line_at, parse_suggestion,
-      review_markdown, suggestion_block, LineComment, LineRef, Pending, Side, Stored,
+      carry, carry_due, commented_text, comments_under, count_label, line_at, parse_suggestion,
+      placement, review_markdown, side_version, suggestion_block, LineComment, LineRef, Pending,
+      Placement, Side, Stored,
     },
   },
   jj::JjDiffHunk,
@@ -50,6 +51,11 @@ pub struct Review {
   saving: bool,
   dirty: bool,
   error: Option<String>,
+  /// The diff's files as last read, with the content ids their comments
+  /// follow (`side_version`).
+  shown: HashMap<String, (Vec<JjDiffHunk>, String)>,
+  /// Comments are being carried to their files' versions.
+  carrying: bool,
 }
 
 impl Review {
@@ -61,6 +67,8 @@ impl Review {
       saving: false,
       dirty: false,
       error: None,
+      shown: HashMap::new(),
+      carrying: false,
     };
     this.load(cx);
     this
@@ -72,11 +80,12 @@ impl Review {
       workspace: self.target.id.clone(),
       scope: self.scope,
     };
-    load::run(cx, remote::read::<Stored>(request), |this, result, _| {
+    load::run(cx, remote::read::<Stored>(request), |this, result, cx| {
       // Edits made while it loaded stay; an older host just has none.
       if this.stored.ready().is_none() {
         this.stored = Load::Ready(result.unwrap_or_default());
       }
+      this.carry(cx);
     });
   }
 
@@ -121,12 +130,107 @@ impl Review {
     cx.notify();
   }
 
+  /// The content id file `path` was last shown at.
+  pub fn content_id(&self, path: &str) -> Option<&str> {
+    self.shown.get(path).map(|(_, id)| id.as_str())
+  }
+
+  /// Files the diff read, with their content ids: comments on older
+  /// versions of them are carried forward.
+  pub fn show(&mut self, files: Vec<(String, Vec<JjDiffHunk>, String)>, cx: &mut Context<Self>) {
+    for (path, hunks, id) in files {
+      self.shown.insert(path, (hunks, id));
+    }
+    self.carry(cx);
+  }
+
+  /// GitHub's carry-forward, as the desktop's `carry_comments`: a comment
+  /// kept on an older version of a shown file moves to its lines in it, or
+  /// goes outdated.
+  fn carry(&mut self, cx: &mut Context<Self>) {
+    let due: Vec<(String, String, String, String)> = self
+      .comments()
+      .iter()
+      .filter_map(|c| {
+        let (from, to) = carry_due(c, self.content_id(&c.file_path)?)?;
+        Some((c.id.clone(), c.file_path.clone(), from.into(), to.into()))
+      })
+      .collect();
+    if due.is_empty() || std::mem::replace(&mut self.carrying, true) {
+      return;
+    }
+    let target = self.target.clone();
+    let read = async move {
+      let mut texts: HashMap<(String, String), Result<Option<String>, String>> = HashMap::new();
+      for (_, path, from, to) in &due {
+        for version in [from, to] {
+          let key = (path.clone(), version.clone());
+          if texts.contains_key(&key) {
+            continue;
+          }
+          let request = TreqCommandRequest::ReadFileVersion {
+            repo: target.repo.clone(),
+            workspace: Some(target.id.clone()),
+            path: path.clone(),
+            version: version.clone(),
+          };
+          texts.insert(key, remote::read::<Option<String>>(request).await);
+        }
+      }
+      (due, texts)
+    };
+    load::run(cx, read, |this, (due, texts), cx| {
+      this.carrying = false;
+      let mut carried = Vec::new();
+      for (id, path, from, to) in due {
+        // Read where it cannot be (an older host): its code decides.
+        let (Some(Ok(from_text)), Some(Ok(Some(to_text)))) = (
+          texts.get(&(path.clone(), from.clone())),
+          texts.get(&(path.clone(), to.clone())),
+        ) else {
+          continue;
+        };
+        // The file may have moved on again while these were read.
+        let Some((hunks, shown)) = this.shown.get(&path) else {
+          continue;
+        };
+        let now = this
+          .comments()
+          .iter()
+          .find(|c| c.id == id && c.version.as_deref() == Some(from.as_str()))
+          .and_then(|c| side_version(shown, c.line_side?));
+        if now == Some(to.as_str()) {
+          carried.push((id, from_text.clone(), to_text.clone(), to, hunks.clone()));
+        }
+      }
+      if carried.is_empty() {
+        return;
+      }
+      this.edit(cx, |stored| {
+        for (id, from, to_text, to, hunks) in &carried {
+          if let Some(c) = stored.comments.iter_mut().find(|c| &c.id == id) {
+            carry(c, from.as_deref(), to_text, to, hunks);
+          }
+        }
+      });
+    });
+  }
+
+  /// Where `comment` shows among `hunks`.
+  pub fn placed(&self, comment: &LineComment, hunks: &[JjDiffHunk]) -> Placement {
+    placement(comment, hunks, self.content_id(&comment.file_path))
+  }
+
   pub fn add(&mut self, pending: &Pending, text: &str, cx: &mut Context<Self>) {
-    let comment = pending.comment(
+    let mut comment = pending.comment(
       text,
       uuid::Uuid::new_v4().to_string(),
       chrono::Utc::now().to_rfc3339(),
     );
+    comment.version = self
+      .content_id(&pending.file_path)
+      .and_then(|id| side_version(id, pending.side))
+      .map(str::to_string);
     self.edit(cx, |s| s.comments.push(comment));
   }
 
@@ -402,7 +506,7 @@ impl Render for Composer {
 pub fn comment_card(
   review: &Entity<Review>,
   comment: &LineComment,
-  outdated: bool,
+  state: Option<&'static str>,
   cx: &App,
 ) -> AnyElement {
   let theme = cx.theme();
@@ -447,10 +551,9 @@ pub fn comment_card(
       h_flex()
         .gap_2()
         .child(widgets::muted(place(comment), cx))
-        .when(outdated, |row| {
+        .when_some(state, |row, state| {
           row.child(
-            treq_ui::Badge::new("Outdated", &treq_ui::theme::current(cx))
-              .tone(treq_ui::Tone::Warning),
+            treq_ui::Badge::new(state, &treq_ui::theme::current(cx)).tone(treq_ui::Tone::Warning),
           )
         }),
     )
@@ -532,11 +635,12 @@ pub fn diff_hunks(
         .children(hunk.lines.iter().enumerate().map(|(l, line)| {
           let on = picked.contains(&(h, l));
           let tap = on_tap.clone();
-          let outdated = |c: &LineComment| is_outdated(c, Some(hunks));
+          let placed = review.read(cx);
+          let outdated = |c: &LineComment| placed.placed(c, hunks) != Placement::Line;
           let under: Vec<AnyElement> =
             comments_under(&comments, path, hunk, line_at(hunk, l), &outdated)
               .into_iter()
-              .map(|c| comment_card(review, c, false, cx))
+              .map(|c| comment_card(review, c, None, cx))
               .collect();
           let number = line_at(hunk, l).0;
           v_flex()
@@ -577,24 +681,26 @@ pub fn file_cards(
   hunks: Option<&[JjDiffHunk]>,
   cx: &App,
 ) -> Vec<AnyElement> {
-  let shown: Vec<(LineComment, bool)> = review
-    .read(cx)
+  let read = review.read(cx);
+  let shown: Vec<(LineComment, Option<&'static str>)> = read
     .comments()
     .iter()
     .filter(|c| c.file_path == path)
     .filter_map(|c| {
       if c.is_file() {
-        Some((c.clone(), false))
-      } else if hunks.is_some() && c.hunk_id != FILE_LINES && is_outdated(c, hunks) {
-        Some((c.clone(), true))
-      } else {
-        None
+        return Some((c.clone(), None));
+      }
+      let hunks = hunks.filter(|_| c.hunk_id != FILE_LINES)?;
+      match read.placed(c, hunks) {
+        Placement::Line => None,
+        Placement::Outdated => Some((c.clone(), Some("Outdated"))),
+        Placement::OffDiff => Some((c.clone(), Some("Not in diff"))),
       }
     })
     .collect();
   shown
     .iter()
-    .map(|(c, outdated)| comment_card(review, c, *outdated, cx))
+    .map(|(c, state)| comment_card(review, c, *state, cx))
     .collect()
 }
 
