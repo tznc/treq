@@ -674,17 +674,6 @@ pub fn suggestion_block(pending: &Pending) -> Option<String> {
   suggestion_lines(pending).map(|lines| format!("```suggestion\n{lines}\n```\n"))
 }
 
-/// A comment's text with its suggestion appended as GitHub's
-/// ```` ```suggestion ```` block, the format comments are kept and sent in.
-pub fn compose_suggestion_comment(text: &str, suggestion: Option<&str>) -> String {
-  let text = text.trim();
-  match suggestion {
-    None => text.to_string(),
-    Some(lines) if text.is_empty() => format!("```suggestion\n{lines}\n```"),
-    Some(lines) => format!("{text}\n\n```suggestion\n{lines}\n```"),
-  }
-}
-
 /// A comment's text around its first suggestion block.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Suggestion {
@@ -932,28 +921,6 @@ mod tests {
       "old lines cannot be replaced"
     );
     assert_eq!(suggestion_lines(&Pending::file("a.rs")), None);
-  }
-
-  #[test]
-  fn a_suggestion_joins_the_comment_as_a_github_block() {
-    assert_eq!(
-      compose_suggestion_comment("Use B", Some("B")),
-      "Use B\n\n```suggestion\nB\n```"
-    );
-    assert_eq!(
-      compose_suggestion_comment("  ", Some("b\nc")),
-      "```suggestion\nb\nc\n```"
-    );
-    assert_eq!(
-      compose_suggestion_comment("", Some("")),
-      "```suggestion\n\n```",
-      "an empty suggestion deletes the lines"
-    );
-    assert_eq!(compose_suggestion_comment(" Nit ", None), "Nit");
-    let composed = compose_suggestion_comment("Use B", Some("B\nC"));
-    let parsed = parse_suggestion(&composed).expect("parses back");
-    assert_eq!(parsed.before, "Use B");
-    assert_eq!(parsed.suggested, "B\nC");
   }
 
   #[test]

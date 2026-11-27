@@ -1110,19 +1110,11 @@ fn a_suggested_change_is_drawn_and_applied_to_the_file(cx: &mut TestAppContext) 
   h.click("gutter-a.rs-0-1");
   h.cx.simulate_keystrokes("shift-down left");
   h.click("suggest-change");
-  // A code editor with the lines and a preview, not fences in the comment.
-  assert!(h.shows(gpui::Role::Group, "Suggested change"));
+  // GitHub's way: the block goes into the comment itself, and the preview
+  // reads it from there. No second editor.
+  assert!(!h.shows(gpui::Role::Group, "Suggested change"));
   assert!(h.shows(gpui::Role::Group, "Suggestion preview"));
-  let (comment, suggestion) = h.screen.read_with(&h.cx, |screen, cx| {
-    let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
-    let changes = workspace.changes().expect("changes").read(cx);
-    (
-      changes.review.draft_text.clone(),
-      changes.review.suggestion_text.clone(),
-    )
-  });
-  assert_eq!(comment, "");
-  assert_eq!(suggestion.as_deref(), Some("b\nc"));
+  assert_eq!(draft_text(&mut h), "```suggestion\nb\nc\n```\n");
   h.cx.simulate_keystrokes("secondary-enter");
   settle_save(&mut h);
   let saved = host.review.lock().unwrap().clone().unwrap_or_default();
@@ -1148,6 +1140,41 @@ fn a_suggested_change_is_drawn_and_applied_to_the_file(cx: &mut TestAppContext) 
     !has_comment(&mut h, "^Comments on a.rs line \\d+$"),
     "the applied comment is done"
   );
+}
+
+fn draft_text(h: &mut Harness) -> String {
+  h.screen.read_with(&h.cx, |screen, cx| {
+    let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
+    let changes = workspace.changes().expect("changes").read(cx);
+    changes.review.draft_text.clone()
+  })
+}
+
+#[gpui::test]
+fn suggest_change_inserts_the_block_on_its_own_line_at_the_cursor(cx: &mut TestAppContext) {
+  let (mut h, _host) = workspace_harness(cx, changes_host(), changes_route());
+  h.click("gutter-a.rs-0-1");
+  h.cx.simulate_keystrokes("shift-down left");
+  h.cx.simulate_input("Wrap it");
+  h.click("suggest-change");
+  assert_eq!(draft_text(&mut h), "Wrap it\n```suggestion\nb\nc\n```\n");
+  // The cursor sits after the block, to go on writing.
+  h.cx.simulate_input("thanks");
+  assert_eq!(
+    draft_text(&mut h),
+    "Wrap it\n```suggestion\nb\nc\n```\nthanks"
+  );
+}
+
+#[gpui::test]
+fn the_suggestion_preview_follows_the_comment_text(cx: &mut TestAppContext) {
+  let (mut h, _host) = workspace_harness(cx, changes_host(), changes_route());
+  h.click("gutter-a.rs-0-1");
+  h.cx.simulate_keystrokes("shift-down left");
+  h.cx.simulate_input("Nit");
+  assert!(!h.shows(gpui::Role::Group, "Suggestion preview"));
+  h.cx.simulate_input("\n```suggestion\nB\n```");
+  assert!(h.shows(gpui::Role::Group, "Suggestion preview"));
 }
 
 #[gpui::test]

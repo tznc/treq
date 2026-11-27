@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { workspaceDir } from "../landing/seed.ts";
 import { capture } from "./capture.ts";
-import { openTab, openWorkspace, settle } from "./helpers.ts";
+import { mod, openTab, openWorkspace, settle } from "./helpers.ts";
 
 test.describe.configure({ mode: "serial" });
 
@@ -62,22 +62,62 @@ test("changes review: character marks, keyboard, suggestion, stale banner", asyn
   await page.keyboard.press("ArrowLeft");
   const input = page.getByRole("textbox", { name: "Add a comment…" });
   await expect(input).toBeVisible();
+  await input.fill("Wrap it");
   await page.getByRole("button", { name: "Suggest change" }).click();
-  const suggested = page.getByRole("textbox", { name: "Suggested lines" });
-  await expect(suggested).toBeVisible();
-  await expect(input).toHaveValue("");
+  await expect(input).toHaveValue(/^Wrap it\n```suggestion\n[\s\S]*\n```\n$/);
   await settle(page, 400);
   await capture(page, {
     name: "13-review-03-suggest-change",
-    title: "Left opens the comment box; Suggest change opens a suggestion editor",
+    title: "Left opens the comment box; Suggest change inserts a suggestion block",
     expectations: [
-      "Comment box under the selected lines with their range label; its text field stays empty",
-      "Below it a monospace 'Suggested change' field holds the two lines, and a preview shows them as - and + rows",
-      "'Remove suggestion' on the left, Cancel and Add comment on the right",
+      "The comment field reads 'Wrap it', then a ```suggestion block holding the two lines",
+      "Below the field a preview shows the lines as - and + rows",
+      "'Suggest change' on the left, Cancel and Add comment on the right",
     ],
   });
+  const edited =
+    "Wrap it\n```suggestion\n  return `[lorem:${level.toUpperCase()}] ${line}`;\n}\n```\n";
+  const preview = page.getByRole("group", { name: "Suggestion preview" });
+  await input.fill(edited);
+  await expect(preview).toBeVisible();
+  await settle(page, 400);
+  await capture(page, {
+    name: "13-review-03b-suggestion-edited",
+    title: "The preview follows edits to the block in the comment",
+    expectations: [
+      "The field grew to show the whole comment: 'Wrap it', the fences and both edited lines",
+      "The preview's + rows read the edited `return ...toUpperCase()...` line and `}`",
+    ],
+  });
+  await page.keyboard.press(`${mod}+=`);
+  await page.keyboard.press(`${mod}+=`);
+  await settle(page, 1000);
+  try {
+    await capture(page, {
+      name: "13-review-03c-suggestion-zoom",
+      title: "The comment box with a suggestion at a larger UI zoom (Ctrl+= twice)",
+      expectations: [
+        "Field, preview and buttons scale together",
+        "Nothing in the comment box clips or overlaps",
+      ],
+    });
+  } finally {
+    await page.keyboard.press(`${mod}+-`);
+    await page.keyboard.press(`${mod}+-`);
+    await settle(page, 800);
+  }
   await input.fill("Wrap it");
-  await suggested.fill("  return `[lorem:${level.toUpperCase()}] ${line}`;\n}");
+  await expect(preview).toHaveCount(0);
+  await settle(page, 400);
+  await capture(page, {
+    name: "13-review-03d-suggestion-removed",
+    title: "Deleting the block from the comment removes the preview",
+    expectations: [
+      "The field reads only 'Wrap it' and shrinks back to its three rows",
+      "No preview under the field",
+    ],
+  });
+  await input.fill(edited);
   await page.getByRole("button", { name: "Add comment", exact: true }).click();
   await expect(input).toHaveCount(0);
   await settle(page, 800);

@@ -15,10 +15,10 @@ use super::*;
 use crate::core::review::{selected_range, selected_row, selected_text, word_at, TextPoint};
 use crate::gpui_shell::screen::{
   changes_review::{
-    commented_text, comments_under, compose_suggestion_comment, count_label, is_outdated,
-    line_has_comment, line_location, number_and_side, outdated_label, outdated_markdown,
-    parse_suggestion, pending_for_line, pending_for_selection, review_markdown, stale_names,
-    suggestion_lines, ConflictNote, LineComment, Pending, Side, Stored, FILE_HUNK,
+    commented_text, comments_under, count_label, is_outdated, line_has_comment, line_location,
+    number_and_side, outdated_label, outdated_markdown, parse_suggestion, pending_for_line,
+    pending_for_selection, review_markdown, stale_names, suggestion_block, suggestion_lines,
+    ConflictNote, LineComment, Pending, Side, Stored, FILE_HUNK,
   },
   commits_data::{selection, LineRef},
 };
@@ -68,7 +68,6 @@ enum Field {
   Edit,
   Note,
   Summary,
-  Suggestion,
 }
 
 #[derive(Default)]
@@ -97,10 +96,6 @@ pub(in crate::gpui_shell::screen) struct Review {
   pub draft: Option<Pending>,
   pub draft_text: String,
   pub(super) draft_input: Option<Input>,
-  /// "Suggest change"'s lines, as edited; the comment takes them as a
-  /// suggestion block when it is added.
-  pub suggestion_text: Option<String>,
-  pub(super) suggestion_input: Option<Input>,
   /// The comment, or the conflict's note, being edited.
   pub editing: Option<String>,
   pub edit_text: String,
@@ -500,15 +495,10 @@ impl ChangesView {
   }
 
   fn submit_draft(&mut self, cx: &mut Context<Self>) {
-    let text = compose_suggestion_comment(
-      &self.review.draft_text,
-      self.review.suggestion_text.as_deref(),
-    );
+    let text = self.review.draft_text.trim().to_string();
     if text.is_empty() {
       return;
     }
-    self.review.suggestion_text = None;
-    self.review.suggestion_input = None;
     if self.read_only() {
       if let Some(draft) = self.review.draft.clone() {
         self.submit_pr_draft(draft, text, cx);
@@ -531,22 +521,28 @@ impl ChangesView {
     cx.notify();
   }
 
-  /// "Suggest change": opens a code editor with the commented lines, to edit
-  /// into what they should read; pressed again, drops the suggestion.
+  /// "Suggest change": the commented lines as a ```` ```suggestion ```` block
+  /// at the comment's cursor, on a line of its own, to edit into what they
+  /// should read (GitHub's way).
   fn suggest_change(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-    if self.review.suggestion_text.take().is_some() {
-      self.review.suggestion_input = None;
-      if let Some(input) = &self.review.draft_input {
-        input.state.update(cx, |s, cx| s.focus(window, cx));
-      }
-      cx.notify();
-      return;
-    }
-    let Some(lines) = self.review.draft.as_ref().and_then(suggestion_lines) else {
+    let (Some(block), Some(state)) = (
+      self.review.draft.as_ref().and_then(suggestion_block),
+      self.review.draft_input.as_ref().map(|i| i.state.clone()),
+    ) else {
       return;
     };
-    self.review.suggestion_text = Some(lines);
-    self.input_for(Field::Suggestion, window, cx);
+    state.update(cx, |s, cx| {
+      let value = s.value();
+      let before = value.get(..s.cursor()).unwrap_or_default();
+      let lead = if before.is_empty() || before.ends_with('\n') {
+        ""
+      } else {
+        "\n"
+      };
+      s.insert(format!("{lead}{block}"), window, cx);
+      s.focus(window, cx);
+    });
+    self.review.draft_text = state.read(cx).value().to_string();
     cx.notify();
   }
 
@@ -598,8 +594,6 @@ impl ChangesView {
     self.review.draft = None;
     self.review.draft_input = None;
     self.review.draft_text.clear();
-    self.review.suggestion_text = None;
-    self.review.suggestion_input = None;
     cx.notify();
   }
 
@@ -1060,25 +1054,20 @@ impl ChangesView {
         "Add a summary comment (optional)…",
         3,
       ),
-      Field::Suggestion => {
-        let lines = self.review.suggestion_text.as_ref()?;
-        (
-          &self.review.suggestion_input,
-          lines.clone(),
-          "Suggested lines",
-          lines.lines().count().max(1),
-        )
-      }
       _ => return None,
     };
     if let Some(input) = slot {
       return Some(input.state.clone());
     }
     let state = cx.new(|cx| {
-      TextareaState::new(window, cx)
-        .rows(rows)
-        .placeholder(placeholder)
-        .default_value(text)
+      let state = TextareaState::new(window, cx);
+      // The comment grows to show a suggestion block, as GitHub's does.
+      let state = if field == Field::Draft {
+        state.auto_grow(rows, 12)
+      } else {
+        state.rows(rows)
+      };
+      state.placeholder(placeholder).default_value(text)
     });
     let changes = cx.subscribe(&state, move |view, state, event: &InputEvent, cx| {
       if let InputEvent::Change = event {
@@ -1091,7 +1080,6 @@ impl ChangesView {
             view.review.summary = value;
             view.save_review(cx);
           }
-          Field::Suggestion => view.review.suggestion_text = Some(value),
         }
         cx.notify();
       }
@@ -1108,24 +1096,14 @@ impl ChangesView {
       Field::Edit => self.review.edit_input = Some(input),
       Field::Note => self.review.note_input = Some(input),
       Field::Summary => self.review.summary_input = Some(input),
-      Field::Suggestion => self.review.suggestion_input = Some(input),
     }
     Some(state)
   }
 
   /// Builds the boxes that are open, so render can draw them.
   pub(super) fn ensure_review_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-    for field in [
-      Field::Draft,
-      Field::Edit,
-      Field::Note,
-      Field::Summary,
-      Field::Suggestion,
-    ] {
+    for field in [Field::Draft, Field::Edit, Field::Note, Field::Summary] {
       self.input_for(field, window, cx);
-    }
-    if self.review.suggestion_text.is_none() {
-      self.review.suggestion_input = None;
     }
     if !self.review.finish_open {
       self.review.summary_input = None;
@@ -1686,8 +1664,7 @@ impl ChangesView {
 
   /// `CommentInput`.
   pub(super) fn comment_input(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
-    let suggesting = self.review.suggestion_text.is_some();
-    let empty = self.review.draft_text.trim().is_empty() && !suggesting;
+    let empty = self.review.draft_text.trim().is_empty();
     let label = self.review.draft.as_ref().and_then(|d| d.label());
     let can_suggest = self
       .review
@@ -1745,7 +1722,7 @@ impl ChangesView {
           .mb_2()
           .child(ui::text(Textarea::new(&i.state), TextSize::Sm))
       }))
-      .children(self.suggestion_editor(p))
+      .children(self.suggestion_preview(p))
       .child(
         div()
           .flex()
@@ -1757,11 +1734,7 @@ impl ChangesView {
                 Button::new("suggest-change", p)
                   .variant(Variant::Ghost)
                   .icon(theme::ICON_FILE_DIFF, 14.)
-                  .label(if suggesting {
-                    "Remove suggestion"
-                  } else {
-                    "Suggest change"
-                  })
+                  .label("Suggest change")
                   .on_click(cx.listener(|view, _, window, cx| view.suggest_change(window, cx))),
               )
               .child(div().flex_1())
@@ -1781,12 +1754,13 @@ impl ChangesView {
       )
   }
 
-  /// "Suggest change"'s editor: the lines in a code field, and below it a
-  /// preview of what changes against the lines as they are.
-  fn suggestion_editor(&self, p: &Palette) -> Option<impl IntoElement> {
-    let input = self.review.suggestion_input.as_ref()?;
-    let suggested = self.review.suggestion_text.as_deref()?;
-    let original = commented_text(&self.review.draft.as_ref()?.line_content);
+  /// The comment's ```` ```suggestion ```` block, read from its text and
+  /// previewed against the lines as they are.
+  fn suggestion_preview(&self, p: &Palette) -> Option<impl IntoElement> {
+    let draft = self.review.draft.as_ref()?;
+    suggestion_lines(draft)?;
+    let suggested = parse_suggestion(&self.review.draft_text)?.suggested;
+    let original = commented_text(&draft.line_content);
     let line = |marker: &'static str, text: String, tone: Tone| {
       div()
         .flex()
@@ -1805,7 +1779,6 @@ impl ChangesView {
       .border_1()
       .border_color(p.border)
       .overflow_hidden()
-      .font_family(theme::MONO_FONT)
       .children(
         original
           .into_iter()
@@ -1818,9 +1791,6 @@ impl ChangesView {
       );
     Some(
       div()
-        .selector("suggestion-editor")
-        .role(gpui::Role::Group)
-        .aria_label("Suggested change")
         .mb_2()
         .flex()
         .flex_col()
@@ -1829,25 +1799,13 @@ impl ChangesView {
           // Short label (section heading). ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .text_color(p.muted_foreground)
-            .child("Suggested change"),
-        )
-        .child(
-          div()
-            .rounded(radius::SM)
-            .border_1()
-            .border_color(p.border)
-            .bg(p.background)
-            .font_family(theme::MONO_FONT)
-            .child(ui::text(Textarea::new(&input.state), TextSize::Code)),
-        )
-        .child(
-          // Short label (section heading). ast-grep-ignore: gpui-text-xs-short-label-only
-          ui::text(div(), TextSize::Xs)
-            .text_color(p.muted_foreground)
             .child("Preview"),
         )
-        .child(ui::text(preview, TextSize::Code).test_support())
-        .test_support(),
+        .child(
+          ui::text(preview, TextSize::Code)
+            .font_family(theme::MONO_FONT)
+            .test_support(),
+        ),
     )
   }
 
