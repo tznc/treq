@@ -4264,6 +4264,22 @@ impl TerminalPane {
           // terminals' drawing as it was.
           .child(view.cached(gpui::StyleRefinement::default().size_full()))
           .children(previews)
+          // Lights up while files or an attachment hover it; a remote
+          // session takes no drops.
+          .when(!remote, |d| {
+            d.child(
+              div()
+                .selector(SharedString::from(format!("terminal-drop-target-{id}")))
+                .absolute()
+                .inset_0()
+                .border_2()
+                .border_color(p.primary)
+                .bg(p.primary.opacity(0.1))
+                .invisible()
+                .drag_over::<ExternalPaths>(|s, _, _, _| s.visible())
+                .drag_over::<SendAssetDrag>(|s, _, _, _| s.visible()),
+            )
+          })
       })
       // `ring-1 ring-inset ring-primary/40` on the active remote session.
       .when(remote && active, |d| {

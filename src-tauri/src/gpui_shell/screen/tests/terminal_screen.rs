@@ -951,6 +951,100 @@ fn files_dropped_on_an_agent_are_pasted(cx: &mut TestAppContext) {
   );
 }
 
+fn drop_target(h: &mut Harness, column: &str) -> bool {
+  by_id_prefix(h, &format!("terminal-drop-target-{column}")).is_visible()
+}
+
+/// Files dragged over the pane light up the terminal they would land in,
+/// and only that one.
+#[gpui::test]
+fn files_dragged_over_a_terminal_highlight_it_as_the_drop_target(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(
+    &mut h,
+    serde_json::json!({
+      "activeSessionId": 3,
+      "commands": [{ "nonce": 1, "kind": "newShell", "dir": "/repo" }],
+    }),
+  );
+  assert!(!drop_target(&mut h, "agent-"));
+  assert!(!drop_target(&mut h, "shell-"));
+
+  let agent = by_id_prefix(&mut h, "terminal-column-agent-")
+    .bounds()
+    .center();
+  let paths = gpui::ExternalPaths(["/tmp/shot.png".into()].into_iter().collect());
+  h.cx.simulate_event(gpui::FileDropEvent::Entered {
+    position: agent,
+    paths,
+  });
+  h.cx.run_until_parked();
+  assert!(drop_target(&mut h, "agent-"));
+  assert!(!drop_target(&mut h, "shell-"));
+
+  let shell = by_id_prefix(&mut h, "terminal-column-shell-")
+    .bounds()
+    .center();
+  h.cx
+    .simulate_event(gpui::FileDropEvent::Pending { position: shell });
+  h.cx.run_until_parked();
+  assert!(!drop_target(&mut h, "agent-"));
+  assert!(drop_target(&mut h, "shell-"));
+
+  h.cx.simulate_event(gpui::FileDropEvent::Exited);
+  h.cx.run_until_parked();
+  assert!(!drop_target(&mut h, "agent-"));
+  assert!(!drop_target(&mut h, "shell-"));
+}
+
+/// Dragging a `treq send` attachment lights up the terminal it would land in.
+#[gpui::test]
+fn an_attachment_dragged_over_a_terminal_highlights_it_as_the_drop_target(cx: &mut TestAppContext) {
+  let (mut h, _) = send_harness(cx);
+  h.cx.run_until_parked();
+  let from = h
+    .cx
+    .debug_bounds("terminal-send-preview-t1")
+    .expect("card")
+    .center();
+  let to = by_id_prefix(&mut h, "terminal-column-agent-")
+    .bounds()
+    .center();
+  h.cx
+    .simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
+  h.cx
+    .simulate_mouse_move(to, Some(MouseButton::Left), Modifiers::none());
+  h.cx
+    .simulate_mouse_move(to, Some(MouseButton::Left), Modifiers::none());
+  h.cx.run_until_parked();
+  assert!(h.cx.update(|_, cx| cx.has_active_drag()));
+  assert!(drop_target(&mut h, "agent-"));
+}
+
+/// A remote session takes no drops, so it never shows as a drop target.
+#[gpui::test]
+fn a_remote_session_is_not_a_drop_target(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, open_remote_command(1));
+  let at = by_id_prefix(&mut h, "terminal-column-").bounds().center();
+  let paths = gpui::ExternalPaths(["/tmp/shot.png".into()].into_iter().collect());
+  h.cx.simulate_event(gpui::FileDropEvent::Entered {
+    position: at,
+    paths,
+  });
+  h.cx.run_until_parked();
+  let targets = h
+    .rendered()
+    .elements()
+    .into_iter()
+    .filter(|n| {
+      matches!(n.element_id(), gpui::ElementId::Name(id) if id.starts_with("terminal-drop-target-"))
+    })
+    .count();
+  assert_eq!(targets, 0);
+}
+
 #[gpui::test]
 fn double_clicking_a_remote_session_scrolls_it_fully_into_view(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
