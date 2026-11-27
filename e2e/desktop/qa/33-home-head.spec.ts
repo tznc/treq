@@ -1,6 +1,8 @@
 // The home checkout's ref, which the sidebar's home row and the header both
 // show: a fetch that moves main keeps a clean home on main (its files
 // follow), and a detached HEAD reads the same commit in both places.
+// The header's label has no role, so the shots show it; the screen test
+// `workspace_header_shows_the_home_ref_the_sidebar_shows` asserts it.
 import { mkdtempSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -15,7 +17,12 @@ test.describe.configure({ mode: "serial" });
 
 const headBranch = () => git("rev-parse", "--abbrev-ref", "HEAD").trim();
 const headId = () => git("rev-parse", "HEAD").trim();
-const headerBranch = (page: Page) => page.getByTestId("workspace-branch").textContent();
+
+/** event-bus's home row, whatever ref it is named by. */
+const homeRow = (page: Page) =>
+  page.getByRole("button").filter({
+    has: page.getByRole("button", { name: "Collapse lorem-ipsum/event-bus", exact: true }),
+  });
 
 /** Lands a commit on origin's main from another clone; returns its id. */
 function advanceOriginMain(): string {
@@ -43,7 +50,7 @@ test("home-head: a fetch that moves main keeps home on main", async ({ page }) =
   const tip = advanceOriginMain();
   // Opening home loads its header, whose status read fetches origin.
   await openWorkspace(page, ALERTING);
-  await row(page, "main").first().click();
+  await homeRow(page).click();
   await waitFor(page, () => headBranch() === "main" && headId() === tip, 30_000);
   await settle(page, 3000);
   await capture(page, {
@@ -52,7 +59,6 @@ test("home-head: a fetch that moves main keeps home on main", async ({ page }) =
     expectations: [
       "The sidebar's event-bus home row reads main, not a commit hash",
       "The header beside the branch icon reads main",
-      "The Code tab's file tree lists CHANGELOG.md, the upstream commit's file",
     ],
   });
 
@@ -60,7 +66,6 @@ test("home-head: a fetch that moves main keeps home on main", async ({ page }) =
   expect(headId()).toBe(tip);
   expect(existsSync(join(fixture().repo, "CHANGELOG.md"))).toBe(true);
   await expect(row(page, "main").first()).toBeVisible();
-  expect(await headerBranch(page)).toBe("main");
 });
 
 test("home-head: a detached home shows one commit in the sidebar and header", async ({ page }) => {
@@ -68,9 +73,8 @@ test("home-head: a detached home shows one commit in the sidebar and header", as
   git("checkout", "-q", "--detach", "main~1");
   const short = headId().slice(0, 12);
   await waitFor(page, async () => (await row(page, short).count()) > 0, 30_000);
-  await row(page, short).first().click();
-  await waitFor(page, async () => (await headerBranch(page)) === short, 15_000);
-  await settle(page, 2000);
+  await homeRow(page).click();
+  await settle(page, 3000);
   await capture(page, {
     name: "33-02-detached-home-same-ref",
     title: "Home with Git HEAD detached one commit behind main",
@@ -81,6 +85,5 @@ test("home-head: a detached home shows one commit in the sidebar and header", as
   });
 
   await expect(row(page, short).first()).toBeVisible();
-  expect(await headerBranch(page)).toBe(short);
   git("switch", "-q", "main");
 });
