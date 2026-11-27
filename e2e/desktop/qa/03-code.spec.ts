@@ -52,6 +52,19 @@ test("code: workspace Code tab, action row, alerts and Agent", async ({ page }) 
     ],
   });
 
+  // The fake gh puts the demo's stacked pull requests in GitHub stack #7.
+  await expect(
+    page.getByRole("button", { name: /^Stack level \d+ of \d+, GitHub stack #7$/ }),
+  ).toBeVisible();
+  await capture(page, {
+    name: "03-code-stack-github",
+    title: "Stack card: level button and pull request badges",
+    expectations: [
+      "The stack card's header ends in a GitHub-mark button reading the level from the bottom, as 'N/M'",
+      "Each stack row with a pull request shows its number as a green badge (#412, #418)",
+    ],
+  });
+
   const alerts = page.getByRole("button", { name: /^Alerts/ });
   await alerts.click();
   const conflicts = page.getByRole("alert", { name: "1 file has conflicts" });

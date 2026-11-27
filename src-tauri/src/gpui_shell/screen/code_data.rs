@@ -19,6 +19,7 @@ use crate::{
     feature_preview::{self, PreviewFeature},
     MaybeEmptyParam, WorkspaceEntry,
   },
+  github_stack::{GhStack, StackCache},
   gpui_shell::{
     native::Backend,
     remote_repo::{unsupported, UNSUPPORTED},
@@ -162,6 +163,8 @@ pub trait CodeHost: WorkspaceHost + SettingsHost {
   ) -> Result<JjLogResult, String>;
   /// Every workspace's current record, for the stack panel.
   fn workspaces(&self, repo_path: &str) -> Result<Vec<Workspace>, String>;
+  /// The native GitHub stack pull request `pr_number` is in, if any.
+  fn github_stack(&self, repo_path: &str, pr_number: u64) -> Option<GhStack>;
   fn set_submodule_synced(&self, repo_path: &str, path: &str, enabled: bool) -> Result<(), String>;
   fn set_description(
     &self,
@@ -262,6 +265,20 @@ impl CodeHost for Backend {
     }
     // Stored records suffice for branches and targets. Statuses would wait on the commit lock.
     core::list_all_workspaces(repo_path)
+  }
+
+  fn github_stack(&self, repo_path: &str, pr_number: u64) -> Option<GhStack> {
+    if self.remote_containing(repo_path).is_some() {
+      return None;
+    }
+    static CACHE: std::sync::LazyLock<StackCache> =
+      std::sync::LazyLock::new(|| StackCache::new(std::time::Duration::from_secs(60)));
+    CACHE.get_or(repo_path, pr_number, std::time::Instant::now(), || {
+      core::github_cli::pr_stack(repo_path, pr_number)
+        .inspect_err(|err| log::warn!("stack card: GitHub stack of #{pr_number}: {err}"))
+        .ok()
+        .flatten()
+    })
   }
 
   fn set_submodule_synced(&self, repo_path: &str, path: &str, enabled: bool) -> Result<(), String> {

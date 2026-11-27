@@ -1,8 +1,13 @@
 //! GitHub's native stacked pull requests: which stack a pull request is in.
 
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
 use serde::Deserialize;
 
 use crate::github::{check_gh_output, check_graphql_errors, spawn_with_etxtbsy_retry};
+use crate::lock_ext::LockExt as _;
 
 /// A stack of pull requests on GitHub.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -135,6 +140,83 @@ pub fn gh_pr_stack_impl(
       .and_then(|pr| pr.stack)
       .map(GhStack::from),
   )
+}
+
+type Kept = (Instant, Option<GhStack>);
+
+/// Each pull request's stack, kept for a while: the stack card asks again
+/// on every revalidation, and each ask is a network call.
+pub struct StackCache {
+  ttl: Duration,
+  /// By `(repo_path, number)`: when it was read, and what it found.
+  entries: Mutex<HashMap<(String, u64), Kept>>,
+}
+
+impl StackCache {
+  pub fn new(ttl: Duration) -> Self {
+    Self {
+      ttl,
+      entries: Mutex::default(),
+    }
+  }
+
+  /// The stack kept for pull request `number` in `repo_path` as of `now`,
+  /// else what `read` finds, kept from `now`.
+  pub fn get_or(
+    &self,
+    repo_path: &str,
+    number: u64,
+    now: Instant,
+    read: impl FnOnce() -> Option<GhStack>,
+  ) -> Option<GhStack> {
+    let key = (repo_path.to_string(), number);
+    let kept = self.entries.lock_or_recover().get(&key).cloned();
+    if let Some((_, stack)) = kept.filter(|(at, _)| now.duration_since(*at) < self.ttl) {
+      return stack;
+    }
+    let stack = read();
+    self
+      .entries
+      .lock_or_recover()
+      .insert(key, (now, stack.clone()));
+    stack
+  }
+}
+
+#[cfg(test)]
+mod cache_tests {
+  use super::*;
+
+  fn stack(number: u64) -> Option<GhStack> {
+    Some(GhStack {
+      number,
+      base_ref_name: "main".into(),
+      entries: vec![],
+    })
+  }
+
+  #[test]
+  fn keeps_a_read_until_it_expires() {
+    let cache = StackCache::new(Duration::from_secs(60));
+    let start = Instant::now();
+    cache.get_or("/repo", 42, start, || stack(12));
+
+    let kept = cache.get_or("/repo", 42, start + Duration::from_secs(59), || stack(13));
+    let fresh = cache.get_or("/repo", 42, start + Duration::from_secs(61), || stack(14));
+
+    assert_eq!(kept, stack(12));
+    assert_eq!(fresh, stack(14));
+  }
+
+  #[test]
+  fn keeps_each_pull_request_apart() {
+    let cache = StackCache::new(Duration::from_secs(60));
+    let now = Instant::now();
+    cache.get_or("/repo", 42, now, || stack(12));
+
+    assert_eq!(cache.get_or("/repo", 43, now, || None), None);
+    assert_eq!(cache.get_or("/other", 42, now, || stack(5)), stack(5));
+  }
 }
 
 #[cfg(test)]

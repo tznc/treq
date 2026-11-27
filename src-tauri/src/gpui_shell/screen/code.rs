@@ -53,6 +53,8 @@ use crate::{
     running_checks::{CheckRun, ChecksTarget},
     WorkspaceEntry,
   },
+  github::PrInfo,
+  github_stack::GhStack,
   gpui_shell::{
     checks_run,
     native::NativeEvent,
@@ -152,6 +154,32 @@ pub struct StackRow {
   pub workspace: Workspace,
   pub current: bool,
   pub stats: (u32, u32),
+  pub pr: Option<PrInfo>,
+}
+
+/// A stack row's pull request: its number in its state's colour.
+fn pr_chip(pr: &PrInfo, p: &Palette) -> impl IntoElement {
+  let (state, tone) = match pr.state.to_uppercase().as_str() {
+    "OPEN" if pr.is_draft => ("draft", ui::Tone::Neutral),
+    "OPEN" => ("open", ui::Tone::GitOpen),
+    "MERGED" => ("merged", ui::Tone::GitMerged),
+    _ => ("closed", ui::Tone::GitClosed),
+  };
+  div()
+    .selector(format!("workspace-stack-pr-{}", pr.number))
+    .role(Role::Status)
+    .aria_label(format!("Pull request #{}, {state}", pr.number))
+    .child(ui::Badge::new(format!("#{}", pr.number), p).tone(tone))
+}
+
+/// The pull request the stack card speaks for: the shown workspace's, else
+/// the first row's that has one.
+fn stack_pr(rows: &[StackRow]) -> Option<&PrInfo> {
+  rows
+    .iter()
+    .filter(|r| r.current)
+    .chain(rows)
+    .find_map(|r| r.pr.as_ref())
 }
 
 /// What [`CodeView::load`] reads, all at once.
@@ -247,22 +275,28 @@ fn read_stack(host: &dyn CodeHost, parent: &Parent) -> Option<Vec<StackRow>> {
     let reads: Vec<_> = stack
       .into_iter()
       .map(|(workspace, current)| {
-        let id = workspace.id;
-        let stats = scope.spawn(move || {
-          host
+        let (id, branch) = (workspace.id, workspace.branch_name.clone());
+        let read = scope.spawn(move || {
+          let stats = host
             .commits(&parent.repo_path, Some(id), false, None)
             .map(|log| diff_stats(&log.commits))
-            .unwrap_or_default()
+            .unwrap_or_default();
+          let pr = host.pr_cache(&parent.repo_path, &branch).pr.flatten();
+          (stats, pr)
         });
-        (workspace, current, stats)
+        (workspace, current, read)
       })
       .collect();
     reads
       .into_iter()
-      .map(|(workspace, current, stats)| StackRow {
-        workspace,
-        current,
-        stats: super::joined(stats),
+      .map(|(workspace, current, read)| {
+        let (stats, pr) = super::joined(read);
+        StackRow {
+          workspace,
+          current,
+          stats,
+          pr,
+        }
       })
       .collect()
   }))
@@ -274,6 +308,8 @@ pub enum Menu {
   SaveDescription,
   /// The description's Sync options: keep the local text or GitHub's.
   SyncDescription,
+  /// The stack card's level button: the stack on GitHub.
+  Stack,
 }
 
 /// Which side of a local draft the title and description card shows.
@@ -312,6 +348,8 @@ pub struct CodeView {
   /// Whether the alerts button has its popover open.
   status_open: bool,
   pub(super) stack: Option<Vec<StackRow>>,
+  /// The native GitHub stack the stack's pull requests are in.
+  github_stack: Option<GhStack>,
   pub(super) settings: Option<TaskSettings>,
   pub(super) menu: Option<Menu>,
   /// The title being edited, and its editor.
@@ -410,6 +448,7 @@ impl CodeView {
       files_error_open: false,
       status_open: false,
       stack: None,
+      github_stack: None,
       settings: None,
       menu: None,
       chrome,
@@ -578,7 +617,11 @@ impl CodeView {
     self.logs_enabled = read.logs;
     self.set_setup(read.setup, cx);
     self.set_history(read.history);
+    if moved {
+      self.github_stack = None;
+    }
     self.stack = read.stack;
+    self.load_github_stack(cx);
     self.settings = Some(read.settings);
     self.take_pr_sync(read.pr_sync);
     self.rebase_hold = read.rebase_hold;
@@ -586,6 +629,31 @@ impl CodeView {
     if !unchanged {
       cx.notify();
     }
+  }
+
+  /// Reads the stack's GitHub stack after the rest: it waits on the network.
+  /// Draws only when it changed, so an unchanged revalidation draws nothing.
+  fn load_github_stack(&mut self, cx: &mut Context<Self>) {
+    let Some(number) = self.stack.as_deref().and_then(stack_pr).map(|pr| pr.number) else {
+      self.github_stack = None;
+      return;
+    };
+    let (host, parent) = (self.host.clone(), self.parent.clone());
+    let key = parent.key();
+    cx.spawn(async move |this, cx| {
+      let stack = cx
+        .background_spawn(async move { host.github_stack(&parent.repo_path, number) })
+        .await;
+      this
+        .update(cx, |view, cx| {
+          if view.parent.key() == key && view.github_stack != stack {
+            view.github_stack = stack;
+            cx.notify();
+          }
+        })
+        .ignore_closed();
+    })
+    .detach();
   }
 
   /// Runs `read` off the main thread, then `apply`s it unless the tab moved
@@ -1893,13 +1961,7 @@ impl CodeView {
       .child("Stack")
       .child(help)
       .children(self.stack_button(p, cx))
-      .child(
-        // Short label (position count). ast-grep-ignore: gpui-text-xs-short-label-only
-        ui::text(div(), TextSize::Xs)
-          .ml_auto()
-          .font_weight(FontWeight::NORMAL)
-          .child(format!("{} of {}", current + 1, stack.len())),
-      );
+      .child(self.stack_level_button(stack.len() - current, stack.len(), p, cx));
     let base = div()
       .relative()
       .flex()
@@ -2071,6 +2133,72 @@ impl CodeView {
     )
   }
 
+  /// The workspace's level in the stack, counted from the bottom as GitHub
+  /// does. Its icon says whether the stack is on GitHub, whose menu it opens.
+  fn stack_level_button(
+    &mut self,
+    level: usize,
+    total: usize,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> AnyElement {
+    let number = self.github_stack.as_ref().map(|s| s.number);
+    let (icon, status, tip) = match number {
+      Some(n) => (
+        theme::ICON_GITHUB,
+        format!("GitHub stack #{n}"),
+        format!("Stack #{n} on GitHub"),
+      ),
+      None => (
+        theme::ICON_LAYERS,
+        "not stacked on GitHub".into(),
+        "Not stacked on GitHub".into(),
+      ),
+    };
+    let button = Button::new("workspace-stack-level", p)
+      .variant(Variant::Ghost)
+      .size(Size::Sm)
+      .gap_1()
+      .px_2()
+      .font_weight(FontWeight::NORMAL)
+      .aria_label(format!("Stack level {level} of {total}, {status}"))
+      .disabled(number.is_none())
+      .icon(icon, 14.)
+      .label(format!("{level}/{total}"))
+      .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Stack, cx)));
+    let panel = menu_panel("workspace-stack-menu", p)
+      .top(zpx(28.))
+      .right_0()
+      .w(zpx(240.))
+      .child(
+        ui::MenuItem::new("workspace-stack-open", "Open on GitHub", p)
+          .description("See the stack on its pull request")
+          .on_click(cx.listener(|view, _, _, cx| view.open_stack_on_github(cx))),
+      );
+    let open = self.menu == Some(Menu::Stack) && number.is_some();
+    let el = div().relative().child(button).when(open, |this| {
+      this.child(deferred(self.close_menu_on_outside(panel, cx)).with_priority(1))
+    });
+    div()
+      .ml_auto()
+      .child(self.tips.wrap(
+        "workspace-stack-level",
+        Side::Top,
+        Some(TooltipContent::Text(tip.into())),
+        el,
+        cx,
+      ))
+      .into_any_element()
+  }
+
+  fn open_stack_on_github(&mut self, cx: &mut Context<Self>) {
+    self.menu = None;
+    if let Some(pr) = self.stack.as_deref().and_then(stack_pr) {
+      self.host.open_url(&pr.url);
+    }
+    cx.notify();
+  }
+
   fn stack_row(
     &mut self,
     row: StackRow,
@@ -2120,6 +2248,7 @@ impl CodeView {
               .mt_0p5()
               .flex_wrap()
               .child(time)
+              .children(row.pr.as_ref().map(|pr| pr_chip(pr, p)))
               .when(ins > 0 || del > 0, |this| {
                 this.child(div().ml_auto().child(loc_indicator(
                   ins,
