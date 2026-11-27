@@ -129,7 +129,7 @@ fn the_agent_picker_lists_every_agent(cx: &mut TestAppContext) {
     .collect();
   assert_eq!(
     agents,
-    ["Claude", "Codex", "Cursor", "Copilot", "Devin", "Gemini", "OpenCode"]
+    ["Claude", "Codex", "Cursor", "Copilot", "Devin", "Gemini", "OpenCode", "Pi"]
   );
 }
 
@@ -163,6 +163,7 @@ fn the_agent_picker_hides_agents_that_are_not_installed(cx: &mut TestAppContext)
       ("devin", false),
       ("gemini", false),
       ("opencode", false),
+      ("pi", false),
     ],
     ..FakeHost::default()
   };

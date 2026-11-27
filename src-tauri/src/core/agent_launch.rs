@@ -1210,6 +1210,10 @@ mod tests {
       resolve_agent(&store, "/r", Some("opencode")).as_deref(),
       Some("opencode")
     );
+    assert_eq!(
+      resolve_agent(&store, "/r", Some("pi")).as_deref(),
+      Some("pi")
+    );
     assert_eq!(resolve_agent(&store, "/r", Some("bogus")), None);
   }
 

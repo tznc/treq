@@ -546,7 +546,8 @@ mod tests {
         "copilot",
         "devin",
         "gemini",
-        "opencode"
+        "opencode",
+        "pi"
       ]
     );
   }

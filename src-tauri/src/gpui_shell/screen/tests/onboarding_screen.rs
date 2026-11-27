@@ -29,7 +29,7 @@ fn builds_the_checklist_from_the_check() {
   assert!(required.tools[0].required);
   assert_eq!(required.tools[0].installed, Some(false));
   assert!(agents.error, "no agent CLI is installed");
-  assert_eq!(agents.tools.len(), 7);
+  assert_eq!(agents.tools.len(), 8);
   assert_eq!(optional.tools[0].installed, Some(true));
   assert_eq!(
     optional.tools[0].note.as_deref(),

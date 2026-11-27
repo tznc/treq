@@ -921,9 +921,37 @@ mod tests {
   }
 
   #[test]
+  fn starts_pi_with_the_system_prompt_file_and_the_task_argument() {
+    let files = AgentCliFiles {
+      task_path: Some("/tmp/treq-agent-1/task.txt".into()),
+      ..files()
+    };
+    let edit = build_auto_command(
+      &AutoCommand {
+        pending_prompt: Some("Fix it"),
+        ..opts("pi")
+      },
+      &files,
+    )
+    .unwrap();
+    assert!(edit.contains(&format!(
+      "pi --append-system-prompt '/tmp/treq-agent-1/prompt.txt' {TASK_ARG}"
+    )));
+    let plan = build_auto_command(
+      &AutoCommand {
+        permission_mode: Some("plan"),
+        ..opts("pi")
+      },
+      &files,
+    )
+    .unwrap();
+    assert!(plan.contains("pi --tools read,grep,find,ls --append-system-prompt '/tmp/treq-agent-1/prompt.txt' )"));
+  }
+
+  #[test]
   fn tells_treq_when_the_agent_exits() {
     for agent in [
-      "claude", "codex", "cursor", "copilot", "devin", "gemini", "opencode",
+      "claude", "codex", "cursor", "copilot", "devin", "gemini", "opencode", "pi",
     ] {
       let command = build_auto_command(
         &AutoCommand {
@@ -1016,7 +1044,7 @@ mod tests {
     let dir = tempfile::tempdir().unwrap();
     let cwd = dir.path().to_str().unwrap();
     let task = format!("Fix the parser.\n{}", "x".repeat(4000));
-    for agent in ["claude", "codex", "copilot"] {
+    for agent in ["claude", "codex", "copilot", "pi"] {
       let prepared = prepare_auto_command(
         &AgentPaths {
           workspace_path: None,

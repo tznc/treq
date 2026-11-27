@@ -806,6 +806,7 @@ mod tests {
     assert_eq!(remote_agent("devin"), Some(RemoteAgentId::Devin));
     assert_eq!(remote_agent("gemini"), Some(RemoteAgentId::Gemini));
     assert_eq!(remote_agent("opencode"), Some(RemoteAgentId::OpenCode));
+    assert_eq!(remote_agent("pi"), Some(RemoteAgentId::Pi));
     assert_eq!(remote_agent("aider"), None);
   }
 
@@ -832,6 +833,7 @@ mod tests {
     assert!(session_label(Some(RemoteAgentId::Devin), 1).starts_with("devin-"));
     assert!(session_label(Some(RemoteAgentId::Gemini), 1).starts_with("gemini-"));
     assert!(session_label(Some(RemoteAgentId::OpenCode), 1).starts_with("opencode-"));
+    assert!(session_label(Some(RemoteAgentId::Pi), 1).starts_with("pi-"));
     assert_eq!(base36(35), "z");
     assert_eq!(base36(36), "10");
   }
