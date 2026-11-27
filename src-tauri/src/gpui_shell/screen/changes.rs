@@ -2858,7 +2858,7 @@ impl ChangesView {
   fn tip(
     &self,
     key: String,
-    text: &'static str,
+    text: impl Into<SharedString>,
     el: impl IntoElement,
     cx: &mut Context<Self>,
   ) -> Stateful<Div> {
@@ -3035,7 +3035,7 @@ impl ChangesView {
         .bg(p.muted.opacity(0.8))
         .border_b_1()
         .border_color(p.border)
-        .children(self.agent_count(p))
+        .children(self.comment_count(p, cx))
         .child(self.start_review_button(p, cx))
         .into_any_element()
     };

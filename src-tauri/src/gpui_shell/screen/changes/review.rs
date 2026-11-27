@@ -2128,7 +2128,7 @@ impl ChangesView {
               .text_color(p.muted_foreground)
               .child(format!("{} pending", count_label(total, "comment"))),
           )
-          .children(self.agent_count(p)),
+          .children(self.comment_count(p, cx)),
       )
       .child(
         div()

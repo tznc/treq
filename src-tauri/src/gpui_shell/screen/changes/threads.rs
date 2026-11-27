@@ -19,10 +19,10 @@ pub(super) const CARD_MAX_W: f32 = 820.;
 use crate::{
   github::{GhReviewComment, GhReviewThread},
   gpui_shell::screen::{
-    changes_review::{count_label, number_and_side, Pending, Quote, Side},
+    changes_review::{number_and_side, Pending, Quote, Side},
     changes_threads::{
-      agent_by_line, comment_date, github_suggestion_original, original_text, place_threads,
-      preview, suggestion_diff, suggestion_span, Placed, RowKind,
+      agent_by_line, comment_date, comment_summary, github_suggestion_original, original_text,
+      place_threads, preview, suggestion_diff, suggestion_span, Placed, RowKind,
     },
     commits_data::LineRef,
     reactions::{self, Reacts},
@@ -301,27 +301,26 @@ impl ChangesView {
     counts
   }
 
-  /// What a diff line carries from others: agent comments, then threads.
-  /// `ReviewActionBar`'s count of the open local agent comments.
-  pub(super) fn agent_count(&self, p: &Palette) -> Option<impl IntoElement> {
-    let open = self
-      .threads
-      .agent
-      .iter()
-      .filter(|c| c.status != "resolved")
-      .count();
-    (open > 0).then(|| {
-      // Short label (count). ast-grep-ignore: gpui-text-xs-short-label-only
-      ui::text(div(), TextSize::Xs)
-        .selector("agent-review-comment-count")
-        .role(gpui::Role::Label)
-        .aria_label(count_label(open, "local review comment"))
-        .text_color(Tone::GitMerged.color(p))
-        .child(count_label(open, "local review comment"))
-        .test_support()
-    })
+  /// `ReviewActionBar`'s count of open GitHub and local comments; its
+  /// tooltip says how many came from each.
+  pub(super) fn comment_count(
+    &self,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> Option<impl IntoElement> {
+    let (label, sources) = comment_summary(&self.threads.github, &self.threads.agent)?;
+    // Short label (count). ast-grep-ignore: gpui-text-xs-short-label-only
+    let count = ui::text(div(), TextSize::Xs)
+      .selector("review-comment-count")
+      .role(gpui::Role::Label)
+      .aria_label(label.clone())
+      .text_color(Tone::GitMerged.color(p))
+      .child(label)
+      .test_support();
+    Some(self.tip("review-comment-count-tip".into(), sources, count, cx))
   }
 
+  /// What a diff line carries from others: agent comments, then threads.
   #[expect(
     clippy::too_many_arguments,
     reason = "flat argument list kept to match callers"

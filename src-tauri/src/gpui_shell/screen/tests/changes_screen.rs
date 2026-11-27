@@ -1428,14 +1428,45 @@ fn changes_tab_marks_an_agent_comment_as_local(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn changes_tab_counts_open_agent_comments(cx: &mut TestAppContext) {
-  let host = changes_host();
+fn changes_tab_counts_open_github_and_local_comments(cx: &mut TestAppContext) {
+  let mut host = changes_host();
+  host.threads = vec![gh_thread("t1", 2, false)];
   *host.agent.lock().unwrap() = vec![agent_comment(None)];
   let (mut h, _) = workspace_harness(cx, host, changes_route());
-  assert!(h.shows(gpui::Role::Label, "1 local review comment"));
+  assert!(h.shows(gpui::Role::Label, "2 comments"));
   h.click("agent-resolve-ag");
   h.cx.run_until_parked();
-  assert!(!h.shows(gpui::Role::Label, "1 local review comment"));
+  assert!(h.shows(gpui::Role::Label, "1 comment"));
+}
+
+#[gpui::test]
+fn the_comment_count_tooltip_breaks_it_down_by_source(cx: &mut TestAppContext) {
+  use crate::gpui_shell::popup::{PopupRequest, TooltipContent};
+  let mut host = changes_host();
+  host.threads = vec![gh_thread("t1", 2, false)];
+  *host.agent.lock().unwrap() = vec![agent_comment(None)];
+  let (mut h, _) = workspace_harness(cx, host, changes_route());
+  let at = h
+    .cx
+    .debug_bounds("review-comment-count")
+    .expect("comment count")
+    .center();
+  h.cx.simulate_mouse_move(at, None, Modifiers::none());
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_millis(300));
+  h.cx.run_until_parked();
+  let text = h.popups.borrow().iter().rev().find_map(|p| match p {
+    PopupRequest::ShowTooltip {
+      content: TooltipContent::Text(text),
+      ..
+    } => Some(text.to_string()),
+    _ => None,
+  });
+  assert_eq!(
+    text.as_deref(),
+    Some("1 GitHub comment, 1 local review comment")
+  );
 }
 
 #[gpui::test]
