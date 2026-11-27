@@ -159,6 +159,19 @@ pub fn get_file_lines(
     .map_err(|e| format!("Failed to get file lines: {}", e))
 }
 
+/// The text of `file_path` at `version` (`review::side_version`), `None`
+/// once jj no longer has it.
+pub fn read_file_version(
+  repo_path: &str,
+  workspace_id: Option<i64>,
+  file_path: &str,
+  version: &str,
+) -> Result<Option<String>, String> {
+  let path = resolve_workspace_dir(repo_path, workspace_id)?;
+  jj::jj_read_file_version(&path, file_path, version)
+    .map_err(|e| format!("Failed to read file version: {}", e))
+}
+
 /// Discard all uncommitted working-copy changes in a workspace directory.
 pub fn discard_all_changes(workspace_path: &str) -> Result<String, String> {
   jj::jj_restore_all(workspace_path).map_err(|e| format!("Failed to discard changes: {}", e))

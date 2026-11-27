@@ -654,6 +654,34 @@ pub fn jj_get_file_lines(
   })
 }
 
+/// The text of `file_path` at `version`, a file id as
+/// `review::side_version` names it: `None` once the store no longer has it
+/// (jj's gc drops old snapshots) or it is not text.
+pub fn jj_read_file_version(
+  workspace_path: &str,
+  file_path: &str,
+  version: &str,
+) -> Result<Option<String>, JjError> {
+  use jj_lib::backend::{BackendError, FileId};
+  use tokio::io::AsyncReadExt as _;
+  let id = version
+    .strip_prefix(['f', 'x'])
+    .and_then(FileId::try_from_hex)
+    .ok_or_else(|| JjError::IoError(format!("Not a file version: {version}")))?;
+  let repo_path = RepoPathBuf::from_relative_path(file_path)
+    .map_err(|_| JjError::IoError("Invalid file path".to_string()))?;
+  let loaded = load_workspace_repo(workspace_path)?;
+  let mut file = match block_on(loaded.repo.store().read_file(&repo_path, &id)) {
+    Ok(file) => file,
+    Err(BackendError::ObjectNotFound { .. }) => return Ok(None),
+    Err(e) => return Err(JjError::IoError(format!("Failed to read file: {e}"))),
+  };
+  let mut bytes = Vec::new();
+  block_on(file.read_to_end(&mut bytes))
+    .map_err(|e| JjError::IoError(format!("Failed to read file: {e}")))?;
+  Ok(String::from_utf8(bytes).ok())
+}
+
 // Mutation Operations (CLI fallbacks)
 
 /// Restore a file to parent state (discard changes).
