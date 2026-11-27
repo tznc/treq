@@ -337,6 +337,54 @@ test("changes: filter menu picks what the lists show", async ({ page }) => {
   await settle(page, 500);
 });
 
+test("changes: no changes placeholder stays above the Committed group", async ({ page }) => {
+  await openWorkspace(page, "feat/keyvalues-cache");
+  await openTab(page, "Changes");
+  const placeholder = page.getByRole("status", { name: "No changes", exact: true });
+  // The Hide toggle is not observable: click it on the Committed header's
+  // row, at the sidebar's right edge (1400x900 window).
+  const toggleHide = async () => {
+    const header = await page.getByRole("button", { name: /^(Expand|Collapse) Committed$/ }).boundingBox();
+    if (!header) throw new Error("no Committed header");
+    await page.mouse.click(463, header.y + header.height / 2);
+    await settle(page, 500);
+  };
+  await expect.soft(placeholder).toBeVisible();
+  await capture(page, {
+    name: "05-changes-no-changes-committed-shown",
+    title: "Nothing uncommitted, Committed files shown",
+    expectations: [
+      "'No changes' and its check icon sit above the Committed header",
+      "Committed 2 lists cache.ts and cache.test.ts under it, Hide unchecked",
+      "No 'Nothing to commit' line and no commit box",
+    ],
+  });
+  await page.getByRole("button", { name: "Collapse Committed", exact: true }).click();
+  await settle(page, 500);
+  await expect.soft(placeholder).toBeVisible();
+  await capture(page, {
+    name: "05-changes-no-changes-committed-collapsed",
+    title: "Nothing uncommitted, Committed collapsed",
+    expectations: [
+      "'No changes' and its check icon sit above the collapsed Committed header",
+      "Hide unchecked, no committed rows listed",
+    ],
+  });
+  await page.getByRole("button", { name: "Expand Committed", exact: true }).click();
+  await settle(page, 500);
+  await toggleHide();
+  await expect(placeholder).toBeVisible();
+  await capture(page, {
+    name: "05-changes-no-changes-committed-hidden",
+    title: "Nothing uncommitted, Committed hidden",
+    expectations: [
+      "'No changes' and its check icon sit above the Committed header",
+      "Hide checked, no committed rows listed",
+    ],
+  });
+  await toggleHide();
+});
+
 test("changes: empty state wraps inside the file list", async ({ page }) => {
   await home(page);
   await page.keyboard.press(`${mod}+n`);
