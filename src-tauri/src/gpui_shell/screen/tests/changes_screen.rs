@@ -265,6 +265,34 @@ fn changes_tab_labels_the_hunks_already_committed(cx: &mut TestAppContext) {
   assert!(!labels_committed(&mut h, "a.rs", 1));
 }
 
+/// Whether hunk `h` of `path` draws its lines.
+fn shows_hunk_lines(h: &mut Harness, path: &str, hunk: usize) -> bool {
+  h.cx.run_until_parked();
+  h.cx
+    .debug_bounds(super::changes_large::leak(format!(
+      "line-new-{path}-{hunk}-1"
+    )))
+    .is_some()
+}
+
+/// With Committed hidden, a committed hunk shows only its header until
+/// its label opens it.
+#[gpui::test]
+fn changes_tab_collapses_committed_hunks_while_committed_is_hidden(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host_partly_committed(), committed_route(false));
+  assert!(labels_committed(&mut h, "a.rs", 0));
+  assert!(!shows_hunk_lines(&mut h, "a.rs", 0));
+  assert!(shows_hunk_lines(&mut h, "a.rs", 1));
+  h.click("committed-hunk-a.rs-0");
+  assert!(shows_hunk_lines(&mut h, "a.rs", 0));
+}
+
+#[gpui::test]
+fn changes_tab_opens_committed_hunks_while_committed_shows(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host_partly_committed(), committed_route(true));
+  assert!(shows_hunk_lines(&mut h, "a.rs", 0));
+}
+
 fn changes_host_committed_only() -> FakeHost {
   let mut host = changes_host();
   host.working = serde_json::from_value(serde_json::json!({

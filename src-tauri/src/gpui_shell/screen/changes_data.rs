@@ -482,7 +482,8 @@ pub struct Snapshot {
   /// Each file's `content_id` in that diff, where known.
   pub content_ids: HashMap<String, String>,
   /// Dirty files also committed, shown as one diff from the fork point to
-  /// the working copy (their `committed_hunks`) while Committed is on.
+  /// the working copy (their `committed_hunks`) wherever Committed is
+  /// offered: hidden, its committed hunks start shut.
   pub branch_diff: HashSet<String>,
 }
 
@@ -507,7 +508,7 @@ impl Snapshot {
   }
 
   /// What `loadChangedFiles` keeps of a workspace's diff.
-  pub fn from_workspace_diff(diff: JjRevisionDiff, show_committed: bool) -> Self {
+  pub fn from_workspace_diff(diff: JjRevisionDiff, show_committed: Option<bool>) -> Self {
     let files = ChangedFile::parse(&diff.uncommitted_files);
     let content_ids = diff
       .uncommitted_files
@@ -529,7 +530,7 @@ impl Snapshot {
         });
       }
     }
-    let branch_diff = if show_committed {
+    let branch_diff = if show_committed.is_some() {
       diff
         .hunks_by_file
         .iter()
@@ -543,7 +544,9 @@ impl Snapshot {
       .hunks_by_file
       .into_iter()
       .filter(|f| {
-        show_committed || uncommitted.contains(f.path.as_str()) || conflicted.contains(&f.path)
+        show_committed == Some(true)
+          || uncommitted.contains(f.path.as_str())
+          || conflicted.contains(&f.path)
       })
       .map(|f| {
         let hunks = FileHunks {
@@ -1672,7 +1675,7 @@ mod tests {
       render_block_reason: None,
       working_copy_token: None,
     };
-    let snap = Snapshot::from_workspace_diff(diff, false);
+    let snap = Snapshot::from_workspace_diff(diff, None);
     let committed: Vec<&str> = snap.committed.iter().map(|f| f.path.as_str()).collect();
     assert_eq!(committed, ["done.rs", "clash.rs"]);
     assert_eq!(snap.committed[1].status, "C");
@@ -1705,17 +1708,18 @@ mod tests {
       render_block_reason: None,
       working_copy_token: None,
     };
-    let snap = Snapshot::from_workspace_diff(diff, false);
+    let snap = Snapshot::from_workspace_diff(diff, None);
     assert!(snap.purely_committed("done.rs"));
     assert!(!snap.purely_committed("both.rs"));
     assert!(!snap.purely_committed("dirty.rs"));
   }
 
-  /// With Committed on, a file both committed and dirty shows the branch
-  /// diff (fork point to working copy), not the working copy's own diff;
-  /// with it off, or for dirty-only and conflicted files, the working copy's.
+  /// Where the Committed group is offered, shown or hidden, a file both
+  /// committed and dirty shows the branch diff (fork point to working
+  /// copy), not the working copy's own diff; elsewhere, or for dirty-only
+  /// and conflicted files, the working copy's.
   #[test]
-  fn dirty_committed_file_shows_the_branch_diff_with_committed_on() {
+  fn dirty_committed_file_shows_the_branch_diff_where_committed_is_offered() {
     let change = |path: &str| JjFileChange {
       path: path.into(),
       status: "M".into(),
@@ -1739,12 +1743,14 @@ mod tests {
       render_block_reason: None,
       working_copy_token: None,
     };
-    let on = Snapshot::from_workspace_diff(diff(), true);
+    let on = Snapshot::from_workspace_diff(diff(), Some(true));
     assert!(on.shows_branch_diff("both.rs"));
     assert!(!on.shows_branch_diff("dirty.rs"));
     assert!(!on.shows_branch_diff("clash.rs"));
-    let off = Snapshot::from_workspace_diff(diff(), false);
-    assert!(!off.shows_branch_diff("both.rs"));
+    let hidden = Snapshot::from_workspace_diff(diff(), Some(false));
+    assert!(hidden.shows_branch_diff("both.rs"));
+    let unoffered = Snapshot::from_workspace_diff(diff(), None);
+    assert!(!unoffered.shows_branch_diff("both.rs"));
   }
 
   /// A jj workspace whose working copy is empty but whose branch has
@@ -1768,7 +1774,7 @@ mod tests {
       render_block_reason: None,
       working_copy_token: None,
     };
-    let snap = Snapshot::from_workspace_diff(diff, false);
+    let snap = Snapshot::from_workspace_diff(diff, None);
     assert_eq!(snap.review_file_count(), 3);
   }
 
