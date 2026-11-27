@@ -164,8 +164,7 @@ fn comment_card(comment: &LineComment, palette: &Palette) -> gpui::AnyElement {
     .font_family(theme::SANS_FONT)
     .text_color(palette.foreground)
     .child(
-      // Short label: line range. ast-grep-ignore: gpui-text-xs-short-label-only
-      ui::text(div(), TextSize::Xs)
+      ui::text(div(), TextSize::Sm)
         .text_color(palette.muted_foreground)
         .child(range),
     )
@@ -938,8 +937,7 @@ impl Lightbox {
             .test_support(),
         )
         .child(
-          // Short label: zoom level. ast-grep-ignore: gpui-text-xs-short-label-only
-          ui::text(div(), TextSize::Xs)
+          ui::text(div(), TextSize::Sm)
             .selector("treq-send-zoom-level")
             .min_w_10()
             .px_1()
@@ -1233,8 +1231,8 @@ impl Lightbox {
             cx.listener(move |view, e: &MouseMoveEvent, _, cx| view.line_over(n, e, cx)),
           )
           .child(
-            // Line-number gutter: aligned digits. ast-grep-ignore: gpui-sans-text-min-size
             ui::text(div(), TextSize::Code)
+              .font_family(theme::MONO_FONT)
               .w_8()
               .flex_none()
               .flex()

@@ -280,8 +280,7 @@ impl Render for WorkspaceDeletion {
                     .child(row.workspace.branch_name.clone())
                     .when(row.current, |this| {
                       this.child(
-                        // Short label: tag. ast-grep-ignore: gpui-text-xs-short-label-only
-                        ui::text(div(), TextSize::Xs)
+                        ui::text(div(), TextSize::Sm)
                           .ml_2()
                           .font_weight(FontWeight::NORMAL)
                           .text_color(p.muted_foreground)

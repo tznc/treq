@@ -956,8 +956,7 @@ fn text_button(
   p: &Palette,
 ) -> ObservedElement<Stateful<Div>> {
   let fg = p.foreground;
-  // Short label: button label. ast-grep-ignore: gpui-text-xs-short-label-only
-  ui::text(div(), TextSize::Xs)
+  ui::text(div(), TextSize::Sm)
     .selector(id)
     .flex()
     .items_center()
@@ -979,8 +978,7 @@ pub(super) fn disclosure(
 ) -> impl IntoElement {
   let fg = p.foreground;
   let label: SharedString = label.into();
-  // Short label: disclosure label. ast-grep-ignore: gpui-text-xs-short-label-only
-  ui::text(div(), TextSize::Xs)
+  ui::text(div(), TextSize::Sm)
     .selector(id)
     .role(gpui::Role::Button)
     .aria_label(label.clone())
@@ -1086,8 +1084,7 @@ impl WorkspaceDialog {
       let segment = |id: &'static str, label: &'static str, pos: Position, current: Position| {
         let active = pos == current;
         let fg = p.foreground;
-        // Short label: segment label. ast-grep-ignore: gpui-text-xs-short-label-only
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
           .selector(id)
           .px_2p5()
           .py_1()
@@ -1703,8 +1700,7 @@ impl WorkspaceDialog {
                 .disabled(is_locked),
             )
             .child(
-              // Short label: short commit hash. ast-grep-ignore: gpui-text-xs-short-label-only
-              ui::text(div(), TextSize::Xs)
+              ui::text(div(), TextSize::Sm)
                 .flex_none()
                 .font_family(theme::MONO_FONT)
                 .text_color(p.muted_foreground)
@@ -1838,8 +1834,7 @@ impl WorkspaceDialog {
                 })),
             )
             .child(
-              // Short label: status letter. ast-grep-ignore: gpui-text-xs-short-label-only
-              ui::text(div(), TextSize::Xs)
+              ui::text(div(), TextSize::Sm)
                 .w_4()
                 .flex_none()
                 .text_center()
@@ -1979,8 +1974,7 @@ impl WorkspaceDialog {
                 }))
                 .when(hunk.lines.len() > 3, |this| {
                   this.child(
-                    // Short label: line count. ast-grep-ignore: gpui-text-xs-short-label-only
-                    ui::text(div(), TextSize::Xs)
+                    ui::text(div(), TextSize::Sm)
                       .font_family(theme::SANS_FONT)
                       .text_color(p.muted_foreground)
                       .child(format!("+{} more lines", hunk.lines.len() - 3)),

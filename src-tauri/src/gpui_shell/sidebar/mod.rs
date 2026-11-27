@@ -902,8 +902,7 @@ impl Render for Sidebar {
           .pt_3()
           .pb_1()
           .child(
-            // Short label: section heading. ast-grep-ignore: gpui-text-xs-short-label-only
-            ui::text(div(), TextSize::Xs)
+            ui::text(div(), TextSize::Sm)
               .font_weight(gpui::FontWeight::MEDIUM)
               .text_color(palette.sidebar_foreground.opacity(0.7))
               .child("WORKSPACES"),
@@ -1256,8 +1255,7 @@ impl Sidebar {
       .child(title)
       .when(repo.missing, |this| {
         this.child(
-          // Short label: tag. ast-grep-ignore: gpui-text-xs-short-label-only
-          ui::text(div(), TextSize::Xs)
+          ui::text(div(), TextSize::Sm)
             .flex_none()
             .text_color(palette.muted_foreground)
             .child("missing"),
@@ -1345,8 +1343,7 @@ impl Sidebar {
                   .border_color(palette.muted_foreground)
                   .text_color(palette.muted_foreground)
               })
-              // Short label: avatar initial. ast-grep-ignore: gpui-text-xs-short-label-only
-              .child(ui::text(div(), TextSize::Xs).child(initial)),
+              .child(ui::text(div(), TextSize::Sm).child(initial)),
           )
           .child(
             ui::text(div(), TextSize::Sm)
