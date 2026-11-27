@@ -580,7 +580,7 @@ mod tests {
     assert!(lines.iter().any(|line| line.contains("feat/ui")));
     assert!(lines.contains(&"  Uncommitted changes: 4".to_string()));
     assert!(lines.contains(&"  Conflicts: 2 files".to_string()));
-    assert!(lines.contains(&"  run `treq diff` to inspect conflicts".to_string()));
+    assert!(lines.contains(&"  run `treq diff --conflicts` to inspect conflicts".to_string()));
     assert!(lines.contains(&"  Commits: 3".to_string()));
     assert!(!lines.iter().any(|line| line.contains("Target: main")));
   }
@@ -652,6 +652,111 @@ mod tests {
     assert_eq!(
       format_workspace_diff_lines(&diff, &[]),
       vec!["Conflicts: none"]
+    );
+  }
+
+  fn file_change(path: &str, status: &str, previous_path: Option<&str>) -> crate::jj::JjFileChange {
+    crate::jj::JjFileChange {
+      path: path.to_string(),
+      status: status.to_string(),
+      previous_path: previous_path.map(String::from),
+      changed_line_count: 0,
+      diff_deferred: false,
+      content_id: None,
+    }
+  }
+
+  fn file_diff(path: &str, hunk: Option<(&str, &[&str])>) -> crate::jj::JjFileDiff {
+    crate::jj::JjFileDiff {
+      path: path.to_string(),
+      hunks: hunk
+        .into_iter()
+        .map(|(header, lines)| crate::jj::JjDiffHunk {
+          id: format!("{path}-0"),
+          header: header.to_string(),
+          lines: lines.iter().map(|line| line.to_string()).collect(),
+          patch: String::new(),
+          conflict_style: Default::default(),
+          conflict_regions: Vec::new(),
+        })
+        .collect(),
+      conflict_style: Default::default(),
+      conflict_regions: Vec::new(),
+    }
+  }
+
+  /// A modified, an added, a deleted and a renamed (unchanged) file.
+  fn patch_diff() -> crate::jj::JjRevisionDiff {
+    crate::jj::JjRevisionDiff {
+      committed_files: vec![
+        file_change("src/a.rs", "M", None),
+        file_change("new.txt", "A", None),
+        file_change("old.txt", "D", None),
+        file_change("lib/b.rs", "R", Some("src/b.rs")),
+      ],
+      hunks_by_file: vec![
+        file_diff("src/a.rs", Some(("@@ -1,2 +1,2 @@", &[" keep", "-old", "+new"]))),
+        file_diff("new.txt", Some(("@@ -0,0 +1 @@", &["+hello"]))),
+        file_diff("old.txt", Some(("@@ -1 +0,0 @@", &["-bye"]))),
+        file_diff("lib/b.rs", None),
+      ],
+      uncommitted_files: Vec::new(),
+      conflicted_files: Vec::new(),
+      too_large_to_render: false,
+      render_block_reason: None,
+      working_copy_token: None,
+    }
+  }
+
+  #[test]
+  fn patch_prints_a_git_style_section_per_file() {
+    assert_eq!(
+      format_workspace_patch(&patch_diff()),
+      concat!(
+        "diff --git a/src/a.rs b/src/a.rs\n",
+        "--- a/src/a.rs\n",
+        "+++ b/src/a.rs\n",
+        "@@ -1,2 +1,2 @@\n",
+        " keep\n",
+        "-old\n",
+        "+new\n",
+        "diff --git a/new.txt b/new.txt\n",
+        "--- /dev/null\n",
+        "+++ b/new.txt\n",
+        "@@ -0,0 +1 @@\n",
+        "+hello\n",
+        "diff --git a/old.txt b/old.txt\n",
+        "--- a/old.txt\n",
+        "+++ /dev/null\n",
+        "@@ -1 +0,0 @@\n",
+        "-bye\n",
+        "diff --git a/src/b.rs b/lib/b.rs\n",
+        "rename from src/b.rs\n",
+        "rename to lib/b.rs\n",
+      )
+    );
+  }
+
+  #[test]
+  fn stat_lists_each_file_with_its_line_counts_then_totals() {
+    assert_eq!(
+      format_workspace_stat_lines(&patch_diff()),
+      vec![
+        "M src/a.rs (+1 -1)",
+        "A new.txt (+1 -0)",
+        "D old.txt (+0 -1)",
+        "R src/b.rs -> lib/b.rs (+0 -0)",
+        "4 files changed, 2 insertions(+), 2 deletions(-)",
+      ]
+    );
+  }
+
+  #[test]
+  fn patch_conflict_note_points_at_the_conflicts_flag() {
+    assert_eq!(format_patch_conflict_note(0, 0), None);
+    assert_eq!(
+      format_patch_conflict_note(2, 1).as_deref(),
+      Some("Conflicts: 2 files, 1 commits; run `treq diff --conflicts` for the conflict hunks")
     );
   }
 }

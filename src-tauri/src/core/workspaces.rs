@@ -2644,6 +2644,24 @@ mod tests {
   }
 
   #[test]
+  fn workspace_cli_patch_covers_commits_and_working_copy() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = init_workspace_creation_repo(&temp);
+    let ws = super::create_workspace(&repo_path, "fix/patch", None, None, None, None, None)
+      .expect("create workspace");
+    let ws_dir = temp.path().join(".treq/workspaces").join(&ws.workspace_path);
+    fs::write(ws_dir.join("committed.txt"), "one\n").expect("write committed file");
+    super::commit_workspace(&repo_path, ws.id, "add committed file").expect("commit");
+    fs::write(ws_dir.join("dirty.txt"), "two\n").expect("write dirty file");
+
+    let diff = super::workspace_cli_patch(&repo_path, ws.id).expect("patch");
+
+    let mut paths: Vec<&str> = diff.hunks_by_file.iter().map(|f| f.path.as_str()).collect();
+    paths.sort();
+    assert_eq!(paths, ["committed.txt", "dirty.txt"]);
+  }
+
+  #[test]
   fn archive_moves_directory_out_before_background_removal() {
     let temp = TempDir::new().expect("tempdir");
     let repo_path = init_workspace_creation_repo(&temp);

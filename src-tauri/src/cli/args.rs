@@ -248,6 +248,17 @@ mod tests {
   }
 
   #[test]
+  fn diff_takes_stat_and_conflicts_flags() {
+    let flag = |argv: &[&str], name: &str| {
+      let sub = parse(argv.iter().copied()).unwrap().subcommand.unwrap();
+      sub.matches.args.get(name).and_then(|arg| arg.value.as_bool()) == Some(true)
+    };
+    assert!(flag(&["treq", "diff", "feat/x", "--stat"], "stat"));
+    assert!(flag(&["treq", "diff", "--conflicts"], "conflicts"));
+    assert!(!flag(&["treq", "diff"], "conflicts"));
+  }
+
+  #[test]
   fn usage_errors_exit_with_code_two() {
     assert_eq!(run(["treq", "bogus"]), USAGE_ERROR_EXIT_CODE);
     assert_eq!(run(["treq", "commit", "feat/x"]), USAGE_ERROR_EXIT_CODE);

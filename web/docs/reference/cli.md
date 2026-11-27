@@ -85,19 +85,24 @@ Show workspace status.
 treq st [workspace_name]
 ```
 
-From a workspace directory, or with `workspace_name`, Treq prints that workspace only: its stacked parent and children, uncommitted change count, conflicted-file count, and commit count. It omits the repository default branch. If files are conflicted, it tells you to run `treq diff`.
+From a workspace directory, or with `workspace_name`, Treq prints that workspace only: its stacked parent and children, uncommitted change count, conflicted-file count, and commit count. It omits the repository default branch. If files are conflicted, it tells you to run `treq diff --conflicts`.
 
 From the home repository with no name, it lists every workspace. GitHub pull request information is included when GitHub integration is available.
 
 ### `treq diff`
 
-Show conflicted files and conflict hunks for a workspace.
+Show a workspace's changes as a unified diff.
 
 ```bash
-treq diff [workspace_name]
+treq diff [workspace_name] [--stat] [--conflicts]
 ```
 
-Run this from a workspace directory, or pass `workspace_name`. The output lists conflicted files, conflicted commits with change ids, and the conflict hunks. See [Commit Management](/docs/concepts/commit-management).
+Run this from a workspace directory, or pass `workspace_name`. Treq prints one diff of the workspace's commits and working copy against the point where it forked from its target branch, in the same format as `git diff`. In a workspace, use it instead of `git diff`: a workspace has no `.git` folder, so Git reads the home repository.
+
+- `--stat`: list each changed file with its added and removed line counts, then the totals.
+- `--conflicts`: print conflicted files, conflicted commits with change ids, and the conflict hunks instead of the diff. See [Commit Management](/docs/concepts/commit-management).
+
+When the workspace has conflicts, the diff starts with a note on stderr that points to `--conflicts`.
 
 ### `treq mv`
 
