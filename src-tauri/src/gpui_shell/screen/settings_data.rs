@@ -3,6 +3,8 @@
 
 use std::collections::HashMap;
 
+use crate::core::agent_profiles::{self, AgentProfile};
+
 use super::{account_data::AccountHost, checklist::ToolsHost, settings::RepositoryFields};
 use crate::{
   core::{
@@ -411,6 +413,17 @@ pub struct AppFields {
   pub conflict_marker_style: String,
   pub notify_agent_finished: bool,
   pub agent_instructions: String,
+  pub profiles: Vec<AgentProfile>,
+  /// Each profile agent's default profile name, `""` for its own sign-in.
+  pub default_profiles: Vec<(String, String)>,
+}
+
+/// The agents that take account profiles, in `AGENTS` order.
+pub fn profile_agents() -> impl Iterator<Item = &'static str> {
+  crate::core::agent_launch::AGENTS
+    .iter()
+    .map(|(id, _)| *id)
+    .filter(|id| agent_profiles::supports_profiles(id))
 }
 
 /// The keys the screen loads: the Application tab's and the preview flags.
@@ -427,6 +440,8 @@ pub fn app_keys() -> Vec<String> {
   ]
   .into_iter()
   .map(str::to_string)
+  .chain([agent_profiles::PROFILES_SETTING.to_string()])
+  .chain(profile_agents().map(agent_profiles::default_setting))
   .chain(PREVIEW_FEATURES.iter().map(|(f, _, _)| f.setting_key()))
   .collect()
 }
@@ -458,6 +473,13 @@ impl AppFields {
       notify_agent_finished: string(values, NOTIFY_AGENT_FINISHED)
         .is_none_or(|value| value.trim() != "false"),
       agent_instructions: string(values, AGENT_INSTRUCTIONS_SETTING).unwrap_or_default(),
+      profiles: agent_profiles::parse(string(values, agent_profiles::PROFILES_SETTING).as_deref()),
+      default_profiles: profile_agents()
+        .map(|agent| {
+          let name = string(values, &agent_profiles::default_setting(agent));
+          (agent.to_string(), name.unwrap_or_default())
+        })
+        .collect(),
     }
   }
 
@@ -474,9 +496,20 @@ impl AppFields {
       (AGENT_INSTRUCTIONS_SETTING, self.agent_instructions.clone()),
       ("terminal_font_size", self.font_size.to_string()),
       ("ui_zoom", (self.zoom.round() as i64).to_string()),
+      (
+        agent_profiles::PROFILES_SETTING,
+        agent_profiles::to_json(&self.profiles),
+      ),
     ]
     .map(|(key, value)| (key.to_string(), value))
-    .to_vec()
+    .into_iter()
+    .chain(
+      self
+        .default_profiles
+        .iter()
+        .map(|(agent, name)| (agent_profiles::default_setting(agent), name.clone())),
+    )
+    .collect()
   }
 }
 
@@ -681,7 +714,9 @@ pub fn save_timing(field: &str) -> Option<SaveTiming> {
     | "app.defaultAgent"
     | "app.conflictMarkerStyle"
     | "app.notifyAgentFinished"
-    | "app.setupScriptAlwaysRun" => Some(SaveTiming::Now),
+    | "app.setupScriptAlwaysRun"
+    | "app.profiles" => Some(SaveTiming::Now),
+    f if f.starts_with("app.defaultProfile.") => Some(SaveTiming::Now),
     _ => None,
   }
 }

@@ -1193,12 +1193,11 @@ impl ChangesView {
       .filter(|t| t.path == path)
       .is_some_and(|t| selected_row(hunks, t.anchor, t.head, (h, l)));
     let bg = row_fill(selected || text_row, has_comment, kind, p);
-    // The characters this line changed against its pair, a shade deeper.
+    // The characters this line changed against its pair.
     let mark = match kind {
-      LineKind::Removed => Tone::DiffRemoved.color(p),
-      _ => Tone::DiffAdded.color(p),
-    }
-    .opacity(0.45);
+      LineKind::Removed => p.diff_removed_mark(),
+      _ => p.diff_added_mark(),
+    };
     // The text selection first: where it overlaps a changed run, it shows.
     let picked = self
       .review

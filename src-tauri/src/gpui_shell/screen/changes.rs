@@ -199,6 +199,8 @@ pub struct ChangesView {
   committed_collapsed: bool,
   pub(super) collapsed_files: HashSet<String>,
   pub(super) expanded_large: HashSet<String>,
+  /// Committed hunks opened while Committed is hidden, by path and header.
+  pub(super) opened_hunks: HashSet<(String, String)>,
   /// Generated files whose diff "Load diff" read.
   pub(super) loaded_generated: HashSet<String>,
   /// The file list's filter: generated files left out of the list and diff.
@@ -310,6 +312,7 @@ impl ChangesView {
       committed_collapsed: false,
       collapsed_files: HashSet::new(),
       expanded_large: HashSet::new(),
+      opened_hunks: HashSet::new(),
       loaded_generated: HashSet::new(),
       hide_generated: false,
       changeset_expanded: false,
@@ -365,6 +368,10 @@ impl ChangesView {
     let reread = moved
       || self.options.revision != options.revision
       || self.options.show_committed != options.show_committed;
+    // Hiding Committed shuts every committed hunk again.
+    if moved || self.options.show_committed != options.show_committed {
+      self.opened_hunks.clear();
+    }
     // The status's conflicts stand in until the diff lists its own.
     if moved || self.parent.conflicted_files != parent.conflicted_files {
       self.layout_gen += 1;
@@ -614,7 +621,7 @@ impl ChangesView {
       return;
     }
     self.loading = true;
-    let show = self.show_committed();
+    let show = self.options.show_committed;
     // What shows now, so the read compares against it off the main thread.
     let shown = self.snapshot.clone();
     self.run_changed(
@@ -1357,6 +1364,8 @@ impl ChangesView {
                   .into(),
               );
               view.committed_collapsed = true;
+              // Its own write: the read after it is not stale.
+              view.review.apply_next = true;
               if action == CommitAction::Pr {
                 view.send_react(
                   ScreenAction::Press {

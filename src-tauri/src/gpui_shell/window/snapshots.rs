@@ -259,6 +259,7 @@ fn workspace_view(model: &Model, data: &Data) -> Value {
     "repoPath": repo,
     "workspaceId": workspace.map(|w| w.id),
     "homeBranch": home_branch,
+    "homeRef": data.home_ref(repo),
     "tab": view.tab.value(),
     "retargeting": false,
     "creatingPr": false,
@@ -594,6 +595,28 @@ mod tests {
     };
     assert_eq!(route.workspace_id, None);
     assert_eq!(route.show_committed, None);
+  }
+
+  #[test]
+  fn the_home_route_carries_the_ref_the_sidebar_shows() {
+    let mut data = data();
+    data.apply(
+      "/repo",
+      RepoRead {
+        branch: Some(Some(RepoBranch {
+          current_branch: None,
+          display_ref: "65a12f90fd6d".into(),
+          is_detached: true,
+        })),
+        ..RepoRead::default()
+      },
+    );
+    let model = Model::new(Some("/repo".into()));
+    let View::Workspace(route) = screen(&model, &data).unwrap().view else {
+      panic!("not the workspace view");
+    };
+    assert_eq!(route.home_ref, data.home_ref("/repo"));
+    assert_eq!(route.home_ref.as_deref(), Some("65a12f90fd6d"));
   }
 
   #[test]

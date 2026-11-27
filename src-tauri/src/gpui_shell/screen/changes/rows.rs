@@ -29,8 +29,8 @@ use crate::{
   gpui_shell::{
     screen::{
       changes_data::{
-        body, conflict_lines, conflicts, context_row_numbers, is_collapsed, line_counts, Body,
-        BodyInput, Conflict, FileHunks,
+        body, committed_hunks, conflict_lines, conflicts, context_row_numbers, is_collapsed,
+        line_counts, Body, BodyInput, Conflict, FileHunks,
       },
       changes_review::FILE_HUNK,
       commits_data::{line_number, line_numbers},
@@ -51,6 +51,10 @@ pub(super) struct Card {
   pub(super) conflicted: bool,
   pub(super) body: Body,
   pub(super) shut: bool,
+  /// Hunks of a branch diff already committed, by index.
+  settled: HashSet<usize>,
+  /// Those of them drawn as their header alone.
+  shut_hunks: HashSet<usize>,
   regions: Vec<Conflict>,
   prepared: Option<Rc<Prepared>>,
 }
@@ -149,6 +153,7 @@ struct Key {
   /// with the filter off.
   kept_generated: Option<BTreeSet<String>>,
   collapsed: HashSet<String>,
+  opened_hunks: HashSet<(String, String)>,
   expanded_large: HashSet<String>,
   loaded_generated: HashSet<String>,
   /// Files with a file comment or one being written.
@@ -198,6 +203,29 @@ impl ChangesView {
     self.hunks.get(path).or(branch)
   }
 
+  /// Opens or shuts a committed hunk while Committed is hidden.
+  fn toggle_committed_hunk(&mut self, path: &str, header: &str, cx: &mut Context<Self>) {
+    let key = (path.to_string(), header.to_string());
+    if !self.opened_hunks.remove(&key) {
+      self.opened_hunks.insert(key);
+    }
+    cx.notify();
+  }
+
+  /// The hunks of a card shown as its branch diff that are already
+  /// committed; none until its working copy's diff is read.
+  fn settled_hunks(&self, path: &str) -> HashSet<usize> {
+    let Some(snapshot) = self.snapshot.as_ref().filter(|s| s.shows_branch_diff(path)) else {
+      return HashSet::new();
+    };
+    match (snapshot.committed_hunks.get(path), self.hunks.get(path)) {
+      (Some(branch), Some(working)) if !working.loading && working.error.is_none() => {
+        committed_hunks(&branch.hunks, &working.hunks)
+      }
+      _ => HashSet::new(),
+    }
+  }
+
   fn layout_key(&self) -> Key {
     let review = &self.review;
     Key {
@@ -215,6 +243,7 @@ impl ChangesView {
           .collect()
       }),
       collapsed: self.collapsed_files.clone(),
+      opened_hunks: self.opened_hunks.clone(),
       expanded_large: self.expanded_large.clone(),
       loaded_generated: self.loaded_generated.clone(),
       file_comments: review
@@ -279,6 +308,8 @@ impl ChangesView {
       rows.push(Row::Head(c, kind));
       let mut card = Card {
         conflicted: conflicted.contains(&path),
+        settled: self.settled_hunks(&path),
+        shut_hunks: HashSet::new(),
         path,
         status,
         old_path,
@@ -297,6 +328,17 @@ impl ChangesView {
           _ => Rc::new(Prepared::new(source)),
         };
         card.regions = conflicts(&card.path, hunks);
+        if self.options.show_committed == Some(false) {
+          card.shut_hunks = card
+            .settled
+            .iter()
+            .copied()
+            .filter(|&h| {
+              let key = (card.path.clone(), hunks[h].header.clone());
+              !self.opened_hunks.contains(&key)
+            })
+            .collect();
+        }
         self.hunk_rows(c, &card, hunks, &prep, &mut rows);
         card.prepared = Some(prep.clone());
         kept.insert(key, prep);
@@ -329,6 +371,10 @@ impl ChangesView {
         .map_or(0, Vec::len)
     };
     for (h, hunk) in hunks.iter().enumerate() {
+      if card.shut_hunks.contains(&h) {
+        rows.push(Row::HunkHeader(c, h, false));
+        continue;
+      }
       let before = read(h, Dir::Before);
       let (above, below) = self.context_ranges(path, hunks, h);
       // Lines above reaching the previous hunk or the file's start leave nothing to separate.
@@ -336,8 +382,9 @@ impl ChangesView {
         && (before > 0
           || h
             .checked_sub(1)
-            .is_some_and(|prev| read(prev, Dir::After) > 0));
-      if !joined {
+            .is_some_and(|prev| !card.shut_hunks.contains(&prev) && read(prev, Dir::After) > 0));
+      // A committed hunk keeps its header for the label.
+      if !joined || card.settled.contains(&h) {
         rows.push(Row::HunkHeader(c, h, above.is_some()));
       }
       rows.extend((0..before).map(|i| Row::Context(c, h, Dir::Before, i)));
@@ -548,6 +595,7 @@ impl ChangesView {
     match row {
       Row::HunkHeader(_, _, expandable) => {
         let file = path.to_string();
+        let shut = card.shut_hunks.contains(&h);
         gutter_cols(
           div()
             .selector(SharedString::from(format!("hunk-header-{path}-{h}")))
@@ -596,9 +644,46 @@ impl ChangesView {
                   .child("Show more lines above"),
               )
             })
+            .when(card.settled.contains(&h), |this| {
+              let label = div()
+                .selector(SharedString::from(format!("committed-hunk-{path}-{h}")))
+                .ml_2()
+                .flex_none()
+                .flex()
+                .items_center()
+                .gap_1();
+              // Hidden, Committed shuts these hunks; the label opens them.
+              let label = if self.options.show_committed == Some(false) {
+                let (file, header) = (path.to_string(), hunk.header.clone());
+                label
+                  .role(gpui::Role::Button)
+                  .aria_label(if shut {
+                    "Show committed hunk"
+                  } else {
+                    "Hide committed hunk"
+                  })
+                  .cursor_pointer()
+                  .on_click(cx.listener(move |view, _, _, cx| {
+                    cx.stop_propagation();
+                    view.toggle_committed_hunk(&file, &header, cx);
+                  }))
+                  .child(ui::icon(
+                    if shut {
+                      theme::ICON_CHEVRON_RIGHT
+                    } else {
+                      theme::ICON_CHEVRON_DOWN
+                    },
+                    12.,
+                    muted,
+                  ))
+              } else {
+                label
+              };
+              this.child(label.child(ui::Badge::new("Committed", p)))
+            })
             // Between hunks the row above offers it, for the same gap.
             .when_some(
-              (h == 0)
+              (h == 0 && !shut)
                 .then(|| self.expand_all_range(path, hunks, h, Dir::Before))
                 .flatten(),
               |this, range| this.child(self.expand_all_button(path, h, Dir::Before, range, cx)),

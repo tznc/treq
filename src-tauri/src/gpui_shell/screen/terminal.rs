@@ -68,6 +68,9 @@ const DIVIDER_HEIGHT: f32 = 4.;
 const HEADER_HEIGHT: f32 = 28.;
 /// A column never gets narrower than this share of the row (or 300px).
 const MIN_COLUMN_SHARE: f32 = 0.4;
+/// A resized grid reaches the PTY once it stays this long, as VS Code's
+/// terminal debounces: each resize makes the program redraw its screen.
+const PTY_SETTLE: Duration = Duration::from_millis(100);
 /// `onTerminalIdle` fires this long after the process last wrote.
 const IDLE_AFTER: Duration = Duration::from_millis(2000);
 /// The chat log snapshots the screen at most this often while it changes.
@@ -448,6 +451,8 @@ pub struct TerminalView {
   status: Status,
   /// The size last given to the PTY, which follows the grid once it runs.
   pty_size: Option<(usize, usize)>,
+  /// The grid size waiting [`PTY_SETTLE`] to reach the PTY.
+  pty_settle: Option<((usize, usize), Task<()>)>,
   focus: FocusHandle,
   /// The unzoomed font size; the window's rem size scales it.
   font_size: f32,
@@ -569,6 +574,7 @@ impl TerminalView {
       live: None,
       status: Status::Preparing,
       pty_size: None,
+      pty_settle: None,
       focus: cx.focus_handle(),
       font_size,
       measured_font_size: font_size,
@@ -826,15 +832,21 @@ impl TerminalView {
         }
         // A resize while the PTY starts reaches it once it runs; otherwise
         // the program draws for a size the grid isn't.
-        if self.status == Status::Ready && self.pty_size != Some((cols, rows)) {
-          self
-            .host
-            .resize_pty(&self.pty, rows as u16, cols as u16)
-            .ignore_closed();
-          self
-            .host
-            .agent_msg_resize(&self.pty, cols as u16, rows as u16);
-          self.pty_size = Some((cols, rows));
+        let size = Some((cols, rows));
+        if self.pty_size == size {
+          self.pty_settle = None;
+        } else if self.status == Status::Ready && self.pty_settle.as_ref().map(|(s, _)| *s) != size
+        {
+          let task = cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(PTY_SETTLE).await;
+            this
+              .update(cx, |view, _| {
+                view.pty_settle = None;
+                view.resize_pty(cols, rows);
+              })
+              .ignore_closed();
+          });
+          self.pty_settle = Some(((cols, rows), task));
         }
       }
       None => {
@@ -847,6 +859,17 @@ impl TerminalView {
         self.launch(cols, rows, cx);
       }
     }
+  }
+
+  fn resize_pty(&mut self, cols: usize, rows: usize) {
+    self
+      .host
+      .resize_pty(&self.pty, rows as u16, cols as u16)
+      .ignore_closed();
+    self
+      .host
+      .agent_msg_resize(&self.pty, cols as u16, rows as u16);
+    self.pty_size = Some((cols, rows));
   }
 
   fn watch(&mut self, live: &Arc<Live>, cx: &mut Context<Self>) {
@@ -4204,6 +4227,12 @@ impl TerminalPane {
           .size_full(),
       )
       .on_hover(cx.listener(move |pane, hovered: &bool, _, cx| {
+        // A drag step lands the mouse in a column before the divider
+        // catches up: hovering it would cost a frame (and the sidebar's
+        // highlight) per step.
+        if pane.drag.is_some() {
+          return;
+        }
         let id = Some(hover_id.clone());
         if *hovered {
           pane.hovered_column = id;
@@ -4260,10 +4289,35 @@ impl TerminalPane {
               on_files.update(cx, |view, cx| view.insert(&text.join(" "), cx));
             }
           })
+          // Measured before the view draws: a resized view renders in this
+          // frame's prepaint, ahead of its own measure, so it would fit
+          // its grid a frame late.
+          .child({
+            let bounds = view.read(cx).bounds.clone();
+            gpui::canvas(move |b, _, _| bounds.set(Some(b)), |_, _, _, _| {})
+              .absolute()
+              .inset_0()
+          })
           // Its own redraws (output, the blink) leave the other
           // terminals' drawing as it was.
           .child(view.cached(gpui::StyleRefinement::default().size_full()))
           .children(previews)
+          // Lights up while files or an attachment hover it; a remote
+          // session takes no drops.
+          .when(!remote, |d| {
+            d.child(
+              div()
+                .selector(SharedString::from(format!("terminal-drop-target-{id}")))
+                .absolute()
+                .inset_0()
+                .border_2()
+                .border_color(p.primary)
+                .bg(p.primary.opacity(0.1))
+                .invisible()
+                .drag_over::<ExternalPaths>(|s, _, _, _| s.visible())
+                .drag_over::<SendAssetDrag>(|s, _, _, _| s.visible()),
+            )
+          })
       })
       // `ring-1 ring-inset ring-primary/40` on the active remote session.
       .when(remote && active, |d| {

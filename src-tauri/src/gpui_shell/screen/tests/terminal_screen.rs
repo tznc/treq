@@ -265,6 +265,67 @@ fn terminal_pty_follows_a_resize_while_it_starts(cx: &mut TestAppContext) {
   assert_eq!(last, Some((grid.cols, grid.rows)));
 }
 
+/// A grid that returns to the PTY's size before it settles leaves the PTY
+/// alone.
+#[gpui::test]
+fn terminal_pty_keeps_its_size_when_the_grid_returns_to_it(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  let wait = |h: &mut Harness, ms: u64| {
+    h.cx
+      .executor()
+      .advance_clock(std::time::Duration::from_millis(ms));
+    h.cx.run_until_parked();
+  };
+  wait(&mut h, 1000);
+  let before = host.resizes.lock().unwrap().len();
+  for width in [1100., 1400.] {
+    h.cx
+      .simulate_resize(gpui::size(gpui::px(width), gpui::px(900.)));
+  }
+  wait(&mut h, 200);
+  assert_eq!(host.resizes.lock().unwrap().len(), before);
+}
+
+/// A resize reaches the PTY once the grid stops changing, not per drag
+/// step: each one makes the program (an agent's TUI) redraw its screen.
+#[gpui::test]
+fn terminal_pty_resizes_once_the_grid_settles(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  let pty = agent_pty();
+  let wait = |h: &mut Harness, ms: u64| {
+    h.cx
+      .executor()
+      .advance_clock(std::time::Duration::from_millis(ms));
+    h.cx.run_until_parked();
+  };
+  wait(&mut h, 1000);
+  let resizes = |host: &FakeHost| -> Vec<(u16, u16)> {
+    let resizes = host.resizes.lock().unwrap();
+    resizes
+      .iter()
+      .filter(|(id, ..)| *id == pty)
+      .map(|(_, cols, rows)| (*cols, *rows))
+      .collect()
+  };
+  let before = resizes(&host).len();
+  for width in [1300., 1200., 1100.] {
+    h.cx
+      .simulate_resize(gpui::size(gpui::px(width), gpui::px(900.)));
+    wait(&mut h, 30);
+  }
+  assert_eq!(resizes(&host).len(), before, "no resize while dragging");
+  wait(&mut h, 100);
+  let host_dyn: terminal_data::Host = host.clone();
+  let (live, _) = terminal_data::attach(&host_dyn, &pty, 80, 24);
+  let grid = live.emulator.lock().unwrap().size();
+  assert_eq!(
+    resizes(&host)[before..],
+    [(grid.cols as u16, grid.rows as u16)]
+  );
+}
+
 #[gpui::test]
 fn terminal_search_keeps_what_is_typed_out_of_the_pty(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
@@ -949,6 +1010,100 @@ fn files_dropped_on_an_agent_are_pasted(cx: &mut TestAppContext) {
       "write {pty} \"\\u{{1b}}[200~'/tmp/a b.txt'\\u{{1b}}[201~\""
     )]
   );
+}
+
+fn drop_target(h: &mut Harness, column: &str) -> bool {
+  by_id_prefix(h, &format!("terminal-drop-target-{column}")).is_visible()
+}
+
+/// Files dragged over the pane light up the terminal they would land in,
+/// and only that one.
+#[gpui::test]
+fn files_dragged_over_a_terminal_highlight_it_as_the_drop_target(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(
+    &mut h,
+    serde_json::json!({
+      "activeSessionId": 3,
+      "commands": [{ "nonce": 1, "kind": "newShell", "dir": "/repo" }],
+    }),
+  );
+  assert!(!drop_target(&mut h, "agent-"));
+  assert!(!drop_target(&mut h, "shell-"));
+
+  let agent = by_id_prefix(&mut h, "terminal-column-agent-")
+    .bounds()
+    .center();
+  let paths = gpui::ExternalPaths(["/tmp/shot.png".into()].into_iter().collect());
+  h.cx.simulate_event(gpui::FileDropEvent::Entered {
+    position: agent,
+    paths,
+  });
+  h.cx.run_until_parked();
+  assert!(drop_target(&mut h, "agent-"));
+  assert!(!drop_target(&mut h, "shell-"));
+
+  let shell = by_id_prefix(&mut h, "terminal-column-shell-")
+    .bounds()
+    .center();
+  h.cx
+    .simulate_event(gpui::FileDropEvent::Pending { position: shell });
+  h.cx.run_until_parked();
+  assert!(!drop_target(&mut h, "agent-"));
+  assert!(drop_target(&mut h, "shell-"));
+
+  h.cx.simulate_event(gpui::FileDropEvent::Exited);
+  h.cx.run_until_parked();
+  assert!(!drop_target(&mut h, "agent-"));
+  assert!(!drop_target(&mut h, "shell-"));
+}
+
+/// Dragging a `treq send` attachment lights up the terminal it would land in.
+#[gpui::test]
+fn an_attachment_dragged_over_a_terminal_highlights_it_as_the_drop_target(cx: &mut TestAppContext) {
+  let (mut h, _) = send_harness(cx);
+  h.cx.run_until_parked();
+  let from = h
+    .cx
+    .debug_bounds("terminal-send-preview-t1")
+    .expect("card")
+    .center();
+  let to = by_id_prefix(&mut h, "terminal-column-agent-")
+    .bounds()
+    .center();
+  h.cx
+    .simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
+  h.cx
+    .simulate_mouse_move(to, Some(MouseButton::Left), Modifiers::none());
+  h.cx
+    .simulate_mouse_move(to, Some(MouseButton::Left), Modifiers::none());
+  h.cx.run_until_parked();
+  assert!(h.cx.update(|_, cx| cx.has_active_drag()));
+  assert!(drop_target(&mut h, "agent-"));
+}
+
+/// A remote session takes no drops, so it never shows as a drop target.
+#[gpui::test]
+fn a_remote_session_is_not_a_drop_target(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, open_remote_command(1));
+  let at = by_id_prefix(&mut h, "terminal-column-").bounds().center();
+  let paths = gpui::ExternalPaths(["/tmp/shot.png".into()].into_iter().collect());
+  h.cx.simulate_event(gpui::FileDropEvent::Entered {
+    position: at,
+    paths,
+  });
+  h.cx.run_until_parked();
+  let targets = h
+    .rendered()
+    .elements()
+    .into_iter()
+    .filter(|n| {
+      matches!(n.element_id(), gpui::ElementId::Name(id) if id.starts_with("terminal-drop-target-"))
+    })
+    .count();
+  assert_eq!(targets, 0);
 }
 
 #[gpui::test]
@@ -1882,4 +2037,66 @@ fn shows_hidden(h: &mut Harness, role: gpui::Role, name: &str) -> bool {
   h.rendered()
     .query_by_role(gpui_testing_library::by::role(role).name(name).hidden(true))
     .is_some()
+}
+
+/// The grid size of the terminal drawing `pty`.
+fn grid(host: &Arc<FakeHost>, pty: &str) -> terminal_emu::Size {
+  let host: terminal_data::Host = host.clone();
+  let (live, _) = terminal_data::attach(&host, pty, 80, 24);
+  let size = live.emulator.lock().unwrap().size();
+  size
+}
+
+/// A divider drag draws a frame per step: each grid fits its new column in
+/// the frame the divider moves, not in a second frame after it.
+#[gpui::test]
+fn terminal_divider_drag_fits_the_grids_in_one_frame(cx: &mut TestAppContext) {
+  let (mut h, host, frames) =
+    super::idle::counted(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  click_terminal(&mut h);
+  h.cx.simulate_keystrokes("cmd-\\");
+  h.cx.run_until_parked();
+  let ptys = host.ptys.lock().unwrap().clone();
+  assert_eq!(ptys.len(), 2);
+  let left = h
+    .cx
+    .debug_bounds(super::changes_large::leak(format!("terminal-{}", ptys[0])))
+    .expect("left terminal");
+  let cols = grid(&host, &ptys[0]).cols;
+  let mut at = gpui::point(left.right() + gpui::px(2.), left.center().y);
+  h.cx
+    .simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
+  let drawn = frames.get();
+  // A hand moves a few pixels per event, and the divider keeps up.
+  for _ in 0..20 {
+    at.x -= gpui::px(3.);
+    h.cx
+      .simulate_mouse_move(at, Some(MouseButton::Left), Modifiers::none());
+  }
+  assert!(grid(&host, &ptys[0]).cols < cols);
+  assert_eq!(frames.get() - drawn, 20);
+}
+
+/// Dragging the pane's top edge draws a frame per step: the grid fits the
+/// new height in the frame the edge moves.
+#[gpui::test]
+fn terminal_height_drag_fits_the_grid_in_one_frame(cx: &mut TestAppContext) {
+  let (mut h, host, frames) =
+    super::idle::counted(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  click_terminal(&mut h);
+  let rows = grid(&host, &agent_pty()).rows;
+  let pane = h.cx.debug_bounds("workspace-terminal-pane").expect("pane");
+  let mut at = gpui::point(pane.center().x, pane.top() - gpui::px(2.));
+  h.cx
+    .simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
+  let drawn = frames.get();
+  for _ in 0..20 {
+    at.y -= gpui::px(3.);
+    h.cx
+      .simulate_mouse_move(at, Some(MouseButton::Left), Modifiers::none());
+  }
+  assert!(grid(&host, &agent_pty()).rows > rows);
+  assert_eq!(frames.get() - drawn, 20);
 }
