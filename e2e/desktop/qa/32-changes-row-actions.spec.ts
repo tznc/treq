@@ -47,7 +47,12 @@ test("changes rows: aligned status letters, actions on hover or click", async ({
   const selected = page.getByRole("button", { name: "lib/users.ex", exact: true, selected: true });
   await expect(users).toBeVisible();
   const list = (await page.getByRole("button", { name: "lib/backends.ex", exact: true }).boundingBox())!;
-  const clip = { x: 0, y: Math.max(0, list.y - 120), width: list.x + list.width + 24, height: 300 };
+  const clip = {
+    x: Math.max(0, list.x - 16),
+    y: Math.max(0, list.y - 24),
+    width: list.width + 32,
+    height: 200,
+  };
 
   await capture(page, {
     name: "32-changes-row-actions-01-rest",
