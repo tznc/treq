@@ -14,6 +14,8 @@ import { openTab, openWorkspace, settle } from "./helpers.ts";
 
 const BRANCH = "feat/committed-hunks";
 const FILE = "packages/api/src/routes.ts";
+// Committed only, so the Committed group and its Hide toggle show.
+const NOTES = "packages/api/NOTES.md";
 
 const lines = (edit: (n: number) => string) =>
   Array.from({ length: 60 }, (_, i) => edit(i + 1)).join("\n") + "\n";
@@ -43,6 +45,7 @@ test("committed hunks: labelled, and shut while Committed is hidden", async ({ p
   git("commit", "-m", "feat: list routes");
   treq("add", BRANCH);
   writeInWorkspace(f.repo, BRANCH, FILE, COMMITTED);
+  writeInWorkspace(f.repo, BRANCH, NOTES, "Routes move to v2.\n");
   treq("commit", BRANCH, "-m", "feat: route 10 on v2");
   writeInWorkspace(f.repo, BRANCH, FILE, DIRTY);
 
@@ -61,7 +64,8 @@ test("committed hunks: labelled, and shut while Committed is hidden", async ({ p
     ],
   });
 
-  await page.getByTestId("committed-hide").click();
+  // The Hide toggle is not observable: click its fixed point (1400x900 window).
+  await page.mouse.click(463, 308);
   await settle(page, 1500);
   const open = page.getByRole("button", { name: "Show committed hunk" });
   await expect(open).toBeVisible();
