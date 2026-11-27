@@ -635,7 +635,9 @@ impl Sidebar {
   }
 
   fn start_tooltip(&mut self, key: SharedString, cx: &mut Context<Self>) {
-    self.tooltip = Some((key.clone(), false));
+    if !crate::gpui_shell::tooltips::enter(&mut self.tooltip, &key) {
+      return;
+    }
     cx.spawn(async move |this, cx| {
       cx.background_executor().timer(TOOLTIP_DELAY).await;
       this

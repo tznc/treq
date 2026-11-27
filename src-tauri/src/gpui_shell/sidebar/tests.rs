@@ -610,6 +610,23 @@ fn tooltip_shows_after_a_short_rest(cx: &mut TestAppContext) {
     .read_with(&h.cx, |s, _| assert!(!s.tooltip_shown("settings")));
 }
 
+/// A repeat hover-enter, as a popup window opening can send, keeps a shown
+/// tooltip instead of hiding and reopening it in a loop.
+#[gpui::test]
+fn repeat_hover_keeps_a_shown_tooltip(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![]));
+  h.hover("settings");
+  h.cx.executor().advance_clock(TOOLTIP_DELAY);
+  h.cx.run_until_parked();
+  h.sidebar.update(&mut h.cx, |s, cx| {
+    s.hover_tooltip("settings".into(), true, cx)
+  });
+  h.cx.run_until_parked();
+  h.sidebar
+    .read_with(&h.cx, |s, _| assert!(s.tooltip_shown("settings")));
+  assert!(!h.popups.borrow().contains(&PopupRequest::HideTooltip));
+}
+
 #[gpui::test]
 fn row_button_tooltip_wins_over_its_row(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, snapshot(vec![]));
