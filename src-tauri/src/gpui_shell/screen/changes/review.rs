@@ -111,8 +111,6 @@ pub(in crate::gpui_shell::screen) struct Review {
   pub use_idle: bool,
   pub sending: bool,
   pub discard_dialog: bool,
-  /// `hasUserAddedComments`.
-  pub user_added: bool,
   /// Files that changed since the review started, and the read parked
   /// until Reload.
   pub stale: Vec<String>,
@@ -162,7 +160,6 @@ impl ChangesView {
             view.review.comments = stored.comments;
             view.review.summary = stored.summary;
             view.review.notes = stored.notes;
-            view.review.user_added = true;
           }
         }
         Ok(None) => {}
@@ -174,7 +171,8 @@ impl ChangesView {
 
   /// `isInReviewMode`: a refreshed file list waits behind the stale banner.
   pub(super) fn in_review(&self) -> bool {
-    self.review.user_added
+    !self.review.comments.is_empty()
+      || !self.review.notes.is_empty()
       || self.review.draft.is_some()
       || self.review.finish_open
       || !self.review.summary.trim().is_empty()
@@ -512,7 +510,6 @@ impl ChangesView {
       .review
       .comments
       .push(draft.comment(&text, new_id(), now()));
-    self.review.user_added = true;
     self.review.draft_input = None;
     self.review.draft_text.clear();
     self.review.selection = None;
@@ -606,10 +603,6 @@ impl ChangesView {
       return;
     }
     self.review.comments.retain(|c| c.id != id);
-    // The last comment gone ends the review: refreshes show as they land.
-    if self.review.comments.is_empty() {
-      self.review.user_added = false;
-    }
     if self.review.editing.as_deref() == Some(id) {
       self.cancel_edit(cx);
     }

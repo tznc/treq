@@ -165,4 +165,23 @@ test("changes review: character marks, keyboard, suggestion, stale banner", asyn
       "The comment is gone and the diff shows the toUpperCase line",
     ],
   });
+
+  // With no comment left the review is over: an edit on disk shows at once.
+  writeFileSync(
+    join(alertingDir(), "packages/api/src/levels.ts"),
+    'export const LEVELS = ["trace", "debug", "info", "warn", "error"] as const;\n',
+  );
+  await settle(page, 4000);
+  await expect(page.getByRole("button", { name: "Reload" })).toHaveCount(0);
+  await page.getByRole("button", { name: "packages/api/src/levels.ts", exact: true }).click();
+  await expect(page.getByRole("row", { name: /trace/ })).toBeVisible();
+  await settle(page, 800);
+  await capture(page, {
+    name: "13-review-07-no-comments-no-banner",
+    title: "An edit on disk after the last comment goes shows at once",
+    expectations: [
+      "No amber 'changed since you started reviewing' banner and no Reload button",
+      "levels.ts's diff shows the \"trace\" level",
+    ],
+  });
 });
