@@ -767,10 +767,6 @@ pub(super) fn pr_color(pr: PrState, palette: &Palette) -> Hsla {
 /// Three 20px row buttons with 2px gaps.
 const ROW_ACTIONS_WIDTH: f32 = 3. * 20. + 2. * 2.;
 
-/// How long the project button's chevron takes to turn over: the design
-/// system's full-width dropdown turn.
-const CHEVRON_TURN: Duration = ui::picker::CHEVRON_TURN;
-
 fn icon(path: &'static str, size: f32, color: Hsla) -> gpui::Svg {
   svg()
     .path(path)
@@ -1306,94 +1302,41 @@ impl Sidebar {
     let anchor = self.menu_anchor.clone();
     let sink = self.sink.clone();
     let this = cx.entity().downgrade();
-    let (open, generation) = (self.project_menu_open, self.menu_generation);
-    // Half a turn while the menu is open; still until it first opens.
-    let to = if open { 0.5 } else { 0. };
-    let from = if generation == 0 { to } else { 0.5 - to };
+    let picker =
+      ui::Picker::new("project-button", palette)
+        .label("Project")
+        .placement(ui::PickerPlacement::Toolbar)
+        .full_width()
+        .open(self.project_menu_open)
+        .badge(initial)
+        .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+          this.hover_tooltip(key.clone(), *hovered, cx)
+        }))
+        .on_click({
+          let bounds = bounds.clone();
+          move |_, _, cx| {
+            anchor.set(MenuAnchor::Button(bounds.get()));
+            this
+              .update(cx, |this, cx| {
+                this.menu_generation += 1;
+                this.project_menu_open = true;
+                cx.notify();
+              })
+              .ignore_closed();
+            sink(SidebarAction::ProjectMenu, cx);
+          }
+        });
+    // An unsaved project reads as the picker's placeholder.
+    let picker = if saved {
+      picker.value(name)
+    } else {
+      picker.placeholder(name)
+    };
     div()
       .relative()
       .flex_1()
       .min_w_0()
-      .child(
-        div()
-          .selector("project-button")
-          .role(Role::Button)
-          .aria_label(SharedString::from(format!("Project: {name}")))
-          .aria_expanded(open)
-          .flex()
-          .items_center()
-          .gap_1p5()
-          .px_2()
-          .h(zpx(ui::IconButtonSize::Medium.metrics().0))
-          .w_full()
-          .rounded_lg()
-          .border_1()
-          .border_color(palette.border)
-          .cursor_pointer()
-          .hover(|style| style.bg(palette.hover()))
-          .child(
-            div()
-              .flex()
-              .flex_none()
-              .items_center()
-              .justify_center()
-              .size(zpx(18.))
-              .rounded_md()
-              .when(saved, |this| {
-                this
-                  .bg(palette.primary)
-                  .text_color(palette.primary_foreground)
-              })
-              .when(!saved, |this| {
-                this
-                  .border_1()
-                  .border_dashed()
-                  .border_color(palette.muted_foreground)
-                  .text_color(palette.muted_foreground)
-              })
-              // Short label (['avatar initial']): 11px is fine.
-              // ast-grep-ignore: gpui-text-xs-short-label-only
-              .child(ui::text(div(), TextSize::Xs).child(initial)),
-          )
-          .child(
-            ui::text(div(), TextSize::Sm)
-              .flex_1()
-              .min_w_0()
-              .truncate()
-              .font_weight(gpui::FontWeight::MEDIUM)
-              .when(!saved, |this| this.text_color(palette.muted_foreground))
-              .child(name),
-          )
-          .child(div().selector("project-chevron").flex().flex_none().child(
-            icon(theme::ICON_CHEVRON_DOWN, 14., palette.muted_foreground).with_animation(
-              // A new id each time the menu opens or closes starts the turn.
-              ("project-chevron", generation * 2 + u64::from(open)),
-              Animation::new(CHEVRON_TURN).with_easing(gpui::ease_in_out),
-              move |svg, delta| {
-                svg.with_transformation(Transformation::rotate(gpui::percentage(
-                  from + (to - from) * delta,
-                )))
-              },
-            ),
-          ))
-          .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
-            this.hover_tooltip(key.clone(), *hovered, cx)
-          }))
-          .on_click({
-            let bounds = bounds.clone();
-            move |_, _, cx| {
-              anchor.set(MenuAnchor::Button(bounds.get()));
-              this
-                .update(cx, |this, cx| {
-                  this.menu_generation += 1;
-                  this.project_menu_open = true;
-                  cx.notify();
-                })
-                .ignore_closed();
-              sink(SidebarAction::ProjectMenu, cx);
-            }
-          }),
-      )
+      .child(picker)
       // The button's outer edge, so its menu opens under it at its width.
       .child(
         gpui::canvas(move |b, _, _| bounds.set(b), |_, _, _, _| {})
