@@ -946,6 +946,105 @@ fn a_comment_follows_its_line_when_lines_are_added_above(cx: &mut TestAppContext
   assert!(has_comment(&mut h, "^Comments on a.rs line 3$"));
 }
 
+/// Selects the line whose gutter is `gutter`, opens its comment box from the
+/// keyboard and adds `text`.
+fn comment_from_gutter(h: &mut Harness, gutter: &'static str, text: &str) {
+  h.click(gutter);
+  h.cx.simulate_keystrokes("left");
+  h.cx.run_until_parked();
+  h.cx.simulate_input(text);
+  h.cx.simulate_keystrokes("secondary-enter");
+  h.cx.run_until_parked();
+}
+
+fn hunk(id: &str, header: &str, lines: &[&str]) -> crate::jj::JjDiffHunk {
+  serde_json::from_value(serde_json::json!({
+    "id": id, "header": header, "lines": lines, "patch": ""
+  }))
+  .expect("hunk")
+}
+
+/// a.rs committed on the branch and dirty: with Committed on it shows its
+/// branch diff, `branch`, while its working copy's diff is `working`.
+fn branch_diff_host(
+  branch: Vec<crate::jj::JjDiffHunk>,
+  working: Vec<crate::jj::JjDiffHunk>,
+) -> FakeHost {
+  let mut host = tokened_changes_host();
+  if let Some(diff) = host.working.as_mut() {
+    // a.rs alone, so its card is the first drawn.
+    diff.uncommitted_files.truncate(1);
+    diff.hunks_by_file.truncate(1);
+    diff.committed_files = vec![diff.uncommitted_files[0].clone()];
+    diff.uncommitted_files[0].content_id = Some("fbase>fv1:git".into());
+    diff.hunks_by_file[0].hunks = branch;
+  }
+  host.wc_hunks.lock().unwrap().insert("a.rs".into(), working);
+  host
+}
+
+#[gpui::test]
+fn a_removed_line_of_a_branch_diff_keeps_no_file_version(cx: &mut TestAppContext) {
+  // The branch diff numbers removed lines from the fork point, not from the
+  // working copy's parent that the content id names.
+  let lines = [" a", "-x", "+b"];
+  let host = branch_diff_host(
+    vec![hunk("h", "@@ -1,2 +1,2 @@", &lines)],
+    vec![hunk("h", "@@ -1,2 +1,2 @@", &lines)],
+  );
+  let (mut h, host) = workspace_harness(cx, host, show_committed_route());
+  comment_from_gutter(&mut h, "gutter-a.rs-0-1", "Nit");
+  settle_save(&mut h);
+  let saved: serde_json::Value =
+    serde_json::from_str(&host.review.lock().unwrap().clone().unwrap_or_default())
+      .expect("saved review");
+  assert_eq!(saved[0]["line_side"], "old", "{saved}");
+  assert!(saved[0].get("version").is_none(), "{saved}");
+}
+
+#[gpui::test]
+fn a_comment_on_a_branch_diff_follows_its_line_in_the_shown_hunks(cx: &mut TestAppContext) {
+  let filler: Vec<String> = (3..=20).map(|n| format!("l{n}")).collect();
+  let text = |extra: &str| format!("a\nb\n{}\n{extra}t\nu\n", filler.join("\n"));
+  let mut host = branch_diff_host(
+    vec![
+      hunk("hunk-0", "@@ -1,1 +1,2 @@", &[" a", "+b"]),
+      hunk("hunk-1", "@@ -20,1 +21,2 @@", &[" t", "+u"]),
+    ],
+    vec![hunk("hunk-0", "@@ -21,1 +21,2 @@", &[" t", "+u"])],
+  );
+  host.versions = HashMap::from([
+    ("fv1".to_string(), text("")),
+    ("fv2".to_string(), text("new\n")),
+  ]);
+  let (mut h, host) = workspace_harness(cx, host, show_committed_route());
+  comment_from_gutter(&mut h, "gutter-a.rs-1-1", "Nit");
+  assert!(has_comment(&mut h, "^Comments on a.rs line 22$"));
+
+  // A line added above it, in both diffs.
+  let mut edited = host.working.clone().expect("working");
+  edited.hunks_by_file[0].hunks = vec![
+    hunk("hunk-0", "@@ -1,1 +1,2 @@", &[" a", "+b"]),
+    hunk("hunk-1", "@@ -20,1 +21,3 @@", &["+new", " t", "+u"]),
+  ];
+  edited.uncommitted_files[0].content_id = Some("fbase>fv2:git".into());
+  edited.working_copy_token = Some("t2".into());
+  *host.edited.lock().unwrap() = Some(edited);
+  host.wc_hunks.lock().unwrap().insert(
+    "a.rs".into(),
+    vec![hunk("hunk-0", "@@ -21,1 +21,3 @@", &["+new", " t", "+u"])],
+  );
+  h.update(|s| {
+    if let View::Workspace(r) = &mut s.view {
+      r.changes_revision += 1;
+    }
+  });
+  h.cx.run_until_parked();
+  h.click("reload-stale");
+  settle_save(&mut h);
+  assert!(has_comment(&mut h, "^Comments on a.rs line 23$"));
+}
+
 #[gpui::test]
 fn arrow_keys_move_and_extend_the_line_selection(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());

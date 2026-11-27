@@ -165,8 +165,13 @@ impl ChangesView {
       .agent
       .iter()
       .filter_map(|c| {
-        let shown = self.hunks.get(&c.file_path).filter(|d| !d.loading)?;
-        let carry = agent_carry(c, &shown.hunks, shown.content_id.as_deref()?)?;
+        let shown = self.shown_hunks(&c.file_path).filter(|d| !d.loading)?;
+        let side = Some(if c.side.as_deref() == Some("old") {
+          Side::Old
+        } else {
+          Side::New
+        });
+        let carry = agent_carry(c, &shown.hunks, self.content_id_for(&c.file_path, side)?)?;
         Some((c.clone(), carry))
       })
       .collect();
