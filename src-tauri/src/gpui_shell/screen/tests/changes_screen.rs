@@ -1224,6 +1224,21 @@ fn changes_tab_comments_a_dragged_selection(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_comment_keeps_the_file_version_it_was_written_on(cx: &mut TestAppContext) {
+  let mut host = tokened_changes_host();
+  if let Some(working) = host.working.as_mut() {
+    working.uncommitted_files[0].content_id = Some("fold>fnew".into());
+  }
+  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  comment_line(&mut h, "Nit");
+  settle_save(&mut h);
+  let saved: serde_json::Value =
+    serde_json::from_str(&host.review.lock().unwrap().clone().unwrap_or_default())
+      .expect("saved review");
+  assert_eq!(saved[0]["version"], "fnew", "{saved}");
+}
+
+#[gpui::test]
 fn changes_tab_finds_text_in_the_diff(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
   h.click("file-card-a.rs");

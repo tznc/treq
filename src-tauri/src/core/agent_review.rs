@@ -331,6 +331,8 @@ mod tests {
       github_author: None,
       github_avatar_url: None,
       github_comment_url: None,
+      version: None,
+      outdated: false,
     }
   }
 

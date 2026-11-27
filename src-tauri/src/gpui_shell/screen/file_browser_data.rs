@@ -534,6 +534,8 @@ mod tests {
       github_author: None,
       github_avatar_url: None,
       github_comment_url: None,
+      version: None,
+      outdated: false,
     };
     let (json, summary) = review_to_save(std::slice::from_ref(&comment), "  ");
     assert_eq!(summary, None);
