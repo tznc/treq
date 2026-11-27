@@ -858,7 +858,9 @@ impl ChangesView {
       })
       .cloned()
       .collect();
+    // Same working-copy diffs: the rest of the read (the committed side) shows.
     if paths.is_empty() {
+      self.apply(snapshot, cx);
       return;
     }
     let token = snapshot.token.clone();
@@ -893,6 +895,8 @@ impl ChangesView {
         if changed {
           view.review.parked = Some(snapshot);
           cx.notify();
+        } else {
+          view.apply(snapshot, cx);
         }
       },
       cx,
