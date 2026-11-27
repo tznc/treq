@@ -71,6 +71,7 @@ pub struct Checkbox {
   kind: CheckKind,
   disabled: bool,
   label: Option<SharedString>,
+  name: Option<SharedString>,
   on_click: Option<OnClick>,
 }
 
@@ -86,6 +87,7 @@ impl Checkbox {
       kind: CheckKind::Box,
       disabled: false,
       label: None,
+      name: None,
       on_click: None,
     }
   }
@@ -115,6 +117,13 @@ impl Checkbox {
   /// The text beside the box, and its accessible name.
   pub fn label(mut self, label: impl Into<SharedString>) -> Self {
     self.label = Some(label.into());
+    self
+  }
+
+  /// An accessible name in place of the label's, for a label that repeats
+  /// on the screen.
+  pub fn name(mut self, name: impl Into<SharedString>) -> Self {
+    self.name = Some(name.into());
     self
   }
 
@@ -216,7 +225,9 @@ impl RenderOnce for Checkbox {
         this
           .role(self.kind.role())
           .aria_toggled(toggled)
-          .when_some(self.label.clone(), |this, label| this.aria_label(label))
+          .when_some(self.name.or(self.label.clone()), |this, name| {
+            this.aria_label(name)
+          })
       })
       // Before `track_focus`, so tests see its focus too.
       .test_support()
@@ -277,6 +288,32 @@ mod tests {
     let screen = Screen::new(cx, window);
     screen.redraw();
     expect(screen.get_by_role(by::role(Role::CheckBox).name("Viewed"))).to_be_checked();
+  }
+
+  struct Named;
+
+  impl gpui::Render for Named {
+    fn render(&mut self, _: &mut gpui::Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+      div().size_full().child(
+        Checkbox::new("viewed", &theme::palette(false))
+          .label("Viewed")
+          .name("Viewed a.rs"),
+      )
+    }
+  }
+
+  #[gpui::test]
+  fn a_named_checkbox_is_found_by_its_name_not_its_label(cx: &mut gpui::TestAppContext) {
+    use gpui_testing_library::{by, expect, prelude::*, Screen};
+    let (_, cx) = cx.add_window_view(|_, _| Named);
+    cx.run_until_parked();
+    let window = cx.update(|window, _| window.window_handle());
+    let screen = Screen::new(cx, window);
+    screen.redraw();
+    expect(screen.get_by_role(by::role(Role::CheckBox).name("Viewed a.rs"))).to_be_visible();
+    assert!(screen
+      .query_by_role(by::role(Role::CheckBox).name("Viewed"))
+      .is_none());
   }
 
   #[test]
