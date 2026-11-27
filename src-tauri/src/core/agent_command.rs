@@ -2,7 +2,9 @@
 //! system prompt, filesystem settings and skills, wrapped so its temp files
 //! are removed and Treq hears when it exits.
 
-use super::agent_cli::{write_agent_cli_files, write_agent_task_file, AgentCliFiles};
+use super::agent_cli::{
+  review_skill_md, write_agent_cli_files, write_agent_task_file, AgentCliFiles,
+};
 use super::remote::shell_quote;
 use serde_json::{json, Map, Value};
 use std::path::Path;
@@ -26,6 +28,15 @@ pub struct AgentPaths<'a> {
   pub app_instructions: Option<&'a str>,
   /// Instructions from the repository's settings.
   pub repo_instructions: Option<&'a str>,
+  /// Set for an AI review session, which loads the treq-review skill.
+  pub review: Option<Review<'a>>,
+}
+
+/// What an AI review session adds to the treq-review skill.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Review<'a> {
+  /// The repository's review instructions (its `review_prompt` setting).
+  pub instructions: Option<&'a str>,
 }
 
 /// What a project adds to its agents (`core::projects`).
@@ -399,12 +410,14 @@ pub fn prepare_auto_command(
     _ => (system, None),
   };
 
+  let review_skill = paths.review.map(|r| review_skill_md(r.instructions));
+  let review_skill = review_skill.as_deref();
   let mut skipped_project_skills = false;
-  let files = match write_agent_cli_files(&prompt, settings.as_deref(), Some(cwd)) {
+  let files = match write_agent_cli_files(&prompt, settings.as_deref(), Some(cwd), review_skill) {
     Ok(files) => files,
     Err(_) => {
       skipped_project_skills = true;
-      write_agent_cli_files(&prompt, settings.as_deref(), None)?
+      write_agent_cli_files(&prompt, settings.as_deref(), None, review_skill)?
     }
   };
   let pending_prompt = if matches!(options.agent, "cursor" | "devin" | "gemini") {
@@ -510,6 +523,7 @@ mod tests {
       project: None,
       app_instructions: None,
       repo_instructions: None,
+      review: None,
     });
     assert!(prompt.contains("You are operating inside a Treq workspace."));
     assert!(prompt.contains(
@@ -531,6 +545,7 @@ mod tests {
       project: None,
       app_instructions: None,
       repo_instructions: None,
+      review: None,
     });
     assert!(prompt.contains("You are operating in the Treq home repository."));
     assert!(!prompt.contains("sibling workspaces"));
@@ -549,6 +564,7 @@ mod tests {
         project: None,
         app_instructions: None,
         repo_instructions: None,
+        review: None,
       }),
       json!({
         "denyRead": ["/repos/app"],
@@ -564,6 +580,7 @@ mod tests {
         project: None,
         app_instructions: None,
         repo_instructions: None,
+        review: None,
       }),
       json!({ "allowRead": ["/repos/app"], "allowWrite": ["/repos/app"] })
     );
@@ -587,6 +604,7 @@ mod tests {
       project: Some(&project),
       app_instructions: None,
       repo_instructions: None,
+      review: None,
     });
     assert!(prompt.contains("Treq project \"Checkout\""));
     assert!(prompt.contains("treq project status"));
@@ -605,6 +623,7 @@ mod tests {
       project: None,
       app_instructions: None,
       repo_instructions: None,
+      review: None,
     });
     assert!(!prompt.contains("Treq project"));
     assert!(!prompt.contains("treq project status"));
@@ -621,6 +640,7 @@ mod tests {
       project: Some(&project),
       app_instructions: Some("Be terse.\nPrefer TDD."),
       repo_instructions: Some("Use cargo nextest."),
+      review: None,
     });
     let app = prompt
       .find("Application instructions: Be terse. Prefer TDD.")
@@ -642,6 +662,7 @@ mod tests {
       project: None,
       app_instructions: Some(" \n "),
       repo_instructions: None,
+      review: None,
     });
     assert!(!prompt.contains("Application instructions"));
     assert!(!prompt.contains("Repository instructions"));
@@ -661,6 +682,7 @@ mod tests {
       project: Some(&project),
       app_instructions: None,
       repo_instructions: None,
+      review: None,
     });
     assert!(prompt.contains("Treq project \"Checkout\""));
     assert!(!prompt.contains("Project instructions"));
@@ -703,6 +725,7 @@ mod tests {
         project: Some(&project),
         app_instructions: None,
         repo_instructions: None,
+        review: None,
       },
       &opts("claude"),
     )
@@ -743,6 +766,7 @@ mod tests {
         project: Some(&project),
         app_instructions: None,
         repo_instructions: None,
+        review: None,
       }),
       json!({ "allowRead": ["/repos/app", "/docs/style.md"], "allowWrite": ["/repos/app"] })
     );
@@ -917,6 +941,7 @@ mod tests {
         project: None,
         app_instructions: None,
         repo_instructions: None,
+        review: None,
       },
       &AutoCommand {
         pending_prompt: Some("hi"),
@@ -949,6 +974,7 @@ mod tests {
       project: None,
       app_instructions: None,
       repo_instructions: None,
+      review: None,
     };
     for _ in 0..2 {
       let prepared = prepare_auto_command(&paths, &opts("codex")).unwrap();
@@ -977,6 +1003,7 @@ mod tests {
           project: None,
           app_instructions: None,
           repo_instructions: None,
+          review: None,
         },
         &AutoCommand {
           pending_prompt: Some(&task),
@@ -1030,6 +1057,7 @@ mod tests {
         project: None,
         app_instructions: None,
         repo_instructions: None,
+        review: None,
       },
       &AutoCommand {
         pending_prompt: Some("fix the bug"),
@@ -1048,6 +1076,46 @@ mod tests {
   }
 
   #[test]
+  fn points_a_review_session_at_the_review_skill_with_repository_instructions() {
+    let dir = tempfile::tempdir().unwrap();
+    let launch = |review: Option<Review<'_>>| {
+      let prepared = prepare_auto_command(
+        &AgentPaths {
+          workspace_path: None,
+          repo_path: dir.path().to_str().unwrap(),
+          supporting_repo_paths: NONE,
+          project: None,
+          app_instructions: None,
+          repo_instructions: None,
+          review,
+        },
+        &opts("claude"),
+      )
+      .unwrap();
+      let temp = Path::new(&prepared.file_paths[0]);
+      let read = |p: &str| std::fs::read_to_string(temp.join(p)).ok();
+      let texts = (
+        read("prompt.txt").unwrap(),
+        read("skills/skills/treq-review/SKILL.md"),
+      );
+      super::super::agent_cli::cleanup_agent_cli_files(&prepared.file_paths).unwrap();
+      texts
+    };
+
+    let (prompt, skill) = launch(Some(Review {
+      instructions: Some("Flag N+1 queries."),
+    }));
+    assert!(prompt.contains("load the treq-review skill"), "{prompt}");
+    let skill = skill.expect("a review session gets the review skill");
+    assert!(skill.contains("name: treq-review"));
+    assert!(skill.ends_with("Flag N+1 queries.\n"), "{skill}");
+
+    let (prompt, skill) = launch(None);
+    assert!(!prompt.contains("treq-review"), "{prompt}");
+    assert!(skill.is_none());
+  }
+
+  #[test]
   fn refuses_to_start_in_a_deleted_workspace() {
     let dir = tempfile::tempdir().unwrap();
     let workspace = dir.path().join("deleted");
@@ -1059,6 +1127,7 @@ mod tests {
         project: None,
         app_instructions: None,
         repo_instructions: None,
+        review: None,
       },
       &opts("claude"),
     )
@@ -1083,6 +1152,7 @@ mod tests {
         project: None,
         app_instructions: None,
         repo_instructions: None,
+        review: None,
       },
       &AutoCommand {
         pending_prompt: Some(prompt),

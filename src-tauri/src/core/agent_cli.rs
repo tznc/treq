@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 const FILE_PREFIX: &str = "treq-agent-";
 const TREQ_SKILL_MD: &str = include_str!("../../resources/agent-skill/SKILL.md");
+const TREQ_REVIEW_SKILL_MD: &str = include_str!("../../resources/agent-review-skill/SKILL.md");
 const PROJECT_SKILL_MARKER: &str = ".treq-generated";
 const AGENTS_SKILL_RELATIVE: &str = ".agents/skills/treq";
 const CLAUDE_SKILL_RELATIVE: &str = ".claude/skills/treq";
@@ -30,11 +31,24 @@ pub struct AgentCliFiles {
   pub task_path: Option<String>,
 }
 
-/// Write the agent system prompt, optional Claude settings, and bundled Treq skill pack.
+/// The treq-review skill a review session loads, with the repository's
+/// review instructions, if any, as its last section.
+pub fn review_skill_md(instructions: Option<&str>) -> String {
+  match instructions.map(str::trim).filter(|i| !i.is_empty()) {
+    Some(text) => format!(
+      "{TREQ_REVIEW_SKILL_MD}\n## Repository instructions\n\nThe repository adds these instructions. Follow them where they differ from the steps above.\n\n{text}\n"
+    ),
+    None => TREQ_REVIEW_SKILL_MD.to_string(),
+  }
+}
+
+/// Write the agent system prompt, optional Claude settings, and bundled Treq
+/// skill pack, plus `review_skill` for a review session.
 pub fn write_agent_cli_files(
   prompt: &str,
   settings_json: Option<&str>,
   cwd: Option<&str>,
+  review_skill: Option<&str>,
 ) -> Result<AgentCliFiles, String> {
   let dir = std::env::temp_dir().join(format!("{FILE_PREFIX}{}", uuid::Uuid::new_v4()));
   create_private_dir(&dir).map_err(|e| format!("Failed to create agent temp dir: {e}"))?;
@@ -52,10 +66,18 @@ pub fn write_agent_cli_files(
     None => (None, None),
   };
 
-  let prompt_with_skill = format!(
+  let mut prompt_with_skill = format!(
     "{prompt} The bundled Treq skill file is at {}/skills/treq/SKILL.md.",
     skill_dir.to_string_lossy()
   );
+  if let Some(review_skill) = review_skill {
+    let path = skill_dir.join("skills/treq-review/SKILL.md");
+    write_skill_file(&path, review_skill)?;
+    prompt_with_skill.push_str(&format!(
+      " This is a Treq review session: before anything else, load the treq-review skill from {} and follow it.",
+      path.to_string_lossy()
+    ));
+  }
   let prompt_path = dir.join("prompt.txt");
   write_private(&prompt_path, &prompt_with_skill)
     .map_err(|e| format!("Failed to write agent prompt file: {e}"))?;
@@ -154,13 +176,17 @@ fn write_treq_skill_pack(dir: &Path) -> Result<PathBuf, String> {
     skill_dir.join(".agents/skills/treq/SKILL.md"),
   ];
   for path in &copies {
-    let parent = path
-      .parent()
-      .ok_or_else(|| "Invalid skill pack path".to_string())?;
-    fs::create_dir_all(parent).map_err(|e| format!("Failed to create skill pack dir: {e}"))?;
-    fs::write(path, TREQ_SKILL_MD).map_err(|e| format!("Failed to write Treq skill: {e}"))?;
+    write_skill_file(path, TREQ_SKILL_MD)?;
   }
   Ok(skill_dir)
+}
+
+fn write_skill_file(path: &Path, contents: &str) -> Result<(), String> {
+  let parent = path
+    .parent()
+    .ok_or_else(|| "Invalid skill pack path".to_string())?;
+  fs::create_dir_all(parent).map_err(|e| format!("Failed to create skill pack dir: {e}"))?;
+  fs::write(path, contents).map_err(|e| format!("Failed to write Treq skill: {e}"))
 }
 
 fn install_project_treq_skill(
@@ -259,6 +285,7 @@ mod tests {
       "you are in a workspace",
       Some(r#"{"filesystem":{"allowRead":["/ws"],"allowWrite":["/ws"]}}"#),
       None,
+      None,
     )
     .expect("write files");
 
@@ -311,8 +338,50 @@ mod tests {
   }
 
   #[test]
+  fn writes_the_review_skill_and_points_the_prompt_at_it() {
+    let skill = review_skill_md(None);
+    let files = write_agent_cli_files("prompt", None, None, Some(&skill)).expect("write");
+    let path = Path::new(&files.skill_dir).join("skills/treq-review/SKILL.md");
+    let body = fs::read_to_string(&path).expect("read review skill");
+    assert!(body.contains("name: treq-review"));
+    assert!(body.contains("treq agent-review add"));
+    let prompt = fs::read_to_string(&files.prompt_path).expect("read prompt");
+    assert!(
+      prompt.contains(&format!(
+        "load the treq-review skill from {} and follow it",
+        path.display()
+      )),
+      "{prompt}"
+    );
+    cleanup_agent_cli_files(&[files.dir]).expect("cleanup");
+  }
+
+  #[test]
+  fn leaves_the_review_skill_out_of_other_sessions() {
+    let files = write_agent_cli_files("prompt", None, None, None).expect("write");
+    assert!(!Path::new(&files.skill_dir)
+      .join("skills/treq-review")
+      .exists());
+    let prompt = fs::read_to_string(&files.prompt_path).expect("read prompt");
+    assert!(!prompt.contains("treq-review"), "{prompt}");
+    cleanup_agent_cli_files(&[files.dir]).expect("cleanup");
+  }
+
+  #[test]
+  fn adds_repository_instructions_to_the_review_skill() {
+    assert_eq!(review_skill_md(None), TREQ_REVIEW_SKILL_MD);
+    assert_eq!(review_skill_md(Some(" \n")), TREQ_REVIEW_SKILL_MD);
+    let skill = review_skill_md(Some("Flag N+1 queries.\n"));
+    assert!(skill.starts_with(TREQ_REVIEW_SKILL_MD));
+    assert!(
+      skill.ends_with("## Repository instructions\n\nThe repository adds these instructions. Follow them where they differ from the steps above.\n\nFlag N+1 queries.\n"),
+      "{skill}"
+    );
+  }
+
+  #[test]
   fn omits_settings_file_when_not_requested() {
-    let files = write_agent_cli_files("prompt only", None, None).expect("write");
+    let files = write_agent_cli_files("prompt only", None, None, None).expect("write");
     assert!(files.settings_path.is_none());
     assert!(Path::new(&files.prompt_path).exists());
     assert!(Path::new(&files.skill_dir).is_dir());
@@ -321,8 +390,13 @@ mod tests {
 
   #[test]
   fn cleanup_deletes_written_files_and_skill_dir() {
-    let files = write_agent_cli_files("tmp", Some(r#"{"filesystem":{"allowRead":[]}}"#), None)
-      .expect("write");
+    let files = write_agent_cli_files(
+      "tmp",
+      Some(r#"{"filesystem":{"allowRead":[]}}"#),
+      None,
+      None,
+    )
+    .expect("write");
     let settings_path = files.settings_path.clone().unwrap();
     cleanup_agent_cli_files(&[
       files.prompt_path.clone(),
@@ -378,7 +452,7 @@ mod tests {
   #[test]
   fn installs_project_skills_under_cwd_for_codex_and_claude_discovery() {
     let cwd = tempfile::TempDir::new().expect("cwd");
-    let files = write_agent_cli_files("prompt", None, cwd.path().to_str()).expect("write");
+    let files = write_agent_cli_files("prompt", None, cwd.path().to_str(), None).expect("write");
     let agents_dir = files.agents_skill_path.expect("agents skill path");
     let claude_dir = files.claude_skill_path.expect("claude skill path");
     assert_eq!(
@@ -417,7 +491,7 @@ mod tests {
     fs::write(agents_dir.join("SKILL.md"), "user agents skill\n").expect("write agents");
     fs::write(claude_dir.join("SKILL.md"), "user claude skill\n").expect("write claude");
 
-    let files = write_agent_cli_files("prompt", None, cwd.path().to_str()).expect("write");
+    let files = write_agent_cli_files("prompt", None, cwd.path().to_str(), None).expect("write");
     assert!(files.agents_skill_path.is_none());
     assert!(files.claude_skill_path.is_none());
     assert!(files.skill_write_warning.is_none());
@@ -444,7 +518,7 @@ mod tests {
     perms.set_readonly(true);
     fs::set_permissions(&cwd_path, perms).expect("chmod");
 
-    let result = write_agent_cli_files("prompt", None, cwd_path.to_str());
+    let result = write_agent_cli_files("prompt", None, cwd_path.to_str(), None);
 
     let mut perms = fs::metadata(&cwd_path).expect("metadata").permissions();
     // Restore write access so the tempdir can clean itself up; this is test
