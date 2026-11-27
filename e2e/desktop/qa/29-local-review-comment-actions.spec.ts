@@ -27,8 +27,8 @@ test("local-review-comment-actions: Send to agent, Resolve, Delete", async ({ pa
   await openWorkspace(page, "feat/alerting-logs");
   await openTab(page, "Changes");
   await settle(page, 1500);
-  // The first added line's gutter (by place in the 1400x900 window).
-  await page.mouse.click(600, 277);
+  // Line 3's gutter selects the line; Left opens a comment box on it.
+  await page.getByRole("button", { name: "Line 3 of packages/api/src/alerting.ts" }).click();
   await page.keyboard.press("ArrowLeft");
   await page.getByRole("textbox", { name: "Add a comment…" }).fill("Log the level in upper case");
   await page.getByRole("button", { name: "Add comment", exact: true }).click();
@@ -45,7 +45,7 @@ test("local-review-comment-actions: Send to agent, Resolve, Delete", async ({ pa
   });
   await expect(page.getByRole("button", { name: "Delete" })).toBeVisible();
   // The review's agent pane covers the bottom of the diff: scroll the card above it.
-  await page.mouse.move(1100, 300);
+  await page.getByRole("group", { name: /^Sent comment on/ }).hover();
   await page.mouse.wheel(0, 240);
   await settle(page, 800);
   await capture(page, {
