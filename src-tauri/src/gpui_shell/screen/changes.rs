@@ -1118,6 +1118,18 @@ impl ChangesView {
     cx.notify();
   }
 
+  /// A click outside the file list drops its selection and highlight.
+  fn click_away(&mut self, cx: &mut Context<Self>) {
+    let s = &mut self.staging;
+    if self.active.is_none() && s.selected.is_empty() && s.selected_staged.is_empty() {
+      return;
+    }
+    self.active = None;
+    s.selected.clear();
+    s.selected_staged.clear();
+    cx.notify();
+  }
+
   fn stage(&mut self, path: &str, cx: &mut Context<Self>) {
     self.staging.stage(path);
     cx.notify();
@@ -2196,6 +2208,7 @@ impl ChangesView {
           }
         }),
       )
+      .on_mouse_down_out(cx.listener(|this, _, _, cx| this.click_away(cx)))
       .on_mouse_up_out(
         MouseButton::Left,
         cx.listener(|this, _, _, cx| {
@@ -2893,17 +2906,7 @@ impl ChangesView {
     };
     let red = Tone::Danger.text(p);
     let status_color = p.muted_foreground;
-    let mut actions = div()
-      .flex()
-      .items_center()
-      .gap_1()
-      .flex_none()
-      .child(self.status_letter(
-        format!("{list:?}-{}", file.path),
-        &file.status,
-        status_color,
-        cx,
-      ));
+    let mut actions = div().flex().items_center().gap_1().flex_none();
     if !staged {
       // The selection's last row keeps its buttons; the others show them on hover.
       let hidden = !(last && selected);
@@ -2955,6 +2958,13 @@ impl ChangesView {
       .test_support();
       actions = actions.child(self.tip(tip_key, "Unstage file", el, cx));
     }
+    // Last, so it lines up with the committed rows' letters.
+    actions = actions.child(self.status_letter(
+      format!("{list:?}-{}", file.path),
+      &file.status,
+      status_color,
+      cx,
+    ));
     let (click, menu) = (path.clone(), path);
     ui::Row::new(
       SharedString::from(format!(
@@ -2975,6 +2985,8 @@ impl ChangesView {
     .min_w_0()
     .gap_1()
     .px_0()
+    // The committed rows' right inset.
+    .pr_1p5()
     .rounded_none()
     .border_l_2()
     .border_color(gpui::transparent_black())
