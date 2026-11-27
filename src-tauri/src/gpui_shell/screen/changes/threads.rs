@@ -21,8 +21,8 @@ use crate::{
   gpui_shell::screen::{
     changes_review::{count_label, number_and_side, Pending, Quote, Side},
     changes_threads::{
-      agent_by_line, comment_date, github_suggestion_original, original_text, place_threads,
-      preview, suggestion_diff, suggestion_span, LineKey, Placed, RowKind,
+      agent_by_line, comment_date, github_suggestion_original, line_label, original_text,
+      place_threads, preview, suggestion_diff, suggestion_span, LineKey, Placed, RowKind,
     },
     commits_data::LineRef,
     reactions::{self, Reacts},
@@ -433,7 +433,24 @@ impl ChangesView {
     let quoted = self.quoted_thread(path, None).filter(|_| drafting);
     for t in threads.iter().filter_map(|&i| self.threads.github.get(i)) {
       let line = t.line.and_then(|n| u32::try_from(n).ok()).unwrap_or(0);
-      section = section.child(self.thread_card(t, path, None, line, Side::New, p, cx));
+      let label = line_label(t).map(|label| {
+        // Short label (line number). ast-grep-ignore: gpui-text-xs-short-label-only
+        ui::text(div(), TextSize::Xs)
+          .selector(SharedString::from(format!("github-thread-line-{}", t.id)))
+          .role(gpui::Role::Label)
+          .aria_label(label.clone())
+          .text_color(p.muted_foreground)
+          .child(label)
+          .test_support()
+      });
+      section = section.child(
+        div()
+          .flex()
+          .flex_col()
+          .gap_1p5()
+          .children(label)
+          .child(self.thread_card(t, path, None, line, Side::New, p, cx)),
+      );
       if quoted == Some(t.id.as_str()) {
         section = section.child(self.comment_input(p, cx));
       }

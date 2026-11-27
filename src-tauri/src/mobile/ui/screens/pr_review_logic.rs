@@ -275,6 +275,8 @@ deleted file mode 100644
       path: path.into(),
       line,
       start_line: None,
+      original_line: None,
+      original_start_line: None,
       diff_side: side.into(),
       comments: vec![GhReviewComment {
         author_id: None,

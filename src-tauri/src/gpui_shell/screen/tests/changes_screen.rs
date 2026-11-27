@@ -1282,6 +1282,24 @@ fn changes_tab_shows_review_threads_on_their_line(cx: &mut TestAppContext) {
   assert!(h.shows(gpui::Role::Paragraph, "Folded away"));
 }
 
+/// A thread above the file names the line it was left on.
+#[gpui::test]
+fn threads_above_the_file_name_their_line(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  let mut host = changes_host();
+  let mut outdated = gh_thread("t2", 0, false);
+  outdated.line = None;
+  outdated.is_outdated = true;
+  outdated.original_line = Some(7);
+  host.threads = vec![gh_thread("t1", 40, false), outdated];
+  let (mut h, _) = workspace_harness(cx, host, changes_route());
+  let screen = a11y_screen(&mut h);
+  let above = screen.get_by_role(by::role(gpui::Role::Group).name("Outdated threads on a.rs"));
+  for label in ["Line 40", "Outdated · line 7"] {
+    expect(within(&above).get_by_role(by::role(gpui::Role::Label).name(label))).to_be_visible();
+  }
+}
+
 #[gpui::test]
 fn a_review_thread_draws_its_replies_as_one_card(cx: &mut TestAppContext) {
   let mut host = changes_host();
