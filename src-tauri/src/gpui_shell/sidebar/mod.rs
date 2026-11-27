@@ -708,8 +708,6 @@ impl Sidebar {
 /// group header's repository name.
 const GROUP_INDENT: f32 = 4.;
 
-/// Indentation of a row's content: one 12px icon per level, so a child's
-/// icon starts past its parent's.
 /// The space between two workspace rows.
 const ROW_GAP: f32 = 0.;
 
@@ -717,12 +715,15 @@ const ROW_GAP: f32 = 0.;
 /// the parent row's space under its 12px icon, stopping 1px short of it.
 const ELBOW_REACH: f32 = ROW_GAP + (theme::ROW_HEIGHT_COMPACT - 12.) / 2. - 1.;
 
+/// Indentation of a row's content: every row stacked on a root sits one 12px
+/// icon past it, however deep, so a tall stack keeps its titles in view.
 fn row_indent(depth: u32) -> f32 {
-  10. + depth as f32 * 12.
+  10. + depth.min(1) as f32 * 12.
 }
 
-/// Where a nested row's elbow starts: under its parent's icon centre, so it
-/// runs from the parent into the row's own icon.
+/// Where a nested row's connector runs: under the icon centre of the row it
+/// hangs from (the root's for the first level's elbow, the row above's for
+/// a deeper row's straight line).
 fn guide_left(depth: u32) -> f32 {
   row_indent(depth.saturating_sub(1)) + 5.
 }
@@ -1615,7 +1616,7 @@ impl Sidebar {
           .when_some(fill, |this, fill| this.bg(fill))
           .debug_selector(move || format!("workspace-peek-{id}"))
       })
-      .when(row.depth > 0, |this| {
+      .when(row.depth == 1, |this| {
         // An elbow into the row, not a bar that reads as a selection marker.
         this.overlay(
           div()
@@ -1627,6 +1628,21 @@ impl Sidebar {
             .w(zpx(6.))
             .border_l_1()
             .border_b_1()
+            .border_color(palette.stack_connector()),
+        )
+      })
+      .when(row.depth > 1, |this| {
+        // Deeper rows share the first level's indent: a straight line from
+        // the icon above into this row's, as far short of each.
+        this.overlay(
+          div()
+            .selector(format!("{prefix}workspace-{id}-line"))
+            .absolute()
+            .top(zpx(-ELBOW_REACH))
+            .left(zpx(guide_left(row.depth) + group_indent))
+            .h(zpx(2. * ELBOW_REACH - ROW_GAP))
+            .w(zpx(1.))
+            .border_l_1()
             .border_color(palette.stack_connector()),
         )
       })
