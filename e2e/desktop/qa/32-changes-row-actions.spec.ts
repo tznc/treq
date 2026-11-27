@@ -1,6 +1,6 @@
 // Changes tab file rows: the status letter keeps one column across the
-// Uncommitted and Committed lists, and a row's discard and stage buttons
-// show only on hover or once the row is clicked, until a click elsewhere.
+// lists, and a row's buttons take its place only on hover or once the row is
+// clicked, until a click elsewhere.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -72,8 +72,8 @@ test("changes rows: aligned status letters, actions on hover or click", async ({
     clip,
     rest: false,
     expectations: [
-      "users.ex shows discard and + to the left of its M",
-      "Its M stays in the same column as the other rows' letters",
+      "users.ex shows discard and + in place of its M",
+      "The + sits in the column of the other rows' M letters",
     ],
   });
 
@@ -87,8 +87,8 @@ test("changes rows: aligned status letters, actions on hover or click", async ({
     clip,
     rest: false,
     expectations: [
-      "users.ex stays highlighted with discard and + showing",
-      "Its M stays in the same column as the other rows' letters",
+      "users.ex stays highlighted, with discard and + in place of its M",
+      "The + sits in the column of the other rows' M letters",
     ],
   });
 
@@ -125,8 +125,8 @@ test("changes rows: aligned status letters, actions on hover or click", async ({
     rest: false,
     expectations: [
       "backends.ex and users.ex are both highlighted",
-      "Only users.ex, the last clicked, shows discard and +",
-      "Every M stays in one column",
+      "Only users.ex, the last clicked, shows discard and +, in place of its M",
+      "backends.ex keeps its M, in line with the + and the committed letters",
     ],
   });
 
@@ -141,7 +141,7 @@ test("changes rows: aligned status letters, actions on hover or click", async ({
     expectations: ["No row is highlighted and no row shows buttons"],
   });
 
-  // The Selected (staged) list: its unstage button sits before the letter too.
+  // The Selected (staged) list: its unstage button takes the letter's place too.
   await users.hover();
   await page.getByRole("button", { name: "Stage lib/users.ex", exact: true }).click();
   const unstage = page.getByRole("button", { name: "Unstage lib/users.ex", exact: true });
@@ -164,8 +164,8 @@ test("changes rows: aligned status letters, actions on hover or click", async ({
     clip: staged,
     rest: false,
     expectations: [
-      "users.ex sits in the Selected list, highlighted, with − before its M",
-      "The M letters of the Selected, Changes and Committed rows share one column",
+      "users.ex sits in the Selected list, highlighted, with − in place of its M",
+      "The − lines up with the M letters of the Changes and Committed rows",
     ],
   });
 
@@ -176,6 +176,6 @@ test("changes rows: aligned status letters, actions on hover or click", async ({
     name: "32-changes-row-actions-08-staged-cleared",
     title: "Selected list after a click in the diff",
     clip: staged,
-    expectations: ["users.ex is no longer highlighted and its − is hidden"],
+    expectations: ["users.ex is no longer highlighted; its M is back in place of the −"],
   });
 });

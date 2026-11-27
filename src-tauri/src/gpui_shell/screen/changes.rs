@@ -2906,10 +2906,11 @@ impl ChangesView {
     };
     let red = Tone::Danger.text(p);
     let status_color = p.muted_foreground;
+    // The selection's last row keeps its buttons; the others show them on hover.
+    let shown = selected && (staged || last);
+    let hidden = !shown;
     let mut actions = div().flex().items_center().gap_1().flex_none();
     if !staged {
-      // The selection's last row keeps its buttons; the others show them on hover.
-      let hidden = !(last && selected);
       let target = path.clone();
       let tip_key = format!("discard-tip-{}", file.path);
       let el = small(
@@ -2949,7 +2950,7 @@ impl ChangesView {
         format!("Unstage {}", file.path),
         theme::ICON_MINUS,
         name_color,
-        !selected,
+        hidden,
       )
       .on_click(cx.listener(move |view, _, _, cx| {
         cx.stop_propagation();
@@ -2958,13 +2959,18 @@ impl ChangesView {
       .test_support();
       actions = actions.child(self.tip(tip_key, "Unstage file", el, cx));
     }
-    // Last, so it lines up with the committed rows' letters.
-    actions = actions.child(self.status_letter(
+    // Last, so it lines up with the committed rows' letters. The buttons
+    // take its place while they show.
+    let letter = self.status_letter(
       format!("{list:?}-{}", file.path),
       &file.status,
       status_color,
       cx,
-    ));
+    );
+    actions = actions.child(match shown {
+      true => letter.hidden(),
+      false => letter.group_hover("file-row", |s| s.hidden()),
+    });
     let (click, menu) = (path.clone(), path);
     ui::Row::new(
       SharedString::from(format!(

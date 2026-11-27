@@ -389,6 +389,39 @@ fn changes_tab_hides_row_actions_after_a_click_away(cx: &mut TestAppContext) {
   assert!(shows_hidden(&mut h, "Stage a.rs"), "still offered on hover");
 }
 
+/// Whether the status letter `key` (`<list>-<path>`) shows.
+fn shows_letter(h: &mut Harness, key: &str) -> bool {
+  let id = gpui::ElementId::Name(format!("status-{key}").into());
+  h.rendered()
+    .query_all_by_element_id(gpui_testing_library::by::element_id(id))
+    .iter()
+    .any(|n| n.is_visible())
+}
+
+/// A hovered row shows its buttons in place of its status letter.
+#[gpui::test]
+fn changes_tab_hides_the_status_letter_on_a_hovered_row(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  assert!(shows_letter(&mut h, "Changes-b.rs"));
+  h.hover("file-row-b.rs");
+  assert!(!shows_letter(&mut h, "Changes-b.rs"));
+  assert!(h.shows(gpui::Role::Button, "Stage b.rs"));
+  assert!(shows_letter(&mut h, "Changes-a.rs"), "other rows keep theirs");
+}
+
+/// A clicked row keeps its buttons in the letter's place off hover, until a
+/// click away.
+#[gpui::test]
+fn changes_tab_hides_the_status_letter_on_a_clicked_row(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  h.click("file-row-a.rs");
+  h.hover("file-card-b.rs");
+  assert!(!shows_letter(&mut h, "Changes-a.rs"));
+  assert!(h.shows(gpui::Role::Button, "Stage a.rs"));
+  h.click("file-card-b.rs");
+  assert!(shows_letter(&mut h, "Changes-a.rs"));
+}
+
 /// The click that drops the row's highlight still reaches the diff control.
 #[gpui::test]
 fn changes_tab_click_away_reaches_the_diff_control(cx: &mut TestAppContext) {
