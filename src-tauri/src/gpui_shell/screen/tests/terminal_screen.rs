@@ -265,6 +265,67 @@ fn terminal_pty_follows_a_resize_while_it_starts(cx: &mut TestAppContext) {
   assert_eq!(last, Some((grid.cols, grid.rows)));
 }
 
+/// A grid that returns to the PTY's size before it settles leaves the PTY
+/// alone.
+#[gpui::test]
+fn terminal_pty_keeps_its_size_when_the_grid_returns_to_it(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  let wait = |h: &mut Harness, ms: u64| {
+    h.cx
+      .executor()
+      .advance_clock(std::time::Duration::from_millis(ms));
+    h.cx.run_until_parked();
+  };
+  wait(&mut h, 1000);
+  let before = host.resizes.lock().unwrap().len();
+  for width in [1100., 1400.] {
+    h.cx
+      .simulate_resize(gpui::size(gpui::px(width), gpui::px(900.)));
+  }
+  wait(&mut h, 200);
+  assert_eq!(host.resizes.lock().unwrap().len(), before);
+}
+
+/// A resize reaches the PTY once the grid stops changing, not per drag
+/// step: each one makes the program (an agent's TUI) redraw its screen.
+#[gpui::test]
+fn terminal_pty_resizes_once_the_grid_settles(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  let pty = agent_pty();
+  let wait = |h: &mut Harness, ms: u64| {
+    h.cx
+      .executor()
+      .advance_clock(std::time::Duration::from_millis(ms));
+    h.cx.run_until_parked();
+  };
+  wait(&mut h, 1000);
+  let resizes = |host: &FakeHost| -> Vec<(u16, u16)> {
+    let resizes = host.resizes.lock().unwrap();
+    resizes
+      .iter()
+      .filter(|(id, ..)| *id == pty)
+      .map(|(_, cols, rows)| (*cols, *rows))
+      .collect()
+  };
+  let before = resizes(&host).len();
+  for width in [1300., 1200., 1100.] {
+    h.cx
+      .simulate_resize(gpui::size(gpui::px(width), gpui::px(900.)));
+    wait(&mut h, 30);
+  }
+  assert_eq!(resizes(&host).len(), before, "no resize while dragging");
+  wait(&mut h, 100);
+  let host_dyn: terminal_data::Host = host.clone();
+  let (live, _) = terminal_data::attach(&host_dyn, &pty, 80, 24);
+  let grid = live.emulator.lock().unwrap().size();
+  assert_eq!(
+    resizes(&host)[before..],
+    [(grid.cols as u16, grid.rows as u16)]
+  );
+}
+
 #[gpui::test]
 fn terminal_search_keeps_what_is_typed_out_of_the_pty(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
