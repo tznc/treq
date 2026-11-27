@@ -65,6 +65,45 @@ test.describe('pickDownloads', () => {
   });
 });
 
+// Asset URLs come from the live releases API, which reports the repo's
+// canonical owner rather than an alias, so the owner is not pinned.
+const RELEASE_ASSET = /^https:\/\/github\.com\/[^/]+\/treq\/releases\/download\/v[\d.]+\//;
+
+test.describe('Download page', () => {
+  for (const [ua, name, others] of [
+    ['mac', 'macOS', ['Windows', 'Linux']],
+    ['windows', 'Windows', ['macOS', 'Linux']],
+    ['linux', 'Linux', ['macOS', 'Windows']],
+  ] as const) {
+    test.describe(`on ${name}`, () => {
+      test.use({ userAgent: UA[ua] });
+
+      test(`focuses ${name} and lists the other platforms`, async ({ page }) => {
+        await page.goto('/download/');
+        const focus = page.getByRole('region', { name: `Download for ${name}` });
+        await expect(focus.getByText('Your system')).toBeVisible();
+        await expect(focus.getByRole('link').first()).toHaveAttribute('href', RELEASE_ASSET);
+        const list = page.getByRole('region', { name: 'Other platforms' });
+        for (const other of others) {
+          await expect(list.getByRole('heading', { name: other, level: 3 })).toBeVisible();
+        }
+        await expect(list.getByRole('heading', { name, level: 3 })).toHaveCount(0);
+      });
+    });
+  }
+
+  test.describe('on an iPhone', () => {
+    test.use({ userAgent: UA.iphone });
+
+    test('shows macOS without claiming it is the visitor’s system', async ({ page }) => {
+      await page.goto('/download/');
+      const focus = page.getByRole('region', { name: 'Download for macOS' });
+      await expect(focus.getByRole('link').first()).toHaveAttribute('href', RELEASE_ASSET);
+      await expect(focus.getByText('Your system')).toHaveCount(0);
+    });
+  });
+});
+
 test.describe('Landing page download links on macOS', () => {
   test.use({ userAgent: UA.mac });
 
