@@ -3177,8 +3177,7 @@ impl ChangesView {
       card.status.clone(),
       card.old_path.clone(),
     );
-    let (committed, shut, kind, conflicted_file) =
-      (card.committed, card.shut, card.body, card.conflicted);
+    let (committed, shut, kind) = (card.committed, card.shut, card.body);
     let counts = self.card_counts(c);
     let header = self.file_header(
       &path,
@@ -3186,6 +3185,7 @@ impl ChangesView {
       old_path.as_deref(),
       committed,
       shut,
+      kind != Body::Bare,
       counts,
       p,
       cx,
@@ -3239,19 +3239,17 @@ impl ChangesView {
             .unwrap_or_default(),
         ),
       ),
-      Body::Empty => card.child(div().selector("empty-diff-placeholder").child(
-        if conflicted_file {
+      // Only a conflicted file reaches here: any other without hunks is bare.
+      Body::Empty => card.child(
+        div().selector("empty-diff-placeholder").child(
           ui::EmptyState::new(
             "empty-diff-conflicted",
             "No diff for this conflicted file",
             p,
           )
-          .message("The file may have been deleted on one side of the conflict.")
-        } else {
-          ui::EmptyState::new("empty-diff-none", "No diff hunks", p)
-            .message("This change has no text lines to show, such as a mode change.")
-        },
-      )),
+          .message("The file may have been deleted on one side of the conflict."),
+        ),
+      ),
       Body::Generated => {
         let file = path.clone();
         card.child(
@@ -3298,7 +3296,7 @@ impl ChangesView {
       Body::Hunks => card
         .children(self.unplaced_threads(&path, p, cx))
         .children(self.outdated_comments(&path, p, cx)),
-      Body::Collapsed => card,
+      Body::Collapsed | Body::Bare => card,
     }
     .into_any_element()
   }
@@ -3314,6 +3312,7 @@ impl ChangesView {
     old_path: Option<&str>,
     committed: bool,
     shut: bool,
+    collapsible: bool,
     (additions, deletions): (usize, usize),
     p: &Palette,
     cx: &mut Context<Self>,
@@ -3324,11 +3323,15 @@ impl ChangesView {
     let viewed = self.viewed.contains_key(path);
     let badge = |text: &'static str, tone: Tone| ui::Badge::new(text, p).tone(tone);
     let file = path.to_string();
-    let chevron = if renamed {
+    let chevron = if renamed || !collapsible {
       div().size_3().flex_none().into_any_element()
     } else {
       div()
         .id(SharedString::from(format!("collapse-{path}")))
+        .debug_selector({
+          let id = format!("collapse-{path}");
+          move || id
+        })
         .role(gpui::Role::Button)
         .aria_label(if shut { "Expand file" } else { "Collapse file" })
         .cursor_pointer()

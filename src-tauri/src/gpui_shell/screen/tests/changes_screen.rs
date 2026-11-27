@@ -1712,23 +1712,21 @@ fn a_file_without_hunks_shows_its_header_alone(cx: &mut TestAppContext) {
   host.working = serde_json::from_value(serde_json::json!({
     "committed_files": [],
     "uncommitted_files": [
+      {"path": "a.rs", "status": "M", "previous_path": null, "changed_line_count": 1, "diff_deferred": false},
       {"path": "run.sh", "status": "M", "previous_path": null, "changed_line_count": 0, "diff_deferred": false}
     ],
-    "hunks_by_file": [{"path": "run.sh", "hunks": []}],
+    "hunks_by_file": [
+      {"path": "a.rs", "hunks": [{"id": "h", "header": "@@ -1 +1 @@", "lines": ["-a", "+b"], "patch": ""}]},
+      {"path": "run.sh", "hunks": []}
+    ],
     "too_large_to_render": false
   }))
   .ok();
   let (mut h, _) = workspace_harness(cx, host, changes_route());
+  assert!(h.drawn("collapse-a.rs"));
+  assert!(!h.drawn("collapse-run.sh"));
   let screen = a11y_screen(&mut h);
-  let card = screen.get_by_role(by::role(gpui::Role::Group).name("run.sh"));
-  for name in ["Collapse file", "Expand file"] {
-    assert!(
-      within(&card)
-        .query_by_role(by::role(gpui::Role::Button).name(name))
-        .is_none(),
-      "{name}"
-    );
-  }
+  expect(screen.get_by_role(by::role(gpui::Role::Group).name("run.sh"))).to_be_visible();
   assert!(screen.query_by_text("No diff hunks").is_none());
 }
 
