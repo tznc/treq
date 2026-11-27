@@ -49,7 +49,7 @@ test.describe('Download page', () => {
     test.use({ userAgent: UA.android });
 
     test('focuses Android and labels it a preview', async ({ page }) => {
-      await page.goto('/download/');
+      await openDownloadPage(page);
       const focus = page.getByRole('region', { name: 'Download for Android' });
       await expect(focus.getByText('Your system')).toBeVisible();
       await expect(focus.getByText('Preview', { exact: true })).toBeVisible();
@@ -61,7 +61,7 @@ test.describe('Download page', () => {
     test.use({ userAgent: UA.mac });
 
     test('is labelled a preview', async ({ page }) => {
-      await page.goto('/download/');
+      await openDownloadPage(page);
       const android = page.getByRole('listitem').filter({ has: page.getByRole('heading', { name: 'Android' }) });
       await expect(android.getByText('Preview', { exact: true })).toBeVisible();
       const windows = page.getByRole('listitem').filter({ has: page.getByRole('heading', { name: 'Windows' }) });
