@@ -333,6 +333,10 @@ pub fn build_auto_command(
         .as_deref()
         .ok_or("Claude auto-command requires a settings file path")?;
       command.push_str(&format!(" --settings {}", shell_quote(settings)));
+      if files.claude_skill_path.is_none() {
+        // No workspace copy: let Claude load and read the bundled one.
+        command.push_str(&format!(" --add-dir {}", shell_quote(&files.skill_dir)));
+      }
       command.push_str(&format!(
         " --append-system-prompt-file {}",
         shell_quote(&files.prompt_path)
@@ -789,6 +793,21 @@ mod tests {
       "sys do the thing"
     );
     assert_eq!(cursor_prompt_file_contents("sys", None), "sys");
+  }
+
+  #[test]
+  fn adds_bundled_skill_dir_for_claude_only_without_project_skill() {
+    let fallback = build_auto_command(&opts("claude"), &files()).unwrap();
+    assert!(fallback.contains(" --add-dir '/tmp/treq-agent-1/skills'"));
+    let installed = build_auto_command(
+      &opts("claude"),
+      &AgentCliFiles {
+        claude_skill_path: Some("/ws/.claude/skills/treq".into()),
+        ..files()
+      },
+    )
+    .unwrap();
+    assert!(!installed.contains("--add-dir"));
   }
 
   #[test]
