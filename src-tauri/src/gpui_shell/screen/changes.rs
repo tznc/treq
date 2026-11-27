@@ -1125,6 +1125,18 @@ impl ChangesView {
     cx.notify();
   }
 
+  /// A click outside the file list drops its selection and highlight.
+  fn click_away(&mut self, cx: &mut Context<Self>) {
+    let s = &mut self.staging;
+    if self.active.is_none() && s.selected.is_empty() && s.selected_staged.is_empty() {
+      return;
+    }
+    self.active = None;
+    s.selected.clear();
+    s.selected_staged.clear();
+    cx.notify();
+  }
+
   fn stage(&mut self, path: &str, cx: &mut Context<Self>) {
     self.staging.stage(path);
     cx.notify();
@@ -2205,6 +2217,7 @@ impl ChangesView {
           }
         }),
       )
+      .on_mouse_down_out(cx.listener(|this, _, _, cx| this.click_away(cx)))
       .on_mouse_up_out(
         MouseButton::Left,
         cx.listener(|this, _, _, cx| {
@@ -2902,20 +2915,11 @@ impl ChangesView {
     };
     let red = Tone::Danger.text(p);
     let status_color = p.muted_foreground;
-    let mut actions = div()
-      .flex()
-      .items_center()
-      .gap_1()
-      .flex_none()
-      .child(self.status_letter(
-        format!("{list:?}-{}", file.path),
-        &file.status,
-        status_color,
-        cx,
-      ));
+    // The selection's last row keeps its buttons; the others show them on hover.
+    let shown = selected && (staged || last);
+    let hidden = !shown;
+    let mut actions = div().flex().items_center().gap_1().flex_none();
     if !staged {
-      // The selection's last row keeps its buttons; the others show them on hover.
-      let hidden = !(last && selected);
       let target = path.clone();
       let tip_key = format!("discard-tip-{}", file.path);
       let el = small(
@@ -2955,7 +2959,7 @@ impl ChangesView {
         format!("Unstage {}", file.path),
         theme::ICON_MINUS,
         name_color,
-        !selected,
+        hidden,
       )
       .on_click(cx.listener(move |view, _, _, cx| {
         cx.stop_propagation();
@@ -2964,6 +2968,26 @@ impl ChangesView {
       .test_support();
       actions = actions.child(self.tip(tip_key, "Unstage file", el, cx));
     }
+    // Over the last button, at the committed rows' right edge, and hidden
+    // while the buttons show. Visibility, not display: a hover that changes
+    // layout can skip a child's prepaint and then panic in paint.
+    let letter = div()
+      .absolute()
+      .top_0()
+      .bottom_0()
+      .right_0()
+      .flex()
+      .items_center()
+      .child(self.status_letter(
+        format!("{list:?}-{}", file.path),
+        &file.status,
+        status_color,
+        cx,
+      ));
+    actions = actions.relative().child(match shown {
+      true => letter.invisible(),
+      false => letter.group_hover("file-row", |s| s.invisible()),
+    });
     let (click, menu) = (path.clone(), path);
     ui::Row::new(
       SharedString::from(format!(
@@ -2984,6 +3008,8 @@ impl ChangesView {
     .min_w_0()
     .gap_1()
     .px_0()
+    // The committed rows' right inset.
+    .pr_1p5()
     .rounded_none()
     .border_l_2()
     .border_color(gpui::transparent_black())
