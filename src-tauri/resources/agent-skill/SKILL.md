@@ -1,15 +1,16 @@
 ---
 name: treq
 description: >-
-  Work inside a Treq agent terminal: use the treq CLI to create and inspect
-  workspaces, keep the workspace description current with treq set -d (it
-  becomes the pull request body), send files or text to the user in the Treq
-  UI, notify the user with treq notify, and create commits with treq commit
-  only when the user explicitly asks. Use this skill for every Treq agent
-  session, whenever you need another workspace, change what the workspace
-  does, should show the user a file or preview, finish a task or need the
-  user's input, are asked to record a commit, or are finishing inplace
-  conflict resolution.
+  Work inside a Treq agent terminal: use the treq CLI instead of git to check
+  status and diffs (treq st, treq diff), create and inspect workspaces, keep
+  the workspace description current with treq set -d (it becomes the pull
+  request body), send files or text to the user in the Treq UI, notify the
+  user with treq notify, and create commits with treq commit only when the
+  user explicitly asks. Use this skill for every Treq agent session, whenever
+  you would run git status, git diff or git log, need another workspace,
+  change what the workspace does, should show the user a file or preview,
+  finish a task or need the user's input, are asked to record a commit, or
+  are finishing inplace conflict resolution.
 ---
 
 # Treq

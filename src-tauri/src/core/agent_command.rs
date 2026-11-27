@@ -70,6 +70,8 @@ pub fn system_prompt(paths: &AgentPaths<'_>) -> String {
       format!("Your current working directory and direct filesystem scope is {workspace}."),
       format!("The Treq home repository is {}.", paths.repo_path),
       "The home repository and sibling workspaces are outside your direct filesystem scope.".into(),
+      "This workspace has no `.git` folder, so `git` here reads and writes the home repository: never run `git`.".into(),
+      "Use `treq st` for status, `treq diff` for the diff (`treq diff --stat` for a summary), and `jj log`, `jj show` and `jj file annotate` for history.".into(),
     ],
     None => vec![
       "You are operating in the Treq home repository.".into(),
@@ -83,8 +85,8 @@ pub fn system_prompt(paths: &AgentPaths<'_>) -> String {
     [
       "You may freely read and write files within this directory and its descendants.",
       "Do not directly read, write, edit, or delete files outside this directory.",
-      "A Treq skill named treq is loaded automatically for this session.",
-      "Follow it for the treq CLI, workspaces, sending files to the user, and commits.",
+      "A Treq skill named treq is available in this session.",
+      "Invoke it before you use the treq CLI, check status or diffs, create workspaces, send files to the user, or commit.",
       "You may run treq CLI commands even when they create or manage workspaces outside the current working directory.",
     ]
     .map(String::from),
@@ -516,9 +518,25 @@ mod tests {
       "Your current working directory and direct filesystem scope is /repos/treq/.treq/workspaces/fix-parser."
     ));
     assert!(prompt.contains("The Treq home repository is /repos/treq."));
-    assert!(prompt.contains("A Treq skill named treq is loaded automatically for this session."));
+    assert!(prompt.contains("Invoke it before you use the treq CLI, check status or diffs"));
     assert!(!prompt.contains('\n'));
     assert!(!prompt.contains("Supporting repositories"));
+  }
+
+  /// A jj workspace has no `.git`, so `git` there reads the home repo.
+  #[test]
+  fn workspace_prompt_forbids_git_and_names_the_treq_commands() {
+    let prompt = system_prompt(&AgentPaths {
+      workspace_path: Some("/repos/treq/.treq/workspaces/fix-parser"),
+      repo_path: "/repos/treq",
+      supporting_repo_paths: NONE,
+      project: None,
+      app_instructions: None,
+      repo_instructions: None,
+    });
+    assert!(prompt.contains("never run `git`"), "{prompt}");
+    assert!(prompt.contains("`treq st`"), "{prompt}");
+    assert!(prompt.contains("`treq diff`"), "{prompt}");
   }
 
   #[test]
@@ -534,6 +552,8 @@ mod tests {
     });
     assert!(prompt.contains("You are operating in the Treq home repository."));
     assert!(!prompt.contains("sibling workspaces"));
+    // The home repository is a real Git checkout.
+    assert!(!prompt.contains("never run `git`"));
     assert!(prompt.contains("Supporting repositories: /repos/api, /repos/web."));
     assert!(prompt.contains("treq agent start -r <repo> <branch> \"<prompt>\""));
   }
