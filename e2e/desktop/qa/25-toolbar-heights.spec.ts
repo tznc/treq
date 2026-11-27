@@ -15,7 +15,7 @@ test.describe.configure({ mode: "serial" });
 async function headerClip(page: Page) {
   const box = await page.getByRole("button", { name: "More workspace actions" }).boundingBox();
   if (!box) throw new Error("no more button");
-  return { x: box.x + box.width - 520, y: box.y - 12, width: 532, height: box.height + 24 };
+  return { x: box.x + box.width - 620, y: box.y - 12, width: 632, height: box.height + 24 };
 }
 
 test("toolbar: header controls share one height", async ({ page }) => {
@@ -30,7 +30,7 @@ test("toolbar: header controls share one height", async ({ page }) => {
     title: "Workspace header controls",
     clip: await headerClip(page),
     expectations: [
-      "Checks, the PR pill, sync, Merge and the menu share one height and vertical centre",
+      "Sync sits left of Checks; sync, Checks, the PR pill, Merge and the menu share one height and vertical centre",
       "The sync button shows only its icon, with no amber pip: the branch is not on the remote",
     ],
   });
@@ -97,7 +97,7 @@ test("toolbar: header with the sync button", async ({ page }) => {
     title: "Workspace header with Sync",
     clip: await headerClip(page),
     expectations: [
-      "The PR pill, the ahead count with the sync icon, Merge and the menu share one height and vertical centre",
+      "Sync sits left of Checks, its icon before the ahead count; the controls share one height and vertical centre",
       "A solid amber pip sits on the sync button's top-right corner, ringed in the background, not clipped",
     ],
   });
@@ -121,7 +121,7 @@ test("toolbar: sync on a branch that matches its remote", async ({ page }) => {
     title: "Workspace header with Sync up to date",
     clip: await headerClip(page),
     expectations: [
-      "The sync button shows only its icon, with no count and no amber pip",
+      "The sync button, left of Checks, shows only its icon, with no count and no amber pip",
       "Sync shares one height and vertical centre with its neighbours",
     ],
   });

@@ -1407,6 +1407,9 @@ impl WorkspaceView {
           .on_click(move |_, _, cx| sink(ScreenAction::OpenUrl { url: url.clone() }, cx)),
       );
     }
+    if let Some(sync) = &h.sync {
+      right = right.child(self.sync(sync, p, cx));
+    }
     if let Some(checks) = &h.checks {
       right = right.child(
         div()
@@ -1421,9 +1424,6 @@ impl WorkspaceView {
     }
     if let Some(create) = &h.create_pr {
       right = right.child(self.create_pr(create, p, cx));
-    }
-    if let Some(sync) = &h.sync {
-      right = right.child(self.sync(sync, p, cx));
     }
     let merged = h
       .view_pr
@@ -1616,8 +1616,6 @@ impl WorkspaceView {
       .px_2()
       .text_color(p.muted_foreground)
       .disabled(sync.disabled)
-      .when(sync.behind > 0, |b| b.child(format!("↓{}", sync.behind)))
-      .when(sync.ahead > 0, |b| b.child(format!("↑{}", sync.ahead)))
       .map(|b| {
         let icon = ui::icon(theme::ICON_REFRESH, 16., p.muted_foreground);
         if sync.spinning {
@@ -1626,6 +1624,8 @@ impl WorkspaceView {
           b.child(icon)
         }
       })
+      .when(sync.behind > 0, |b| b.child(format!("↓{}", sync.behind)))
+      .when(sync.ahead > 0, |b| b.child(format!("↑{}", sync.ahead)))
       .on_click(self.press("workspace.sync"));
     self
       .with_tooltip(
