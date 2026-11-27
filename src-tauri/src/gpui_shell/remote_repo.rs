@@ -876,6 +876,21 @@ impl Remote {
     })
   }
 
+  /// `path`'s text at `version`, `None` once the host's store dropped it.
+  pub fn file_version(
+    &self,
+    workspace_id: Option<i64>,
+    path: &str,
+    version: &str,
+  ) -> Result<Option<String>, String> {
+    self.read(TreqCommandRequest::ReadFileVersion {
+      repo: self.repo_arg(),
+      workspace: workspace_arg(workspace_id),
+      path: path.to_string(),
+      version: version.to_string(),
+    })
+  }
+
   pub fn commit_diff(
     &self,
     workspace_id: Option<i64>,
@@ -1441,6 +1456,25 @@ pub(crate) mod tests {
     let (remote, transport) = remote();
     *transport.latency.lock().unwrap() = latency;
     (remote, transport)
+  }
+
+  #[test]
+  fn a_file_version_is_read_from_the_host() {
+    let (remote, transport) = remote();
+    transport.answer("ReadFileVersion", serde_json::json!("a\nb\n"));
+    assert_eq!(
+      remote.file_version(Some(1), "a.rs", "fv1"),
+      Ok(Some("a\nb\n".into()))
+    );
+    // Gone from the host's store.
+    transport.answer("ReadFileVersion", serde_json::Value::Null);
+    assert_eq!(remote.file_version(Some(1), "a.rs", "fv1"), Ok(None));
+    // An older host cannot say: not the same as gone.
+    transport.answers.lock().unwrap().insert(
+      "ReadFileVersion",
+      Err("invalid_arguments: unknown file action 'read-version'".into()),
+    );
+    assert!(remote.file_version(Some(1), "a.rs", "fv1").is_err());
   }
 
   #[test]

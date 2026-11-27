@@ -260,10 +260,10 @@ impl ChangesHost for Backend {
     path: &str,
     version: &str,
   ) -> Result<Option<String>, String> {
-    if self.remote_containing(repo_path).is_some() {
-      return Err("Remote hosts do not read file versions yet".into());
+    match self.remote_containing(repo_path) {
+      Some(remote) => remote.file_version(workspace_id, path, version),
+      None => core::changes::read_file_version(repo_path, workspace_id, path, version),
     }
-    core::changes::read_file_version(repo_path, workspace_id, path, version)
   }
 
   fn generated_files(&self, repo_path: &str, workspace_id: Option<i64>) -> GeneratedFiles {

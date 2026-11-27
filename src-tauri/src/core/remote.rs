@@ -181,6 +181,14 @@ pub enum TreqCommandRequest {
     start_line: Option<usize>,
     end_line: Option<usize>,
   },
+  /// A file's whole text at a version a review comment kept
+  /// (`review::side_version`); `null` once the host's store dropped it.
+  ReadFileVersion {
+    repo: String,
+    workspace: Option<String>,
+    path: String,
+    version: String,
+  },
   ListCommits {
     repo: String,
     workspace: Option<String>,
@@ -747,6 +755,7 @@ impl TreqCommandRequest {
       | Self::DiffFile { .. }
       | Self::DiffFiles { .. }
       | Self::ReadFile { .. }
+      | Self::ReadFileVersion { .. }
       | Self::ListCommits { .. }
       | Self::ListConflicts { .. }
       | Self::WorkspaceDiff { .. }
@@ -857,6 +866,7 @@ impl TreqCommandRequest {
       | Self::DiffFile { .. }
       | Self::DiffFiles { .. }
       | Self::ReadFile { .. }
+      | Self::ReadFileVersion { .. }
       | Self::ListCommits { .. }
       | Self::ListConflicts { .. }
       | Self::WorkspaceDiff { .. }
@@ -918,6 +928,7 @@ impl TreqCommandRequest {
       Self::DiffFile { .. } => "DiffFile",
       Self::DiffFiles { .. } => "DiffFiles",
       Self::ReadFile { .. } => "ReadFile",
+      Self::ReadFileVersion { .. } => "ReadFileVersion",
       Self::ListCommits { .. } => "ListCommits",
       Self::ListConflicts { .. } => "ListConflicts",
       Self::WorkspaceDiff { .. } => "WorkspaceDiff",
@@ -1002,6 +1013,7 @@ impl TreqCommandRequest {
     "DiffFile",
     "DiffFiles",
     "ReadFile",
+    "ReadFileVersion",
     "ListCommits",
     "ListConflicts",
     "WorkspaceChangeMarker",
@@ -1381,6 +1393,17 @@ impl TreqCommandRequest {
         fields.workspace = workspace.as_deref();
         fields.path = Some(path);
         ("file", "read", repo)
+      }
+      Self::ReadFileVersion {
+        repo,
+        workspace,
+        path,
+        version,
+      } => {
+        fields.workspace = workspace.as_deref();
+        fields.path = Some(path);
+        fields.value = Some(version.clone());
+        ("file", "read-version", repo)
       }
       Self::RestoreFile {
         repo,
@@ -3605,7 +3628,7 @@ mod tests {
     let value = serde_json::to_value(&sample).unwrap();
     assert_eq!(value["kind"], "GitFetch");
     assert!(TreqCommandRequest::KIND_NAMES.contains(&sample.kind_name()));
-    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 78);
+    assert_eq!(TreqCommandRequest::KIND_NAMES.len(), 79);
   }
 
   #[test]

@@ -414,6 +414,17 @@ fn execute(request: &TreqCommandRequest) -> Result<serde_json::Value, String> {
         end_line.unwrap_or(start_line.saturating_add(299)),
       ))
     }
+    TreqCommandRequest::ReadFileVersion {
+      repo,
+      workspace,
+      path,
+      version,
+    } => json(crate::core::changes::read_file_version(
+      repo,
+      workspace_id(workspace.as_ref())?,
+      path,
+      version,
+    )),
     TreqCommandRequest::ListCommits { repo, workspace } => {
       json(crate::core::commits::list_commits(
         repo,

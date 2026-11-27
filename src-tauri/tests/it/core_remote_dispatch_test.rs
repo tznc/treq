@@ -329,6 +329,38 @@ fn probe_init_inspect_and_clone_through_typed_commands() {
 }
 
 #[test]
+fn read_file_version_reads_a_file_at_a_kept_version() {
+  let repo = TestRepo::new().unwrap();
+  let (ws, path) = workspace_with_file(&repo, "feat/read-version", "a.txt");
+  let diff = dispatch(TreqCommandRequest::WorkspaceDiff {
+    repo: repo.repo_path.clone(),
+    workspace: ws.id.to_string(),
+  });
+  let content_id = diff["uncommitted_files"][0]["content_id"]
+    .as_str()
+    .unwrap()
+    .to_string();
+  let version =
+    treq_lib::core::review::side_version(&content_id, treq_lib::core::review::Side::New)
+      .unwrap()
+      .to_string();
+  TestRepo::write_workspace_file(&path, "a.txt", "edited\n").unwrap();
+  let read = |version: &str| {
+    dispatch(TreqCommandRequest::ReadFileVersion {
+      repo: repo.repo_path.clone(),
+      workspace: Some(ws.id.to_string()),
+      path: "a.txt".into(),
+      version: version.into(),
+    })
+  };
+  assert_eq!(read(&version), Value::String("a.txt\n".into()));
+  assert_eq!(
+    read("f0123456789abcdef0123456789abcdef01234567"),
+    Value::Null
+  );
+}
+
+#[test]
 fn diff_files_reads_the_workspace_diffs_trees() {
   let repo = TestRepo::new().unwrap();
   let (ws, path) = workspace_with_file(&repo, "feat/diff-files", "a.txt");
