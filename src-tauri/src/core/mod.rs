@@ -42,6 +42,7 @@ pub mod palette_commands;
 pub mod pr_link;
 pub mod pr_stacks;
 pub mod pr_sync;
+pub mod stack_order;
 pub mod pr_view;
 pub mod prerequisites;
 pub mod project_sync;
