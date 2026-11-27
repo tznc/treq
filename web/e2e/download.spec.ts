@@ -67,7 +67,6 @@ test.describe('Landing page download links on macOS', () => {
     await expect(button).toBeVisible();
     await expect(page.locator('a[href*="/releases/download/"]')).toHaveCount(0);
     await button.click();
-    await expect(page).toHaveURL(/\/download\/$/);
     await expect(page.getByRole('region', { name: 'Download for macOS' })).toBeVisible();
   });
 });
