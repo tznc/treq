@@ -773,11 +773,16 @@ impl ChangesView {
               .child(format!("{}:{range}", comment.file_path)),
           ),
       )
-      .child(
+      .child({
+        let id = SharedString::from(format!("agent-review-comment-text-{}", comment.id));
         div()
+          .selector(id.clone())
           .whitespace_normal()
-          .child(comment.comment_text.clone()),
-      );
+          .child(gpui_kit::base::SelectableText::new(
+            id,
+            comment.comment_text.clone(),
+          ))
+      });
     if let Some(suggested) = &comment.suggested_replacement {
       card = card.child(suggestion_box(original.as_deref(), suggested, p));
     }

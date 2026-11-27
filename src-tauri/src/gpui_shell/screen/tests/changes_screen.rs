@@ -1431,6 +1431,32 @@ fn changes_tab_resolves_an_agent_comment(cx: &mut TestAppContext) {
   assert!(!h.shows(gpui::Role::Group, "Agent comment on a.rs line 2"));
 }
 
+/// A local review comment's text selects with a drag.
+#[gpui::test]
+fn changes_tab_selects_the_text_of_a_local_review_comment(cx: &mut TestAppContext) {
+  let host = changes_host();
+  *host.agent.lock().unwrap() = vec![agent_comment(None)];
+  let (mut h, _) = workspace_harness(cx, host, changes_route());
+  h.cx.run_until_parked();
+  let text = h
+    .cx
+    .debug_bounds("agent-review-comment-text-ag")
+    .expect("text");
+  let (from, to) = (
+    gpui::point(text.left() + gpui::px(1.), text.center().y),
+    gpui::point(text.right() - gpui::px(1.), text.center().y),
+  );
+  h.cx
+    .simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
+  h.cx
+    .simulate_mouse_move(to, Some(MouseButton::Left), Modifiers::none());
+  h.cx
+    .simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
+  h.cx.run_until_parked();
+  let selected = h.cx.update(gpui_kit::base::TextSelection::selected_text);
+  assert_eq!(selected.trim(), "Use one line");
+}
+
 #[gpui::test]
 fn changes_tab_marks_a_sent_review_comment_and_folds_it_once_resolved(cx: &mut TestAppContext) {
   use gpui::Role;
