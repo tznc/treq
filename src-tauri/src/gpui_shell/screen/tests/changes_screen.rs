@@ -222,6 +222,49 @@ fn changes_tab_hides_the_committed_group_when_filtered_out(cx: &mut TestAppConte
   assert!(!h.shows(gpui::Role::Group, "c.rs"));
 }
 
+/// `a.rs` is committed and dirty: its branch diff's first hunk is
+/// committed, its second the working copy's.
+fn changes_host_partly_committed() -> FakeHost {
+  let mut host = changes_host();
+  let hunk = |header: &str, lines: &[&str]| serde_json::json!({"id": "h", "header": header, "lines": lines, "patch": ""});
+  let dirty = hunk("@@ -40,3 +41,4 @@", &[" e", "+f", " g", " h"]);
+  host.working = serde_json::from_value(serde_json::json!({
+    "committed_files": [],
+    "uncommitted_files": [
+      {"path": "a.rs", "status": "M", "previous_path": null, "changed_line_count": 2, "diff_deferred": false}
+    ],
+    "hunks_by_file": [
+      {"path": "a.rs", "hunks": [hunk("@@ -8,3 +8,4 @@", &[" a", "+b", " c", " d"]), dirty]}
+    ],
+    "too_large_to_render": false
+  }))
+  .ok();
+  let dirty = hunk("@@ -41,3 +41,4 @@", &[" e", "+f", " g", " h"]);
+  host.working_hunks = serde_json::from_value(serde_json::json!([
+    {"path": "a.rs", "hunks": [dirty]}
+  ]))
+  .expect("working-copy hunks");
+  host
+}
+
+/// Whether hunk `h` of `path` is labelled committed.
+fn labels_committed(h: &mut Harness, path: &str, hunk: usize) -> bool {
+  h.cx.run_until_parked();
+  h.cx
+    .debug_bounds(super::changes_large::leak(format!(
+      "committed-hunk-{path}-{hunk}"
+    )))
+    .is_some()
+}
+
+#[gpui::test]
+fn changes_tab_labels_the_hunks_already_committed(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host_partly_committed(), committed_route(true));
+  assert!(h.shows(gpui::Role::Group, "a.rs"));
+  assert!(labels_committed(&mut h, "a.rs", 0));
+  assert!(!labels_committed(&mut h, "a.rs", 1));
+}
+
 fn changes_host_committed_only() -> FakeHost {
   let mut host = changes_host();
   host.working = serde_json::from_value(serde_json::json!({

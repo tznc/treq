@@ -890,6 +890,50 @@ pub fn line_counts(hunks: &[JjDiffHunk]) -> (usize, usize) {
     })
 }
 
+/// The hunks of a file's branch diff (fork point to working copy) that
+/// hold no change of its working-copy diff (`working`): already committed.
+/// Both diffs number the working copy's lines alike, so a hunk is matched
+/// by the lines it spans there, context included: a diff may place a
+/// change anywhere among identical lines.
+pub fn committed_hunks(branch: &[JjDiffHunk], working: &[JjDiffHunk]) -> HashSet<usize> {
+  let dirty: Vec<u32> = working.iter().flat_map(changed_lines).collect();
+  branch
+    .iter()
+    .enumerate()
+    .filter(|(_, hunk)| {
+      let (_, start) = core::review::hunk_starts(&hunk.header);
+      let len = hunk
+        .lines
+        .iter()
+        .filter(|l| !l.starts_with(['-', '\\']))
+        .count() as u32;
+      !dirty.iter().any(|n| (start..=start + len).contains(n))
+    })
+    .map(|(h, _)| h)
+    .collect()
+}
+
+/// Where a hunk's changes land in the working copy: an added line's number,
+/// and a removed line's as the number of the line it was removed before.
+fn changed_lines(hunk: &JjDiffHunk) -> impl Iterator<Item = u32> + '_ {
+  let (_, mut new) = core::review::hunk_starts(&hunk.header);
+  hunk
+    .lines
+    .iter()
+    .filter_map(move |line| match line.as_bytes().first() {
+      Some(b'+') => {
+        new += 1;
+        Some(new - 1)
+      }
+      Some(b'-') => Some(new),
+      Some(b'\\') => None,
+      _ => {
+        new += 1;
+        None
+      }
+    })
+}
+
 /// A file's diff as read.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct FileHunks {
@@ -1266,6 +1310,30 @@ mod tests {
 
   fn set(paths: &[&str]) -> HashSet<String> {
     paths.iter().map(|p| p.to_string()).collect()
+  }
+
+  /// A branch hunk whose span holds no working-copy change is committed;
+  /// one that holds an added or a removed working-copy line is not.
+  #[test]
+  fn committed_hunks_are_those_the_working_copy_does_not_touch() {
+    let branch = [
+      hunk("@@ -8,3 +8,6 @@", &[" a", "+b", "+c", "+d", " e", " f"]),
+      hunk("@@ -40,3 +43,4 @@", &[" g", "+h", " i", " j"]),
+      hunk("@@ -90,4 +94,3 @@", &[" k", "-l", " m", " n"]),
+    ];
+    let working = [
+      hunk("@@ -43,2 +43,3 @@", &[" g", "+h", " i"]),
+      hunk("@@ -94,3 +94,2 @@", &[" k", "-l", " m"]),
+    ];
+    assert_eq!(committed_hunks(&branch, &working), HashSet::from([0]));
+  }
+
+  /// With nothing changed in the working copy, every branch hunk is committed.
+  #[test]
+  fn committed_hunks_are_all_of_them_without_a_working_copy_change() {
+    let branch = [hunk("@@ -1 +1 @@", &["-a", "+b"])];
+    assert_eq!(committed_hunks(&branch, &[]), HashSet::from([0]));
+    assert!(committed_hunks(&[], &branch).is_empty());
   }
 
   #[test]

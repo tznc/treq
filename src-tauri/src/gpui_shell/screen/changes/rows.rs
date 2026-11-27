@@ -29,8 +29,8 @@ use crate::{
   gpui_shell::{
     screen::{
       changes_data::{
-        body, conflict_lines, conflicts, context_row_numbers, is_collapsed, line_counts, Body,
-        BodyInput, Conflict, FileHunks,
+        body, committed_hunks, conflict_lines, conflicts, context_row_numbers, is_collapsed,
+        line_counts, Body, BodyInput, Conflict, FileHunks,
       },
       changes_review::FILE_HUNK,
       commits_data::{line_number, line_numbers},
@@ -51,6 +51,8 @@ pub(super) struct Card {
   pub(super) conflicted: bool,
   pub(super) body: Body,
   pub(super) shut: bool,
+  /// Hunks of a branch diff already committed, by index.
+  settled: HashSet<usize>,
   regions: Vec<Conflict>,
   prepared: Option<Rc<Prepared>>,
 }
@@ -198,6 +200,20 @@ impl ChangesView {
     self.hunks.get(path).or(branch)
   }
 
+  /// The hunks of a card shown as its branch diff that are already
+  /// committed; none until its working copy's diff is read.
+  fn settled_hunks(&self, path: &str) -> HashSet<usize> {
+    let Some(snapshot) = self.snapshot.as_ref().filter(|s| s.shows_branch_diff(path)) else {
+      return HashSet::new();
+    };
+    match (snapshot.committed_hunks.get(path), self.hunks.get(path)) {
+      (Some(branch), Some(working)) if !working.loading && working.error.is_none() => {
+        committed_hunks(&branch.hunks, &working.hunks)
+      }
+      _ => HashSet::new(),
+    }
+  }
+
   fn layout_key(&self) -> Key {
     let review = &self.review;
     Key {
@@ -279,6 +295,7 @@ impl ChangesView {
       rows.push(Row::Head(c, kind));
       let mut card = Card {
         conflicted: conflicted.contains(&path),
+        settled: self.settled_hunks(&path),
         path,
         status,
         old_path,
@@ -337,7 +354,8 @@ impl ChangesView {
           || h
             .checked_sub(1)
             .is_some_and(|prev| read(prev, Dir::After) > 0));
-      if !joined {
+      // A committed hunk keeps its header for the label.
+      if !joined || card.settled.contains(&h) {
         rows.push(Row::HunkHeader(c, h, above.is_some()));
       }
       rows.extend((0..before).map(|i| Row::Context(c, h, Dir::Before, i)));
@@ -594,6 +612,15 @@ impl ChangesView {
                   .flex_none()
                   .text_color(muted)
                   .child("Show more lines above"),
+              )
+            })
+            .when(card.settled.contains(&h), |this| {
+              this.child(
+                div()
+                  .selector(SharedString::from(format!("committed-hunk-{path}-{h}")))
+                  .ml_2()
+                  .flex_none()
+                  .child(ui::Badge::new("Committed", p)),
               )
             })
             // Between hunks the row above offers it, for the same gap.
