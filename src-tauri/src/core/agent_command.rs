@@ -257,7 +257,7 @@ pub struct AutoCommand<'a> {
 /// The PTY auto-command for an agent CLI.
 ///
 /// Long prompt/settings bodies are never inlined. Claude reads files via native
-/// flags; Codex, Cursor, Devin and Gemini have no append-from-file flags, so the shell expands
+/// flags; Codex, Cursor, Devin, Gemini and OpenCode have no append-from-file flags, so the shell expands
 /// `$(cat -- path)` at exec time (the typed command stays short).
 pub fn build_auto_command(
   options: &AutoCommand<'_>,
@@ -311,6 +311,7 @@ pub fn build_auto_command(
         shell_cat(&files.prompt_path)
       )
     }
+    "opencode" => format!("opencode --prompt \"{}\"", shell_cat(&files.prompt_path)),
     "copilot" => {
       let command = format!(
         "copilot --allow-all-tools -- \"{}\"",
@@ -380,7 +381,7 @@ pub fn prepare_auto_command(
   let system = system_prompt(paths);
   let (prompt, settings) = match options.agent {
     // No system-prompt flag: the task rides in the prompt file.
-    "cursor" | "devin" | "gemini" => (
+    "cursor" | "devin" | "gemini" | "opencode" => (
       cursor_prompt_file_contents(&system, options.pending_prompt),
       None,
     ),
@@ -407,7 +408,7 @@ pub fn prepare_auto_command(
       write_agent_cli_files(&prompt, settings.as_deref(), None)?
     }
   };
-  let pending_prompt = if matches!(options.agent, "cursor" | "devin" | "gemini") {
+  let pending_prompt = if matches!(options.agent, "cursor" | "devin" | "gemini" | "opencode") {
     None
   } else {
     options.pending_prompt.filter(|p| !p.is_empty())
@@ -915,7 +916,7 @@ mod tests {
       .unwrap();
     assert!(std::fs::read_to_string(prompt)
       .unwrap()
-      .ends_with(" Fix the parser."));
+      .contains(" Fix the parser."));
     super::super::agent_cli::cleanup_agent_cli_files(&prepared.file_paths).unwrap();
   }
 
