@@ -612,8 +612,7 @@ fn action_sink(app: AppHandle, label: String) -> sidebar::ActionSink {
         .map(|sidebar| sidebar.read(cx).snapshot().clone());
       let shown = snapshot
         .is_some_and(|snapshot| sidebar_actions::handle(&app, &label, &snapshot, &action, cx));
-      // No menu opened (an empty project has none), so the project button
-      // must not stay open.
+      // No menu opened (an empty project has none): close the project button.
       if !shown {
         if let Some(sidebar) = window_sidebar(cx, &label) {
           sidebar.update(cx, |sidebar, cx| {
@@ -751,8 +750,7 @@ pub fn show_menu(app: &AppHandle, label: &str, entries: Vec<MenuEntry>) {
     });
     if let Ok(Some((at, dark, generation))) = anchor {
       popup::show_menu(app, &label, entries, at, dark);
-      // Tell the sidebar when the menu closes, so the project button's
-      // chevron turns back.
+      // Tell the sidebar when the menu closes, to turn its chevron back.
       let app = app.clone();
       popup::on_menu_closed(move || {
         defer_main(&app, move |_| {

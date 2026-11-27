@@ -1306,8 +1306,7 @@ impl Sidebar {
     let sink = self.sink.clone();
     let this = cx.entity().downgrade();
     let (open, generation) = (self.project_menu_open, self.menu_generation);
-    // Half a turn while the menu is open, turning over as it opens or
-    // closes; still before it first opens.
+    // Half a turn while the menu is open; still until it first opens.
     let to = if open { 0.5 } else { 0. };
     let from = if generation == 0 { to } else { 0.5 - to };
     div()
@@ -1394,8 +1393,7 @@ impl Sidebar {
             }
           }),
       )
-      // The button's outer edge, border included, so its menu opens under
-      // it at its width.
+      // The button's outer edge, so its menu opens under it at its width.
       .child(
         gpui::canvas(move |b, _, _| bounds.set(b), |_, _, _, _| {})
           .absolute()
