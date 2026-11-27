@@ -4,9 +4,9 @@
 //! (`RemoteCapabilityNotice`) and, while access is cut off, the overlay
 //! that dims the window (`remote-cutoff-overlay`).
 
-use gpui_kit::base::TestSupportExt as _;
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{self, div, prelude::*, App, ClickEvent, Window};
+use treq_ui::SelectorExt as _;
 
 use crate::gpui_shell::{
   theme::Palette,
@@ -79,14 +79,12 @@ fn link(
   press: &Press,
 ) -> impl IntoElement {
   div()
-    .id(id)
-    .debug_selector(move || id.into())
+    .selector(id)
     .role(gpui::Role::Button)
     .aria_label(label)
     .underline()
     .child(label)
     .when(enabled, |d| d.cursor_pointer().on_click(press(action)))
-    .test_support()
 }
 
 /// The strip above the workspace view: the name and its links, the banner
@@ -126,11 +124,9 @@ pub fn strip(chrome: &RemoteChrome, _dark: bool, p: &Palette, press: &Press) -> 
   let banner = copy(&chrome.state).map(|(label, t)| {
     let (bg, fg, border) = (t.tint(p), t.text(p), t.border(p));
     ui::text(div(), TextSize::Sm)
-      .id("remote-status-banner")
-      .debug_selector(|| "remote-status-banner".into())
+      .selector("remote-status-banner")
       .role(tauri_plugin_gpui::gpui::Role::Status)
       .aria_label(label)
-      .test_support()
       .flex()
       .items_center()
       .justify_between()
@@ -171,11 +167,9 @@ pub fn strip(chrome: &RemoteChrome, _dark: bool, p: &Palette, press: &Press) -> 
   });
   let notice = (!chrome.notices.is_empty()).then(|| {
     ui::text(div(), TextSize::Sm)
-      .id("remote-capability-notice")
-      .debug_selector(|| "remote-capability-notice".into())
+      .selector("remote-capability-notice")
       .role(tauri_plugin_gpui::gpui::Role::Status)
       .aria_label(chrome.notices.join(" "))
-      .test_support()
       .border_b_1()
       .border_color(p.border)
       .px_4()
@@ -184,11 +178,9 @@ pub fn strip(chrome: &RemoteChrome, _dark: bool, p: &Palette, press: &Press) -> 
       .children(chrome.notices.iter().map(|n| div().child(n.clone())))
   });
   div()
-    .id("remote-strip")
-    .debug_selector(|| "remote-strip".into())
+    .selector("remote-strip")
     .role(tauri_plugin_gpui::gpui::Role::Group)
     .aria_label(format!("Remote repository {}", chrome.display_name))
-    .test_support()
     .flex_none()
     .border_b_1()
     .border_color(p.border)
@@ -201,11 +193,9 @@ pub fn strip(chrome: &RemoteChrome, _dark: bool, p: &Palette, press: &Press) -> 
 /// `remote-cutoff-overlay`: dims and blocks what it covers.
 pub fn cutoff_overlay(p: &Palette) -> impl IntoElement {
   div()
-    .id("remote-cutoff-overlay")
-    .debug_selector(|| "remote-cutoff-overlay".into())
+    .selector("remote-cutoff-overlay")
     .role(tauri_plugin_gpui::gpui::Role::Group)
     .aria_label("Access blocked")
-    .test_support()
     .absolute()
     .inset_0()
     .bg(p.background.opacity(0.4))
