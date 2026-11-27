@@ -150,46 +150,97 @@ pub enum MergeMethod {
   Rebase,
 }
 
+/// The `gh stack` extension's repository.
+const EXTENSION: &str = "github/gh-stack";
+
+/// Runs `gh args` in `dir` (when given); its output.
+fn run(
+  gh_path: &str,
+  dir: Option<&str>,
+  args: &[&str],
+  extended_path: &str,
+) -> Result<Vec<u8>, String> {
+  let mut cmd = std::process::Command::new(gh_path);
+  cmd.args(args).env("PATH", extended_path);
+  if let Some(dir) = dir {
+    cmd.current_dir(dir);
+  }
+  check_gh_output(spawn_with_etxtbsy_retry(cmd)?)
+}
+
 /// Whether the `gh stack` extension is installed.
-pub fn gh_stack_installed_impl(_gh_path: &str, _extended_path: &str) -> Result<bool, String> {
-  Err("unimplemented".into())
+pub fn gh_stack_installed_impl(gh_path: &str, extended_path: &str) -> Result<bool, String> {
+  let out = run(gh_path, None, &["extension", "list"], extended_path)?;
+  Ok(
+    String::from_utf8_lossy(&out)
+      .lines()
+      .any(|line| line.split_whitespace().any(|field| field == EXTENSION)),
+  )
 }
 
 /// Installs the `gh stack` extension.
-pub fn gh_stack_install_impl(_gh_path: &str, _extended_path: &str) -> Result<(), String> {
-  Err("unimplemented".into())
+pub fn gh_stack_install_impl(gh_path: &str, extended_path: &str) -> Result<(), String> {
+  run(
+    gh_path,
+    None,
+    &["extension", "install", EXTENSION],
+    extended_path,
+  )
+  .map(drop)
 }
 
 /// Puts pull requests `prs`, bottom first, in one stack on GitHub. Adds to
 /// a stack they are already in; never takes one out.
 pub fn gh_stack_link_impl(
-  _gh_path: &str,
-  _repo_path: &str,
-  _prs: &[u64],
-  _extended_path: &str,
+  gh_path: &str,
+  repo_path: &str,
+  prs: &[u64],
+  extended_path: &str,
 ) -> Result<(), String> {
-  Err("unimplemented".into())
+  let numbers: Vec<String> = prs.iter().map(u64::to_string).collect();
+  let mut args = vec!["stack", "link"];
+  args.extend(numbers.iter().map(String::as_str));
+  run(gh_path, Some(repo_path), &args, extended_path).map(drop)
 }
 
 /// Takes the open pull requests of stack `number` out of it on GitHub.
 pub fn gh_stack_unstack_impl(
-  _gh_path: &str,
-  _repo_path: &str,
-  _number: u64,
-  _extended_path: &str,
+  gh_path: &str,
+  repo_path: &str,
+  number: u64,
+  extended_path: &str,
 ) -> Result<(), String> {
-  Err("unimplemented".into())
+  let number = number.to_string();
+  run(
+    gh_path,
+    Some(repo_path),
+    &["stack", "unstack", &number],
+    extended_path,
+  )
+  .map(drop)
 }
 
 /// Merges all of stack `number` at once, without asking.
 pub fn gh_stack_merge_impl(
-  _gh_path: &str,
-  _repo_path: &str,
-  _number: u64,
-  _method: MergeMethod,
-  _extended_path: &str,
+  gh_path: &str,
+  repo_path: &str,
+  number: u64,
+  method: MergeMethod,
+  extended_path: &str,
 ) -> Result<(), String> {
-  Err("unimplemented".into())
+  let number = number.to_string();
+  let method = match method {
+    MergeMethod::Merge => "merge",
+    MergeMethod::Squash => "squash",
+    MergeMethod::Rebase => "rebase",
+  };
+  run(
+    gh_path,
+    Some(repo_path),
+    &["stack", "merge", &number, "--merge-method", method, "--yes"],
+    extended_path,
+  )
+  .map(drop)
 }
 
 /// Each pull request's stack, kept for a while: the stack card asks again
