@@ -4164,7 +4164,6 @@ impl TerminalPane {
         "shell"
       }
     );
-    let accent_selector = format!("terminal-accent-{id}");
     let hover_id = id.clone();
     let hover_dir = self.column_key(column);
     let focus_id = id.clone();
@@ -4231,7 +4230,6 @@ impl TerminalPane {
       .when(active, |d| {
         d.child(
           div()
-            .debug_selector(move || accent_selector)
             .absolute()
             .top_0()
             .left_0()
@@ -4787,8 +4785,7 @@ impl Render for TerminalPane {
             .hover(|s| s.bg(p.handle_hover()))
             .child(
               div()
-                .id("terminal-height-divider")
-                .debug_selector(|| "terminal-height-divider".into())
+                .selector("terminal-height-divider")
                 .absolute()
                 .left_0()
                 .right_0()

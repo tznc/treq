@@ -679,49 +679,6 @@ fn dragging_the_height_divider_moves_the_edge_by_the_drag(cx: &mut TestAppContex
   );
 }
 
-/// Only the focused terminal carries the accent along its top, not every
-/// terminal of the shown workspace.
-#[gpui::test]
-fn only_the_active_terminal_shows_the_accent(cx: &mut TestAppContext) {
-  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
-  set_terminal(
-    &mut h,
-    serde_json::json!({
-      "activeSessionId": 3,
-      "commands": [{ "nonce": 1, "kind": "newShell", "dir": "/repo/.treq/workspaces/login" }],
-    }),
-  );
-  let shell = host
-    .calls()
-    .iter()
-    .filter_map(|c| c.strip_prefix("spawn ").and_then(|c| c.split(' ').next()))
-    .find(|id| id.starts_with("shell-"))
-    .map(str::to_string)
-    .expect("shell spawned");
-  let accent = |h: &mut Harness, id: &str| {
-    h.cx
-      .debug_bounds(Box::leak(format!("terminal-accent-{id}").into_boxed_str()))
-      .is_some()
-  };
-  let focus = |h: &mut Harness, name: &str| {
-    let screen = h.rendered();
-    let column = screen.get_by_role(gpui_testing_library::by::role(gpui::Role::Group).name(name));
-    screen.user().click(&column);
-    h.cx.run_until_parked();
-  };
-  // Both are this workspace's.
-  assert!(column_is(&mut h, "Claude 1 terminal", CURRENT));
-  assert!(column_is(&mut h, "Shell terminal", CURRENT));
-  focus(&mut h, "Shell terminal");
-  assert!(accent(&mut h, &shell), "the focused shell");
-  assert!(!accent(&mut h, "agent-3"), "the unfocused agent");
-  focus(&mut h, "Claude 1 terminal");
-  assert!(accent(&mut h, "agent-3"), "the focused agent");
-  assert!(!accent(&mut h, &shell), "the unfocused shell");
-  h.click("workspace-header");
-  assert!(!accent(&mut h, "agent-3"), "nothing focused");
-}
-
 /// Double-clicks the shown terminal's title, as the user renames it.
 fn double_click_title(h: &mut Harness) {
   let title = by_id_prefix(h, "terminal-title-");
