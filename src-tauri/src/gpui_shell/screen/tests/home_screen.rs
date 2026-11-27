@@ -218,6 +218,45 @@ fn home_workspace_opens_the_branch_switcher(cx: &mut TestAppContext) {
   );
 }
 
+/// A repeat hover-enter, as a popup window opening can send, keeps a shown
+/// header tooltip instead of hiding and reopening it in a loop.
+#[gpui::test]
+fn a_repeat_hover_keeps_a_shown_header_tooltip(cx: &mut TestAppContext) {
+  use crate::gpui_shell::popup::PopupRequest;
+  let mut host = feature_host();
+  if let Some(status) = host.loaded.status.as_mut() {
+    status.conflicted_files = vec!["src/a.rs".into()];
+  }
+  let (mut h, _) = workspace_harness(cx, host, workspace_route());
+  h.cx.run_until_parked();
+  let at = h
+    .cx
+    .debug_bounds("workspace-merge")
+    .expect("merge")
+    .center();
+  h.cx.simulate_mouse_move(at, None, gpui::Modifiers::none());
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_millis(300));
+  h.cx.run_until_parked();
+  let workspace = h
+    .screen
+    .read_with(&h.cx, |screen, _| screen.workspace.clone())
+    .expect("workspace");
+  let key = workspace
+    .read_with(&h.cx, |view, _| view.shown_tooltip())
+    .expect("a shown tooltip");
+  workspace.update(&mut h.cx, |view, cx| {
+    view.hover_tooltip(key.clone(), true, cx)
+  });
+  h.cx.run_until_parked();
+  assert_eq!(
+    workspace.read_with(&h.cx, |view, _| view.shown_tooltip()),
+    Some(key)
+  );
+  assert!(!h.popups.borrow().contains(&PopupRequest::HideTooltip));
+}
+
 #[gpui::test]
 fn a_disabled_merge_button_says_why_first(cx: &mut TestAppContext) {
   use crate::gpui_shell::popup::{PopupRequest, TooltipContent};
