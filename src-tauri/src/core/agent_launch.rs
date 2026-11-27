@@ -297,7 +297,7 @@ pub fn start_agent_task(
   );
   let (agent, profile, trimmed) =
     match super::agent_profiles::mention(&profiles, &task.agent, &task.text) {
-      Some((p, rest)) => (p.agent, Some(p.name), rest.trim()),
+      Some((p, target, rest)) => (p.agent, Some(target), rest.trim()),
       None => (task.agent.clone(), task.profile.clone(), task.text.trim()),
     };
   if trimmed.is_empty() && task.issue.is_none() {
@@ -1133,6 +1133,26 @@ mod tests {
       ..task
     };
     assert!(start_agent_task(&store, &bare).unwrap().is_none());
+  }
+
+  #[test]
+  fn start_agent_task_routes_an_at_mention_to_a_profile_mode() {
+    let store = FakeStore {
+      settings: HashMap::from([(
+        "agent_profiles".to_string(),
+        r#"[{"agent":"claude","name":"work"}]"#.to_string(),
+      )]),
+      ..Default::default()
+    };
+    let task = TaskRequest {
+      repo_path: "/repo".into(),
+      text: "@work/deep fix it".into(),
+      agent: "claude".into(),
+      ..Default::default()
+    };
+    let (start, _) = start_agent_task(&store, &task).unwrap().unwrap();
+    assert_eq!(start.pending_prompt.as_deref(), Some("fix it"));
+    assert_eq!(start.profile.as_deref(), Some("work/deep"));
   }
 
   #[test]
