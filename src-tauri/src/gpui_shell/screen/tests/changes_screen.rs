@@ -1469,6 +1469,66 @@ fn changes_tab_marks_a_sent_review_comment_and_folds_it_once_resolved(cx: &mut T
 }
 
 #[gpui::test]
+fn a_sent_comment_whose_code_changed_shows_as_outdated(cx: &mut TestAppContext) {
+  use gpui::Role;
+  use gpui_testing_library::by;
+  let host = changes_host();
+  let sent = |line: i64, quoted: &str| {
+    let mut c = agent_comment(None);
+    c.id = format!("sent{line}");
+    (c.start_line, c.end_line) = (line, line);
+    c.source = "sent-review".into();
+    c.quoted_text = Some(quoted.into());
+    c
+  };
+  // Line 2 still reads `+b`; line 3 was `+x` when sent and is `+c` now.
+  *host.agent.lock().unwrap() = vec![sent(2, "+b"), sent(3, "+x")];
+  let (mut h, _) = workspace_harness(cx, host, changes_route());
+  let screen = h.rendered();
+  let outdated = screen.get_by_role(by::role(Role::Group).name("Outdated threads on a.rs"));
+  let within = gpui_testing_library::within(&outdated);
+  assert!(within
+    .query_by_role(by::role(Role::Group).name("Sent comment on a.rs line 3"))
+    .is_some());
+  assert!(within
+    .query_by_role(by::role(Role::Group).name("Sent comment on a.rs line 2"))
+    .is_none());
+  assert!(h.shows(Role::Group, "Sent comment on a.rs line 2"));
+}
+
+#[gpui::test]
+fn a_sent_comment_follows_its_line_when_lines_are_added_above(cx: &mut TestAppContext) {
+  let mut host = tokened_changes_host();
+  host.versions = HashMap::from([
+    ("fv1".to_string(), "a\nb\nc\n".to_string()),
+    ("fv2".to_string(), "new\na\nb\nc\n".to_string()),
+  ]);
+  if let Some(working) = host.working.as_mut() {
+    working.uncommitted_files[0].content_id = Some("fbase>fv2:git".into());
+    working.hunks_by_file[0].hunks[0] = serde_json::from_value(serde_json::json!({
+      "id": "h", "header": "@@ -1,1 +1,4 @@", "lines": ["+new", " a", "+b", "+c"], "patch": ""
+    }))
+    .expect("hunk");
+  }
+  // Sent on line 2 of the file before a line was added above it.
+  let mut sent = agent_comment(None);
+  sent.source = "sent-review".into();
+  sent.quoted_text = Some("+b".into());
+  sent.version = Some("fv1".into());
+  *host.agent.lock().unwrap() = vec![sent];
+  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  h.cx.run_until_parked();
+  assert!(
+    host
+      .writes()
+      .contains(&"carry agent comment ag 3-3 fv2".to_string()),
+    "{:?}",
+    host.writes()
+  );
+  assert!(h.shows(gpui::Role::Group, "Sent comment on a.rs line 3"));
+}
+
+#[gpui::test]
 fn changes_tab_marks_an_agent_comment_as_local(cx: &mut TestAppContext) {
   use gpui::Role;
   let host = changes_host();

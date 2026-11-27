@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use super::{
-  changes_review::{number_and_side, Side},
+  changes_review::{number_and_side, side_version, Placement, Side},
   commits_data::{line_numbers, numbered},
 };
 use crate::{github::GhReviewThread, jj::JjDiffHunk, local_db::AgentReviewComment};
@@ -87,10 +87,27 @@ fn place<'a>(
   None
 }
 
-/// Open agent comments, and resolved sent ones, by the last line of their range and side, as
-/// indices into `comments`.
-pub fn agent_by_line(comments: &[AgentReviewComment]) -> HashMap<(String, u32, Side), Vec<usize>> {
-  let mut out: HashMap<_, Vec<_>> = HashMap::new();
+/// Agent comments on their line, and the outdated ones by file, as indices
+/// into the comments placed.
+#[derive(Default, Clone)]
+pub struct AgentPlaced {
+  pub by_line: HashMap<(String, u32, Side), Vec<usize>>,
+  pub outdated: HashMap<String, Vec<usize>>,
+  pub off_diff: HashMap<String, Vec<usize>>,
+}
+
+/// Open agent comments, and resolved sent ones, by the last line of their
+/// range and side, as GitHub places a thread. One carried to the version of
+/// its file `content_ids` names stands on its lines alone, off the diff when
+/// its hunks in `maps` (the working copy's, then the committed ones) no
+/// longer show them; any other goes outdated once those hunks no longer
+/// read as it quoted them.
+pub fn place_agent(
+  comments: &[AgentReviewComment],
+  maps: &[&HashMap<String, &[JjDiffHunk]>],
+  content_ids: &HashMap<String, String>,
+) -> AgentPlaced {
+  let mut placed = AgentPlaced::default();
   for (i, c) in comments
     .iter()
     .enumerate()
@@ -99,41 +116,121 @@ pub fn agent_by_line(comments: &[AgentReviewComment]) -> HashMap<(String, u32, S
       c.status != "resolved" || c.source == crate::core::agent_review::SENT_REVIEW_SOURCE
     })
   {
-    let side = if c.side.as_deref() == Some("old") {
-      Side::Old
+    let hunks = maps.iter().find_map(|m| m.get(&c.file_path));
+    let shown = content_ids
+      .get(&c.file_path)
+      .and_then(|id| side_version(id, agent_side(c)));
+    let carried = c.version.is_some() && c.version.as_deref() == shown;
+    let at = if c.outdated {
+      Placement::Outdated
+    } else if carried && hunks.is_some_and(|h| code_on(c, h).is_none()) {
+      Placement::OffDiff
+    } else if !carried && hunks.is_some_and(|h| agent_outdated(c, h)) {
+      Placement::Outdated
     } else {
-      Side::New
+      Placement::Line
     };
-    let Ok(end) = u32::try_from(c.end_line) else {
-      continue;
-    };
-    out
-      .entry((c.file_path.clone(), end, side))
-      .or_default()
-      .push(i);
+    let file = || c.file_path.clone();
+    match at {
+      Placement::Outdated => placed.outdated.entry(file()).or_default().push(i),
+      Placement::OffDiff => placed.off_diff.entry(file()).or_default().push(i),
+      Placement::Line => {
+        if let Ok(end) = u32::try_from(c.end_line) {
+          placed
+            .by_line
+            .entry((file(), end, agent_side(c)))
+            .or_default()
+            .push(i);
+        }
+      }
+    }
   }
-  out
+  placed
+}
+
+/// What carrying an agent comment to its file's shown version needs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentCarry {
+  /// Diff the version it kept against the shown one (`review::carry_lines`).
+  Read { from: String, to: String },
+  /// It kept no version, but its lines still read as it quoted them: it
+  /// follows the file from the shown version on.
+  Adopt(String),
+  /// It kept no version, and its lines changed.
+  Outdate,
+}
+
+/// What carrying `comment` to its file at `content_id`, whose diff is
+/// `hunks`, needs; `None` when nothing.
+pub fn agent_carry(
+  comment: &AgentReviewComment,
+  hunks: &[JjDiffHunk],
+  content_id: &str,
+) -> Option<AgentCarry> {
+  if comment.outdated {
+    return None;
+  }
+  let to = side_version(content_id, agent_side(comment))?;
+  match &comment.version {
+    Some(from) if from == to => None,
+    Some(from) => Some(AgentCarry::Read {
+      from: from.clone(),
+      to: to.to_string(),
+    }),
+    None if comment.quoted_text.is_none() => None,
+    None if agent_outdated(comment, hunks) => Some(AgentCarry::Outdate),
+    None => Some(AgentCarry::Adopt(to.to_string())),
+  }
+}
+
+fn agent_side(comment: &AgentReviewComment) -> Side {
+  if comment.side.as_deref() == Some("old") {
+    Side::Old
+  } else {
+    Side::New
+  }
+}
+
+/// GitHub's outdated rule for a comment that quoted its lines: their code
+/// is no longer what it quoted, or the diff no longer has them. A sent
+/// review quotes diff lines, marker first; the review agent quotes the
+/// file. One that quoted nothing stays on its line.
+pub fn agent_outdated(comment: &AgentReviewComment, hunks: &[JjDiffHunk]) -> bool {
+  let Some(quoted) = &comment.quoted_text else {
+    return false;
+  };
+  let sent = comment.source == crate::core::agent_review::SENT_REVIEW_SOURCE;
+  let quoted = quoted
+    .split('\n')
+    .map(|l| if sent { l.get(1..).unwrap_or("") } else { l });
+  code_on(comment, hunks).is_none_or(|code| !code.iter().map(String::as_str).eq(quoted))
+}
+
+/// The code of the comment's range on its side, from any of `hunks`;
+/// `None` when a line of it is not there.
+fn code_on(comment: &AgentReviewComment, hunks: &[JjDiffHunk]) -> Option<Vec<String>> {
+  let old_side = agent_side(comment) == Side::Old;
+  let text_of = |n: i64| {
+    hunks.iter().find_map(|hunk| {
+      hunk
+        .lines
+        .iter()
+        .zip(line_numbers(hunk))
+        .find_map(|(line, (old, new))| {
+          let at = if old_side { old } else { new };
+          (at.map(i64::from) == Some(n)).then(|| line.get(1..).unwrap_or("").to_string())
+        })
+    })
+  };
+  (comment.start_line..=comment.end_line)
+    .map(text_of)
+    .collect()
 }
 
 /// `originalTextForComment`: the range's current text from `hunk`, or
 /// `None` when a line of it is not there.
 pub fn original_text(comment: &AgentReviewComment, hunk: &JjDiffHunk) -> Option<String> {
-  let old_side = comment.side.as_deref() == Some("old");
-  let numbers = line_numbers(hunk);
-  let text_of = |n: i64| {
-    hunk
-      .lines
-      .iter()
-      .zip(&numbers)
-      .find_map(|(line, (old, new))| {
-        let at = if old_side { *old } else { *new };
-        (at.map(i64::from) == Some(n)).then(|| line.get(1..).unwrap_or("").to_string())
-      })
-  };
-  (comment.start_line..=comment.end_line)
-    .map(text_of)
-    .collect::<Option<Vec<_>>>()
-    .map(|lines| lines.join("\n"))
+  code_on(comment, std::slice::from_ref(hunk)).map(|lines| lines.join("\n"))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -443,11 +540,16 @@ mod tests {
 
   #[test]
   fn agent_comments_sit_on_their_last_line_unless_resolved() {
-    let by_line = agent_by_line(&[
-      agent("a.rs", 1, 3, None, "open"),
-      agent("a.rs", 2, 2, Some("old"), "open"),
-      agent("a.rs", 4, 4, None, "resolved"),
-    ]);
+    let by_line = place_agent(
+      &[
+        agent("a.rs", 1, 3, None, "open"),
+        agent("a.rs", 2, 2, Some("old"), "open"),
+        agent("a.rs", 4, 4, None, "resolved"),
+      ],
+      &[],
+      &HashMap::new(),
+    )
+    .by_line;
     assert!(by_line.contains_key(&("a.rs".into(), 3, Side::New)));
     assert!(by_line.contains_key(&("a.rs".into(), 2, Side::Old)));
     assert_eq!(by_line.len(), 2);
@@ -457,8 +559,90 @@ mod tests {
   fn resolved_sent_review_comments_stay_on_their_line() {
     let mut sent = agent("a.rs", 4, 4, None, "resolved");
     sent.source = crate::core::agent_review::SENT_REVIEW_SOURCE.into();
-    let by_line = agent_by_line(&[sent]);
+    let by_line = place_agent(&[sent], &[], &HashMap::new()).by_line;
     assert!(by_line.contains_key(&("a.rs".into(), 4, Side::New)));
+  }
+
+  #[test]
+  fn an_agent_comment_on_other_code_is_outdated() {
+    let hunks = [hunk("h", "@@ -1,1 +1,3 @@", &[" a", "+b", "+c"])];
+    let mut c = agent("a.rs", 2, 3, None, "open");
+    // Quoting nothing, it stays on its line.
+    assert!(!agent_outdated(&c, &hunks));
+    // The review agent quotes the file's text.
+    c.quoted_text = Some("b\nc".into());
+    assert!(!agent_outdated(&c, &hunks));
+    c.quoted_text = Some("b\nx".into());
+    assert!(agent_outdated(&c, &hunks));
+    // A sent review quotes its diff lines.
+    c.source = crate::core::agent_review::SENT_REVIEW_SOURCE.into();
+    c.quoted_text = Some("+b\n+c".into());
+    assert!(!agent_outdated(&c, &hunks));
+    // Lines the diff no longer has.
+    c.end_line = 9;
+    assert!(agent_outdated(&c, &hunks));
+  }
+
+  #[test]
+  fn outdated_agent_comments_leave_their_line() {
+    let hunks = [hunk("h", "@@ -1,1 +1,3 @@", &[" a", "+b", "+c"])];
+    let files = HashMap::from([("a.rs".to_string(), &hunks[..])]);
+    let mut moved = agent("a.rs", 2, 2, None, "open");
+    moved.quoted_text = Some("x".into());
+    let placed = place_agent(
+      &[agent("a.rs", 3, 3, None, "open"), moved],
+      &[&files],
+      &HashMap::new(),
+    );
+    assert!(placed.by_line.contains_key(&("a.rs".into(), 3, Side::New)));
+    assert!(!placed.by_line.contains_key(&("a.rs".into(), 2, Side::New)));
+    assert_eq!(placed.outdated["a.rs"], [1]);
+  }
+
+  #[test]
+  fn an_agent_comment_that_followed_its_file_stands_on_its_lines_alone() {
+    let hunks = [hunk("h", "@@ -1,1 +1,3 @@", &[" a", "+b", "+c"])];
+    let files = HashMap::from([("a.rs".to_string(), &hunks[..])]);
+    let ids = HashMap::from([("a.rs".to_string(), "fbase>fv1:git".to_string())]);
+    let at = |line: i64, version: &str, outdated: bool| {
+      let mut c = agent("a.rs", line, line, None, "open");
+      // A quote that no longer matches: the version decides.
+      c.quoted_text = Some("x".into());
+      c.version = Some(version.into());
+      c.outdated = outdated;
+      place_agent(&[c], &[&files], &ids)
+    };
+    assert!(at(2, "fv1", false)
+      .by_line
+      .contains_key(&("a.rs".into(), 2, Side::New)));
+    assert_eq!(at(9, "fv1", false).off_diff["a.rs"], [0]);
+    assert_eq!(at(2, "fv1", true).outdated["a.rs"], [0]);
+    // Not carried to the shown version yet: its quote decides.
+    assert_eq!(at(2, "fv0", false).outdated["a.rs"], [0]);
+  }
+
+  #[test]
+  fn what_carrying_an_agent_comment_needs() {
+    let hunks = [hunk("h", "@@ -1,1 +1,3 @@", &[" a", "+b", "+c"])];
+    let due = |c: &AgentReviewComment| agent_carry(c, &hunks, "fbase>fv2:git");
+    let mut c = agent("a.rs", 2, 2, None, "open");
+    // Nothing tells where its lines were.
+    assert_eq!(due(&c), None);
+    // Its quote still matches: it follows the file from here.
+    c.quoted_text = Some("b".into());
+    assert_eq!(due(&c), Some(AgentCarry::Adopt("fv2".into())));
+    c.quoted_text = Some("x".into());
+    assert_eq!(due(&c), Some(AgentCarry::Outdate));
+    c.version = Some("fv1".into());
+    let read = AgentCarry::Read {
+      from: "fv1".into(),
+      to: "fv2".into(),
+    };
+    assert_eq!(due(&c), Some(read));
+    c.version = Some("fv2".into());
+    assert_eq!(due(&c), None);
+    (c.version, c.outdated) = (Some("fv1".into()), true);
+    assert_eq!(due(&c), None);
   }
 
   #[test]

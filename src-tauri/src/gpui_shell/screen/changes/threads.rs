@@ -19,10 +19,11 @@ pub(super) const CARD_MAX_W: f32 = 820.;
 use crate::{
   github::{GhReviewComment, GhReviewThread},
   gpui_shell::screen::{
-    changes_review::{count_label, number_and_side, Pending, Quote, Side},
+    changes_review::{carry_lines, count_label, number_and_side, Pending, Quote, Side},
     changes_threads::{
-      agent_by_line, comment_date, github_suggestion_original, original_text, place_threads,
-      preview, suggestion_diff, suggestion_span, Placed, RowKind,
+      agent_carry, comment_date, github_suggestion_original, original_text, place_agent,
+      place_threads, preview, suggestion_diff, suggestion_span, AgentCarry, AgentPlaced, Placed,
+      RowKind,
     },
     commits_data::LineRef,
     reactions::{self, Reacts},
@@ -47,8 +48,9 @@ pub(in crate::gpui_shell::screen) struct Threads {
   /// Agent comments with an action running.
   busy: HashSet<String>,
   placed: Placed,
-  /// Indices into `agent`.
-  agent_lines: HashMap<(String, u32, Side), Vec<usize>>,
+  agent_placed: AgentPlaced,
+  /// Agent comments are being carried to their files' versions.
+  carrying: bool,
   /// Bumped when `github` or `agent` reads back changed.
   pub(in crate::gpui_shell::screen) revision: u64,
   /// The rows' and the threads' revisions `placed` was derived from.
@@ -137,17 +139,77 @@ impl ChangesView {
     };
     self.run_changed(
       move |host, parent| host.agent_comments(&parent.repo_path, id),
-      |view, result, _| match result {
+      |view, result, cx| match result {
         Ok(comments) if comments == view.threads.agent => false,
         Ok(comments) => {
           view.threads.agent = comments;
           view.threads.revision += 1;
+          view.carry_agent(cx);
           true
         }
         Err(err) => {
           log::warn!("Failed to read agent review comments: {err}");
           false
         }
+      },
+      cx,
+    );
+  }
+
+  /// GitHub's carry-forward for agent and sent comments, as
+  /// `carry_comments` for the review's own: each kept on an older version of
+  /// a file shown at another moves to its lines in it, or goes outdated.
+  pub(super) fn carry_agent(&mut self, cx: &mut Context<Self>) {
+    let due: Vec<(AgentReviewComment, AgentCarry)> = self
+      .threads
+      .agent
+      .iter()
+      .filter_map(|c| {
+        let shown = self.hunks.get(&c.file_path).filter(|d| !d.loading)?;
+        let carry = agent_carry(c, &shown.hunks, shown.content_id.as_deref()?)?;
+        Some((c.clone(), carry))
+      })
+      .collect();
+    if due.is_empty() || std::mem::replace(&mut self.threads.carrying, true) {
+      return;
+    }
+    self.run(
+      move |host, parent| {
+        let repo = parent.repo_path.as_str();
+        for (c, carry) in due {
+          let lines = (c.start_line, c.end_line);
+          let done = match carry {
+            AgentCarry::Adopt(to) => host.carry_agent_comment(repo, &c.id, lines, Some(&to), false),
+            AgentCarry::Outdate => host.carry_agent_comment(repo, &c.id, lines, None, true),
+            AgentCarry::Read { from, to } => {
+              let read = |v: &str| host.file_version(repo, parent.workspace_id(), &c.file_path, v);
+              // Read where it cannot be (a remote host): its quote decides.
+              let (Ok(from_text), Ok(Some(to_text))) = (read(&from), read(&to)) else {
+                continue;
+              };
+              let at = u32::try_from(c.start_line)
+                .ok()
+                .zip(u32::try_from(c.end_line).ok());
+              let moved = from_text
+                .zip(at)
+                .and_then(|(text, at)| carry_lines(&text, &to_text, at));
+              match moved {
+                Some((start, end)) => {
+                  let lines = (i64::from(start), i64::from(end));
+                  host.carry_agent_comment(repo, &c.id, lines, Some(&to), false)
+                }
+                None => host.carry_agent_comment(repo, &c.id, lines, Some(&from), true),
+              }
+            }
+          };
+          if let Err(err) = done {
+            log::warn!("Failed to carry review comment {}: {err}", c.id);
+          }
+        }
+      },
+      |view, (), cx| {
+        view.threads.carrying = false;
+        view.read_agent(cx);
       },
       cx,
     );
@@ -161,12 +223,13 @@ impl ChangesView {
       return;
     }
     self.threads.placed_for = Some(key);
-    // Only the files a thread is on are looked at.
+    // Only the files a thread or comment is on are looked at.
     let paths: HashSet<&str> = self
       .threads
       .github
       .iter()
       .map(|t| t.path.as_str())
+      .chain(self.threads.agent.iter().map(|c| c.file_path.as_str()))
       .collect();
     fn on<'a>(
       files: &'a HashMap<String, FileHunks>,
@@ -189,7 +252,12 @@ impl ChangesView {
       .map(|s| on(&s.committed_hunks, &paths))
       .unwrap_or_default();
     self.threads.placed = place_threads(&self.threads.github, &[&working, &committed]);
-    self.threads.agent_lines = agent_by_line(&self.threads.agent);
+    // The working copy's file versions, which carried agent comments name.
+    let ids: HashMap<String, String> = working
+      .keys()
+      .filter_map(|p| Some((p.clone(), self.hunks.get(p)?.content_id.clone()?)))
+      .collect();
+    self.threads.agent_placed = place_agent(&self.threads.agent, &[&working, &committed], &ids);
   }
 
   /// Resolve, Delete or Apply, then a fresh read.
@@ -341,7 +409,8 @@ impl ChangesView {
     let mut out = Vec::new();
     if let Some(comments) = self
       .threads
-      .agent_lines
+      .agent_placed
+      .by_line
       .get(&(path.to_string(), number, side))
     {
       let mut list = div()
@@ -356,7 +425,7 @@ impl ChangesView {
         .gap_2()
         .font_family(theme::SANS_FONT);
       for c in comments.iter().filter_map(|&i| self.threads.agent.get(i)) {
-        list = list.child(self.agent_card(c, original_text(c, hunk), p, cx));
+        list = list.child(self.agent_card(c, original_text(c, hunk), None, p, cx));
       }
       out.push(list.into_any_element());
     }
@@ -379,14 +448,21 @@ impl ChangesView {
     out
   }
 
-  /// Threads whose line is not in the diff, at the top of the file.
+  /// Threads whose line is not in the diff, and agent comments whose code
+  /// changed, at the top of the file.
   pub(super) fn unplaced_threads(
     &self,
     path: &str,
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> Option<impl IntoElement> {
-    let threads = self.threads.placed.unplaced.get(path)?;
+    let none = Vec::new();
+    let threads = self.threads.placed.unplaced.get(path);
+    let agent = self.threads.agent_placed.outdated.get(path);
+    let off_diff = self.threads.agent_placed.off_diff.get(path);
+    if threads.is_none() && agent.is_none() && off_diff.is_none() {
+      return None;
+    }
     let mut section = div()
       .selector(SharedString::from(format!(
         "github-outdated-threads-{path}"
@@ -401,9 +477,27 @@ impl ChangesView {
       .flex()
       .flex_col()
       .gap_3();
-    for t in threads.iter().filter_map(|&i| self.threads.github.get(i)) {
+    for t in threads
+      .unwrap_or(&none)
+      .iter()
+      .filter_map(|&i| self.threads.github.get(i))
+    {
       let line = t.line.and_then(|n| u32::try_from(n).ok()).unwrap_or(0);
       section = section.child(self.thread_card(t, path, None, line, Side::New, p, cx));
+    }
+    for c in agent
+      .unwrap_or(&none)
+      .iter()
+      .filter_map(|&i| self.threads.agent.get(i))
+    {
+      section = section.child(self.agent_card(c, None, Some("Outdated"), p, cx));
+    }
+    for c in off_diff
+      .unwrap_or(&none)
+      .iter()
+      .filter_map(|&i| self.threads.agent.get(i))
+    {
+      section = section.child(self.agent_card(c, None, Some("Not in diff"), p, cx));
     }
     let drafting = self
       .review
@@ -694,6 +788,7 @@ impl ChangesView {
     &self,
     comment: &AgentReviewComment,
     original: Option<String>,
+    state: Option<&'static str>,
     p: &Palette,
     cx: &mut Context<Self>,
   ) -> AnyElement {
@@ -759,7 +854,18 @@ impl ChangesView {
             ui::text(div(), TextSize::Sm)
               .text_color(muted)
               .child(format!("{}:{range}", comment.file_path)),
-          ),
+          )
+          .children(state.map(|state| {
+            // Short label (badge). ast-grep-ignore: gpui-text-xs-short-label-only
+            ui::text(div(), TextSize::Xs)
+              .px_1p5()
+              .py_0p5()
+              .rounded(radius::SM)
+              .bg(Tone::Warning.tint(p))
+              .text_color(Tone::Warning.text(p))
+              .font_weight(FontWeight::MEDIUM)
+              .child(state)
+          })),
       )
       .child(
         div()

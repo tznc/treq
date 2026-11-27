@@ -1191,6 +1191,27 @@ impl changes_data::ChangesHost for FakeHost {
     Ok(())
   }
 
+  fn carry_agent_comment(
+    &self,
+    _: &str,
+    id: &str,
+    (start, end): (i64, i64),
+    version: Option<&str>,
+    outdated: bool,
+  ) -> Result<(), String> {
+    let version = version.unwrap_or("-");
+    let out = if outdated { " outdated" } else { "" };
+    self.record(format!(
+      "carry agent comment {id} {start}-{end} {version}{out}"
+    ));
+    for c in self.agent.lock().unwrap().iter_mut().filter(|c| c.id == id) {
+      (c.start_line, c.end_line) = (start, end);
+      c.version = Some(version.to_string());
+      c.outdated = outdated;
+    }
+    Ok(())
+  }
+
   fn resolve_agent_comment(&self, _: &str, id: &str) -> Result<(), String> {
     self.record(format!("resolve agent comment {id}"));
     for c in self.agent.lock().unwrap().iter_mut().filter(|c| c.id == id) {

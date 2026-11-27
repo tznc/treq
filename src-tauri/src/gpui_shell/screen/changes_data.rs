@@ -153,6 +153,16 @@ pub trait ChangesHost: CommitsHost {
     workspace_id: i64,
     comments: &[crate::core::review::LineComment],
   ) -> Result<(), String>;
+  /// Carries an agent comment to lines `start..=end` of file `version`, or
+  /// marks it `outdated` (`review::carry`).
+  fn carry_agent_comment(
+    &self,
+    repo_path: &str,
+    id: &str,
+    lines: (i64, i64),
+    version: Option<&str>,
+    outdated: bool,
+  ) -> Result<(), String>;
   fn resolve_agent_comment(&self, repo_path: &str, id: &str) -> Result<(), String>;
   fn delete_agent_comment(&self, repo_path: &str, id: &str) -> Result<(), String>;
   /// Splices the comment's suggested change into its file.
@@ -365,6 +375,24 @@ impl ChangesHost for Backend {
       &self.state_scope(repo_path),
       workspace_id,
       comments,
+    )
+  }
+
+  fn carry_agent_comment(
+    &self,
+    repo_path: &str,
+    id: &str,
+    (start, end): (i64, i64),
+    version: Option<&str>,
+    outdated: bool,
+  ) -> Result<(), String> {
+    crate::local_db::carry_agent_review_comment(
+      &self.state_scope(repo_path),
+      id,
+      start,
+      end,
+      version,
+      outdated,
     )
   }
 
