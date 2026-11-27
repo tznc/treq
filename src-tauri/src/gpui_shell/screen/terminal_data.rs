@@ -625,6 +625,7 @@ impl TerminalHost for Backend {
         session_model: model.as_deref(),
         pending_prompt: start.pending_prompt.as_deref(),
         treq_bin_dir: bin_dir.as_deref(),
+        deny_git: start.workspace_path.is_some(),
       },
     )?;
     Ok(Prepared {

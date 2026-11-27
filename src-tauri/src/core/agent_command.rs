@@ -198,18 +198,24 @@ fn add_git_guard_hook(settings: &mut Map<String, Value>) {
 
 const CODEX_RULE_PATH: &str = ".codex/rules/treq.rules";
 
-/// Allows `gh pr diff` in a Treq-owned Codex project rule, kept out of
-/// commits through `.git/info/exclude`. Codex loads it in trusted projects.
-fn allow_codex_commands(cwd: &str) -> Result<(), String> {
+/// Allows `gh pr diff`, and forbids `git` when `deny_git`, in a Treq-owned
+/// Codex project rule, kept out of commits through `.git/info/exclude`.
+/// Codex loads it in trusted projects.
+fn allow_codex_commands(cwd: &str, deny_git: bool) -> Result<(), String> {
   let path = Path::new(cwd).join(CODEX_RULE_PATH);
   if let Some(dir) = path.parent() {
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
   }
-  std::fs::write(
-    &path,
-    "prefix_rule(\n  pattern = [\"gh\", \"pr\", \"diff\"],\n  decision = \"allow\",\n)\n",
-  )
-  .map_err(|e| e.to_string())?;
+  let mut rules =
+    "prefix_rule(\n  pattern = [\"gh\", \"pr\", \"diff\"],\n  decision = \"allow\",\n)\n"
+      .to_string();
+  if deny_git {
+    rules.push_str(&format!(
+      "prefix_rule(\n  pattern = [\"git\"],\n  decision = \"forbidden\",\n  justification = {:?},\n)\n",
+      super::git_guard::GIT_IN_WORKSPACE_REASON
+    ));
+  }
+  std::fs::write(&path, rules).map_err(|e| e.to_string())?;
   let Ok(repo) = gix::open(cwd) else {
     return Ok(());
   };
@@ -274,6 +280,8 @@ pub struct AutoCommand<'a> {
   pub session_model: Option<&'a str>,
   pub pending_prompt: Option<&'a str>,
   pub treq_bin_dir: Option<&'a str>,
+  /// Refuse `git`: in a workspace it reads and writes the home repository.
+  pub deny_git: bool,
 }
 
 /// The PTY auto-command for an agent CLI.
@@ -334,8 +342,14 @@ pub fn build_auto_command(
       )
     }
     "copilot" => {
+      // Deny rules win over --allow-all-tools.
+      let deny = if options.deny_git {
+        " --deny-tool 'shell(git)' --deny-tool 'shell(git:*)'"
+      } else {
+        ""
+      };
       let command = format!(
-        "copilot --allow-all-tools -- \"{}\"",
+        "copilot --allow-all-tools{deny} -- \"{}\"",
         shell_cat(&files.prompt_path)
       );
       with_task(command)
@@ -397,7 +411,7 @@ pub fn prepare_auto_command(
     return Err(format!("Workspace folder no longer exists: {cwd}"));
   }
   if options.agent == "codex" {
-    allow_codex_commands(cwd)?;
+    allow_codex_commands(cwd, options.deny_git)?;
   }
   let system = system_prompt(paths);
   let (prompt, settings) = match options.agent {
@@ -510,6 +524,7 @@ mod tests {
       session_model: None,
       pending_prompt: None,
       treq_bin_dir: None,
+      deny_git: false,
     }
   }
 
@@ -1049,6 +1064,51 @@ mod tests {
     assert!(rule.contains(r#"decision = "allow""#));
     let exclude = std::fs::read_to_string(dir.path().join(".git/info/exclude")).unwrap();
     assert_eq!(exclude.matches("/.codex/rules/treq.rules").count(), 1);
+    assert!(!rule.contains("forbidden"), "{rule}");
+  }
+
+  #[test]
+  fn codex_rule_forbids_git_when_denied() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().to_str().unwrap();
+    let paths = AgentPaths {
+      workspace_path: None,
+      repo_path: cwd,
+      supporting_repo_paths: NONE,
+      project: None,
+      app_instructions: None,
+      repo_instructions: None,
+    };
+    let options = AutoCommand {
+      deny_git: true,
+      ..opts("codex")
+    };
+    let prepared = prepare_auto_command(&paths, &options).unwrap();
+    super::super::agent_cli::cleanup_agent_cli_files(&prepared.file_paths).unwrap();
+    let rule = std::fs::read_to_string(dir.path().join(".codex/rules/treq.rules")).unwrap();
+    assert!(rule.contains(r#"pattern = ["gh", "pr", "diff"]"#), "{rule}");
+    assert!(rule.contains(r#"pattern = ["git"]"#), "{rule}");
+    assert!(rule.contains(r#"decision = "forbidden""#), "{rule}");
+    assert!(rule.contains("`treq diff`"), "{rule}");
+  }
+
+  #[test]
+  fn copilot_denies_git_only_when_asked() {
+    let deny = "--deny-tool 'shell(git)' --deny-tool 'shell(git:*)'";
+    let denied = build_auto_command(
+      &AutoCommand {
+        deny_git: true,
+        ..opts("copilot")
+      },
+      &files(),
+    )
+    .unwrap();
+    assert!(
+      denied.contains(&format!("copilot --allow-all-tools {deny} -- ")),
+      "{denied}"
+    );
+    let allowed = build_auto_command(&opts("copilot"), &files()).unwrap();
+    assert!(!allowed.contains("--deny-tool"), "{allowed}");
   }
 
   /// A fresh shell reads typed input in canonical mode, which caps a line
