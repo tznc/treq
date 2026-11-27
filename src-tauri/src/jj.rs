@@ -1485,6 +1485,10 @@ pub struct JjFileChange {
   /// keeps the hunks of files whose id held. `None` when unknown.
   #[serde(default, skip_serializing_if = "Option::is_none")]
   pub content_id: Option<String>,
+  /// The git file modes before and after (`100644`, `100755`, `120000`...)
+  /// when the change sets a new one, such as a chmod.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub mode_change: Option<(String, String)>,
 }
 
 /// File content lines for context expansion

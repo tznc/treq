@@ -219,6 +219,7 @@ pub fn parse_unified_diff(diff: &str) -> ParsedDiff {
         path,
         status: "M".into(),
         old_path: None,
+        mode_change: None,
       });
       in_hunk = false;
       continue;
@@ -246,6 +247,12 @@ pub fn parse_unified_diff(diff: &str) -> ParsedDiff {
       f.status = "A".into();
     } else if line.starts_with("deleted file mode") {
       f.status = "D".into();
+    } else if let Some(old) = line.strip_prefix("old mode ") {
+      f.mode_change = Some((old.to_string(), String::new()));
+    } else if let Some(new) = line.strip_prefix("new mode ") {
+      if let Some((_, after)) = f.mode_change.as_mut() {
+        *after = new.to_string();
+      }
     } else if let Some(old) = line.strip_prefix("rename from ") {
       f.status = "R".into();
       f.old_path = Some(old.to_string());
@@ -795,6 +802,16 @@ rename to moved.rs
     assert_eq!(hunks[0].lines, [" one", "+two", " three"]);
     assert_eq!(parsed.hunks["gone.txt"][0].lines, ["-bye"]);
     assert!(parsed.hunks["moved.rs"].is_empty());
+  }
+
+  #[test]
+  fn reads_a_mode_change() {
+    let parsed =
+      parse_unified_diff("diff --git a/run.sh b/run.sh\nold mode 100644\nnew mode 100755\n");
+    assert_eq!(
+      parsed.files[0].mode_change,
+      Some(("100644".into(), "100755".into()))
+    );
   }
 
   #[test]

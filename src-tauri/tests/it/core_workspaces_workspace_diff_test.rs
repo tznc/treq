@@ -278,6 +278,43 @@ fn test_workspace_diff_includes_uncommitted_changes_and_conflicts() {
   assert!(diff.conflicted_files.is_empty());
 }
 
+/// A chmod has no lines to show, so the diff carries its file modes, for
+/// committed and uncommitted files alike.
+#[cfg(unix)]
+#[test]
+fn test_workspace_diff_reports_file_mode_changes() {
+  use std::os::unix::fs::PermissionsExt as _;
+  let repo = TestRepo::new().unwrap();
+  repo
+    .commit_file("run.sh", "echo run\n", "add run.sh")
+    .unwrap();
+  repo
+    .commit_file("tool.sh", "echo tool\n", "add tool.sh")
+    .unwrap();
+  let ws =
+    treq_lib::core::create_workspace(&repo.repo_path, "feat/chmod", None, None, None, None, None)
+      .unwrap();
+  let dir = repo.workspaces_dir().join(&ws.workspace_path);
+  let chmod = |name: &str| {
+    std::fs::set_permissions(dir.join(name), std::fs::Permissions::from_mode(0o755)).unwrap()
+  };
+  chmod("tool.sh");
+  treq_lib::core::commit_workspace(&repo.repo_path, ws.id, "make tool executable").unwrap();
+  chmod("run.sh");
+
+  init_test_app_db(&repo, Some("git"));
+  let diff = treq_lib::core::workspace_diff(&repo.repo_path, ws.id).unwrap();
+  let mode = |files: &[treq_lib::jj::JjFileChange], path: &str| {
+    files
+      .iter()
+      .find(|f| f.path == path)
+      .and_then(|f| f.mode_change.clone())
+  };
+  let executable = Some(("100644".to_string(), "100755".to_string()));
+  assert_eq!(mode(&diff.uncommitted_files, "run.sh"), executable);
+  assert_eq!(mode(&diff.committed_files, "tool.sh"), executable);
+}
+
 #[test]
 fn test_workspace_diff_dedupes_committed_files_that_also_have_wc_changes() {
   let repo = TestRepo::new().unwrap();

@@ -3178,6 +3178,7 @@ impl ChangesView {
       card.old_path.clone(),
     );
     let (committed, shut, kind) = (card.committed, card.shut, card.body);
+    let note = card.note.clone();
     let counts = self.card_counts(c);
     let header = self.file_header(
       &path,
@@ -3186,6 +3187,7 @@ impl ChangesView {
       committed,
       shut,
       kind != Body::Bare,
+      note.as_deref(),
       counts,
       p,
       cx,
@@ -3313,6 +3315,7 @@ impl ChangesView {
     committed: bool,
     shut: bool,
     collapsible: bool,
+    note: Option<&str>,
     (additions, deletions): (usize, usize),
     p: &Palette,
     cx: &mut Context<Self>,
@@ -3480,6 +3483,16 @@ impl ChangesView {
     }
     if super::changes_data::is_binary(path) {
       right = right.child(badge("Binary", Tone::Neutral));
+    }
+    if let Some(note) = note {
+      right = right.child(
+        div()
+          .id(SharedString::from(format!("bare-note-{path}")))
+          .role(gpui::Role::Label)
+          .aria_label(note.to_string())
+          .child(ui::Badge::new(note.to_string(), p).tone(Tone::Neutral))
+          .test_support(),
+      );
     }
     if !deleted && (additions > 0 || deletions > 0) {
       right = right.child(

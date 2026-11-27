@@ -450,6 +450,8 @@ pub struct ChangedFile {
   /// jj's status letter: `M`, `A`, `D`, `R`, `C`...
   pub status: String,
   pub old_path: Option<String>,
+  /// [`JjFileChange::mode_change`].
+  pub mode_change: Option<(String, String)>,
 }
 
 impl ChangedFile {
@@ -461,6 +463,7 @@ impl ChangedFile {
         path: f.path.clone(),
         status: f.status.clone(),
         old_path: f.previous_path.clone(),
+        mode_change: f.mode_change.clone(),
       })
       .collect()
   }
@@ -526,6 +529,7 @@ impl Snapshot {
           changed_line_count: 0,
           diff_deferred: false,
           content_id: None,
+          mode_change: None,
         });
       }
     }
@@ -950,6 +954,17 @@ pub fn is_bare(input: &BodyInput, conflicted: bool) -> bool {
       .is_some_and(|d| !d.loading && d.error.is_none() && d.hunks.is_empty())
 }
 
+/// What a bare card's header says changed, since it shows no lines.
+pub fn bare_note(status: &str, mode_change: Option<&(String, String)>) -> Option<String> {
+  match (mode_change, status) {
+    (Some((old, new)), _) => Some(format!("File mode {old} → {new}")),
+    (None, "A") => Some("Empty file".into()),
+    // The header already names a rename.
+    (None, "R") => None,
+    (None, _) => Some("No line changes".into()),
+  }
+}
+
 /// Whether the file card is shut: comments keep it open; binary files and
 /// renames start shut.
 pub fn is_collapsed(input: &BodyInput) -> bool {
@@ -1259,6 +1274,7 @@ mod tests {
       path: path.into(),
       status: "M".into(),
       old_path: None,
+      mode_change: None,
     }
   }
 
@@ -1437,6 +1453,19 @@ mod tests {
   }
 
   #[test]
+  fn bare_note_names_what_changed() {
+    let mode = ("100644".to_string(), "100755".to_string());
+    assert_eq!(
+      bare_note("M", Some(&mode)).as_deref(),
+      Some("File mode 100644 → 100755")
+    );
+    assert_eq!(bare_note("A", None).as_deref(), Some("Empty file"));
+    assert_eq!(bare_note("M", None).as_deref(), Some("No line changes"));
+    // The header already names a rename.
+    assert_eq!(bare_note("R", None), None);
+  }
+
+  #[test]
   fn body_waits_for_load_diff_on_a_generated_file() {
     let generated = BodyInput {
       path: "Cargo.lock",
@@ -1466,6 +1495,7 @@ mod tests {
       changed_line_count: 1,
       diff_deferred: false,
       content_id: None,
+      mode_change: None,
     };
     let snapshot = Snapshot {
       files: ChangedFile::parse(&[change("Cargo.lock"), change("src/a.rs")]),
@@ -1607,6 +1637,7 @@ mod tests {
       changed_line_count: 1,
       diff_deferred: false,
       content_id: None,
+      mode_change: None,
     };
     let diff = JjRevisionDiff {
       committed_files: vec![change("done.rs", "M")],
@@ -1640,6 +1671,7 @@ mod tests {
       changed_line_count: 1,
       diff_deferred: false,
       content_id: None,
+      mode_change: None,
     };
     let diff = JjRevisionDiff {
       committed_files: vec![change("done.rs"), change("both.rs")],
@@ -1668,6 +1700,7 @@ mod tests {
       changed_line_count: 1,
       diff_deferred: false,
       content_id: None,
+      mode_change: None,
     };
     let hunks = |path: &str| crate::jj::JjFileDiff {
       path: path.into(),
@@ -1703,6 +1736,7 @@ mod tests {
       changed_line_count: 1,
       diff_deferred: false,
       content_id: None,
+      mode_change: None,
     };
     let diff = JjRevisionDiff {
       committed_files: vec![change("a.rs"), change("b.rs"), change("c.rs")],

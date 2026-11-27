@@ -459,11 +459,13 @@ mod tests {
         path: "src/a.rs".into(),
         status: "A".into(),
         old_path: None,
+        mode_change: None,
       },
       ChangedFile {
         path: "src/b.rs".into(),
         status: "M".into(),
         old_path: None,
+        mode_change: None,
       },
     ];
     assert_eq!(dir_status(&changed, "src"), Some("A"));

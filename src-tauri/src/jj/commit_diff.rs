@@ -65,6 +65,7 @@ pub(super) fn build_file_change(
   diff_deferred: bool,
   before_absent: bool,
   after_absent: bool,
+  mode_change: Option<(String, String)>,
 ) -> JjFileChange {
   let path = entry_path.target().as_internal_file_string().to_string();
   let previous_path = entry_path
@@ -85,6 +86,18 @@ pub(super) fn build_file_change(
     changed_line_count,
     diff_deferred,
     content_id: None,
+    mode_change,
+  }
+}
+
+/// A side's git file mode (`100644`, `100755`, `120000`...).
+fn git_mode(value: &MaterializedTreeValue) -> Option<&'static str> {
+  match value {
+    MaterializedTreeValue::File(file) => Some(if file.executable { "100755" } else { "100644" }),
+    MaterializedTreeValue::Symlink { .. } => Some("120000"),
+    MaterializedTreeValue::GitSubmodule(_) => Some("160000"),
+    MaterializedTreeValue::Tree(_) => Some("040000"),
+    _ => None,
   }
 }
 
@@ -210,6 +223,7 @@ pub(super) fn merge_diff_between_revisions_in(
       let Ok(values) = entry.values else { continue };
       let before_absent = matches!(&values.before, MaterializedTreeValue::Absent);
       let after_absent = matches!(&values.after, MaterializedTreeValue::Absent);
+      let modes = mode_change(git_mode(&values.before), git_mode(&values.after));
       let style = parse_conflict_marker_style(_conflict_marker_style);
       let Ok(merge_options) = MergeOptions::from_settings(&loaded.settings) else {
         continue;
@@ -236,6 +250,7 @@ pub(super) fn merge_diff_between_revisions_in(
         false,
         before_absent,
         after_absent,
+        modes,
       );
       let conflict_regions = annotate_conflict_regions(&file.path, conflict_regions_raw);
       for hunk in &mut hunks {
@@ -366,6 +381,7 @@ pub fn jj_get_commit_diff(
       let Ok(values) = entry.values else { continue };
       let before_absent = matches!(&values.before, MaterializedTreeValue::Absent);
       let after_absent = matches!(&values.after, MaterializedTreeValue::Absent);
+      let modes = mode_change(git_mode(&values.before), git_mode(&values.after));
       let style = parse_conflict_marker_style(_conflict_marker_style);
       let Ok(merge_options) = MergeOptions::from_settings(&loaded.settings) else {
         continue;
@@ -399,6 +415,7 @@ pub fn jj_get_commit_diff(
         diff_deferred,
         before_absent,
         after_absent,
+        modes,
       );
       if !diff_deferred {
         let conflict_regions = annotate_conflict_regions(&file.path, conflict_regions_raw);

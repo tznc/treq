@@ -29,8 +29,8 @@ use crate::{
   gpui_shell::{
     screen::{
       changes_data::{
-        body, conflict_lines, conflicts, context_row_numbers, is_bare, is_collapsed, line_counts,
-        Body, BodyInput, Conflict, FileHunks,
+        bare_note, body, conflict_lines, conflicts, context_row_numbers, is_bare, is_collapsed,
+        line_counts, Body, BodyInput, Conflict, FileHunks,
       },
       changes_review::FILE_HUNK,
       commits_data::{line_number, line_numbers},
@@ -51,6 +51,8 @@ pub(super) struct Card {
   pub(super) conflicted: bool,
   pub(super) body: Body,
   pub(super) shut: bool,
+  /// What the header says changed when the card is bare.
+  pub(super) note: Option<String>,
   regions: Vec<Conflict>,
   prepared: Option<Rc<Prepared>>,
 }
@@ -244,23 +246,33 @@ impl ChangesView {
       return Default::default();
     }
     let conflicted: HashSet<String> = self.conflicted().into_iter().collect();
-    let mut files: Vec<(String, String, Option<String>, bool)> = snapshot
+    type File = (
+      String,
+      String,
+      Option<String>,
+      Option<(String, String)>,
+      bool,
+    );
+    let mut files: Vec<File> = snapshot
       .files
       .iter()
       .filter(|f| !self.hides(&f.path))
-      .map(|f| (f.path.clone(), f.status.clone(), f.old_path.clone(), false))
+      .map(|f| {
+        let (path, status, old_path) = (f.path.clone(), f.status.clone(), f.old_path.clone());
+        (path, status, old_path, f.mode_change.clone(), false)
+      })
       .collect();
     files.extend(
       self
         .visible_committed()
         .into_iter()
-        .map(|f| (f.path, f.status, f.previous_path, true)),
+        .map(|f| (f.path, f.status, f.previous_path, f.mode_change, true)),
     );
     let mut prepared = std::mem::take(&mut self.diff.prepared);
     let mut kept = HashMap::new();
     let mut cards = Vec::with_capacity(files.len());
     let mut rows = Vec::new();
-    for (path, status, old_path, committed) in files {
+    for (path, status, old_path, mode_change, committed) in files {
       let data = self.shown_hunks(&path);
       let input = BodyInput {
         path: &path,
@@ -278,6 +290,9 @@ impl ChangesView {
       // A bare header has nothing below it unless file comments follow.
       let shut = is_collapsed(&input) || (bare && !input.comment_activity);
       let kind = if bare { Body::Bare } else { body(&input) };
+      let note = bare
+        .then(|| bare_note(&status, mode_change.as_ref()))
+        .flatten();
       let c = cards.len();
       rows.push(Row::Head(c, kind));
       let mut card = Card {
@@ -288,6 +303,7 @@ impl ChangesView {
         committed,
         body: kind,
         shut,
+        note,
         regions: Vec::new(),
         prepared: None,
       };

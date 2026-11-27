@@ -148,9 +148,26 @@ pub(super) fn tree_changes(
       changed_line_count: 0,
       diff_deferred: false,
       content_id,
+      mode_change: mode_change(git_mode(&values.before), git_mode(&values.after)),
     });
   }
   changes
+}
+
+/// A resolved side's git file mode (`100644`, `100755`, `120000`...).
+fn git_mode(value: &MergedTreeValue) -> Option<&'static str> {
+  match value.as_resolved()?.as_ref()? {
+    TreeValue::File { executable, .. } => Some(if *executable { "100755" } else { "100644" }),
+    TreeValue::Symlink(_) => Some("120000"),
+    TreeValue::GitSubmodule(_) => Some("160000"),
+    TreeValue::Tree(_) => Some("040000"),
+  }
+}
+
+/// The file modes before and after, when the change sets a new one.
+pub(super) fn mode_change(before: Option<&str>, after: Option<&str>) -> Option<(String, String)> {
+  let (before, after) = (before?, after?);
+  (before != after).then(|| (before.to_string(), after.to_string()))
 }
 
 /// Names one side of a path in a tree diff by its object ids.

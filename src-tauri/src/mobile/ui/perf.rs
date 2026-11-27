@@ -730,6 +730,7 @@ fn big_diff(files: usize, lines_per_file: usize) -> JjRevisionDiff {
     changed_line_count: lines_per_file,
     diff_deferred: false,
     content_id: None,
+    mode_change: None,
   };
   JjRevisionDiff {
     committed_files: (0..files).map(change).collect(),

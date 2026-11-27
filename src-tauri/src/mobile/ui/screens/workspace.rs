@@ -1438,6 +1438,7 @@ mod tests {
       changed_line_count: lines,
       diff_deferred: false,
       content_id: None,
+      mode_change: None,
     }
   }
 

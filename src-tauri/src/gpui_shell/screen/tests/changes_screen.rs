@@ -1713,7 +1713,8 @@ fn a_file_without_hunks_shows_its_header_alone(cx: &mut TestAppContext) {
     "committed_files": [],
     "uncommitted_files": [
       {"path": "a.rs", "status": "M", "previous_path": null, "changed_line_count": 1, "diff_deferred": false},
-      {"path": "run.sh", "status": "M", "previous_path": null, "changed_line_count": 0, "diff_deferred": false}
+      {"path": "run.sh", "status": "M", "previous_path": null, "changed_line_count": 0, "diff_deferred": false,
+       "mode_change": ["100644", "100755"]}
     ],
     "hunks_by_file": [
       {"path": "a.rs", "hunks": [{"id": "h", "header": "@@ -1 +1 @@", "lines": ["-a", "+b"], "patch": ""}]},
@@ -1726,7 +1727,10 @@ fn a_file_without_hunks_shows_its_header_alone(cx: &mut TestAppContext) {
   assert!(h.drawn("collapse-a.rs"));
   assert!(!h.drawn("collapse-run.sh"));
   let screen = a11y_screen(&mut h);
-  expect(screen.get_by_role(by::role(gpui::Role::Group).name("run.sh"))).to_be_visible();
+  let card = screen.get_by_role(by::role(gpui::Role::Group).name("run.sh"));
+  // With no lines to show, the header says what changed.
+  expect(within(&card).get_by_role(by::role(gpui::Role::Label).name("File mode 100644 → 100755")))
+    .to_be_visible();
   assert!(screen.query_by_text("No diff hunks").is_none());
 }
 
