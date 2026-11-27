@@ -5,6 +5,8 @@ use gpui::{
   SharedString, Stateful, Window,
 };
 
+use gpui_kit::base::TestSupportExt as _;
+
 use crate::{icon, radius, theme, theme::Palette, zpx, OnClick};
 
 /// What a [`Checkbox`] shows. `Mixed` is a parent whose children are only
@@ -216,6 +218,8 @@ impl RenderOnce for Checkbox {
           .aria_toggled(toggled)
           .when_some(self.label.clone(), |this, label| this.aria_label(label))
       })
+      // Before `track_focus`, so tests see its focus too.
+      .test_support()
       .when_some(focus, |this, focus| {
         this
           .track_focus(&focus)
@@ -250,6 +254,29 @@ mod tests {
     assert_eq!(switch.kind.role(), Role::Switch);
     assert_eq!(CheckKind::Switch.size(), (28., 16.));
     assert_eq!(CheckKind::Radio.size(), (13., 13.));
+  }
+
+  struct Labelled;
+
+  impl gpui::Render for Labelled {
+    fn render(&mut self, _: &mut gpui::Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+      div().size_full().child(
+        Checkbox::new("viewed", &theme::palette(false))
+          .checked(true)
+          .label("Viewed"),
+      )
+    }
+  }
+
+  #[gpui::test]
+  fn a_labelled_checkbox_is_found_by_role_and_name(cx: &mut gpui::TestAppContext) {
+    use gpui_testing_library::{by, expect, prelude::*, Screen};
+    let (_, cx) = cx.add_window_view(|_, _| Labelled);
+    cx.run_until_parked();
+    let window = cx.update(|window, _| window.window_handle());
+    let screen = Screen::new(cx, window);
+    screen.redraw();
+    expect(screen.get_by_role(by::role(Role::CheckBox).name("Viewed"))).to_be_checked();
   }
 
   #[test]
