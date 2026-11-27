@@ -53,7 +53,8 @@ test("opencode: Settings › Application offers OpenCode", async ({ page }) => {
   });
   await page.keyboard.press("Escape");
   await settle(page, 500);
-  await page.getByText("Command-line tools", { exact: true }).scrollIntoViewIfNeeded();
+  await page.mouse.move(950, 500);
+  await page.mouse.wheel(0, 700);
   await settle(page, 800);
   await capture(page, {
     name: "33-opencode-command-line-tools",
