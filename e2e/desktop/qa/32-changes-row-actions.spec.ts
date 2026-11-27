@@ -104,4 +104,78 @@ test("changes rows: aligned status letters, actions on hover or click", async ({
       "No row shows discard or + buttons; the M column is unchanged",
     ],
   });
+
+  // A range selection: only the last-clicked row keeps its buttons.
+  const backends = page.getByRole("button", { name: "lib/backends.ex", exact: true });
+  const backendsSelected = page.getByRole("button", {
+    name: "lib/backends.ex",
+    exact: true,
+    selected: true,
+  });
+  await backends.click();
+  await users.click({ modifiers: ["Shift"] });
+  await expect(backendsSelected).toHaveCount(1);
+  await expect(selected).toHaveCount(1);
+  await page.mouse.move(900, 600, { steps: 4 });
+  await settle(page, 600);
+  await capture(page, {
+    name: "32-changes-row-actions-05-range",
+    title: "backends.ex then Shift+users.ex",
+    clip,
+    rest: false,
+    expectations: [
+      "backends.ex and users.ex are both highlighted",
+      "Only users.ex, the last clicked, shows discard and +",
+      "Every M stays in one column",
+    ],
+  });
+
+  await page.mouse.click(900, 600);
+  await expect(backendsSelected).toHaveCount(0);
+  await expect(selected).toHaveCount(0);
+  await settle(page, 600);
+  await capture(page, {
+    name: "32-changes-row-actions-06-range-cleared",
+    title: "Range selection after a click in the diff",
+    clip,
+    expectations: ["No row is highlighted and no row shows buttons"],
+  });
+
+  // The Selected (staged) list: its unstage button sits before the letter too.
+  await users.hover();
+  await page.getByRole("button", { name: "Stage lib/users.ex", exact: true }).click();
+  const unstage = page.getByRole("button", { name: "Unstage lib/users.ex", exact: true });
+  await expect(unstage).toHaveCount(1);
+  await users.click();
+  await expect(selected).toHaveCount(1);
+  await page.mouse.move(900, 600, { steps: 4 });
+  await settle(page, 600);
+  const top = (await users.boundingBox())!;
+  const bottom = (await page.getByRole("button", { name: "test/test_helper.exs", exact: true }).boundingBox())!;
+  const staged = {
+    x: Math.max(0, top.x - 16),
+    y: Math.max(0, top.y - 140),
+    width: top.width + 32,
+    height: bottom.y + bottom.height - top.y + 164,
+  };
+  await capture(page, {
+    name: "32-changes-row-actions-07-staged-clicked",
+    title: "users.ex staged, then clicked in the Selected list",
+    clip: staged,
+    rest: false,
+    expectations: [
+      "users.ex sits in the Selected list, highlighted, with − before its M",
+      "The M letters of the Selected, Changes and Committed rows share one column",
+    ],
+  });
+
+  await page.mouse.click(900, 600);
+  await expect(selected).toHaveCount(0);
+  await settle(page, 600);
+  await capture(page, {
+    name: "32-changes-row-actions-08-staged-cleared",
+    title: "Selected list after a click in the diff",
+    clip: staged,
+    expectations: ["users.ex is no longer highlighted and its − is hidden"],
+  });
 });
