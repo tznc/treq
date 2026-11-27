@@ -522,9 +522,7 @@ impl ChangesView {
     };
     let mut comment = draft.comment(&text, new_id(), now());
     comment.version = self
-      .hunks
-      .get(&draft.file_path)
-      .and_then(|d| d.content_id.as_deref())
+      .content_id_for(&draft.file_path, Some(draft.side))
       .and_then(|id| side_version(id, draft.side))
       .map(str::to_string);
     self.review.comments.push(comment);
@@ -923,8 +921,8 @@ impl ChangesView {
       .comments
       .iter()
       .filter_map(|c| {
-        let shown = self.hunks.get(&c.file_path).filter(|d| !d.loading)?;
-        let (from, to) = carry_due(c, shown.content_id.as_deref()?)?;
+        self.hunks.get(&c.file_path).filter(|d| !d.loading)?;
+        let (from, to) = carry_due(c, self.content_id_for(&c.file_path, c.line_side)?)?;
         Some((c.id.clone(), c.file_path.clone(), from.into(), to.into()))
       })
       .collect();
@@ -955,10 +953,17 @@ impl ChangesView {
           ) else {
             continue;
           };
-          let Some(shown) = view.hunks.get(&path) else {
+          // It moves among the hunks the file shows, its branch diff or not.
+          let Some(hunks) = view.shown_hunks(&path).map(|d| d.hunks.clone()) else {
             continue;
           };
-          let (hunks, content_id) = (shown.hunks.clone(), shown.content_id.clone());
+          let side = view
+            .review
+            .comments
+            .iter()
+            .find(|c| c.id == id)
+            .and_then(|c| c.line_side);
+          let content_id = view.content_id_for(&path, side).map(str::to_string);
           let Some(comment) = view
             .review
             .comments
@@ -1022,10 +1027,26 @@ impl ChangesView {
 
   /// Where `comment` shows; on its line while its file loads.
   fn placed(&self, comment: &LineComment) -> Placement {
+    let content_id = self.content_id_for(&comment.file_path, comment.line_side);
     match self.file_hunks(&comment.file_path).filter(|d| !d.loading) {
-      Some(d) => placement(comment, &d.hunks, d.content_id.as_deref()),
+      Some(d) => placement(comment, &d.hunks, content_id),
       None => Placement::Line,
     }
+  }
+
+  /// The content id whose versions comments on `side` of `path` follow:
+  /// the working copy's, whichever diff the file shows. None for a removed
+  /// line of a file shown as its branch diff, numbered from the fork point
+  /// rather than the working copy's parent.
+  pub(super) fn content_id_for(&self, path: &str, side: Option<Side>) -> Option<&str> {
+    let branch = self
+      .snapshot
+      .as_ref()
+      .is_some_and(|s| s.shows_branch_diff(path));
+    if branch && side == Some(Side::Old) {
+      return None;
+    }
+    self.hunks.get(path)?.content_id.as_deref()
   }
 
   /// The file's comments not under a line: outdated, or off the diff.
@@ -1218,10 +1239,7 @@ impl ChangesView {
         return outdated;
       }
     }
-    let content_id = self
-      .hunks
-      .get(&comment.file_path)
-      .and_then(|d| d.content_id.as_deref());
+    let content_id = self.content_id_for(&comment.file_path, comment.line_side);
     let outdated = placement(comment, hunks, content_id) != Placement::Line;
     self
       .review

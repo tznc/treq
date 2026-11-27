@@ -110,6 +110,9 @@ struct FakeHost {
   review: Mutex<Option<String>>,
   /// File texts by version (`review::side_version`).
   versions: HashMap<String, String>,
+  /// A file's working-copy hunks, where they differ from its branch diff
+  /// (`hunks_by_file`).
+  wc_hunks: Mutex<HashMap<String, Vec<crate::jj::JjDiffHunk>>>,
   /// The pull request's review threads and the review agent's comments.
   threads: Vec<crate::github::GhReviewThread>,
   agent: Mutex<Vec<crate::local_db::AgentReviewComment>>,
@@ -1001,11 +1004,19 @@ impl changes_data::ChangesHost for FakeHost {
         .iter()
         .map(|path| crate::core::WorkspaceFileHunksBatchFile {
           path: path.clone(),
-          hunks: working
-            .hunks_by_file
-            .iter()
-            .find(|f| &f.path == path)
-            .map(|f| f.hunks.clone())
+          hunks: self
+            .wc_hunks
+            .lock()
+            .unwrap()
+            .get(path)
+            .cloned()
+            .or_else(|| {
+              working
+                .hunks_by_file
+                .iter()
+                .find(|f| &f.path == path)
+                .map(|f| f.hunks.clone())
+            })
             .unwrap_or_default(),
           error: None,
         })
