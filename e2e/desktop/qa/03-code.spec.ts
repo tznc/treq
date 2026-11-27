@@ -240,6 +240,22 @@ test("code: workspace title in the header, edited inline", async ({ page }) => {
     ],
   });
 
+  const box = await edit.boundingBox();
+  if (!box) throw new Error("edit pencil has no box");
+  const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
+  await page.mouse.move(x, y);
+  await xPointer(page, x, y);
+  await settle(page, 500);
+  await capture(page, {
+    name: "03-code-title-edit-tooltip",
+    title: "Header: hovering the title's edit pencil",
+    screen: true,
+    expectations: [
+      "A tooltip reading \"Edit title\" shows just below the pencil",
+      "The pencil shows its ghost hover background",
+    ],
+  });
+
   await edit.click();
   const input = page.getByRole("textbox", { name: "Workspace title" });
   await expect(input).toBeVisible();

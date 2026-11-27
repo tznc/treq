@@ -429,6 +429,28 @@ fn the_title_edits_in_the_header_on_any_tab(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn the_title_edit_button_has_a_tooltip(cx: &mut TestAppContext) {
+  use crate::gpui_shell::popup::{PopupRequest, TooltipContent};
+  let (mut h, _) = workspace_harness(cx, feature_host(), code_route());
+  h.cx.run_until_parked();
+  let at = h
+    .cx
+    .debug_bounds("workspace-title-edit")
+    .expect("edit")
+    .center();
+  h.cx.simulate_mouse_move(at, None, gpui::Modifiers::none());
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_millis(300));
+  h.cx.run_until_parked();
+  let shown = h.popups.borrow().iter().any(|p| {
+    matches!(p, PopupRequest::ShowTooltip { content: TooltipContent::Text(text), .. }
+      if text == "Edit title")
+  });
+  assert!(shown, "{:?}", h.popups.borrow());
+}
+
+#[gpui::test]
 fn code_tab_saves_a_pr_description_to_the_pr(cx: &mut TestAppContext) {
   let host = FakeHost {
     pr_sync: synced(true),
