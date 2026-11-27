@@ -382,6 +382,23 @@ pub fn line_label(thread: &GhReviewThread) -> Option<String> {
   })
 }
 
+/// Threads by the line they were left on, in the order first seen.
+/// An outdated thread groups by the line it had.
+pub fn by_line<'a>(
+  threads: impl IntoIterator<Item = &'a GhReviewThread>,
+) -> Vec<Vec<&'a GhReviewThread>> {
+  let key = |t: &GhReviewThread| t.line.or(t.original_line).map(|l| (l, t.diff_side.clone()));
+  let mut groups: Vec<Vec<&GhReviewThread>> = Vec::new();
+  for t in threads {
+    let same = key(t).and_then(|k| groups.iter_mut().find(|g| key(g[0]).as_ref() == Some(&k)));
+    match same {
+      Some(group) => group.push(t),
+      None => groups.push(vec![t]),
+    }
+  }
+  groups
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -616,6 +633,32 @@ mod tests {
     assert_eq!(line_label(&t).as_deref(), Some("Outdated · line 7"));
     t.original_start_line = Some(5);
     assert_eq!(line_label(&t).as_deref(), Some("Outdated · lines 5–7"));
+  }
+
+  #[test]
+  fn threads_group_by_the_line_they_were_left_on() {
+    let a = thread("a.rs", Some(40), "RIGHT");
+    let mut b = thread("a.rs", None, "RIGHT");
+    b.original_line = Some(40);
+    let c = thread("a.rs", Some(7), "RIGHT");
+    let d = thread("a.rs", Some(40), "LEFT");
+    let ids = |groups: Vec<Vec<&GhReviewThread>>| {
+      groups
+        .into_iter()
+        .map(|g| g.into_iter().map(|t| t.id.clone()).collect::<Vec<_>>())
+        .collect::<Vec<_>>()
+    };
+    assert_eq!(
+      ids(by_line([&a, &c, &b, &d])),
+      vec![vec![a.id, b.id], vec![c.id], vec![d.id]]
+    );
+  }
+
+  #[test]
+  fn threads_without_a_line_each_stand_alone() {
+    let a = thread("a.rs", None, "RIGHT");
+    let b = thread("a.rs", None, "RIGHT");
+    assert_eq!(by_line([&a, &b]).len(), 2);
   }
 
   #[test]

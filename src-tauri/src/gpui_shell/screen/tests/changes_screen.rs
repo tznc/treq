@@ -1300,6 +1300,28 @@ fn threads_above_the_file_name_their_line(cx: &mut TestAppContext) {
   }
 }
 
+/// Threads above the file on the same line sit together under one label.
+#[gpui::test]
+fn threads_above_the_file_on_one_line_sit_together(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  let mut host = changes_host();
+  let mut other = gh_thread("t2", 40, false);
+  other.comments[0].author.login = "hubot".into();
+  host.threads = vec![
+    gh_thread("t1", 40, false),
+    gh_thread("t3", 50, false),
+    other,
+  ];
+  let (mut h, _) = workspace_harness(cx, host, changes_route());
+  let screen = a11y_screen(&mut h);
+  let labels = screen.query_all_by_role(by::role(gpui::Role::Label).name("Line 40"));
+  assert_eq!(labels.len(), 1);
+  let line = screen.get_by_role(by::role(gpui::Role::Group).name("Threads on line 40"));
+  for author in ["Comment by octo", "Comment by hubot"] {
+    expect(within(&line).get_by_role(by::role(gpui::Role::Group).name(author))).to_be_visible();
+  }
+}
+
 #[gpui::test]
 fn a_review_thread_draws_its_replies_as_one_card(cx: &mut TestAppContext) {
   let mut host = changes_host();
