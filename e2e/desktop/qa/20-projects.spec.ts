@@ -82,9 +82,15 @@ test("projects: sidebar, project menu, save and welcome list", async ({ page }) 
     expectations: [
       "The menu offers Save Project… and New Window…",
       "The project button's chevron points up while its menu is open",
+      "The menu spans the project button, edge to edge",
     ],
   });
   if (!menu) throw new Error("no project menu");
+  // As wide as the button, so the menu does not stop partway along it.
+  const at = await button.boundingBox();
+  if (!at) throw new Error("no project button");
+  expect(Math.abs(menu.x - at.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(menu.w - at.width)).toBeLessThanOrEqual(1);
   // "Save Project…" is the first row.
   await xPointer(page, menu.x + 60, menu.y + 18, 1);
   await settle(page, 1000);
