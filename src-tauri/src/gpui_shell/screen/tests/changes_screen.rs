@@ -166,7 +166,7 @@ fn changes_tab_offers_the_filter_only_with_something_to_filter(cx: &mut TestAppC
   assert!(!h.shows(gpui::Role::Button, "Filter changes"));
 }
 
-fn committed_route(show: bool) -> ScreenSnapshot {
+pub(super) fn committed_route(show: bool) -> ScreenSnapshot {
   let mut route = route_json(Some(7), "main");
   route["code"] = true.into();
   route["tab"] = "changes".into();
@@ -174,7 +174,7 @@ fn committed_route(show: bool) -> ScreenSnapshot {
   serde_json::from_value(route).expect("changes route")
 }
 
-fn changes_host_with_committed() -> FakeHost {
+pub(super) fn changes_host_with_committed() -> FakeHost {
   let mut host = changes_host();
   host.working = serde_json::from_value(serde_json::json!({
     "committed_files": [

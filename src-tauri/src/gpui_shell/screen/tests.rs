@@ -3139,6 +3139,7 @@ mod home_screen;
 mod idle;
 mod input_latency;
 mod kept_tabs;
+mod line_edit;
 mod linear_view;
 mod logs_explorer;
 mod logs_screen;

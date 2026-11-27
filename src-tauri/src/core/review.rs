@@ -147,6 +147,24 @@ pub fn selected_text(hunks: &[JjDiffHunk], a: TextPoint, b: TextPoint) -> String
     .join("\n")
 }
 
+/// Selected diff lines that can be edited in place: the lines the file
+/// still has, in the cursor's hunk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditableLines {
+  /// The rows the editor stands in for, in order.
+  pub rows: Vec<LineRef>,
+  /// The file's lines `start..=end`, 1-based.
+  pub lines: (u32, u32),
+  /// What those lines read, without markers.
+  pub original: Vec<String>,
+}
+
+/// The new-side lines among `rows` that are in hunk `head`; `None` when
+/// there are none (only removed lines picked).
+pub fn editable_lines(_hunks: &[JjDiffHunk], _rows: &[LineRef], _head: usize) -> Option<EditableLines> {
+  None
+}
+
 /// The word around byte `at` for a double-click: a run of identifier
 /// characters, a run of whitespace, or else the single character there.
 pub fn word_at(text: &str, at: usize) -> Range<usize> {
@@ -966,5 +984,48 @@ mod tests {
     assert_eq!(empty.suggested, "", "an empty block deletes the lines");
     assert_eq!(parse_suggestion("no block"), None);
     assert_eq!(parse_suggestion("```suggestion\nunclosed"), None);
+  }
+
+  fn edit_hunks() -> Vec<JjDiffHunk> {
+    vec![
+      hunk(
+        "a",
+        "@@ -4,3 +4,3 @@",
+        &[" keep", "-old", "+new", "+more", "\\ No newline at end of file"],
+      ),
+      hunk("b", "@@ -20 +20 @@", &["-gone", "+here"]),
+    ]
+  }
+
+  #[test]
+  fn editable_lines_takes_the_new_side_of_the_selection() {
+    let h = edit_hunks();
+    let rows = selection(&h, (0, 0), (0, 3));
+    assert_eq!(
+      editable_lines(&h, &rows, 0),
+      Some(EditableLines {
+        rows: vec![(0, 0), (0, 2), (0, 3)],
+        lines: (4, 6),
+        original: vec!["keep".into(), "new".into(), "more".into()],
+      })
+    );
+  }
+
+  #[test]
+  fn editable_lines_stays_in_the_head_hunk() {
+    let h = edit_hunks();
+    let rows = selection(&h, (0, 2), (1, 1));
+    let edit = editable_lines(&h, &rows, 1).expect("editable");
+    assert_eq!(edit.rows, [(1, 1)]);
+    assert_eq!(edit.lines, (20, 20));
+    assert_eq!(edit.original, ["here"]);
+  }
+
+  #[test]
+  fn editable_lines_is_none_for_removed_lines_and_markers() {
+    let h = edit_hunks();
+    assert_eq!(editable_lines(&h, &[(0, 1)], 0), None);
+    assert_eq!(editable_lines(&h, &[(0, 4)], 0), None);
+    assert_eq!(editable_lines(&h, &[], 0), None);
   }
 }

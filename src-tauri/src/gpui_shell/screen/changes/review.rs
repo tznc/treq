@@ -12,7 +12,9 @@ use std::{ops::Range, time::Duration};
 use treq_ui::SelectorExt as _;
 
 use super::*;
-use crate::core::review::{selected_range, selected_row, selected_text, word_at, TextPoint};
+use crate::core::review::{
+  selected_range, selected_row, selected_text, word_at, EditableLines, TextPoint,
+};
 use crate::gpui_shell::screen::{
   changes_review::{
     commented_text, comments_under, compose_suggestion_comment, count_label, is_outdated,
@@ -49,6 +51,13 @@ pub(in crate::gpui_shell::screen) struct TextSelection {
   pub anchor: TextPoint,
   pub head: TextPoint,
   pub dragging: bool,
+}
+
+/// A file's diff lines being edited in place.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::gpui_shell::screen) struct LineEdit {
+  pub path: String,
+  pub lines: EditableLines,
 }
 
 /// Each drawn line's text layout, for finding the character under the mouse.
@@ -105,6 +114,10 @@ pub(in crate::gpui_shell::screen) struct Review {
   pub editing: Option<String>,
   pub edit_text: String,
   pub(super) edit_input: Option<Input>,
+  /// Diff lines being edited in place (E), and their text as edited.
+  pub line_edit: Option<LineEdit>,
+  pub line_edit_text: String,
+  pub(super) line_edit_input: Option<Input>,
   pub notes: Vec<ConflictNote>,
   /// The conflict whose note box is open.
   pub note_open: Option<String>,
