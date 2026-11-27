@@ -1,0 +1,234 @@
+id: no-wait-for-timeout-ts
+snapshots:
+  ? |
+    await Promise.race([exited, new Promise((r) => setTimeout(r, 10_000))]);
+  : labels:
+    - source: new Promise((r) => setTimeout(r, 10_000))
+      style: primary
+      start: 28
+      end: 69
+    - source: Promise
+      style: secondary
+      start: 32
+      end: 39
+    - source: setTimeout(r, 10_000)
+      style: secondary
+      start: 47
+      end: 68
+  ? |
+    await new Promise((r) => globalThis.setTimeout(r, 100));
+  : labels:
+    - source: new Promise((r) => globalThis.setTimeout(r, 100))
+      style: primary
+      start: 6
+      end: 55
+    - source: Promise
+      style: secondary
+      start: 10
+      end: 17
+    - source: globalThis.setTimeout(r, 100)
+      style: secondary
+      start: 25
+      end: 54
+  ? |
+    await new Promise((r) => setTimeout(() => r(undefined), 500));
+  : labels:
+    - source: new Promise((r) => setTimeout(() => r(undefined), 500))
+      style: primary
+      start: 6
+      end: 61
+    - source: Promise
+      style: secondary
+      start: 10
+      end: 17
+    - source: setTimeout(() => r(undefined), 500)
+      style: secondary
+      start: 25
+      end: 60
+  ? |
+    await new Promise((r) => setTimeout(r, 500));
+  : labels:
+    - source: new Promise((r) => setTimeout(r, 500))
+      style: primary
+      start: 6
+      end: 44
+    - source: Promise
+      style: secondary
+      start: 10
+      end: 17
+    - source: setTimeout(r, 500)
+      style: secondary
+      start: 25
+      end: 43
+  ? |
+    await new Promise(function (resolve) {
+      setTimeout(resolve, 500);
+    });
+  : labels:
+    - source: |-
+        new Promise(function (resolve) {
+          setTimeout(resolve, 500);
+        })
+      style: primary
+      start: 6
+      end: 69
+    - source: Promise
+      style: secondary
+      start: 10
+      end: 17
+    - source: setTimeout(resolve, 500)
+      style: secondary
+      start: 41
+      end: 65
+  ? |
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 200);
+    });
+  : labels:
+    - source: |-
+        new Promise<void>((resolve) => {
+          setTimeout(resolve, 200);
+        })
+      style: primary
+      start: 6
+      end: 69
+    - source: Promise
+      style: secondary
+      start: 10
+      end: 17
+    - source: setTimeout(resolve, 200)
+      style: secondary
+      start: 41
+      end: 65
+  ? |
+    await page.waitForTimeout(500);
+  : labels:
+    - source: page.waitForTimeout
+      style: primary
+      start: 6
+      end: 25
+    - source: waitForTimeout
+      style: secondary
+      start: 11
+      end: 25
+  ? |
+    await page?.waitForTimeout(500);
+  : labels:
+    - source: page?.waitForTimeout
+      style: primary
+      start: 6
+      end: 26
+    - source: waitForTimeout
+      style: secondary
+      start: 12
+      end: 26
+  ? |
+    await page["waitForTimeout"](500);
+  : labels:
+    - source: page["waitForTimeout"]
+      style: primary
+      start: 6
+      end: 28
+    - source: '"waitForTimeout"'
+      style: secondary
+      start: 11
+      end: 27
+  ? |
+    const pause = page.waitForTimeout.bind(page);
+  : labels:
+    - source: page.waitForTimeout
+      style: primary
+      start: 14
+      end: 33
+    - source: waitForTimeout
+      style: secondary
+      start: 19
+      end: 33
+  ? |
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  : labels:
+    - source: new Promise((r) => setTimeout(r, ms))
+      style: primary
+      start: 30
+      end: 67
+    - source: Promise
+      style: secondary
+      start: 34
+      end: 41
+    - source: setTimeout(r, ms)
+      style: secondary
+      start: 49
+      end: 66
+  ? |
+    const sleep = promisify(setTimeout);
+  : labels:
+    - source: promisify(setTimeout)
+      style: primary
+      start: 14
+      end: 35
+  ? |
+    const sleep = util.promisify(setTimeout);
+  : labels:
+    - source: util.promisify(setTimeout)
+      style: primary
+      start: 14
+      end: 40
+  ? |
+    const { setTimeout: sleep } = require("node:timers/promises");
+  : labels:
+    - source: require("node:timers/promises")
+      style: primary
+      start: 30
+      end: 61
+  ? |
+    export const settle = (page: Page, ms = 1200) => page.waitForTimeout(ms);
+  : labels:
+    - source: page.waitForTimeout
+      style: primary
+      start: 49
+      end: 68
+    - source: waitForTimeout
+      style: secondary
+      start: 54
+      end: 68
+  ? |
+    export function pause(page: Page, ms = 1200): Promise<void> {
+      return page.waitForTimeout(ms);
+    }
+  : labels:
+    - source: page.waitForTimeout
+      style: primary
+      start: 71
+      end: 90
+    - source: waitForTimeout
+      style: secondary
+      start: 76
+      end: 90
+  ? |
+    export function settle(page: Page, ms = 1200): Promise<void> {
+      return new Promise((r) => setTimeout(r, ms));
+    }
+  : labels:
+    - source: new Promise((r) => setTimeout(r, ms))
+      style: primary
+      start: 72
+      end: 109
+    - source: Promise
+      style: secondary
+      start: 76
+      end: 83
+    - source: setTimeout(r, ms)
+      style: secondary
+      start: 91
+      end: 108
+  ? |
+    import { setTimeout as sleep } from "node:timers/promises";
+  : labels:
+    - source: import { setTimeout as sleep } from "node:timers/promises";
+      style: primary
+      start: 0
+      end: 59
+    - source: '"node:timers/promises"'
+      style: secondary
+      start: 36
+      end: 58

@@ -1,0 +1,81 @@
+id: no-wait-for-timeout-ts
+valid:
+  - |
+    test.setTimeout(600_000);
+  - |
+    const timer = setTimeout(() => controller.abort(), 5000);
+  - |
+    await expect(page.getByRole("button", { name: "Save" })).toBeVisible();
+  - |
+    await page.getByText("Done").waitFor({ timeout: 10_000 });
+  - |
+    await expect.poll(() => readLog(), { timeout: 30_000 }).toContain("ready");
+  - |
+    await expect(async () => {
+      expect(await count()).toBe(3);
+    }).toPass();
+  - |
+    await vi.waitFor(() => expect(spy).toHaveBeenCalled());
+  - |
+    vi.useFakeTimers();
+    vi.advanceTimersByTime(1000);
+  - |
+    await page.waitForResponse("**/api/search");
+  - |
+    await new Promise((resolve) => child.once("exit", resolve));
+  - |
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+  - |
+    const signal = AbortSignal.timeout(5000);
+  - |
+    import { setTimeout as sleep } from "node:timers";
+  # qa/helpers.ts settle(): the one sanctioned fixed wait (see the rule).
+  - |
+    export function settle(page: Page, ms = 1200): Promise<void> {
+      return page.waitForTimeout(ms);
+    }
+invalid:
+  - |
+    await page.waitForTimeout(500);
+  - |
+    await page?.waitForTimeout(500);
+  - |
+    await page["waitForTimeout"](500);
+  - |
+    const pause = page.waitForTimeout.bind(page);
+  - |
+    export function pause(page: Page, ms = 1200): Promise<void> {
+      return page.waitForTimeout(ms);
+    }
+  - |
+    export function settle(page: Page, ms = 1200): Promise<void> {
+      return new Promise((r) => setTimeout(r, ms));
+    }
+  - |
+    export const settle = (page: Page, ms = 1200) => page.waitForTimeout(ms);
+  - |
+    await new Promise((r) => setTimeout(r, 500));
+  - |
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 200);
+    });
+  - |
+    await new Promise((r) => setTimeout(() => r(undefined), 500));
+  - |
+    await new Promise(function (resolve) {
+      setTimeout(resolve, 500);
+    });
+  - |
+    await new Promise((r) => globalThis.setTimeout(r, 100));
+  - |
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  - |
+    await Promise.race([exited, new Promise((r) => setTimeout(r, 10_000))]);
+  - |
+    import { setTimeout as sleep } from "node:timers/promises";
+  - |
+    const { setTimeout: sleep } = require("node:timers/promises");
+  - |
+    const sleep = promisify(setTimeout);
+  - |
+    const sleep = util.promisify(setTimeout);
