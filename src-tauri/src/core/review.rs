@@ -827,7 +827,7 @@ mod tests {
 
   #[test]
   fn comments_go_outdated_with_their_lines() {
-    let hunks = [hunk("h", "@@ -1,1 +1,2 @@", &[" a", "+b"])];
+    let hunks = [hunk("h", "@@ -1,1 +1,2 @@", &[" a", "+x"])];
     assert!(!is_outdated(&comment("h", 2, 2, Side::New), Some(&hunks)));
     assert!(is_outdated(&comment("h", 9, 9, Side::New), Some(&hunks)));
     assert!(is_outdated(&comment("gone", 2, 2, Side::New), Some(&hunks)));
@@ -835,9 +835,32 @@ mod tests {
   }
 
   #[test]
+  fn a_comment_goes_outdated_when_its_code_changes_under_it() {
+    let before = [hunk("h", "@@ -1,1 +1,3 @@", &[" a", "+b", "+c"])];
+    let c = pending_for_selection("a.rs", &before, &[(0, 1), (0, 2)])
+      .unwrap()
+      .comment("fix", "1".into(), "now".into());
+    assert!(!is_outdated(&c, Some(&before)));
+    // The same hunk and line numbers now hold other code.
+    let after = [hunk("h", "@@ -1,1 +1,3 @@", &[" a", "+new", "+c"])];
+    assert!(is_outdated(&c, Some(&after)));
+  }
+
+  #[test]
+  fn a_quoted_github_comment_keeps_its_line() {
+    let hunks = [hunk("h", "@@ -1,1 +1,2 @@", &[" a", "+b"])];
+    let mut c = comment("h", 2, 2, Side::New);
+    c.source = Some("github".into());
+    c.line_content = vec!["the quoted review comment".into()];
+    assert!(!is_outdated(&c, Some(&hunks)));
+  }
+
+  #[test]
   fn a_comment_shows_under_its_last_line() {
     let hunks = [hunk("h", "@@ -1,1 +1,3 @@", &[" a", "+b", "+c"])];
-    let comments = [comment("h", 1, 3, Side::New)];
+    let mut c = comment("h", 1, 3, Side::New);
+    c.line_content = vec![" a".into(), "+b".into(), "+c".into()];
+    let comments = [c];
     let at = |l| line_at(&hunks[0], l);
     let outdated = |c: &LineComment| is_outdated(c, Some(&hunks));
     assert!(comments_under(&comments, "a.rs", &hunks[0], at(0), &outdated).is_empty());
