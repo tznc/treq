@@ -45,7 +45,7 @@ test("changes: conflict card and resolve popover", async ({ page }) => {
     title: "Changes tab: conflicts and committed files",
     expectations: [
       "File list: Conflicts (Home.tsx, C) above Committed 3 (A/A/M badges)",
-      "Review bar: '0 comments pending', Start Review, Reset, red Resolve conflicts…",
+      "Review bar: '0 comments pending', Review, Reset, red Resolve conflicts…",
       "No commit box: nothing is uncommitted, so 'Nothing to commit' sits between Conflicts and Committed",
     ],
   });
