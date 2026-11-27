@@ -1,0 +1,187 @@
+# Two documents share this id because the test context comes from the path
+# for test files but from the syntax in other source files, and one rule has
+# one `files` list. `ast-grep test` runs the first document only, so the
+# context-sensitive one goes first. Keep the `utils` of both in sync.
+id: no-sleep-in-tests-rust
+language: rust
+severity: error
+message: >
+  Do not sleep in Rust tests. A fixed sleep makes the test slow and flaky. Wait
+  for the condition the test needs: join the thread, receive on a channel, or
+  poll with `wait_until` (src-tauri/tests/common/wait.rs). For timeouts and
+  backoff, inject the time or use tokio paused time.
+files:
+  - "src-tauri/src/**/*.rs"
+  - "crates/*/src/**/*.rs"
+ignores:
+  # Whole test files: the second document below covers them.
+  - "**/tests/**"
+  - "**/*_test.rs"
+  - "**/tests.rs"
+  # Not fixed yet. The fix PRs stacked on this one remove these entries.
+  - "src-tauri/src/db.rs"
+  - "src-tauri/src/gpui_shell/remote_repo.rs"
+  - "src-tauri/src/jj.rs"
+  - "src-tauri/src/jj/oplog.rs"
+  - "src-tauri/src/local_db.rs"
+  - "src-tauri/src/pr_status.rs"
+  - "src-tauri/src/pty.rs"
+utils:
+  test-attr:
+    kind: attribute_item
+    regex: '^#\[(\w+::)*(\w+_)?test(\(|\])'
+  cfg-test-attr:
+    kind: attribute_item
+    regex: '^#\[cfg\((all\()?test\b'
+  after-attrs:
+    not:
+      any:
+        - kind: attribute_item
+        - kind: line_comment
+        - kind: block_comment
+  # A `use` in the file, an enclosing module or an enclosing block.
+  use-scope:
+    any:
+      - kind: source_file
+      - kind: declaration_list
+      - kind: block
+  imports-sleep:
+    inside:
+      matches: use-scope
+      stopBy: end
+      has:
+        kind: use_declaration
+        regex: '\b(thread|time)::(sleep\b|\{[^}]*\bsleep\b|\*)'
+  sleep-alias:
+    pattern: $F($$$)
+    has: { field: function, kind: identifier }
+    inside:
+      matches: use-scope
+      stopBy: end
+      has:
+        kind: use_declaration
+        regex: '\b(thread|time)::'
+        has:
+          kind: use_as_clause
+          stopBy: end
+          all:
+            - has: { field: path, regex: '(^|::)sleep$' }
+            - has: { field: alias, pattern: $F }
+  # Macro bodies (proptest!, tokio::select!) are token trees, not calls.
+  sleep-in-macro:
+    kind: identifier
+    regex: '^sleep$'
+    inside: { kind: token_tree }
+    precedes: { kind: token_tree }
+    any:
+      - follows:
+          regex: '^::$'
+          follows: { kind: identifier, regex: '^(thread|time)$' }
+      - all:
+          - not: { follows: { regex: '^::$' } }
+          - matches: imports-sleep
+  sleep-call:
+    any:
+      - pattern: std::thread::sleep($$$)
+      - pattern: ::std::thread::sleep($$$)
+      - pattern: thread::sleep($$$)
+      - pattern: tokio::time::sleep($$$)
+      - pattern: ::tokio::time::sleep($$$)
+      - pattern: time::sleep($$$)
+      - all:
+          - pattern: sleep($$$)
+          - matches: imports-sleep
+      - matches: sleep-alias
+      - matches: sleep-in-macro
+rule:
+  matches: sleep-call
+  inside:
+    stopBy: end
+    any:
+      - kind: function_item
+        follows:
+          matches: test-attr
+          stopBy: { matches: after-attrs }
+      - any:
+          - kind: mod_item
+          - kind: function_item
+          - kind: impl_item
+        follows:
+          matches: cfg-test-attr
+          stopBy: { matches: after-attrs }
+---
+id: no-sleep-in-tests-rust
+language: rust
+severity: error
+message: >
+  Do not sleep in Rust tests. A fixed sleep makes the test slow and flaky. Wait
+  for the condition the test needs: join the thread, receive on a channel, or
+  poll with `wait_until` (src-tauri/tests/common/wait.rs). For timeouts and
+  backoff, inject the time or use tokio paused time.
+files:
+  - "src-tauri/tests/**/*.rs"
+  - "crates/*/tests/**/*.rs"
+  - "src-tauri/src/**/tests/**/*.rs"
+  - "src-tauri/src/**/*_test.rs"
+  - "src-tauri/src/**/tests.rs"
+  - "crates/*/src/**/tests/**/*.rs"
+  - "crates/*/src/**/*_test.rs"
+  - "crates/*/src/**/tests.rs"
+ignores:
+  # The one shared polling helper (`wait_until`): it sleeps between polls of
+  # the condition a test waits on, so no test needs a fixed sleep.
+  - "src-tauri/tests/common/wait.rs"
+utils:
+  # A `use` in the file, an enclosing module or an enclosing block.
+  use-scope:
+    any:
+      - kind: source_file
+      - kind: declaration_list
+      - kind: block
+  imports-sleep:
+    inside:
+      matches: use-scope
+      stopBy: end
+      has:
+        kind: use_declaration
+        regex: '\b(thread|time)::(sleep\b|\{[^}]*\bsleep\b|\*)'
+  sleep-alias:
+    pattern: $F($$$)
+    has: { field: function, kind: identifier }
+    inside:
+      matches: use-scope
+      stopBy: end
+      has:
+        kind: use_declaration
+        regex: '\b(thread|time)::'
+        has:
+          kind: use_as_clause
+          stopBy: end
+          all:
+            - has: { field: path, regex: '(^|::)sleep$' }
+            - has: { field: alias, pattern: $F }
+  sleep-in-macro:
+    kind: identifier
+    regex: '^sleep$'
+    inside: { kind: token_tree }
+    precedes: { kind: token_tree }
+    any:
+      - follows:
+          regex: '^::$'
+          follows: { kind: identifier, regex: '^(thread|time)$' }
+      - all:
+          - not: { follows: { regex: '^::$' } }
+          - matches: imports-sleep
+rule:
+  any:
+    - pattern: std::thread::sleep($$$)
+    - pattern: ::std::thread::sleep($$$)
+    - pattern: thread::sleep($$$)
+    - pattern: tokio::time::sleep($$$)
+    - pattern: ::tokio::time::sleep($$$)
+    - pattern: time::sleep($$$)
+    - all:
+        - pattern: sleep($$$)
+        - matches: imports-sleep
+    - matches: sleep-alias
+    - matches: sleep-in-macro
