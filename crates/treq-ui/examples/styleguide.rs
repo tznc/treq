@@ -8,11 +8,11 @@ use gpui::{div, prelude::*, px, App, Entity, Window};
 use gpui_kit::component::input::InputState;
 use gpui_styleguidist::{example, Example, Styleguide};
 use treq_ui::{
-  floating,
+  floating, picker, radius,
   theme::{self, Palette},
-  touch, Alert, Badge, Button, Card, CardFooter, CardHeader, CardVariant, CheckState, Checkbox,
-  ConfirmDialog, Count, Dialog, Dot, EmptyState, Field, FieldLayout, Form, FormActions, FormLayout,
-  FormRow, FormSection, IconButton, IconButtonSize, Kbd, Loading, MenuItem, MenuLabel,
+  touch, zpx, Alert, Badge, Button, Card, CardFooter, CardHeader, CardVariant, CheckState,
+  Checkbox, ConfirmDialog, Count, Dialog, Dot, EmptyState, Field, FieldLayout, Form, FormActions,
+  FormLayout, FormRow, FormSection, IconButton, IconButtonSize, Kbd, Loading, MenuItem, MenuLabel,
   MenuSeparator, PathField, Picker, PickerPlacement, Row, RowDensity, Severity, Skeleton,
   SplitButton, Tab, Tabs, TabsStyle, Tone, Variant,
 };
@@ -659,6 +659,45 @@ fn buttons() -> Vec<Example> {
     })
     .component("Picker")
     .title("Form and toolbar"),
+    example!("picker/full-width", |knobs, _, cx| {
+      let p = p(cx);
+      let open = knobs.bool("open", true);
+      let saved = knobs.bool("saved", true);
+      let picker = Picker::new("project", &p)
+        .label("Project")
+        .placement(PickerPlacement::Toolbar)
+        .full_width()
+        .open(open);
+      let picker = if saved {
+        picker.value("Event platform").badge("E")
+      } else {
+        picker.placeholder("Unsaved").badge("?")
+      };
+      div()
+        .w(px(260.))
+        .h(px(140.))
+        .relative()
+        .child(picker)
+        // The menu: `MENU_GAP` under the picker, as wide, with its corners.
+        .when(open, |this| {
+          this.child(
+            div()
+              .absolute()
+              .top(zpx(PickerPlacement::Toolbar.height() + picker::MENU_GAP))
+              .left_0()
+              .right_0()
+              .p_1()
+              .rounded(radius::MD)
+              .border_1()
+              .border_color(p.border)
+              .bg(p.popover)
+              .child(MenuItem::new("save", "Save Project…", &p))
+              .child(MenuItem::new("new-window", "New Window…", &p)),
+          )
+        })
+    })
+    .component("Picker")
+    .title("Full width"),
   ]
 }
 

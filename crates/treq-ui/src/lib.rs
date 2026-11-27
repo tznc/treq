@@ -300,6 +300,8 @@ pub struct Button {
   selected: bool,
   /// On or off, for a toggle.
   pressed: Option<bool>,
+  /// Whether the menu it opens is open.
+  expanded: Option<bool>,
   style: StyleRefinement,
   hover_bg: Option<Hsla>,
   /// The accessible name: the first label, unless set with `aria_label`.
@@ -322,6 +324,7 @@ impl Button {
       on_hover: None,
       selected: false,
       pressed: None,
+      expanded: None,
       style: StyleRefinement::default(),
       hover_bg: None,
       name: None,
@@ -354,6 +357,12 @@ impl Button {
   /// trigger of a menu that is open.
   pub fn selected(mut self, selected: bool) -> Self {
     self.selected = selected;
+    self
+  }
+
+  /// Whether the menu it opens is open, read out as expanded or not.
+  pub fn expanded(mut self, open: bool) -> Self {
+    self.expanded = Some(open);
     self
   }
 
@@ -597,6 +606,7 @@ impl RenderOnce for Button {
         b.button_style(gpui_bootstrap::button::ButtonStyle::Link)
       })
       .when_some(self.name, |b, name| b.accessibility_label(name))
+      .when_some(self.expanded, |b, open| b.aria_expanded(open))
       .when_some(self.pressed, |b, on| {
         b.aria_toggled(if on {
           gpui::accesskit::Toggled::True

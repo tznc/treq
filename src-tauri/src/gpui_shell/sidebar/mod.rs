@@ -767,8 +767,9 @@ pub(super) fn pr_color(pr: PrState, palette: &Palette) -> Hsla {
 /// Three 20px row buttons with 2px gaps.
 const ROW_ACTIONS_WIDTH: f32 = 3. * 20. + 2. * 2.;
 
-/// How long the project button's chevron takes to turn over.
-const CHEVRON_TURN: Duration = Duration::from_millis(150);
+/// How long the project button's chevron takes to turn over: the design
+/// system's full-width dropdown turn.
+const CHEVRON_TURN: Duration = ui::picker::CHEVRON_TURN;
 
 fn icon(path: &'static str, size: f32, color: Hsla) -> gpui::Svg {
   svg()
