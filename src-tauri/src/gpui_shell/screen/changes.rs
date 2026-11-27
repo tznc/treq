@@ -1042,12 +1042,22 @@ impl ChangesView {
         if let Some(id) = hash.strip_prefix(CONTENT_ID_MARK) {
           return self.content_id(path).is_some_and(|now| now != id);
         }
+        // Either diff the card can show: hiding Committed switches a dirty committed file between them.
+        let diffs: Vec<&FileHunks> = [
+          self.hunks.get(*path),
+          self
+            .snapshot
+            .as_ref()
+            .and_then(|s| s.committed_hunks.get(*path)),
+        ]
+        .into_iter()
+        .flatten()
+        .filter(|d| !d.loading && !d.hunks.is_empty())
+        .collect();
         !hash.is_empty()
           && read.is_none_or(|read| read.contains(*path))
-          && self
-            .file_hunks(path)
-            .filter(|d| !d.loading && !d.hunks.is_empty())
-            .is_some_and(|d| hunks_hash(&d.hunks) != **hash)
+          && !diffs.is_empty()
+          && diffs.iter().all(|d| hunks_hash(&d.hunks) != **hash)
       })
       .map(|(p, _)| p.clone())
       .collect();

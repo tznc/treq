@@ -100,6 +100,8 @@ struct FakeHost {
   working: Option<crate::jj::JjRevisionDiff>,
   /// Replaces `working` once set: the files edited on disk meanwhile.
   edited: Mutex<Option<crate::jj::JjRevisionDiff>>,
+  /// The working copy's own hunks, where they differ from the branch's.
+  working_hunks: HashMap<String, Vec<crate::jj::JjDiffHunk>>,
   /// The files kept as viewed, with their diff hashes.
   viewed: Vec<(String, String)>,
   /// The token hunk reads report instead of the diff's: the disk moved on
@@ -999,11 +1001,17 @@ impl changes_data::ChangesHost for FakeHost {
         .iter()
         .map(|path| crate::core::WorkspaceFileHunksBatchFile {
           path: path.clone(),
-          hunks: working
-            .hunks_by_file
-            .iter()
-            .find(|f| &f.path == path)
-            .map(|f| f.hunks.clone())
+          hunks: self
+            .working_hunks
+            .get(path)
+            .or_else(|| {
+              working
+                .hunks_by_file
+                .iter()
+                .find(|f| &f.path == path)
+                .map(|f| &f.hunks)
+            })
+            .cloned()
             .unwrap_or_default(),
           error: None,
         })

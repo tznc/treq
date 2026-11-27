@@ -460,6 +460,34 @@ fn a_viewed_committed_file_stays_viewed_across_reloads(cx: &mut TestAppContext) 
 
 /// The committed card's "Show more lines" reads the working copy, which
 /// a file with no uncommitted edits shares with the branch head.
+
+/// Hiding Committed switches a dirty committed file from its branch diff
+/// to the working copy's; the file stays viewed.
+#[gpui::test]
+fn hiding_committed_keeps_a_viewed_mark(cx: &mut TestAppContext) {
+  let mut host = changes_host();
+  host.working_hunks.insert(
+    "a.rs".into(),
+    serde_json::from_value(serde_json::json!([
+      {"id": "w", "header": "@@ -1 +1,2 @@", "lines": [" b", "+c"], "patch": ""}
+    ]))
+    .expect("hunks"),
+  );
+  let (mut h, host) = workspace_harness(cx, host, committed_route(true));
+  h.click("viewed-a.rs");
+  h.cx.run_until_parked();
+  h.update(|s| {
+    if let View::Workspace(r) = &mut s.view {
+      r.show_committed = Some(false);
+    }
+  });
+  h.cx.run_until_parked();
+  assert!(
+    !host.writes().contains(&"unmark viewed a.rs".to_string()),
+    "{:?}",
+    host.writes()
+  );
+}
 #[gpui::test]
 fn show_more_lines_expands_a_committed_file(cx: &mut TestAppContext) {
   let mut host = changes_host();
