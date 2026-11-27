@@ -36,6 +36,11 @@ use super::{
 
 /// A dropdown's gap below its button: `sideOffset={4}`.
 const DROPDOWN_OFFSET: f32 = 4.;
+/// Between a button and the menu it opens: tighter, so the two read as one
+/// control.
+const BUTTON_MENU_OFFSET: f32 = 2.;
+/// A popup's corners: `rounded-md`.
+const POPUP_RADIUS: gpui::Rems = gpui::Rems(0.375);
 /// Room around a popup's box for its shadow.
 const SHADOW_MARGIN: f32 = 8.;
 /// Gap between a tooltip and its element: base-ui's `sideOffset` in
@@ -508,6 +513,8 @@ enum Content {
     entries: Vec<MenuEntry>,
     /// The submenu trigger whose submenu is open.
     open_submenu: Option<usize>,
+    /// The box's corners.
+    radius: gpui::Rems,
   },
 }
 
@@ -710,12 +717,21 @@ impl Default for MenuAnchor {
 }
 
 impl MenuAnchor {
-  /// The narrowest the menu box may be: `min-w-[8rem]`, or the button's
-  /// width, so the menu does not stop partway along it.
-  fn min_width(self) -> f32 {
+  /// How wide the menu box must be on screen: a button's width, so the
+  /// menu does not stop partway along it.
+  fn width(self) -> f32 {
     match self {
-      MenuAnchor::Pointer(_) => MENU_MIN_WIDTH,
-      MenuAnchor::Button(b) => f32::from(b.size.width).max(MENU_MIN_WIDTH),
+      MenuAnchor::Pointer(_) => 0.,
+      MenuAnchor::Button(b) => f32::from(b.size.width),
+    }
+  }
+
+  /// The menu box's corners: a button's radius under a button, so the two
+  /// read as one control.
+  fn radius(self) -> gpui::Rems {
+    match self {
+      MenuAnchor::Pointer(_) => POPUP_RADIUS,
+      MenuAnchor::Button(_) => radius::MD,
     }
   }
 
@@ -733,9 +749,15 @@ impl MenuAnchor {
     match self {
       // base-ui's context menu: 2px right of and 5px above the pointer.
       MenuAnchor::Pointer(at) => place_menu(at + gpui::point(px(2.), px(-5.)), size, screen),
-      MenuAnchor::Button(b) => place_dropdown(b, size, screen, true),
+      MenuAnchor::Button(b) => place_below(b, size, screen, true, BUTTON_MENU_OFFSET),
     }
   }
+}
+
+/// The narrowest a menu box measured at 100% may be, to be at least
+/// `at_least` wide on screen at `zoom`; never under `min-w-[8rem]`.
+fn menu_min_width(at_least: f32, zoom: f32) -> f32 {
+  (at_least / zoom).max(MENU_MIN_WIDTH)
 }
 
 /// The menu box's size: its widest row, at least `min_width`.
@@ -1123,7 +1145,8 @@ impl PopupView {
         &owner,
         items,
         palette,
-        MENU_MIN_WIDTH,
+        0.,
+        POPUP_RADIUS,
         move |size, screen| place_submenu(trigger, size, screen),
       );
     });
@@ -1220,6 +1243,7 @@ impl Render for PopupView {
       Content::Menu {
         entries,
         open_submenu,
+        ..
       } => Some(
         div()
           .p(zpx(MENU_PADDING))
@@ -1230,6 +1254,10 @@ impl Render for PopupView {
     };
     let composited = composited();
     let body = body.map(|body| if composited { body } else { body.shadow_none() });
+    let rounded = match &self.content {
+      Content::Menu { radius, .. } => *radius,
+      _ => POPUP_RADIUS,
+    };
     ui::text(div(), TextSize::Sm)
       .size_full()
       .p(zpx(shadow_margin()))
@@ -1239,7 +1267,7 @@ impl Render for PopupView {
         this.child(
           body
             .size_full()
-            .when(composited, |this| this.rounded_md())
+            .when(composited, |this| this.rounded(rounded))
             .border_1()
             .border_color(palette.border)
             .bg(palette.popover)
@@ -1302,6 +1330,17 @@ pub fn place_dropdown(
   screen: Bounds<Pixels>,
   start: bool,
 ) -> Point<Pixels> {
+  place_below(anchor, size, screen, start, DROPDOWN_OFFSET)
+}
+
+/// A box below `anchor`, `offset` away, as [`place_dropdown`] places one.
+fn place_below(
+  anchor: Bounds<Pixels>,
+  size: (f32, f32),
+  screen: Bounds<Pixels>,
+  start: bool,
+  offset: f32,
+) -> Point<Pixels> {
   let (width, height) = size;
   let x = if start {
     f32::from(anchor.left()).min(f32::from(screen.right()) - width)
@@ -1309,9 +1348,9 @@ pub fn place_dropdown(
     f32::from(anchor.right()) - width
   }
   .max(f32::from(screen.left()));
-  let mut y = f32::from(anchor.bottom()) + DROPDOWN_OFFSET;
+  let mut y = f32::from(anchor.bottom()) + offset;
   if y + height > f32::from(screen.bottom()) {
-    y = f32::from(anchor.top()) - DROPDOWN_OFFSET - height;
+    y = f32::from(anchor.top()) - offset - height;
   }
   gpui::point(px(x), px(y))
 }
@@ -1613,7 +1652,8 @@ fn show_menu_at(
   owner: &str,
   entries: Vec<MenuEntry>,
   palette: Palette,
-  min_width: f32,
+  at_least: f32,
+  radius: gpui::Rems,
   place: impl FnOnce((f32, f32), Bounds<Pixels>) -> Point<Pixels> + 'static,
 ) {
   let Some(screen) = tauri::Manager::get_window(app, owner)
@@ -1630,9 +1670,12 @@ fn show_menu_at(
     Content::Menu {
       entries,
       open_submenu: None,
+      radius,
     },
     move |cx, content| match content {
-      Content::Menu { entries, .. } => menu_size(cx, entries, min_width),
+      Content::Menu { entries, .. } => {
+        menu_size(cx, entries, menu_min_width(at_least, ui::zoom_factor(cx)))
+      }
       _ => (0., 0.),
     },
     move |size| Some(place(size, screen)),
@@ -1664,7 +1707,8 @@ pub fn show_menu(
     owner,
     entries,
     theme::palette(dark),
-    anchor.min_width(),
+    anchor.width(),
+    anchor.radius(),
     move |size, screen| anchor.place(size, screen),
   );
 }
@@ -1695,7 +1739,8 @@ pub fn show_dropdown(
     owner,
     entries,
     theme::palette(dark),
-    MENU_MIN_WIDTH,
+    0.,
+    POPUP_RADIUS,
     move |size, screen| place_dropdown(anchor, size, screen, start),
   );
 }
@@ -1722,11 +1767,35 @@ mod tests {
         shortcut: None,
       }];
       let pointer = MenuAnchor::Pointer(gpui::point(px(40.), px(40.)));
-      let (narrow, _) = menu_size(cx, &entries, pointer.min_width());
+      let (narrow, _) = menu_size(cx, &entries, menu_min_width(pointer.width(), 1.));
       assert!(narrow < 320., "{narrow}");
       let button = MenuAnchor::Button(bounds(16., 10., 320., 32.));
-      assert_eq!(menu_size(cx, &entries, button.min_width()).0, 320.);
+      let (wide, _) = menu_size(cx, &entries, menu_min_width(button.width(), 1.));
+      assert_eq!(wide, 320.);
     });
+  }
+
+  #[test]
+  fn a_button_menu_keeps_the_buttons_width_at_any_zoom() {
+    // Measured at 100%, then drawn at the zoom: 256 * 1.25 = 320.
+    assert_eq!(menu_min_width(320., 1.25), 256.);
+    assert_eq!(
+      menu_min_width(100., 1.25),
+      MENU_MIN_WIDTH,
+      "never under 8rem"
+    );
+  }
+
+  #[test]
+  fn a_button_menu_rounds_its_corners_like_the_button() {
+    let at = gpui::point(px(100.), px(200.));
+    assert_eq!(
+      MenuAnchor::Pointer(at).radius(),
+      gpui::rems(0.375),
+      "rounded-md"
+    );
+    let button = MenuAnchor::Button(bounds(16., 10., 320., 32.));
+    assert_eq!(button.radius(), radius::MD);
   }
 
   #[test]
@@ -1735,7 +1804,8 @@ mod tests {
     let anchor = MenuAnchor::Button(bounds(16., 10., 320., 32.));
     assert_eq!(
       anchor.place((320., 80.), screen),
-      gpui::point(px(16.), px(46.))
+      gpui::point(px(16.), px(44.)),
+      "2px under the button, tighter than a dropdown's 4px"
     );
   }
 
@@ -1743,7 +1813,7 @@ mod tests {
   fn a_pointer_menu_opens_beside_the_pointer() {
     let screen = bounds(0., 0., 1400., 900.);
     let at = gpui::point(px(100.), px(200.));
-    assert_eq!(MenuAnchor::Pointer(at).min_width(), MENU_MIN_WIDTH);
+    assert_eq!(MenuAnchor::Pointer(at).width(), 0.);
     assert_eq!(
       MenuAnchor::Pointer(at).place((160., 80.), screen),
       gpui::point(px(102.), px(195.))

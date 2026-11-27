@@ -82,15 +82,18 @@ test("projects: sidebar, project menu, save and welcome list", async ({ page }) 
     expectations: [
       "The menu offers Save Project… and New Window…",
       "The project button's chevron points up while its menu is open",
-      "The menu spans the project button, edge to edge",
+      "The menu spans the project button edge to edge, 2px under it, with the same corners",
     ],
   });
   if (!menu) throw new Error("no project menu");
-  // As wide as the button, so the menu does not stop partway along it.
+  // As wide as the button and 2px under it, so the two read as one control.
+  // Under a compositor the popup window adds an 8px shadow margin.
   const at = await button.boundingBox();
   if (!at) throw new Error("no project button");
-  expect(Math.abs(menu.x - at.x)).toBeLessThanOrEqual(1);
-  expect(Math.abs(menu.w - at.width)).toBeLessThanOrEqual(1);
+  const margin = (menu.w - at.width) / 2;
+  expect([0, 8]).toContain(Math.round(margin));
+  expect(Math.abs(menu.x + margin - at.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(menu.y + margin - (at.y + at.height) - 2)).toBeLessThanOrEqual(1);
   // "Save Project…" is the first row.
   await xPointer(page, menu.x + 60, menu.y + 18, 1);
   await settle(page, 1000);
