@@ -125,6 +125,17 @@ fn terminal_draws_output_and_types_into_the_pty(cx: &mut TestAppContext) {
   );
 }
 
+/// Claude Code and the shell both read `\` then Enter as a new line.
+#[gpui::test]
+fn shift_enter_sends_a_backslash_and_enter(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  let pty = agent_pty();
+  click_terminal(&mut h);
+  h.cx.simulate_keystrokes("shift-enter");
+  assert_eq!(pty_writes(&host), vec![format!("write {pty} \"\\\\\\r\"")]);
+}
+
 #[gpui::test]
 fn pasting_text_into_a_terminal_types_the_text(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
