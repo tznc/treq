@@ -345,6 +345,50 @@ fn changes_tab_offers_file_actions_on_unselected_rows(cx: &mut TestAppContext) {
   }
 }
 
+/// An uncommitted row's status letter lines up with a committed row's.
+#[gpui::test]
+fn changes_tab_aligns_status_letters_across_lists(cx: &mut TestAppContext) {
+  use gpui_testing_library::by;
+  let (mut h, _) = workspace_harness(cx, changes_host_with_committed(), committed_route(true));
+  let screen = h.rendered();
+  let right = |key: &str| {
+    let id = gpui::ElementId::Name(format!("status-{key}").into());
+    screen
+      .query_all_by_element_id(by::element_id(id))
+      .first()
+      .unwrap_or_else(|| panic!("{key} not drawn"))
+      .snapshot()
+      .bounds()
+      .right()
+  };
+  assert_eq!(right("Changes-a.rs"), right("committed-c.rs"));
+}
+
+/// Whether the file row named `name` is drawn selected.
+fn row_selected(h: &mut Harness, name: &str) -> bool {
+  h.rendered()
+    .query_by_role(
+      gpui_testing_library::by::role(gpui::Role::Button)
+        .name(name)
+        .selected(true),
+    )
+    .is_some()
+}
+
+/// A click outside the file list drops the row's highlight; its actions wait
+/// for hover again.
+#[gpui::test]
+fn changes_tab_hides_row_actions_after_a_click_away(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  h.click("file-row-a.rs");
+  assert!(row_selected(&mut h, "a.rs"));
+  assert!(h.shows(gpui::Role::Button, "Stage a.rs"));
+  h.click("file-card-a.rs");
+  assert!(!row_selected(&mut h, "a.rs"));
+  assert!(!h.shows(gpui::Role::Button, "Stage a.rs"));
+  assert!(shows_hidden(&mut h, "Stage a.rs"), "still offered on hover");
+}
+
 #[gpui::test]
 fn changes_tab_commits_only_staged_files(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
