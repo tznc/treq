@@ -1966,11 +1966,11 @@ impl Render for ChangesView {
       }))
       .on_mouse_up(
         MouseButton::Left,
-        cx.listener(|view, _, _, cx| view.end_drag(cx)),
+        cx.listener(|view, _, window, cx| view.end_pointer(window, cx)),
       )
       .on_mouse_up_out(
         MouseButton::Left,
-        cx.listener(|view, _, _, cx| view.end_drag(cx)),
+        cx.listener(|view, _, window, cx| view.end_pointer(window, cx)),
       )
       .when(self.dragging(), |this| {
         // A drag follows the pointer anywhere in the window, off the rows.

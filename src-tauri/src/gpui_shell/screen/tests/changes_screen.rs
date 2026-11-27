@@ -1359,6 +1359,46 @@ fn changes_tab_draws_a_github_suggestion_as_a_diff(cx: &mut TestAppContext) {
   assert!(h.shows(gpui::Role::Heading, "Suggested change"));
 }
 
+/// Text in a review comment selects with a drag, and Quote quotes only the
+/// selection.
+#[gpui::test]
+fn changes_tab_quotes_the_selected_text_of_a_review_comment(cx: &mut TestAppContext) {
+  let mut host = changes_host();
+  let mut thread = gh_thread("t1", 2, false);
+  thread.comments[0].body = "Why two lines here?".into();
+  host.threads = vec![thread];
+  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  h.cx.run_until_parked();
+  let body = h.cx.debug_bounds("github-comment-body").expect("body");
+  let y = body.top() + gpui::px(8.);
+  let (from, to) = (
+    gpui::point(body.left() + gpui::px(1.), y),
+    gpui::point(body.left() + gpui::px(40.), y),
+  );
+  h.cx
+    .simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
+  h.cx
+    .simulate_mouse_move(to, Some(MouseButton::Left), Modifiers::none());
+  h.cx
+    .simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
+  h.cx.run_until_parked();
+  let selected = h.cx.update(gpui_kit::base::TextSelection::selected_text);
+  let selected = selected.trim().to_string();
+  assert!(
+    !selected.is_empty() && selected != "Why two lines here?",
+    "{selected:?}"
+  );
+  h.click("github-comment-quote");
+  h.click("comment-input");
+  h.cx.simulate_input("Agreed");
+  h.click("comment-submit");
+  settle_save(&mut h);
+  let saved: serde_json::Value =
+    serde_json::from_str(&host.review.lock().unwrap().clone().unwrap_or_default())
+      .expect("saved review");
+  assert_eq!(saved[0]["line_content"], serde_json::json!([selected]));
+}
+
 #[gpui::test]
 fn changes_tab_reacts_to_a_review_comment(cx: &mut TestAppContext) {
   let mut host = changes_host();
