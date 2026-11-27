@@ -754,6 +754,21 @@ impl MenuAnchor {
   }
 }
 
+/// A menu box's own look: how wide it must be on screen, and its corners.
+#[derive(Debug, Clone, Copy)]
+struct MenuBox {
+  at_least: f32,
+  radius: gpui::Rems,
+}
+
+impl MenuBox {
+  /// Sized by its rows, `rounded-md`.
+  const PLAIN: Self = MenuBox {
+    at_least: 0.,
+    radius: POPUP_RADIUS,
+  };
+}
+
 /// The narrowest a menu box measured at 100% may be, to be at least
 /// `at_least` wide on screen at `zoom`; never under `min-w-[8rem]`.
 fn menu_min_width(at_least: f32, zoom: f32) -> f32 {
@@ -1145,8 +1160,7 @@ impl PopupView {
         &owner,
         items,
         palette,
-        0.,
-        POPUP_RADIUS,
+        MenuBox::PLAIN,
         move |size, screen| place_submenu(trigger, size, screen),
       );
     });
@@ -1652,8 +1666,7 @@ fn show_menu_at(
   owner: &str,
   entries: Vec<MenuEntry>,
   palette: Palette,
-  at_least: f32,
-  radius: gpui::Rems,
+  menu_box: MenuBox,
   place: impl FnOnce((f32, f32), Bounds<Pixels>) -> Point<Pixels> + 'static,
 ) {
   let Some(screen) = tauri::Manager::get_window(app, owner)
@@ -1670,12 +1683,14 @@ fn show_menu_at(
     Content::Menu {
       entries,
       open_submenu: None,
-      radius,
+      radius: menu_box.radius,
     },
     move |cx, content| match content {
-      Content::Menu { entries, .. } => {
-        menu_size(cx, entries, menu_min_width(at_least, ui::zoom_factor(cx)))
-      }
+      Content::Menu { entries, .. } => menu_size(
+        cx,
+        entries,
+        menu_min_width(menu_box.at_least, ui::zoom_factor(cx)),
+      ),
       _ => (0., 0.),
     },
     move |size| Some(place(size, screen)),
@@ -1707,8 +1722,10 @@ pub fn show_menu(
     owner,
     entries,
     theme::palette(dark),
-    anchor.width(),
-    anchor.radius(),
+    MenuBox {
+      at_least: anchor.width(),
+      radius: anchor.radius(),
+    },
     move |size, screen| anchor.place(size, screen),
   );
 }
@@ -1739,8 +1756,7 @@ pub fn show_dropdown(
     owner,
     entries,
     theme::palette(dark),
-    0.,
-    POPUP_RADIUS,
+    MenuBox::PLAIN,
     move |size, screen| place_dropdown(anchor, size, screen, start),
   );
 }
