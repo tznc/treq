@@ -62,22 +62,23 @@ test("changes review: character marks, keyboard, suggestion, stale banner", asyn
   await page.keyboard.press("ArrowLeft");
   const input = page.getByRole("textbox", { name: "Add a comment…" });
   await expect(input).toBeVisible();
+  await input.fill("Wrap it");
   await page.getByRole("button", { name: "Suggest change" }).click();
-  const suggested = page.getByRole("textbox", { name: "Suggested lines" });
-  await expect(suggested).toBeVisible();
-  await expect(input).toHaveValue("");
+  await expect(input).toHaveValue(/^Wrap it\n```suggestion\n[\s\S]*\n```\n$/);
   await settle(page, 400);
   await capture(page, {
     name: "13-review-03-suggest-change",
-    title: "Left opens the comment box; Suggest change opens a suggestion editor",
+    title: "Left opens the comment box; Suggest change inserts a suggestion block",
     expectations: [
-      "Comment box under the selected lines with their range label; its text field stays empty",
-      "Below it a monospace 'Suggested change' field holds the two lines, and a preview shows them as - and + rows",
-      "'Remove suggestion' on the left, Cancel and Add comment on the right",
+      "Comment box under the selected lines with their range label",
+      "The comment field reads 'Wrap it', then a ```suggestion block holding the two lines",
+      "Below the field a preview shows the lines as - and + rows",
+      "'Suggest change' on the left, Cancel and Add comment on the right",
     ],
   });
-  await input.fill("Wrap it");
-  await suggested.fill("  return `[lorem:${level.toUpperCase()}] ${line}`;\n}");
+  await input.fill(
+    "Wrap it\n```suggestion\n  return `[lorem:${level.toUpperCase()}] ${line}`;\n}\n```\n",
+  );
   await page.getByRole("button", { name: "Add comment", exact: true }).click();
   await expect(input).toHaveCount(0);
   await settle(page, 800);
