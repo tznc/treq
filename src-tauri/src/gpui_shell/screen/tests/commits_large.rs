@@ -103,14 +103,19 @@ fn a_large_commit_scrolls_and_comments_on_a_line_far_down(cx: &mut TestAppContex
   }
   assert!(!shows_line(&mut h, 0, 0), "scrolled away from the top");
   assert!(!h.shows(gpui::Role::Button, "work"), "the commit's row");
-  // The first line on screen, wherever the scroll landed.
+  // The first line on screen under the pinned file row, wherever the
+  // scroll landed.
   let list = h.cx.debug_bounds("commits-list").expect("list");
+  let top = h
+    .cx
+    .debug_bounds("commit-file-sticky")
+    .map_or(list.top(), |b| b.bottom());
   let (f, l) = (0..FILES)
     .flat_map(|f| (0..lines()).map(move |l| (f, l)))
     .find(|&(f, l)| {
       h.cx
         .debug_bounds(line(f, l))
-        .is_some_and(|b| b.top() >= list.top() && b.bottom() <= list.bottom())
+        .is_some_and(|b| b.top() >= top && b.bottom() <= list.bottom())
     })
     .expect("a line on screen");
   let row = h.cx.debug_bounds(line(f, l)).expect("line");
@@ -184,7 +189,11 @@ fn a_large_commit_pushes_the_pinned_row_up_with_the_next_file(cx: &mut TestAppCo
     scroll(&mut h, 400.);
   }
   let list = h.cx.debug_bounds("commits-list").expect("list");
-  let end = h.cx.debug_bounds(line(0, last)).expect("last line").bottom();
+  let end = h
+    .cx
+    .debug_bounds(line(0, last))
+    .expect("last line")
+    .bottom();
   // The next file's row 10px under the list's top.
   scroll(&mut h, f32::from(end - list.top()) - 10.);
   let pinned = h.cx.debug_bounds("commit-file-sticky").expect("pinned row");
