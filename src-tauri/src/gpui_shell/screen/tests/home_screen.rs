@@ -54,6 +54,24 @@ fn labels_header_create_button_new_at_home_and_stack_in_a_workspace() {
 }
 
 #[test]
+fn workspace_header_shows_the_home_ref_the_sidebar_shows() {
+  let mut json = route_json(None, "main");
+  json["homeRef"] = "65a12f90fd6d".into();
+  let route: ScreenSnapshot = serde_json::from_value(json).expect("route");
+  let (header, _) = workspace_data::workspace_view(
+    route_of(&route),
+    &workspace_data::Loaded::default(),
+    &workspace_data::PrCache::default(),
+    workspace_data::Pending::None,
+  );
+  assert_eq!(header.branch, "65a12f90fd6d");
+  assert!(
+    header.home_target.is_none(),
+    "home is not on a feature branch"
+  );
+}
+
+#[test]
 fn workspace_header_offers_the_home_rebase() {
   let route: ScreenSnapshot = serde_json::from_value(route_json(None, "feat/home")).expect("route");
   let loaded = workspace_data::Loaded {
@@ -155,6 +173,56 @@ fn workspace_header_syncs_itself(cx: &mut TestAppContext) {
   assert_eq!(reads, 1);
 }
 
+fn refreshed_prs(host: &FakeHost) -> Vec<String> {
+  host
+    .calls()
+    .into_iter()
+    .filter(|c| c.starts_with("refresh pr status"))
+    .collect()
+}
+
+/// A sync's push starts new checks on GitHub a moment later: the poller
+/// reads the branch's pull request again then, not on its next round.
+#[gpui::test]
+fn workspace_header_reads_checks_again_a_moment_after_a_sync(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    synced: true,
+    ..feature_host()
+  };
+  let (mut h, host) = workspace_harness(cx, host, workspace_route());
+  h.click("workspace-sync");
+  h.cx.run_until_parked();
+  assert!(
+    refreshed_prs(&host).is_empty(),
+    "GitHub has no new checks yet"
+  );
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_secs(5));
+  h.cx.run_until_parked();
+  assert_eq!(refreshed_prs(&host), ["refresh pr status feature/login"]);
+}
+
+#[gpui::test]
+fn workspace_header_leaves_checks_after_a_failed_or_remote_sync(cx: &mut TestAppContext) {
+  // A local sync that fails, then a remote repository's that succeeds.
+  for remote in [false, true] {
+    let host = FakeHost {
+      synced: remote,
+      react_actions: remote,
+      ..feature_host()
+    };
+    let (mut h, host) = workspace_harness(cx, host, workspace_route());
+    h.click("workspace-sync");
+    h.cx.run_until_parked();
+    h.cx
+      .executor()
+      .advance_clock(std::time::Duration::from_secs(5));
+    h.cx.run_until_parked();
+    assert!(refreshed_prs(&host).is_empty());
+  }
+}
+
 #[gpui::test]
 fn workspace_header_reads_again_when_the_model_refreshes(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, feature_host(), workspace_route());
@@ -216,6 +284,45 @@ fn home_workspace_opens_the_branch_switcher(cx: &mut TestAppContext) {
     h.sent(),
     vec![press("workspace.branchSwitcher"), press("workspace.stack")]
   );
+}
+
+/// A repeat hover-enter, as a popup window opening can send, keeps a shown
+/// header tooltip instead of hiding and reopening it in a loop.
+#[gpui::test]
+fn a_repeat_hover_keeps_a_shown_header_tooltip(cx: &mut TestAppContext) {
+  use crate::gpui_shell::popup::PopupRequest;
+  let mut host = feature_host();
+  if let Some(status) = host.loaded.status.as_mut() {
+    status.conflicted_files = vec!["src/a.rs".into()];
+  }
+  let (mut h, _) = workspace_harness(cx, host, workspace_route());
+  h.cx.run_until_parked();
+  let at = h
+    .cx
+    .debug_bounds("workspace-merge")
+    .expect("merge")
+    .center();
+  h.cx.simulate_mouse_move(at, None, gpui::Modifiers::none());
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_millis(300));
+  h.cx.run_until_parked();
+  let workspace = h
+    .screen
+    .read_with(&h.cx, |screen, _| screen.workspace.clone())
+    .expect("workspace");
+  let key = workspace
+    .read_with(&h.cx, |view, _| view.shown_tooltip())
+    .expect("a shown tooltip");
+  workspace.update(&mut h.cx, |view, cx| {
+    view.hover_tooltip(key.clone(), true, cx)
+  });
+  h.cx.run_until_parked();
+  assert_eq!(
+    workspace.read_with(&h.cx, |view, _| view.shown_tooltip()),
+    Some(key)
+  );
+  assert!(!h.popups.borrow().contains(&PopupRequest::HideTooltip));
 }
 
 #[gpui::test]

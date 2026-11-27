@@ -764,10 +764,10 @@ impl ChangesView {
     if sent && resolved && !self.threads.expanded.contains(&comment.id) {
       return self.folded_sent_card(comment, p, cx).into_any_element();
     }
-    let (icon, tone, label) = if sent {
-      (theme::ICON_SEND, Tone::Primary, "Sent to agent")
+    let (tone, label) = if sent {
+      (Tone::Primary, "Sent to agent")
     } else {
-      (theme::ICON_BOT, Tone::GitMerged, "Local")
+      (Tone::GitMerged, "Local")
     };
     let range = if comment.end_line != comment.start_line {
       format!("{}-{}", comment.start_line, comment.end_line)
@@ -786,7 +786,6 @@ impl ChangesView {
         if sent { "Sent" } else { "Agent" },
         comment.file_path
       ))
-      .font_family(theme::MONO_FONT)
       .rounded(radius::MD)
       .border_1()
       .border_color(violet(p, 0.4))
@@ -805,7 +804,7 @@ impl ChangesView {
               .flex()
               .items_center()
               .gap_2()
-              .child(ui::icon(icon, 14., tone.color(p)))
+              .child(ui::icon(theme::ICON_BOT, 14., tone.color(p)))
               .child(
                 // Short label (tag). ast-grep-ignore: gpui-text-xs-short-label-only
                 ui::text(div(), TextSize::Xs)
@@ -821,7 +820,7 @@ impl ChangesView {
           ),
       )
       .child(
-        div()
+        ui::text(div(), TextSize::Sm)
           .whitespace_normal()
           .child(comment.comment_text.clone()),
       );
@@ -943,7 +942,7 @@ impl ChangesView {
       .hover(move |s| s.bg(p.hover()))
       .on_click(cx.listener(move |view, _, _, cx| view.toggle_sent(&id, cx)))
       .child(ui::icon(theme::ICON_CHEVRON_RIGHT, 12., muted))
-      .child(ui::icon(theme::ICON_SEND, 14., muted))
+      .child(ui::icon(theme::ICON_BOT, 14., muted))
       .child(
         // Short label (tag). ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)

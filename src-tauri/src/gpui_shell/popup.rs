@@ -491,6 +491,14 @@ enum Slot {
 }
 
 impl Slot {
+  /// Whether the popup takes pointer events. A tooltip lets them through to
+  /// the window below: its window, shadow margin included, can open under the
+  /// pointer, and taking the pointer from the hovered element would hide the
+  /// tooltip, which reopens it, in a loop.
+  fn takes_pointer(self) -> bool {
+    !matches!(self, Slot::Tooltip)
+  }
+
   fn label(self) -> String {
     match self {
       Slot::Tooltip => "gpui-popup-tooltip".into(),
@@ -1343,6 +1351,10 @@ fn popup_window(
     window.show().ignore_closed();
     window.hide().ignore_closed();
   }
+  // After the map above: on Linux this needs the realized GDK window.
+  window
+    .set_ignore_cursor_events(!slot.takes_pointer())
+    .warn_on_err("let the pointer through a popup");
   WINDOWS.with(|windows| {
     windows.borrow_mut().insert(
       label,
@@ -1647,6 +1659,13 @@ mod tests {
       place_dropdown(anchor, size, screen, true),
       gpui::point(px(300.), px(132.))
     );
+  }
+
+  #[test]
+  fn lets_the_pointer_through_tooltips_only() {
+    assert!(!Slot::Tooltip.takes_pointer());
+    assert!(Slot::Menu.takes_pointer());
+    assert!(Slot::Submenu.takes_pointer());
   }
 
   #[test]

@@ -6,6 +6,7 @@ use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
 use std::{sync::Arc, time::Duration};
+use treq_ui::SelectorExt as _;
 
 use gpui_kit::component::input::{Escape, InputEvent, InputState, MoveDown, MoveUp};
 use tauri_plugin_gpui::gpui::{
@@ -195,8 +196,7 @@ impl Render for FilePicker {
         .into_any_element()
     };
     let dialog = div()
-      .id("file-picker")
-      .debug_selector(|| "file-picker".into())
+      .selector("file-picker")
       .w(width)
       .map(|el| ui::floating(el, &p))
       .bg(p.background)

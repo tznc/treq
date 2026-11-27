@@ -69,6 +69,8 @@ struct FakeHost {
   /// What the workspace header reads.
   loaded: workspace_data::Loaded,
   pr: workspace_data::PrCache,
+  /// Syncing with the remote succeeds.
+  synced: bool,
   /// What the merge preview reads, and whether merging fails.
   merge: merge::Preview,
   merge_error: Option<String>,
@@ -100,6 +102,9 @@ struct FakeHost {
   working: Option<crate::jj::JjRevisionDiff>,
   /// Replaces `working` once set: the files edited on disk meanwhile.
   edited: Mutex<Option<crate::jj::JjRevisionDiff>>,
+  /// The working copy's own diff of files `working` lists by their branch
+  /// diff (both committed and dirty); others read `working`'s hunks.
+  working_hunks: Vec<crate::jj::JjFileDiff>,
   /// The files kept as viewed, with their diff hashes.
   viewed: Vec<(String, String)>,
   /// The token hunk reads report instead of the diff's: the disk moved on
@@ -609,6 +614,9 @@ impl workspace_data::WorkspaceHost for FakeHost {
 
   fn sync(&self, _: &str, workspace_id: Option<i64>) -> workspace_data::Outcome {
     self.record(format!("sync {workspace_id:?}"));
+    if self.synced {
+      return workspace_data::Outcome::ok("Synced", "Fetched and pushed".into());
+    }
     workspace_data::Outcome::failed("Sync failed", "offline".into())
   }
 
@@ -999,9 +1007,10 @@ impl changes_data::ChangesHost for FakeHost {
         .iter()
         .map(|path| crate::core::WorkspaceFileHunksBatchFile {
           path: path.clone(),
-          hunks: working
-            .hunks_by_file
+          hunks: self
+            .working_hunks
             .iter()
+            .chain(&working.hunks_by_file)
             .find(|f| &f.path == path)
             .map(|f| f.hunks.clone())
             .unwrap_or_default(),
@@ -2510,6 +2519,29 @@ fn selected_lines(h: &mut Harness) -> Option<(String, Vec<(usize, usize)>)> {
       .as_ref()
       .map(|s| (s.path.clone(), s.lines.clone()))
   })
+}
+
+/// Sets the UI zoom to `percent`, as the zoom setting does.
+fn zoom(h: &mut Harness, percent: u32) {
+  use crate::gpui_shell::ui::{apply_zoom, UiZoom};
+  h.cx.update(|window, cx| {
+    cx.set_global(UiZoom(percent));
+    apply_zoom(window, cx);
+    window.refresh();
+  });
+  h.cx.run_until_parked();
+}
+
+/// Asserts `popover` sits under `button` with their right edges aligned.
+fn assert_right_aligned_under(h: &mut Harness, button: &'static str, popover: &'static str) {
+  h.cx.run_until_parked();
+  let b = h.cx.debug_bounds(button).expect(button);
+  let p = h.cx.debug_bounds(popover).expect(popover);
+  assert!(
+    (f32::from(p.right()) - f32::from(b.right())).abs() < 1.,
+    "{b:?} {p:?}"
+  );
+  assert!(p.top() >= b.bottom(), "{b:?} {p:?}");
 }
 
 /// Rests the pointer on the diff line with element id `id`, which shows its

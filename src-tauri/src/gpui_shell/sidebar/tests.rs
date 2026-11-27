@@ -304,14 +304,16 @@ fn names_create_buttons_by_what_they_open() {
 }
 
 #[test]
-fn nests_each_row_one_icon_width_under_its_parent() {
+fn nests_stacked_rows_one_icon_width_in_however_deep() {
   assert_eq!(row_indent(0), 10.);
   assert_eq!(row_indent(1), 22.);
-  assert_eq!(row_indent(3), 46.);
-  // The elbow hangs from the parent's icon centre and ends at the row's icon.
-  for depth in 1..4 {
-    assert_eq!(guide_left(depth), row_indent(depth - 1) + 5.);
-    assert_eq!(guide_left(depth) + 6., row_indent(depth) - 1.);
+  assert_eq!(row_indent(3), 22.);
+  // The elbow hangs from the root's icon centre and ends at the row's icon.
+  assert_eq!(guide_left(1), row_indent(0) + 5.);
+  assert_eq!(guide_left(1) + 6., row_indent(1) - 1.);
+  // Deeper rows hang a straight line from the icon centre of the row above.
+  for depth in 2..5 {
+    assert_eq!(guide_left(depth), row_indent(1) + 5.);
   }
 }
 
@@ -608,6 +610,23 @@ fn tooltip_shows_after_a_short_rest(cx: &mut TestAppContext) {
   h.hover("command-palette");
   h.sidebar
     .read_with(&h.cx, |s, _| assert!(!s.tooltip_shown("settings")));
+}
+
+/// A repeat hover-enter, as a popup window opening can send, keeps a shown
+/// tooltip instead of hiding and reopening it in a loop.
+#[gpui::test]
+fn repeat_hover_keeps_a_shown_tooltip(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![]));
+  h.hover("settings");
+  h.cx.executor().advance_clock(TOOLTIP_DELAY);
+  h.cx.run_until_parked();
+  h.sidebar.update(&mut h.cx, |s, cx| {
+    s.hover_tooltip("settings".into(), true, cx)
+  });
+  h.cx.run_until_parked();
+  h.sidebar
+    .read_with(&h.cx, |s, _| assert!(s.tooltip_shown("settings")));
+  assert!(!h.popups.borrow().contains(&PopupRequest::HideTooltip));
 }
 
 #[gpui::test]
@@ -1401,6 +1420,40 @@ fn a_truncated_group_chevron_lines_up_with_its_rows_status_dots(cx: &mut TestApp
     fold.right(),
     dot.right()
   );
+}
+
+#[gpui::test]
+fn rows_past_the_first_stack_level_hang_straight_under_it(cx: &mut TestAppContext) {
+  let mut h = Harness::new(
+    cx,
+    snapshot(vec![
+      row(7, "root", 0),
+      row(8, "first", 1),
+      row(9, "second", 2),
+      row(10, "third", 3),
+    ]),
+  );
+  let first = h.bounds("workspace-8-icon").expect("first icon");
+  let second = h.bounds("workspace-9-icon").expect("second icon");
+  let third = h.bounds("workspace-10-icon").expect("third icon");
+  // Every level past the root shares the first level's indent.
+  assert_eq!(second.left(), first.left());
+  assert_eq!(third.left(), first.left());
+  assert!(h.bounds("workspace-8-elbow").is_some());
+  for (elbow, line, above, icon) in [
+    ("workspace-9-elbow", "workspace-9-line", first, second),
+    ("workspace-10-elbow", "workspace-10-line", second, third),
+  ] {
+    assert!(h.bounds(elbow).is_none());
+    let line = h.bounds(line).expect("straight line");
+    // A 1px line under the icons, from the row above's icon into this one's,
+    // leaving the same gap at both ends.
+    assert_eq!(line.size.width, gpui::px(1.));
+    assert!(line.left() > icon.left() && line.right() < icon.right());
+    let top_gap = line.top() - above.bottom();
+    assert!(top_gap >= gpui::px(0.), "top gap {top_gap:?}");
+    assert_eq!(top_gap, icon.top() - line.bottom());
+  }
 }
 
 #[gpui::test]
