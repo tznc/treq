@@ -147,7 +147,7 @@
               "index": 1,
               "takesValue": true,
               "required": true,
-              "description": "Hook to run: pre-bash refuses Bash commands that run git in a workspace"
+              "description": "Hook to run: pre-bash tells the agent to use treq when a Bash command runs git in a workspace"
             }
           ]
         },

@@ -239,4 +239,4 @@ Run a hook that Treq registers with an agent CLI. The hook reads its input as JS
 treq hook pre-bash
 ```
 
-- `pre-bash`: a Claude Code `PreToolUse` hook for Bash. It refuses a command that runs `git` and tells the agent which `treq` or `jj` command to use instead. Treq adds it to Claude Code sessions in a workspace, so you never run it yourself.
+- `pre-bash`: a Claude Code `PreToolUse` hook for Bash. When a command runs `git`, it tells the agent that Git reads the home repository and which `treq` or `jj` command to use instead. The command still runs. Treq adds the hook to Claude Code sessions in a workspace, so you never run it yourself.
