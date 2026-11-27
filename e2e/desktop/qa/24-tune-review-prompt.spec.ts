@@ -79,7 +79,7 @@ test("tune review prompt: start, review edits, apply", async ({ page }) => {
     name: "24-tune-01-settings",
     title: "Settings → Code Review before tuning",
     expectations: [
-      "Tune with agent sits under Custom Review Prompt, an outline button",
+      "Tune with agent sits under Review Instructions, an outline button",
       "Its help text says the proposed edits show below for review",
     ],
   });
@@ -96,7 +96,8 @@ test("tune review prompt: start, review edits, apply", async ({ page }) => {
   });
 
   propose(1, "You resolve most correctness comments; lead with them.", `${firstLine} Lead with correctness bugs.`);
-  propose(3, "You dismissed 6 of 7 naming comments in the last 30 days.", "Do not comment on naming or style.");
+  // No instructions yet: body.md has one line to anchor on.
+  propose(1, "You dismissed 6 of 7 naming comments in the last 30 days.", `${firstLine}\nDo not comment on naming or style.`);
   await codeReviewSettings(page);
   const apply = page.getByRole("button", { name: "Apply", exact: true });
   await expect(apply.first()).toBeVisible({ timeout: 20_000 });
@@ -114,7 +115,7 @@ test("tune review prompt: start, review edits, apply", async ({ page }) => {
 
   await apply.first().click();
   await expect(apply).toHaveCount(1);
-  const prompt = page.getByRole("textbox", { name: "Leave empty to use the built-in review prompt" });
+  const prompt = page.getByRole("textbox", { name: "Leave empty to use the built-in review skill as is" });
   await expect(prompt).toHaveValue(/Lead with correctness bugs\./);
   await scrollTo(page, "Tune with agent", 400);
   await capture(page, {

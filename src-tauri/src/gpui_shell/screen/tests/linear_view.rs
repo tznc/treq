@@ -531,6 +531,8 @@ fn linear_issue_shows_its_comments_and_starts_a_review(cx: &mut TestAppContext) 
   assert_eq!(request.agent.as_deref(), Some("codex"));
   assert_eq!(request.session_name.as_deref(), Some("AI Review"));
   assert_eq!(request.mode.as_deref(), Some("acceptEdits"));
+  // A Linear review keeps its own prompt rather than the treq-review skill.
+  assert!(!request.review);
   let prompt = request.prompt.as_deref().expect("prompt");
   assert!(prompt.contains("the Linear issue \"ENG-1 Issue 1\" and its 1 comment."));
   assert!(prompt.contains("/repo/.treq/linear-review/1"));

@@ -708,16 +708,11 @@ pub fn files_label(n: usize) -> String {
   format!("{n} file{}", if n == 1 { "" } else { "s" })
 }
 
-/// `githubPrReviewSummary`: what is under review, and where the agent reads
-/// the diff, as the PR is usually not checked out.
+/// `githubPrReviewSummary`: what is under review. The treq-review skill
+/// says how to read a PR that is not checked out.
 pub fn review_summary(full_name: &str, number: u64, title: &str, files: usize) -> String {
   let files = format!("{files} changed file{}", if files == 1 { "" } else { "s" });
-  format!(
-    "GitHub pull request #{number} \"{title}\" ({files}). The PR is not checked out locally: read \
-     its diff with `gh pr diff {number} --repo {full_name}` and, for full file contents, `gh api \
-     repos/{full_name}/contents/<path>?ref=<head sha>`. Use paths and new-side line numbers from \
-     that diff in --file and --start-line/--end-line (--side old for removed lines)"
-  )
+  format!("GitHub pull request {full_name}#{number} \"{title}\" ({files})")
 }
 
 #[cfg(test)]
@@ -984,9 +979,10 @@ rename to moved.rs
   }
 
   #[test]
-  fn summary_tells_the_agent_where_the_diff_is() {
-    let s = review_summary("o/r", 5, "Fix", 1);
-    assert!(s.starts_with("GitHub pull request #5 \"Fix\" (1 changed file). The PR"));
-    assert!(s.contains("`gh pr diff 5 --repo o/r`"));
+  fn summary_names_the_pull_request_with_its_repository() {
+    assert_eq!(
+      review_summary("o/r", 5, "Fix", 1),
+      "GitHub pull request o/r#5 \"Fix\" (1 changed file)"
+    );
   }
 }

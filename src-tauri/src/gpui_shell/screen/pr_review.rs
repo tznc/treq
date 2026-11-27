@@ -265,21 +265,23 @@ impl PrReviewView {
     let files = self.file_count(cx);
     self.run(
       move |host| {
-        let keys = ["review_prompt".to_string(), "review_agent".to_string()];
+        let keys = ["review_agent".to_string()];
         let settings = host.repo_settings(&repo, &keys).unwrap_or_default();
-        let custom = settings.get("review_prompt").and_then(|v| v.clone());
         let agent = settings
           .get("review_agent")
           .and_then(|v| v.clone())
           .filter(|a| !a.is_empty());
         let summary = review_summary(&full_name, number, &title, files);
-        let prompt = review_prompt_for(custom.as_deref(), TARGET, &number.to_string(), &summary);
+        let prompt = review_prompt_for(TARGET, &number.to_string(), &summary);
         // A PR is usually not checked out, so its review runs in the home
         // repository and reads the diff through gh.
         let link = format!("https://github.com/{full_name}/pull/{number}");
         host
           .launch_session(
-            &super::linear::review_launch(&repo, prompt, agent, Some(link)),
+            &super::launch_data::LaunchRequest {
+              review: true,
+              ..super::linear::review_launch(&repo, prompt, agent, Some(link))
+            },
             false,
           )
           .map(|_| ())

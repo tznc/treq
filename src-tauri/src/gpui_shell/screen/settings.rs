@@ -2827,7 +2827,7 @@ impl SettingsView {
       let review_prompt = self.controls.textarea(
         "repo.reviewPrompt",
         &f.review_prompt,
-        "Leave empty to use the built-in review prompt",
+        "Leave empty to use the built-in review skill as is",
         6,
         window,
         cx,
@@ -2953,9 +2953,9 @@ impl SettingsView {
                 )),
             )
             .child(saved_field_block(
-              "Custom review prompt",
+              "Review instructions",
               form::textarea_field(&review_prompt, true, managed("reviewPrompt")),
-              Some("Overrides the built-in prompt. {target_type}, {target_id} and {diff_summary} are substituted before the prompt is sent."),
+              Some("Added to the end of the treq-review skill that every AI review of a diff or pull request follows."),
               self.mark_of("repo.reviewPrompt"),
               p,
             ))
@@ -2972,7 +2972,7 @@ impl SettingsView {
                     .on_click(self.press("repo.reviewPrompt.tune")),
                 )
                 .child(div().flex_1().min_w_0().child(help(
-                  "An agent reads the last 30 days of reviews (Logs → Reviews) and proposes edits to this prompt for you to review below.",
+                  "An agent reads the last 30 days of reviews (Logs → Reviews) and proposes edits to these instructions for you to review below.",
                   p,
                   0.,
                 ))),

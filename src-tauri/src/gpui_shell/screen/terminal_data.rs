@@ -47,6 +47,8 @@ pub struct AgentStart {
   pub session_id: i64,
   pub pending_prompt: Option<String>,
   pub permission_mode: Option<String>,
+  /// An AI review, whose agent loads the treq-review skill.
+  pub review: bool,
 }
 
 /// Where a persistent remote shell or agent runs (`RemoteTerminalTarget`).
@@ -602,11 +604,12 @@ impl TerminalHost for Backend {
     let supporting = self.supporting_repos(&start.repo_path);
     let project = crate::gpui_shell::projects::window_project(self.app(), self.label())
       .map(agent_command::ProjectContext::from);
-    let (app_instructions, repo_instructions) = self
+    let (app_instructions, repo_instructions, review_instructions) = self
       .with_db(|db| {
         Ok::<_, rusqlite::Error>((
           db.get_setting(agent_command::AGENT_INSTRUCTIONS_SETTING)?,
           db.get_repo_setting(&start.repo_path, agent_command::AGENT_INSTRUCTIONS_SETTING)?,
+          db.get_repo_setting(&start.repo_path, "review_prompt")?,
         ))
       })
       .unwrap_or_default();
@@ -618,7 +621,9 @@ impl TerminalHost for Backend {
         project: project.as_ref(),
         app_instructions: app_instructions.as_deref(),
         repo_instructions: repo_instructions.as_deref(),
-        review: None,
+        review: start.review.then_some(agent_command::Review {
+          instructions: review_instructions.as_deref(),
+        }),
       },
       &AutoCommand {
         agent: &start.agent,

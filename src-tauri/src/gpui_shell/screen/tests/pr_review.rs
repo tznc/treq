@@ -444,12 +444,16 @@ fn pr_review_starts_an_ai_review_in_the_home_repository_without_leaving_the_pr(
   };
   assert_eq!(request.workspace_id, None);
   assert_eq!(request.session_name.as_deref(), Some("AI Review"));
+  assert!(request.review);
   let prompt = request.prompt.clone().unwrap_or_default();
   assert!(
-    prompt.contains("--target-type github_pr --target-id 5"),
+    prompt.starts_with("Review GitHub pull request o/r#5 "),
     "{prompt}"
   );
-  assert!(prompt.contains("`gh pr diff 5 --repo o/r`"), "{prompt}");
+  assert!(
+    prompt.ends_with("Its target is --target-type github_pr --target-id 5."),
+    "{prompt}"
+  );
 }
 
 #[gpui::test]

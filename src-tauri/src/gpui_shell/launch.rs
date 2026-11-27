@@ -268,6 +268,7 @@ pub fn auto_review(app: &AppHandle, event: crate::auto_review::AutoReviewEvent) 
         agent: launch::agent_kind(agent.as_deref()),
         session_name: Some("AI Review".into()),
         link: None,
+        review: true,
       };
       if let Err(err) = backend.launch_session(&request, true) {
         backend.toast(ToastTone::Error, "Failed to start automatic review", err);
@@ -302,6 +303,7 @@ pub(super) fn start_deep_link(host: &dyn WindowHost, request: &AgentDeepLinkRequ
     agent: Some(request.agent.clone()),
     session_name: None,
     link: None,
+    review: false,
   };
   match host.launch(&launched, true) {
     Ok(()) => launch::deep_links()

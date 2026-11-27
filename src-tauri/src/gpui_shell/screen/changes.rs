@@ -1623,17 +1623,16 @@ impl ChangesView {
     let files = self.snapshot.as_ref().map_or(0, |s| s.review_file_count());
     self.run(
       move |host, parent| {
-        let keys = ["review_prompt".to_string(), "review_agent".to_string()];
+        let keys = ["review_agent".to_string()];
         let settings = host
           .repo_settings(&parent.repo_path, &keys)
           .unwrap_or_default();
-        let custom = settings.get("review_prompt").and_then(|v| v.clone());
         let agent = settings
           .get("review_agent")
           .and_then(|v| v.clone())
           .filter(|a| !a.is_empty());
         let summary = diff_summary(Some(&workspace.branch_name), files);
-        let prompt = review_prompt(custom.as_deref(), &workspace.id.to_string(), &summary);
+        let prompt = review_prompt(&workspace.id.to_string(), &summary);
         (prompt, agent)
       },
       |view, (prompt, agent), cx| {

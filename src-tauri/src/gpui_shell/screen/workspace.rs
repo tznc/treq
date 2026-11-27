@@ -1880,6 +1880,7 @@ impl WorkspaceView {
         agent,
         session_name: Some(name.into()),
         link: None,
+        review: false,
       }
     };
     let text = |key: &str| value[key].as_str().unwrap_or_default().to_string();
@@ -1898,7 +1899,10 @@ impl WorkspaceView {
         );
         self.start_then(cx, Some(started), "Failed to create agent", move |host| {
           let agent = host.resolve_agent(&repo, agent.as_deref());
-          request("AI Review", prompt, "acceptEdits", agent)
+          LaunchRequest {
+            review: true,
+            ..request("AI Review", prompt, "acceptEdits", agent)
+          }
         });
       }
       "changes.review" | "fileBrowser.review" => {
