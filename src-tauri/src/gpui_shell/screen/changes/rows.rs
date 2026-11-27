@@ -29,8 +29,8 @@ use crate::{
   gpui_shell::{
     screen::{
       changes_data::{
-        body, conflict_lines, conflicts, context_row_numbers, is_collapsed, line_counts, Body,
-        BodyInput, Conflict, FileHunks,
+        body, committed_hunks, conflict_lines, conflicts, context_row_numbers, is_collapsed,
+        line_counts, Body, BodyInput, Conflict, FileHunks,
       },
       changes_review::FILE_HUNK,
       commits_data::{line_number, line_numbers},
@@ -51,6 +51,10 @@ pub(super) struct Card {
   pub(super) conflicted: bool,
   pub(super) body: Body,
   pub(super) shut: bool,
+  /// Hunks of a branch diff already committed, by index.
+  settled: HashSet<usize>,
+  /// Those of them drawn as their header alone.
+  shut_hunks: HashSet<usize>,
   regions: Vec<Conflict>,
   prepared: Option<Rc<Prepared>>,
 }
@@ -134,6 +138,9 @@ pub(super) struct DiffRows {
   pub(super) revision: u64,
   /// How long the last layout of the rows took.
   pub(super) layout_cost: Duration,
+  /// The card whose header is pinned this frame. Read while the list lays
+  /// out its rows, when its state can't be borrowed.
+  pinned: Option<usize>,
 }
 
 /// Every input of `layout_rows`. The snapshot, the hunks and the lines read
@@ -149,6 +156,7 @@ struct Key {
   /// with the filter off.
   kept_generated: Option<BTreeSet<String>>,
   collapsed: HashSet<String>,
+  opened_hunks: HashSet<(String, String)>,
   expanded_large: HashSet<String>,
   loaded_generated: HashSet<String>,
   /// Files with a file comment or one being written.
@@ -167,6 +175,7 @@ impl Default for DiffRows {
       key: None,
       revision: 0,
       layout_cost: Duration::ZERO,
+      pinned: None,
     }
   }
 }
@@ -198,6 +207,29 @@ impl ChangesView {
     self.hunks.get(path).or(branch)
   }
 
+  /// Opens or shuts a committed hunk while Committed is hidden.
+  fn toggle_committed_hunk(&mut self, path: &str, header: &str, cx: &mut Context<Self>) {
+    let key = (path.to_string(), header.to_string());
+    if !self.opened_hunks.remove(&key) {
+      self.opened_hunks.insert(key);
+    }
+    cx.notify();
+  }
+
+  /// The hunks of a card shown as its branch diff that are already
+  /// committed; none until its working copy's diff is read.
+  fn settled_hunks(&self, path: &str) -> HashSet<usize> {
+    let Some(snapshot) = self.snapshot.as_ref().filter(|s| s.shows_branch_diff(path)) else {
+      return HashSet::new();
+    };
+    match (snapshot.committed_hunks.get(path), self.hunks.get(path)) {
+      (Some(branch), Some(working)) if !working.loading && working.error.is_none() => {
+        committed_hunks(&branch.hunks, &working.hunks)
+      }
+      _ => HashSet::new(),
+    }
+  }
+
   fn layout_key(&self) -> Key {
     let review = &self.review;
     Key {
@@ -215,6 +247,7 @@ impl ChangesView {
           .collect()
       }),
       collapsed: self.collapsed_files.clone(),
+      opened_hunks: self.opened_hunks.clone(),
       expanded_large: self.expanded_large.clone(),
       loaded_generated: self.loaded_generated.clone(),
       file_comments: review
@@ -279,6 +312,8 @@ impl ChangesView {
       rows.push(Row::Head(c, kind));
       let mut card = Card {
         conflicted: conflicted.contains(&path),
+        settled: self.settled_hunks(&path),
+        shut_hunks: HashSet::new(),
         path,
         status,
         old_path,
@@ -297,6 +332,17 @@ impl ChangesView {
           _ => Rc::new(Prepared::new(source)),
         };
         card.regions = conflicts(&card.path, hunks);
+        if self.options.show_committed == Some(false) {
+          card.shut_hunks = card
+            .settled
+            .iter()
+            .copied()
+            .filter(|&h| {
+              let key = (card.path.clone(), hunks[h].header.clone());
+              !self.opened_hunks.contains(&key)
+            })
+            .collect();
+        }
         self.hunk_rows(c, &card, hunks, &prep, &mut rows);
         card.prepared = Some(prep.clone());
         kept.insert(key, prep);
@@ -329,6 +375,10 @@ impl ChangesView {
         .map_or(0, Vec::len)
     };
     for (h, hunk) in hunks.iter().enumerate() {
+      if card.shut_hunks.contains(&h) {
+        rows.push(Row::HunkHeader(c, h, false));
+        continue;
+      }
       let before = read(h, Dir::Before);
       let (above, below) = self.context_ranges(path, hunks, h);
       // Lines above reaching the previous hunk or the file's start leave nothing to separate.
@@ -336,8 +386,9 @@ impl ChangesView {
         && (before > 0
           || h
             .checked_sub(1)
-            .is_some_and(|prev| read(prev, Dir::After) > 0));
-      if !joined {
+            .is_some_and(|prev| !card.shut_hunks.contains(&prev) && read(prev, Dir::After) > 0));
+      // A committed hunk keeps its header for the label.
+      if !joined || card.settled.contains(&h) {
         rows.push(Row::HunkHeader(c, h, above.is_some()));
       }
       rows.extend((0..before).map(|i| Row::Context(c, h, Dir::Before, i)));
@@ -456,14 +507,80 @@ impl ChangesView {
     });
   }
 
-  /// The diff's list.
-  pub(super) fn diff_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
-    div().selector("changes-diff-list").size_full().child(
-      list(
-        self.diff.list.clone(),
-        cx.processor(|view, ix, window, cx| view.row(ix, window, cx)),
+  /// The diff's list, with the header of the card it is scrolled into
+  /// pinned over its top.
+  pub(super) fn diff_list(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+    div()
+      .selector("changes-diff-list")
+      .relative()
+      .size_full()
+      .child(
+        list(
+          self.diff.list.clone(),
+          cx.processor(|view, ix, window, cx| view.row(ix, window, cx)),
+        )
+        .size_full(),
       )
-      .size_full(),
+      .children(self.pinned_header(cx))
+  }
+
+  /// The card at the top of the list once its own header has scrolled
+  /// out of view, and how far below the list's top the card ends, when
+  /// that end is measured.
+  fn pinned_card(&self) -> Option<(usize, Option<Pixels>)> {
+    let list = &self.diff.list;
+    let top = list.logical_scroll_top();
+    let row = *self.diff.rows.get(top.item_ix)?;
+    let c = row.card()?;
+    // A head row starts with the `pt_4` gap above its card.
+    if matches!(row, Row::Head(..)) && top.offset_in_item <= self.diff.rem {
+      return None;
+    }
+    let end = top.item_ix
+      + self.diff.rows[top.item_ix..]
+        .iter()
+        .take_while(|r| r.card() == Some(c))
+        .count();
+    let room = list
+      .bounds_for_item(end)
+      .map(|b| (b.top() - list.viewport_bounds().top()).max(px(0.)));
+    Some((c, room))
+  }
+
+  /// The pinned card's header. It is cut to the room above the card's
+  /// end, so the next card pushes it up and out.
+  fn pinned_header(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    let pinned = self.pinned_card();
+    self.diff.pinned = pinned.map(|(c, _)| c);
+    let (c, room) = pinned?;
+    let p = theme::palette(self.dark);
+    let shut = self.diff.cards[c].shut;
+    let id = format!("pinned-file-header-{}", self.diff.cards[c].path);
+    let header = self.card_header(c, &p, cx);
+    Some(
+      div()
+        .selector(SharedString::from(id))
+        .absolute()
+        .top_0()
+        .left_0()
+        .right_0()
+        .when_some(room, |this, room| this.max_h(room))
+        .flex()
+        .flex_col()
+        .justify_end()
+        .overflow_hidden()
+        .block_mouse_except_scroll()
+        .child(
+          div()
+            .flex_none()
+            .border_x_1()
+            .border_t_1()
+            .when(shut, |this| this.border_b_1())
+            .border_color(p.border)
+            .bg(p.background)
+            .child(header),
+        )
+        .into_any_element(),
     )
   }
 
@@ -481,7 +598,10 @@ impl ChangesView {
     let bottom = card(self.diff.rows.get(ix + 1)) != Some(c);
     let path = self.diff.cards[c].path.clone();
     let content = match row {
-      Row::Head(..) => self.card_head(c, &p, cx),
+      Row::Head(..) => {
+        let pinned = self.diff.pinned == Some(c);
+        self.card_head(c, pinned, &p, cx)
+      }
       _ => ui::text(div(), TextSize::Code)
         .font_family(theme::MONO_FONT)
         .child(self.body_line(row, &p, cx))
@@ -548,6 +668,7 @@ impl ChangesView {
     match row {
       Row::HunkHeader(_, _, expandable) => {
         let file = path.to_string();
+        let shut = card.shut_hunks.contains(&h);
         gutter_cols(
           div()
             .selector(SharedString::from(format!("hunk-header-{path}-{h}")))
@@ -596,9 +717,46 @@ impl ChangesView {
                   .child("Show more lines above"),
               )
             })
+            .when(card.settled.contains(&h), |this| {
+              let label = div()
+                .selector(SharedString::from(format!("committed-hunk-{path}-{h}")))
+                .ml_2()
+                .flex_none()
+                .flex()
+                .items_center()
+                .gap_1();
+              // Hidden, Committed shuts these hunks; the label opens them.
+              let label = if self.options.show_committed == Some(false) {
+                let (file, header) = (path.to_string(), hunk.header.clone());
+                label
+                  .role(gpui::Role::Button)
+                  .aria_label(if shut {
+                    "Show committed hunk"
+                  } else {
+                    "Hide committed hunk"
+                  })
+                  .cursor_pointer()
+                  .on_click(cx.listener(move |view, _, _, cx| {
+                    cx.stop_propagation();
+                    view.toggle_committed_hunk(&file, &header, cx);
+                  }))
+                  .child(ui::icon(
+                    if shut {
+                      theme::ICON_CHEVRON_RIGHT
+                    } else {
+                      theme::ICON_CHEVRON_DOWN
+                    },
+                    12.,
+                    muted,
+                  ))
+              } else {
+                label
+              };
+              this.child(label.child(ui::Badge::new("Committed", p)))
+            })
             // Between hunks the row above offers it, for the same gap.
             .when_some(
-              (h == 0)
+              (h == 0 && !shut)
                 .then(|| self.expand_all_range(path, hunks, h, Dir::Before))
                 .flatten(),
               |this, range| this.child(self.expand_all_button(path, h, Dir::Before, range, cx)),

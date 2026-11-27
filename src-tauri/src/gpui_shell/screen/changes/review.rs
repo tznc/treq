@@ -2319,7 +2319,7 @@ impl ChangesView {
     let total = self.review.comments.len() + self.review.notes.len();
     let sending = self.review.sending;
     let width = 320.;
-    let at = point(anchor.right() - px(width), anchor.bottom() + px(4.));
+    let at = point(anchor.right(), anchor.bottom() + px(4.));
     let checkbox = {
       let checked = self.review.use_idle;
       div()
@@ -2465,7 +2465,15 @@ impl ChangesView {
               ),
           ),
       );
-    Some(deferred(anchored().position(at).child(panel.test_support())).with_priority(1))
+    Some(
+      deferred(
+        anchored()
+          .anchor(gpui::Anchor::TopRight)
+          .position(at)
+          .child(panel.test_support()),
+      )
+      .with_priority(1),
+    )
   }
 
   /// `ReviewActionBar` C: "Discard review?".
