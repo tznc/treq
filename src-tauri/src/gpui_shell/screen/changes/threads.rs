@@ -611,7 +611,10 @@ impl ChangesView {
         self.dark,
       )
     };
-    let body = div().selector("github-comment-body");
+    let body = div()
+      .selector("github-comment-body")
+      .role(gpui::Role::Article)
+      .aria_label(preview(&comment.body));
     let Some(s) = crate::core::review::parse_suggestion(&comment.body) else {
       return body.child(md("", &comment.body));
     };
