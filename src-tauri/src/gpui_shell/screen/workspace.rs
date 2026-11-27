@@ -298,6 +298,10 @@ pub struct TabRow {
 /// cache, which the poller itself refreshes.
 const PR_POLL: Duration = Duration::from_secs(5);
 
+/// How long after a sync the branch's pull request is read again: GitHub
+/// starts the pushed commit's checks a moment after the push.
+const CHECKS_AFTER_SYNC: Duration = Duration::from_secs(5);
+
 /// The header and tab row, drawn from what they read from the backend.
 pub struct WorkspaceView {
   host: Arc<dyn WorkspaceHost>,
@@ -989,11 +993,15 @@ impl WorkspaceView {
     self.rebuild(cx);
     let host = self.host.clone();
     let repo_path = self.route.repo_path.clone();
+    let key = self.route.key();
     cx.spawn(async move |this, cx| {
       let outcome = cx.background_spawn(async move { work(&*host) }).await;
       this
         .update(cx, |view, cx| {
           view.pending = Pending::None;
+          if pending == Pending::Sync && outcome.ok && view.route.key() == key {
+            view.refresh_checks_later(cx);
+          }
           view.host.notify(NativeEvent::from(Toast::new(
             match (outcome.ok, outcome.warning) {
               (false, _) => ToastTone::Error,
@@ -1011,6 +1019,25 @@ impl WorkspaceView {
           view.rebuild(cx);
         })
         .ignore_closed();
+    })
+    .detach();
+  }
+
+  /// Has the poller read the branch's pull request again once GitHub has
+  /// started a sync's new checks, rather than draw the old ones until its
+  /// next round.
+  fn refresh_checks_later(&self, cx: &mut Context<Self>) {
+    let repo = self.route.repo_path.clone();
+    let Some(branch) = self
+      .pr_branch()
+      .filter(|_| self.actions.acts_locally(&repo))
+    else {
+      return;
+    };
+    let (host, executor) = (self.actions.clone(), cx.background_executor().clone());
+    cx.background_spawn(async move {
+      executor.timer(CHECKS_AFTER_SYNC).await;
+      host.refresh_pr_status(&repo, &branch);
     })
     .detach();
   }
