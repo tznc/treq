@@ -1,0 +1,47 @@
+id: gpui-button-sans-font
+valid:
+  - |
+    impl RenderOnce for Button {
+      fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        Base::new(self.id).font_weight(FontWeight::MEDIUM).font_family(theme::SANS_FONT)
+      }
+    }
+  - |
+    impl RenderOnce for Card {
+      fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        div().font_family(theme::MONO_FONT)
+      }
+    }
+  - |
+    fn f(p: &Palette) {
+      Button::new("resolve", p).variant(Variant::Outline).label("Resolve");
+    }
+  - |
+    fn f(p: &Palette) {
+      div().font_family(theme::MONO_FONT).child(Button::new("resolve", p).label("Resolve"));
+    }
+  - |
+    fn f(p: &Palette) {
+      Button::new("sha", p).child(div().font_family(theme::MONO_FONT).child("abc123"));
+    }
+invalid:
+  - |
+    impl RenderOnce for Button {
+      fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        Base::new(self.id).font_weight(FontWeight::MEDIUM)
+      }
+    }
+  - |
+    impl RenderOnce for Button {
+      fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        Base::new(self.id).font_family(theme::MONO_FONT)
+      }
+    }
+  - |
+    fn f(p: &Palette) {
+      Button::new("resolve", p).label("Resolve").font_family(theme::MONO_FONT);
+    }
+  - |
+    fn f(p: &Palette) {
+      ui::IconButton::new("copy", theme::ICON_COPY, "Copy", p).font_family(theme::SANS_FONT);
+    }

@@ -47,6 +47,10 @@ pub struct Route {
   pub workspace_id: Option<i64>,
   /// The home repository's checked-out branch (`mainRepoBranch`).
   pub home_branch: String,
+  /// The home row's label in the sidebar: its branch, or the commit a
+  /// detached HEAD is on. `None` until read.
+  #[serde(default)]
+  pub home_ref: Option<String>,
   pub tab: Tab,
   /// The target branch is being changed (`rebasing`).
   pub retargeting: bool,
@@ -740,8 +744,12 @@ pub fn workspace_view(
     })
   });
 
+  let label = match (workspace, &route.home_ref) {
+    (None, Some(home_ref)) if !home_ref.is_empty() => home_ref.clone(),
+    _ => branch.clone(),
+  };
   let header = Header {
-    branch: branch.clone(),
+    branch: label,
     title: workspace.map(super::code_data::display_title),
     home: workspace.is_none(),
     linear: match (&metadata.linear_issue_key, &metadata.linear_issue_url) {

@@ -328,6 +328,10 @@ pub struct TabRow {
 /// cache, which the poller itself refreshes.
 const PR_POLL: Duration = Duration::from_secs(5);
 
+/// How long after a sync or a new pull request the branch's pull request is
+/// read again: GitHub starts the pushed commit's checks a moment after.
+const CHECKS_AFTER_PUSH: Duration = Duration::from_secs(5);
+
 /// The header and tab row, drawn from what they read from the backend.
 pub struct WorkspaceView {
   host: Arc<dyn WorkspaceHost>,
@@ -1019,11 +1023,15 @@ impl WorkspaceView {
     self.rebuild(cx);
     let host = self.host.clone();
     let repo_path = self.route.repo_path.clone();
+    let key = self.route.key();
     cx.spawn(async move |this, cx| {
       let outcome = cx.background_spawn(async move { work(&*host) }).await;
       this
         .update(cx, |view, cx| {
           view.pending = Pending::None;
+          if pending == Pending::Sync && outcome.ok && view.route.key() == key {
+            view.refresh_checks_later(cx);
+          }
           view.host.notify(NativeEvent::from(Toast::new(
             match (outcome.ok, outcome.warning) {
               (false, _) => ToastTone::Error,
@@ -1041,6 +1049,25 @@ impl WorkspaceView {
           view.rebuild(cx);
         })
         .ignore_closed();
+    })
+    .detach();
+  }
+
+  /// Has the poller read the branch's pull request again once GitHub has
+  /// started the checks of a sync or a new pull request, rather than draw
+  /// the old ones until its next round.
+  fn refresh_checks_later(&self, cx: &mut Context<Self>) {
+    let repo = self.route.repo_path.clone();
+    let Some(branch) = self
+      .pr_branch()
+      .filter(|_| self.actions.acts_locally(&repo))
+    else {
+      return;
+    };
+    let (host, executor) = (self.actions.clone(), cx.background_executor().clone());
+    cx.background_spawn(async move {
+      executor.timer(CHECKS_AFTER_PUSH).await;
+      host.refresh_pr_status(&repo, &branch);
     })
     .detach();
   }
@@ -1108,7 +1135,7 @@ impl WorkspaceView {
       }
       _ => {
         let host: Arc<dyn super::code_data::CodeHost> = self.code_host.clone();
-        self.title = Some(cx.new(|_| TitleEditor::new(host, repo, id, title, dark)));
+        self.title = Some(cx.new(|cx| TitleEditor::new(host, repo, id, title, dark, cx)));
       }
     }
   }
@@ -1127,7 +1154,17 @@ impl WorkspaceView {
     .size_full()
   }
 
-  fn hover_tooltip(&mut self, key: SharedString, hovered: bool, cx: &mut Context<Self>) {
+  /// The element whose tooltip shows.
+  #[cfg(test)]
+  pub(crate) fn shown_tooltip(&self) -> Option<SharedString> {
+    self
+      .tooltip
+      .clone()
+      .filter(|(_, shown)| *shown)
+      .map(|(k, _)| k)
+  }
+
+  pub(crate) fn hover_tooltip(&mut self, key: SharedString, hovered: bool, cx: &mut Context<Self>) {
     if !hovered {
       if self.tooltip.as_ref().is_some_and(|(k, _)| *k == key) {
         self.tooltip = None;
@@ -1135,10 +1172,9 @@ impl WorkspaceView {
       }
       return;
     }
-    if self.popover.is_some() {
+    if self.popover.is_some() || !crate::gpui_shell::tooltips::enter(&mut self.tooltip, &key) {
       return;
     }
-    self.tooltip = Some((key.clone(), false));
     cx.spawn(async move |this, cx| {
       cx.background_executor().timer(TOOLTIP_DELAY).await;
       this
