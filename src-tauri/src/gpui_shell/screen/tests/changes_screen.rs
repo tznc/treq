@@ -257,7 +257,10 @@ fn changes_tab_offers_no_commit_box_with_nothing_to_commit(cx: &mut TestAppConte
       "show: {show}"
     );
     assert!(h.shows(gpui::Role::Status, "No changes"), "show: {show}");
-    assert!(!h.shows(gpui::Role::Status, "Nothing to commit"), "show: {show}");
+    assert!(
+      !h.shows(gpui::Role::Status, "Nothing to commit"),
+      "show: {show}"
+    );
   }
 }
 
