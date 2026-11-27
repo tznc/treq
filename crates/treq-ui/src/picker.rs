@@ -7,7 +7,10 @@ use gpui::{
   Transformation, Window,
 };
 
-use crate::{icon, text, theme, theme::Palette, zpx, Button, OnClick, Size, TextSize, Variant};
+use crate::{
+  icon, text, theme, theme::Palette, zpx, Button, OnClick, SelectorExt as _, Size, TextSize,
+  Variant,
+};
 
 /// The gap between a [`Picker::full_width`] and its menu: tighter than a
 /// dropdown's 4px, so the two read as one control.
@@ -46,6 +49,7 @@ pub struct Picker {
   placeholder: SharedString,
   label: Option<SharedString>,
   icon: Option<&'static str>,
+  badge: Option<SharedString>,
   placement: PickerPlacement,
   full_width: bool,
   open: bool,
@@ -62,6 +66,7 @@ impl Picker {
       placeholder: "Select…".into(),
       label: None,
       icon: None,
+      badge: None,
       placement: PickerPlacement::default(),
       full_width: false,
       open: false,
@@ -85,6 +90,15 @@ impl Picker {
   /// What the value is, such as "Target branch": the accessible name.
   pub fn label(mut self, label: impl Into<SharedString>) -> Self {
     self.label = Some(label.into());
+    self
+  }
+
+  /// A leading badge with the value's initial, such as a project's, in
+  /// place of an icon: filled while there is a value, a dashed outline while
+  /// the placeholder shows. It is decoration; the accessible name stays the
+  /// value.
+  pub fn badge(mut self, initial: impl Into<SharedString>) -> Self {
+    self.badge = Some(initial.into());
     self
   }
 
@@ -147,6 +161,7 @@ impl Picker {
 impl RenderOnce for Picker {
   fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
     let p = self.palette;
+    let id = self.id.clone();
     let chevron = icon(theme::ICON_CHEVRON_DOWN, 14., p.muted_foreground);
     let chevron = if self.full_width {
       let turns = menu_turns(&self.id, self.open, window, cx);
@@ -183,6 +198,9 @@ impl RenderOnce for Picker {
       .justify_start()
       .font_weight(gpui::FontWeight::NORMAL)
       .when_some(self.icon, |b, path| b.icon(path, 16.))
+      .when_some(self.badge, |b, initial| {
+        b.child(badge(format!("{id}-badge"), initial, !empty, &p))
+      })
       .child(
         text(div(), TextSize::Sm)
           .flex_1()
@@ -197,6 +215,32 @@ impl RenderOnce for Picker {
         b.on_click(move |e, w, cx| f(e, w, cx))
       })
   }
+}
+
+/// An 18px square with `initial`: filled when `filled`, else a dashed
+/// outline.
+fn badge(id: String, initial: SharedString, filled: bool, p: &Palette) -> impl IntoElement {
+  div()
+    .selector(id)
+    .flex()
+    .flex_none()
+    .items_center()
+    .justify_center()
+    .size(zpx(18.))
+    .rounded_md()
+    .when(filled, |this| {
+      this.bg(p.primary).text_color(p.primary_foreground)
+    })
+    .when(!filled, |this| {
+      this
+        .border_1()
+        .border_dashed()
+        .border_color(p.muted_foreground)
+        .text_color(p.muted_foreground)
+    })
+    // Short label (['avatar initial']): 11px is fine.
+    // ast-grep-ignore: gpui-text-xs-short-label-only
+    .child(text(div(), TextSize::Xs).child(initial))
 }
 
 /// Where a full-width picker's chevron turns from and to, in turns, given
@@ -240,10 +284,30 @@ mod tests {
         Picker::new("project", &p)
           .label("Project")
           .value("Event platform")
+          .badge("E")
           .full_width()
           .open(self.open),
       )
     }
+  }
+
+  #[gpui::test]
+  fn a_picker_badge_leads_its_value(cx: &mut TestAppContext) {
+    cx.update(theme::init);
+    let (_, cx) = cx.add_window_view(|_, _| Column { open: false });
+    cx.run_until_parked();
+    let picker = cx.debug_bounds("project").expect("the picker is drawn");
+    let badge = cx
+      .debug_bounds("project-badge")
+      .expect("the badge is drawn");
+    // An 18px square at the start, inside the picker.
+    assert_eq!(badge.size, gpui::size(px(18.), px(18.)));
+    assert!(badge.left() > picker.left() && badge.left() < picker.left() + px(12.));
+    let window = cx.update(|window, _| window.window_handle());
+    let screen = Screen::new(cx, window);
+    screen.redraw();
+    // The initial is decoration: the name stays what the value is.
+    screen.get_by_role(by::role(gpui::Role::Button).name("Project: Event platform"));
   }
 
   #[gpui::test]

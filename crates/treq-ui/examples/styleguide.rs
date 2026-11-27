@@ -662,23 +662,28 @@ fn buttons() -> Vec<Example> {
     example!("picker/full-width", |knobs, _, cx| {
       let p = p(cx);
       let open = knobs.bool("open", true);
+      let saved = knobs.bool("saved", true);
+      let picker = Picker::new("project", &p)
+        .label("Project")
+        .placement(PickerPlacement::Toolbar)
+        .full_width()
+        .open(open);
+      let picker = if saved {
+        picker.value("Event platform").badge("E")
+      } else {
+        picker.placeholder("Unsaved").badge("?")
+      };
       div()
         .w(px(260.))
         .h(px(140.))
         .relative()
-        .child(
-          Picker::new("project", &p)
-            .label("Project")
-            .value("Event platform")
-            .full_width()
-            .open(open),
-        )
+        .child(picker)
         // The menu: `MENU_GAP` under the picker, as wide, with its corners.
         .when(open, |this| {
           this.child(
             div()
               .absolute()
-              .top(zpx(PickerPlacement::Form.height() + picker::MENU_GAP))
+              .top(zpx(PickerPlacement::Toolbar.height() + picker::MENU_GAP))
               .left_0()
               .right_0()
               .p_1()
