@@ -1632,8 +1632,7 @@ impl Sidebar {
         )
       })
       .when(row.depth > 1, |this| {
-        // Deeper rows share the first level's indent: a straight line from
-        // the icon above into this row's, as far short of each.
+        // Deeper rows keep the first level's indent: a line from the icon above.
         this.overlay(
           div()
             .selector(format!("{prefix}workspace-{id}-line"))
