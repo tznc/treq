@@ -323,8 +323,14 @@ pub fn build_auto_command(
       } else {
         "auto_edit"
       };
+      // Gemini takes no effort at launch: only a mode's model applies.
+      let model = options
+        .model
+        .filter(|m| !m.is_empty())
+        .map(|m| format!(" -m {}", shell_quote(m)))
+        .unwrap_or_default();
       format!(
-        "gemini --approval-mode {mode} --allowed-tools 'run_shell_command(gh pr diff)' -i \"{}\"",
+        "gemini{model} --approval-mode {mode} --allowed-tools 'run_shell_command(gh pr diff)' -i \"{}\"",
         shell_cat(&files.prompt_path)
       )
     }
@@ -568,6 +574,27 @@ mod tests {
       plain.contains("codex -c \"developer_instructions="),
       "{plain}"
     );
+  }
+
+  #[test]
+  fn a_mode_sets_geminis_model() {
+    let command = build_auto_command(
+      &AutoCommand {
+        model: Some("gemini-3-pro-preview"),
+        // Gemini takes no effort at launch.
+        effort: Some("high"),
+        ..opts("gemini")
+      },
+      &files(),
+    )
+    .unwrap();
+    assert!(
+      command.contains("gemini -m 'gemini-3-pro-preview' --approval-mode auto_edit "),
+      "{command}"
+    );
+    assert!(!command.contains("high"));
+    let plain = build_auto_command(&opts("gemini"), &files()).unwrap();
+    assert!(plain.contains("gemini --approval-mode"), "{plain}");
   }
 
   #[test]
