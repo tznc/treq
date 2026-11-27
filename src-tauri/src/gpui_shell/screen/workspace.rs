@@ -183,26 +183,10 @@ pub(super) fn stack_label(home: bool) -> &'static str {
 
 fn sync_state(sync: &Sync) -> String {
   match (sync.ahead, sync.behind) {
-    _ if sync.not_on_remote => "Not on remote".into(),
-    (0, 0) => "Up to date".into(),
     (a, 0) => format!("{a} to push"),
     (0, b) => format!("{b} to pull"),
     (a, b) => format!("{a} to push, {b} to pull"),
   }
-}
-
-fn sync_tooltip(sync: &Sync, now: chrono::DateTime<chrono::FixedOffset>) -> String {
-  let rebased = sync.rebased.as_ref().map_or(String::new(), |r| {
-    format!(
-      " Last rebased on {} {}.",
-      r.target,
-      crate::gpui_shell::time::relative_at(&r.at, now)
-    )
-  });
-  format!(
-    "{}.{rebased} Sync with remote (fetch and push)",
-    sync_state(sync)
-  )
 }
 
 fn view_pr_name(pr: &ViewPr) -> String {
@@ -232,22 +216,8 @@ pub struct CreatePr {
 pub struct Sync {
   pub ahead: u32,
   pub behind: u32,
-  /// The branch has never been pushed.
-  #[serde(default)]
-  pub not_on_remote: bool,
-  /// When the branch was last rebased onto its target; `None` until a
-  /// rebase is recorded.
-  #[serde(default)]
-  pub rebased: Option<Rebased>,
   pub disabled: bool,
   pub spinning: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct Rebased {
-  pub target: String,
-  /// RFC 3339.
-  pub at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -1601,8 +1571,8 @@ impl WorkspaceView {
   }
 
   fn sync(&self, sync: &Sync, p: &Palette, cx: &mut Context<Self>) -> Stateful<Div> {
-    // The pip says at a glance that the branch and its remote differ, and
-    // the tooltip says by how much.
+    // The header only draws sync while the branch and its remote differ;
+    // the pip says so at a glance, and the tooltip says by how much.
     let state = sync_state(sync);
     let button = Button::new("workspace-sync", p)
       .aria_label(format!("Sync with remote: {state}"))
@@ -1631,27 +1601,25 @@ impl WorkspaceView {
       .with_tooltip(
         "workspace-sync",
         Some(TooltipContent::Text(
-          sync_tooltip(sync, chrono::Local::now().fixed_offset()).into(),
+          format!("{state}. Sync with remote (fetch and push)").into(),
         )),
         button,
         cx,
       )
-      .when(sync.ahead > 0 || sync.behind > 0, |d| {
-        d.child(
-          // Solid status colour, ringed in the background so it reads against
-          // the button's border in both themes; inset so nothing clips it.
-          div()
-            .selector("workspace-sync-pip")
-            .absolute()
-            .top(zpx(-4.))
-            .right(zpx(-4.))
-            .size(zpx(10.))
-            .rounded_full()
-            .border(zpx(1.5))
-            .border_color(p.background)
-            .bg(ui::Tone::Warning.color(p)),
-        )
-      })
+      .child(
+        // Solid status colour, ringed in the background so it reads against
+        // the button's border in both themes; inset so nothing clips it.
+        div()
+          .selector("workspace-sync-pip")
+          .absolute()
+          .top(zpx(-4.))
+          .right(zpx(-4.))
+          .size(zpx(10.))
+          .rounded_full()
+          .border(zpx(1.5))
+          .border_color(p.background)
+          .bg(ui::Tone::Warning.color(p)),
+      )
   }
 
   fn checks(&self, checks: &Checks, p: &Palette) -> Button {
@@ -2626,36 +2594,9 @@ mod sync_state_tests {
     Sync {
       ahead,
       behind,
-      not_on_remote: false,
-      rebased: None,
       disabled: false,
       spinning: false,
     }
-  }
-
-  #[test]
-  fn tooltip_says_when_the_branch_was_last_rebased() {
-    let now = chrono::DateTime::parse_from_rfc3339("2026-11-27T12:00:00Z").expect("now");
-    let sync = Sync {
-      rebased: Some(Rebased {
-        target: "main".into(),
-        at: "2026-11-27T09:00:00Z".into(),
-      }),
-      ..sync(38, 0)
-    };
-    assert_eq!(
-      sync_tooltip(&sync, now),
-      "38 to push. Last rebased on main 3 hours ago. Sync with remote (fetch and push)"
-    );
-  }
-
-  #[test]
-  fn tooltip_leaves_out_a_rebase_never_recorded() {
-    let now = chrono::DateTime::parse_from_rfc3339("2026-11-27T12:00:00Z").expect("now");
-    assert_eq!(
-      sync_tooltip(&sync(38, 0), now),
-      "38 to push. Sync with remote (fetch and push)"
-    );
   }
 
   #[test]
@@ -2663,19 +2604,5 @@ mod sync_state_tests {
     assert_eq!(sync_state(&sync(2, 0)), "2 to push");
     assert_eq!(sync_state(&sync(0, 3)), "3 to pull");
     assert_eq!(sync_state(&sync(2, 3)), "2 to push, 3 to pull");
-  }
-
-  #[test]
-  fn names_a_branch_that_matches_its_remote() {
-    assert_eq!(sync_state(&sync(0, 0)), "Up to date");
-  }
-
-  #[test]
-  fn names_a_branch_not_on_the_remote() {
-    let sync = Sync {
-      not_on_remote: true,
-      ..sync(0, 0)
-    };
-    assert_eq!(sync_state(&sync), "Not on remote");
   }
 }
