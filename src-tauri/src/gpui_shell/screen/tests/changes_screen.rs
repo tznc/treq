@@ -406,7 +406,10 @@ fn changes_tab_hides_the_status_letter_on_a_hovered_row(cx: &mut TestAppContext)
   h.hover("file-row-b.rs");
   assert!(!shows_letter(&mut h, "Changes-b.rs"));
   assert!(h.shows(gpui::Role::Button, "Stage b.rs"));
-  assert!(shows_letter(&mut h, "Changes-a.rs"), "other rows keep theirs");
+  assert!(
+    shows_letter(&mut h, "Changes-a.rs"),
+    "other rows keep theirs"
+  );
 }
 
 /// A clicked row keeps its buttons in the letter's place off hover, until a
