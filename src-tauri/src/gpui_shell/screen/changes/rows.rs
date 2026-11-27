@@ -783,6 +783,9 @@ impl ChangesView {
         .into_any_element()
       }
       Row::Line(_, _, l) => {
+        if let Some(editor) = self.line_edit_row(path, (h, l), p, cx) {
+          return editor;
+        }
         // Numbered with the card's other lines, not by counting up to this one.
         let numbers = card
           .prepared

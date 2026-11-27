@@ -12,7 +12,9 @@ use std::{ops::Range, time::Duration};
 use treq_ui::SelectorExt as _;
 
 use super::*;
-use crate::core::review::{selected_range, selected_row, selected_text, word_at, TextPoint};
+use crate::core::review::{
+  selected_range, selected_row, selected_text, word_at, EditableLines, TextPoint,
+};
 use crate::gpui_shell::screen::{
   changes_review::{
     commented_text, comments_under, compose_suggestion_comment, count_label, is_outdated,
@@ -51,6 +53,13 @@ pub(in crate::gpui_shell::screen) struct TextSelection {
   pub dragging: bool,
 }
 
+/// A file's diff lines being edited in place.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::gpui_shell::screen) struct LineEdit {
+  pub path: String,
+  pub lines: EditableLines,
+}
+
 /// Each drawn line's text layout, for finding the character under the mouse.
 pub(in crate::gpui_shell::screen) type Layouts =
   Rc<RefCell<HashMap<(String, LineRef), TextLayout>>>;
@@ -69,6 +78,7 @@ enum Field {
   Note,
   Summary,
   Suggestion,
+  LineEdit,
 }
 
 #[derive(Default)]
@@ -105,6 +115,10 @@ pub(in crate::gpui_shell::screen) struct Review {
   pub editing: Option<String>,
   pub edit_text: String,
   pub(super) edit_input: Option<Input>,
+  /// Diff lines being edited in place (E), and their text as edited.
+  pub line_edit: Option<LineEdit>,
+  pub line_edit_text: String,
+  pub(super) line_edit_input: Option<Input>,
   pub notes: Vec<ConflictNote>,
   /// The conflict whose note box is open.
   pub note_open: Option<String>,
@@ -1061,6 +1075,12 @@ impl ChangesView {
           lines.lines().count().max(1),
         )
       }
+      Field::LineEdit if self.review.line_edit.is_some() => (
+        &self.review.line_edit_input,
+        self.review.line_edit_text.clone(),
+        "",
+        self.review.line_edit_text.lines().count().max(1),
+      ),
       _ => return None,
     };
     if let Some(input) = slot {
@@ -1084,6 +1104,7 @@ impl ChangesView {
             view.save_review(cx);
           }
           Field::Suggestion => view.review.suggestion_text = Some(value),
+          Field::LineEdit => view.review.line_edit_text = value,
         }
         cx.notify();
       }
@@ -1101,6 +1122,7 @@ impl ChangesView {
       Field::Note => self.review.note_input = Some(input),
       Field::Summary => self.review.summary_input = Some(input),
       Field::Suggestion => self.review.suggestion_input = Some(input),
+      Field::LineEdit => self.review.line_edit_input = Some(input),
     }
     Some(state)
   }
@@ -1113,6 +1135,7 @@ impl ChangesView {
       Field::Note,
       Field::Summary,
       Field::Suggestion,
+      Field::LineEdit,
     ] {
       self.input_for(field, window, cx);
     }

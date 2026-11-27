@@ -8,6 +8,7 @@
 //! [`changes_data`]: super::changes_data
 
 mod keys;
+mod line_edit;
 pub(in crate::gpui_shell::screen) mod pr;
 mod review;
 mod rows;
