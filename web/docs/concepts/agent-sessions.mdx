@@ -44,6 +44,8 @@ Treq starts the agent process with the workspace as its working directory. The g
 
 The same prompt also allows `treq` CLI commands that create or manage other workspaces. Those commands write under `.treq/workspaces/`, outside the current working directory.
 
+In a workspace, the prompt tells the agent not to run `git`. A workspace has no `.git` folder, so Git reads and changes the home repository instead. The agent uses `treq st`, [`treq diff`](/docs/reference/cli#treq-diff), and `jj` for status, diffs, and history.
+
 This boundary separates concurrent tasks at the file-system level. Repository history remains shared across workspaces, while each agent sees the working copy for its assigned workspace.
 
 ## Bundled Treq skill

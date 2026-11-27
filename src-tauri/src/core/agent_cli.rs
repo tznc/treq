@@ -310,6 +310,16 @@ mod tests {
     cleanup_agent_cli_files(&[files.prompt_path, settings_path, files.skill_dir]).expect("cleanup");
   }
 
+  /// Claude reads only the description until it invokes the skill, so the
+  /// description must match a status or diff check.
+  #[test]
+  fn skill_description_matches_status_and_diff_checks() {
+    let description = TREQ_SKILL_MD.split("---").nth(1).expect("frontmatter");
+    for phrase in ["treq diff", "git status", "git diff"] {
+      assert!(description.contains(phrase), "description omits {phrase}");
+    }
+  }
+
   #[test]
   fn omits_settings_file_when_not_requested() {
     let files = write_agent_cli_files("prompt only", None, None).expect("write");
