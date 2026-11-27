@@ -2523,7 +2523,10 @@ fn assert_right_aligned_under(h: &mut Harness, button: &'static str, popover: &'
   h.cx.run_until_parked();
   let b = h.cx.debug_bounds(button).expect(button);
   let p = h.cx.debug_bounds(popover).expect(popover);
-  assert!((f32::from(p.right()) - f32::from(b.right())).abs() < 1., "{b:?} {p:?}");
+  assert!(
+    (f32::from(p.right()) - f32::from(b.right())).abs() < 1.,
+    "{b:?} {p:?}"
+  );
   assert!(p.top() >= b.bottom(), "{b:?} {p:?}");
 }
 
