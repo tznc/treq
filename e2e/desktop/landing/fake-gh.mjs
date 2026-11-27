@@ -455,6 +455,27 @@ if (group === "api" && command === "graphql") {
       },
     });
   }
+  if (query.includes("stack {")) {
+    // The demo's two stacked pull requests are GitHub stack #7.
+    const stacked = [412, 418];
+    const stack = stacked.includes(Number(field("number")))
+      ? {
+          number: 7,
+          baseRefName: "main",
+          entries: {
+            nodes: stacked.map((number, i) => ({
+              position: i + 1,
+              pullRequest: {
+                number,
+                headRefName: prs.find((pr) => pr.number === number).headRefName,
+                state: "OPEN",
+              },
+            })),
+          },
+        }
+      : null;
+    out({ data: { repository: { pullRequest: { stack } } } });
+  }
   if (query.includes("issues(")) {
     out({
       data: {

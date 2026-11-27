@@ -7,6 +7,7 @@ use crate::github::{
   self, GhDraftReviewComment, GhIssue, GhListPage, GhPullRequest, GhReviewThread, GitRemoteInfo,
   PrCiStatus, GH_LIST_PAGE_SIZE,
 };
+use crate::github_stack::GhStack;
 
 /// Why `gh` was not found, naming where Treq looked.
 fn gh_not_found(search_path: &str) -> String {
@@ -109,6 +110,13 @@ pub fn pr_diff(repo: &str, number: u64) -> Result<String, String> {
 pub fn pr_file(repo: &str, number: u64, path: &str) -> Result<String, String> {
   let (gh, env_path) = gh()?;
   github::gh_pr_file_impl(&gh, repo, number, path, &env_path)
+}
+
+/// The native GitHub stack pull request `number` is in, for the
+/// repository `gh` finds at `repo_path`.
+pub fn pr_stack(repo_path: &str, number: u64) -> Result<Option<GhStack>, String> {
+  let (gh, path) = gh()?;
+  crate::github_stack::gh_pr_stack_impl(&gh, repo_path, number, &path)
 }
 
 pub fn pr_checks(repo: &str, number: u64) -> Result<Option<PrCiStatus>, String> {

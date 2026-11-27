@@ -69,6 +69,10 @@ struct FakeHost {
   /// What the workspace header reads.
   loaded: workspace_data::Loaded,
   pr: workspace_data::PrCache,
+  /// Pull requests by branch, over `pr` (the stack card's rows).
+  branch_prs: HashMap<String, Option<crate::github::PrInfo>>,
+  /// The native GitHub stack the pull request is in.
+  gh_stack: Option<crate::github_stack::GhStack>,
   /// What the merge preview reads, and whether merging fails.
   merge: merge::Preview,
   merge_error: Option<String>,
@@ -599,7 +603,13 @@ impl workspace_data::WorkspaceHost for FakeHost {
 
   fn pr_cache(&self, _: &str, branch: &str) -> workspace_data::PrCache {
     self.record(format!("read pr {branch}"));
-    self.pr.clone()
+    match self.branch_prs.get(branch) {
+      Some(pr) => workspace_data::PrCache {
+        pr: Some(pr.clone()),
+        ci: None,
+      },
+      None => self.pr.clone(),
+    }
   }
 
   fn push(&self, _: &str, workspace_id: Option<i64>) -> workspace_data::Outcome {
@@ -808,6 +818,11 @@ impl code_data::CodeHost for FakeHost {
   fn workspaces(&self, _: &str) -> Result<Vec<crate::local_db::Workspace>, String> {
     self.record("read workspaces".into());
     Ok(self.workspaces.clone())
+  }
+
+  fn github_stack(&self, _: &str, pr_number: u64) -> Option<crate::github_stack::GhStack> {
+    self.record(format!("read github stack {pr_number}"));
+    self.gh_stack.clone()
   }
 
   fn set_submodule_synced(&self, _: &str, path: &str, enabled: bool) -> Result<(), String> {
