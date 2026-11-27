@@ -69,6 +69,8 @@ struct FakeHost {
   /// What the workspace header reads.
   loaded: workspace_data::Loaded,
   pr: workspace_data::PrCache,
+  /// Syncing with the remote succeeds.
+  synced: bool,
   /// What the merge preview reads, and whether merging fails.
   merge: merge::Preview,
   merge_error: Option<String>,
@@ -612,6 +614,9 @@ impl workspace_data::WorkspaceHost for FakeHost {
 
   fn sync(&self, _: &str, workspace_id: Option<i64>) -> workspace_data::Outcome {
     self.record(format!("sync {workspace_id:?}"));
+    if self.synced {
+      return workspace_data::Outcome::ok("Synced", "Fetched and pushed".into());
+    }
     workspace_data::Outcome::failed("Sync failed", "offline".into())
   }
 
