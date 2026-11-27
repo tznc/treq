@@ -142,11 +142,14 @@ pub fn gh_pr_stack_impl(
   )
 }
 
+type Kept = (Instant, Option<GhStack>);
+
 /// Each pull request's stack, kept for a while: the stack card asks again
 /// on every revalidation, and each ask is a network call.
 pub struct StackCache {
   ttl: Duration,
-  entries: Mutex<HashMap<(String, u64), (Instant, Option<GhStack>)>>,
+  /// By `(repo_path, number)`: when it was read, and what it found.
+  entries: Mutex<HashMap<(String, u64), Kept>>,
 }
 
 impl StackCache {
