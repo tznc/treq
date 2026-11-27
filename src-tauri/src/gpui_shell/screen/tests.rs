@@ -2511,6 +2511,29 @@ fn selected_lines(h: &mut Harness) -> Option<(String, Vec<(usize, usize)>)> {
   })
 }
 
+/// Sets the UI zoom to `percent`, as the zoom setting does.
+fn zoom(h: &mut Harness, percent: u32) {
+  use crate::gpui_shell::ui::{apply_zoom, UiZoom};
+  h.cx.update(|window, cx| {
+    cx.set_global(UiZoom(percent));
+    apply_zoom(window, cx);
+    window.refresh();
+  });
+  h.cx.run_until_parked();
+}
+
+/// Asserts `popover` sits under `button` with their right edges aligned.
+fn assert_right_aligned_under(h: &mut Harness, button: &'static str, popover: &'static str) {
+  h.cx.run_until_parked();
+  let b = h.cx.debug_bounds(button).expect(button);
+  let p = h.cx.debug_bounds(popover).expect(popover);
+  assert!(
+    (f32::from(p.right()) - f32::from(b.right())).abs() < 1.,
+    "{b:?} {p:?}"
+  );
+  assert!(p.top() >= b.bottom(), "{b:?} {p:?}");
+}
+
 /// Rests the pointer on the diff line with element id `id`, which shows its
 /// Add comment button.
 fn hover_line(h: &mut Harness, id: &str) {

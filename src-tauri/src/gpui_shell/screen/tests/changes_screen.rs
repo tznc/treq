@@ -416,6 +416,104 @@ fn changes_tab_offers_file_actions_on_unselected_rows(cx: &mut TestAppContext) {
   }
 }
 
+/// An uncommitted row's status letter lines up with a committed row's.
+#[gpui::test]
+fn changes_tab_aligns_status_letters_across_lists(cx: &mut TestAppContext) {
+  use gpui_testing_library::by;
+  let (mut h, _) = workspace_harness(cx, changes_host_with_committed(), committed_route(true));
+  let screen = h.rendered();
+  let right = |key: &str| {
+    let id = gpui::ElementId::Name(format!("status-{key}").into());
+    screen
+      .query_all_by_element_id(by::element_id(id))
+      .first()
+      .unwrap_or_else(|| panic!("{key} not drawn"))
+      .snapshot()
+      .bounds()
+      .right()
+  };
+  assert_eq!(right("Changes-a.rs"), right("committed-c.rs"));
+}
+
+/// Whether the file row named `name` is drawn selected.
+fn row_selected(h: &mut Harness, name: &str) -> bool {
+  h.rendered()
+    .query_by_role(
+      gpui_testing_library::by::role(gpui::Role::Button)
+        .name(name)
+        .selected(true),
+    )
+    .is_some()
+}
+
+/// A click outside the file list drops the row's highlight; its actions wait
+/// for hover again.
+#[gpui::test]
+fn changes_tab_hides_row_actions_after_a_click_away(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  h.click("file-row-a.rs");
+  assert!(row_selected(&mut h, "a.rs"));
+  assert!(h.shows(gpui::Role::Button, "Stage a.rs"));
+  h.click("file-card-a.rs");
+  assert!(!row_selected(&mut h, "a.rs"));
+  assert!(!h.shows(gpui::Role::Button, "Stage a.rs"));
+  assert!(shows_hidden(&mut h, "Stage a.rs"), "still offered on hover");
+}
+
+/// Whether the status letter `key` (`<list>-<path>`) shows.
+fn shows_letter(h: &mut Harness, key: &str) -> bool {
+  let id = gpui::ElementId::Name(format!("status-{key}").into());
+  h.rendered()
+    .query_all_by_element_id(gpui_testing_library::by::element_id(id))
+    .iter()
+    .any(|n| n.is_visible())
+}
+
+/// A hovered row shows its buttons in place of its status letter.
+#[gpui::test]
+fn changes_tab_hides_the_status_letter_on_a_hovered_row(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  assert!(shows_letter(&mut h, "Changes-b.rs"));
+  h.hover("file-row-b.rs");
+  assert!(!shows_letter(&mut h, "Changes-b.rs"));
+  assert!(h.shows(gpui::Role::Button, "Stage b.rs"));
+  assert!(
+    shows_letter(&mut h, "Changes-a.rs"),
+    "other rows keep theirs"
+  );
+}
+
+/// A clicked row keeps its buttons in the letter's place off hover, until a
+/// click away.
+#[gpui::test]
+fn changes_tab_hides_the_status_letter_on_a_clicked_row(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  h.click("file-row-a.rs");
+  h.hover("file-card-b.rs");
+  assert!(!shows_letter(&mut h, "Changes-a.rs"));
+  assert!(h.shows(gpui::Role::Button, "Stage a.rs"));
+  h.click("file-card-b.rs");
+  assert!(shows_letter(&mut h, "Changes-a.rs"));
+}
+
+/// The click that drops the row's highlight still reaches the diff control.
+#[gpui::test]
+fn changes_tab_click_away_reaches_the_diff_control(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  h.click("file-row-a.rs");
+  h.click("viewed-a.rs");
+  h.cx.run_until_parked();
+  assert!(!row_selected(&mut h, "a.rs"));
+  assert!(
+    host
+      .writes()
+      .iter()
+      .any(|w| w.starts_with("mark viewed a.rs ")),
+    "{:?}",
+    host.writes()
+  );
+}
+
 #[gpui::test]
 fn changes_tab_commits_only_staged_files(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
@@ -965,6 +1063,23 @@ fn a_review_recheck_reads_only_files_whose_content_changed(cx: &mut TestAppConte
   assert!(shows_stale_banner(&mut h));
 }
 
+/// A review reads a moved working copy whose diffs held once, not again on
+/// every refresh after.
+#[gpui::test]
+fn a_review_reads_a_moved_working_copy_once(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, tokened_changes_host(), changes_route());
+  comment_line(&mut h, "Nit");
+  let mut moved = host.working.clone().expect("working");
+  moved.working_copy_token = Some("t2".into());
+  *host.edited.lock().unwrap() = Some(moved);
+  bump_changes_revision(&mut h);
+  let reads = count_calls(&host, "read hunks");
+  bump_changes_revision(&mut h);
+  bump_changes_revision(&mut h);
+  assert_eq!(count_calls(&host, "read hunks"), reads);
+  assert!(!shows_stale_banner(&mut h));
+}
+
 #[gpui::test]
 fn an_edit_on_disk_during_a_review_waits_behind_the_stale_banner(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
@@ -977,6 +1092,18 @@ fn an_edit_on_disk_during_a_review_waits_behind_the_stale_banner(cx: &mut TestAp
     "the reviewed diff stays"
   );
   h.click("reload-stale");
+  assert!(!shows_stale_banner(&mut h));
+  assert_eq!(shown_lines(&mut h, "a.rs"), [" a", "+b", "+e"]);
+}
+
+/// Deleting the last comment ends the review: edits on disk show again.
+#[gpui::test]
+fn deleting_the_last_comment_ends_the_review(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  comment_line(&mut h, "Nit");
+  click_named(&mut h, gpui::Role::Button, "Delete comment");
+  h.cx.run_until_parked();
+  edit_a_rs(&mut h, &host);
   assert!(!shows_stale_banner(&mut h));
   assert_eq!(shown_lines(&mut h, "a.rs"), [" a", "+b", "+e"]);
 }
@@ -1081,19 +1208,11 @@ fn a_suggested_change_is_drawn_and_applied_to_the_file(cx: &mut TestAppContext) 
   h.click("gutter-a.rs-0-1");
   h.cx.simulate_keystrokes("shift-down left");
   h.click("suggest-change");
-  // A code editor with the lines and a preview, not fences in the comment.
-  assert!(h.shows(gpui::Role::Group, "Suggested change"));
+  // GitHub's way: the block goes into the comment itself, and the preview
+  // reads it from there. No second editor.
+  assert!(!h.shows(gpui::Role::Group, "Suggested change"));
   assert!(h.shows(gpui::Role::Group, "Suggestion preview"));
-  let (comment, suggestion) = h.screen.read_with(&h.cx, |screen, cx| {
-    let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
-    let changes = workspace.changes().expect("changes").read(cx);
-    (
-      changes.review.draft_text.clone(),
-      changes.review.suggestion_text.clone(),
-    )
-  });
-  assert_eq!(comment, "");
-  assert_eq!(suggestion.as_deref(), Some("b\nc"));
+  assert_eq!(draft_text(&mut h), "```suggestion\nb\nc\n```\n");
   h.cx.simulate_keystrokes("secondary-enter");
   settle_save(&mut h);
   let saved = host.review.lock().unwrap().clone().unwrap_or_default();
@@ -1119,6 +1238,41 @@ fn a_suggested_change_is_drawn_and_applied_to_the_file(cx: &mut TestAppContext) 
     !has_comment(&mut h, "^Comments on a.rs line \\d+$"),
     "the applied comment is done"
   );
+}
+
+fn draft_text(h: &mut Harness) -> String {
+  h.screen.read_with(&h.cx, |screen, cx| {
+    let workspace = screen.workspace.as_ref().expect("workspace").read(cx);
+    let changes = workspace.changes().expect("changes").read(cx);
+    changes.review.draft_text.clone()
+  })
+}
+
+#[gpui::test]
+fn suggest_change_inserts_the_block_on_its_own_line_at_the_cursor(cx: &mut TestAppContext) {
+  let (mut h, _host) = workspace_harness(cx, changes_host(), changes_route());
+  h.click("gutter-a.rs-0-1");
+  h.cx.simulate_keystrokes("shift-down left");
+  h.cx.simulate_input("Wrap it");
+  h.click("suggest-change");
+  assert_eq!(draft_text(&mut h), "Wrap it\n```suggestion\nb\nc\n```\n");
+  // The cursor sits after the block, to go on writing.
+  h.cx.simulate_input("thanks");
+  assert_eq!(
+    draft_text(&mut h),
+    "Wrap it\n```suggestion\nb\nc\n```\nthanks"
+  );
+}
+
+#[gpui::test]
+fn the_suggestion_preview_follows_the_comment_text(cx: &mut TestAppContext) {
+  let (mut h, _host) = workspace_harness(cx, changes_host(), changes_route());
+  h.click("gutter-a.rs-0-1");
+  h.cx.simulate_keystrokes("shift-down left");
+  h.cx.simulate_input("Nit");
+  assert!(!h.shows(gpui::Role::Group, "Suggestion preview"));
+  h.cx.simulate_input("\n```suggestion\nB\n```");
+  assert!(h.shows(gpui::Role::Group, "Suggestion preview"));
 }
 
 #[gpui::test]
@@ -1248,6 +1402,17 @@ fn changes_tab_sends_the_review_to_an_agent(cx: &mut TestAppContext) {
   assert!(host
     .writes()
     .contains(&"keep sent comments 7 a.rs:Nit".to_string()));
+}
+
+/// Zoomed in, the popover still opens under Finish review, right edges
+/// aligned, rather than flipping left of the button.
+#[gpui::test]
+fn changes_tab_finish_popover_stays_under_its_button_when_zoomed(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  zoom(&mut h, 125);
+  comment_line(&mut h, "Nit");
+  h.click("finish-review");
+  assert_right_aligned_under(&mut h, "finish-review", "finish-review-popover");
 }
 
 #[gpui::test]

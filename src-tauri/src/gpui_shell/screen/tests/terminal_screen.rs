@@ -125,6 +125,17 @@ fn terminal_draws_output_and_types_into_the_pty(cx: &mut TestAppContext) {
   );
 }
 
+/// Claude Code and the shell both read `\` then Enter as a new line.
+#[gpui::test]
+fn shift_enter_sends_a_backslash_and_enter(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  let pty = agent_pty();
+  click_terminal(&mut h);
+  h.cx.simulate_keystrokes("shift-enter");
+  assert_eq!(pty_writes(&host), vec![format!("write {pty} \"\\\\\\r\"")]);
+}
+
 #[gpui::test]
 fn pasting_text_into_a_terminal_types_the_text(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
@@ -666,6 +677,77 @@ fn terminal_pane_undims_a_hovered_column(cx: &mut TestAppContext) {
   assert!(
     !column_is(&mut h, "Shell terminal", DIMMED),
     "hovered, so not dimmed"
+  );
+}
+
+/// Presses the height divider at `from`, moves to `to` and lets go.
+fn drag_height_divider(
+  h: &mut Harness,
+  from: gpui::Point<gpui::Pixels>,
+  to: gpui::Point<gpui::Pixels>,
+) {
+  h.cx
+    .simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
+  h.cx.run_until_parked();
+  h.cx
+    .simulate_mouse_move(to, Some(MouseButton::Left), Modifiers::none());
+  h.cx.run_until_parked();
+  h.cx
+    .simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
+  h.cx.run_until_parked();
+}
+
+fn pane_top(h: &mut Harness) -> f32 {
+  let pane = h.cx.debug_bounds("workspace-terminal-pane").expect("pane");
+  f32::from(pane.top())
+}
+
+/// A click anywhere in the divider's grab area leaves the pane's height as
+/// it was: only a drag resizes it.
+#[gpui::test]
+fn clicking_the_height_divider_keeps_the_pane_height(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  let before = pane_top(&mut h);
+  let grab = h
+    .cx
+    .debug_bounds("terminal-height-divider")
+    .expect("divider");
+  for y in [
+    grab.top() + gpui::px(1.),
+    grab.center().y,
+    grab.bottom() - gpui::px(1.),
+  ] {
+    let at = gpui::point(grab.center().x, y);
+    drag_height_divider(&mut h, at, at);
+    assert!(
+      (pane_top(&mut h) - before).abs() < 0.5,
+      "clicked at {y:?}: {} != {before}",
+      pane_top(&mut h)
+    );
+  }
+}
+
+/// The pane's edge follows the pointer by exactly the distance dragged.
+#[gpui::test]
+fn dragging_the_height_divider_moves_the_edge_by_the_drag(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  let before = pane_top(&mut h);
+  let grab = h
+    .cx
+    .debug_bounds("terminal-height-divider")
+    .expect("divider");
+  let from = gpui::point(grab.center().x, grab.top() + gpui::px(1.));
+  drag_height_divider(
+    &mut h,
+    from,
+    from - gpui::point(gpui::px(0.), gpui::px(100.)),
+  );
+  assert!(
+    (before - pane_top(&mut h) - 100.).abs() < 0.5,
+    "{before} -> {}",
+    pane_top(&mut h)
   );
 }
 

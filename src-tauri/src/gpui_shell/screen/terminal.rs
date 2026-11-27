@@ -254,13 +254,14 @@ pub fn edge_scroll(y: f32, top: f32, bottom: f32) -> i32 {
   }
 }
 
-/// The pane height for a drag to `y` in a view spanning `top..bottom`.
-pub fn drag_height(top: f32, bottom: f32, y: f32) -> f32 {
-  let height = bottom - top;
-  if height <= 0. {
-    return HEIGHT_DEFAULT;
+/// The pane height after its edge, at `from` percent of a `view` tall view,
+/// is dragged `up` pixels: relative to where it was grabbed, so a click
+/// leaves it as it was.
+pub fn drag_height(from: f32, up: f32, view: f32) -> f32 {
+  if view <= 0. {
+    return from;
   }
-  ((bottom - y) / height * 100.).clamp(HEIGHT_MIN, HEIGHT_MAX)
+  (from + up / view * 100.).clamp(HEIGHT_MIN, HEIGHT_MAX)
 }
 
 /// The row's scrollbar thumb, as its left edge and width, for a row
@@ -1301,7 +1302,7 @@ impl TerminalView {
     }
     // Shift+Enter continues the line, as React's terminal did.
     if k.key == "enter" && m.shift && !m.control && !m.alt && !m.platform {
-      self.write("\\", cx);
+      self.write("\\\r", cx);
       return;
     }
     let app_cursor = self.with_emulator(|e| e.app_cursor()).unwrap_or(false);
@@ -2049,7 +2050,11 @@ enum Kind {
 /// A divider or the pane's edge being dragged.
 #[derive(Clone, Copy)]
 enum Drag {
-  Height,
+  /// The pane's edge, grabbed at `y` with the pane at `from` percent.
+  Height {
+    y: f32,
+    from: f32,
+  },
   Divider {
     left: usize,
     x: f32,
@@ -3551,13 +3556,12 @@ impl TerminalPane {
     }
     let (x, y) = (f32::from(event.position.x), f32::from(event.position.y));
     match drag {
-      Drag::Height => {
+      Drag::Height { y: grabbed, from } => {
         if self.maximized {
           return;
         }
         if let Some(b) = self.container.get() {
-          let top = f32::from(b.origin.y);
-          self.height = drag_height(top, top + f32::from(b.size.height), y);
+          self.height = drag_height(from, grabbed - y, f32::from(b.size.height));
         }
       }
       Drag::Divider { left, x: from } => {
@@ -4250,9 +4254,9 @@ impl TerminalPane {
             d.debug_selector(|| "terminal-column-active".into())
           }),
       )
-      // The shown workspace's terminals: an accent along the top, over
-      // the header, which keeps its own colours.
-      .when(current, |d| {
+      // The focused terminal: an accent along the top, over the header,
+      // which keeps its own colours.
+      .when(active, |d| {
         d.child(
           div()
             .absolute()
@@ -4827,7 +4831,7 @@ impl Render for TerminalPane {
             .relative()
             .h_1()
             .flex_shrink_0()
-            .bg(if matches!(self.drag, Some(Drag::Height)) {
+            .bg(if matches!(self.drag, Some(Drag::Height { .. })) {
               p.primary
             } else {
               p.border
@@ -4835,7 +4839,7 @@ impl Render for TerminalPane {
             .hover(|s| s.bg(p.handle_hover()))
             .child(
               div()
-                .id("terminal-height-divider")
+                .selector("terminal-height-divider")
                 .absolute()
                 .left_0()
                 .right_0()
@@ -4844,8 +4848,11 @@ impl Render for TerminalPane {
                 .cursor_ns_resize()
                 .on_mouse_down(
                   MouseButton::Left,
-                  cx.listener(|pane, _, _, cx| {
-                    pane.drag = Some(Drag::Height);
+                  cx.listener(|pane, e: &MouseDownEvent, _, cx| {
+                    pane.drag = Some(Drag::Height {
+                      y: f32::from(e.position.y),
+                      from: pane.height.min(HEIGHT_MAX),
+                    });
                     cx.stop_propagation();
                     cx.notify();
                   }),
@@ -5065,9 +5072,10 @@ mod tests {
 
   #[test]
   fn clamps_the_pane_height() {
-    assert!((drag_height(0., 1000., 700.) - 30.).abs() < 0.01);
-    assert_eq!(drag_height(0., 1000., 990.), HEIGHT_MIN);
-    assert_eq!(drag_height(0., 1000., 0.), HEIGHT_MAX);
+    assert_eq!(drag_height(33., 0., 1000.), 33.);
+    assert!((drag_height(20., 100., 1000.) - 30.).abs() < 0.01);
+    assert_eq!(drag_height(20., -100., 1000.), HEIGHT_MIN);
+    assert_eq!(drag_height(20., 1000., 1000.), HEIGHT_MAX);
   }
 
   #[test]

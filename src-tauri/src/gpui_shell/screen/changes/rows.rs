@@ -138,6 +138,9 @@ pub(super) struct DiffRows {
   pub(super) revision: u64,
   /// How long the last layout of the rows took.
   pub(super) layout_cost: Duration,
+  /// The card whose header is pinned this frame. Read while the list lays
+  /// out its rows, when its state can't be borrowed.
+  pinned: Option<usize>,
 }
 
 /// Every input of `layout_rows`. The snapshot, the hunks and the lines read
@@ -172,6 +175,7 @@ impl Default for DiffRows {
       key: None,
       revision: 0,
       layout_cost: Duration::ZERO,
+      pinned: None,
     }
   }
 }
@@ -503,14 +507,80 @@ impl ChangesView {
     });
   }
 
-  /// The diff's list.
-  pub(super) fn diff_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
-    div().selector("changes-diff-list").size_full().child(
-      list(
-        self.diff.list.clone(),
-        cx.processor(|view, ix, window, cx| view.row(ix, window, cx)),
+  /// The diff's list, with the header of the card it is scrolled into
+  /// pinned over its top.
+  pub(super) fn diff_list(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+    div()
+      .selector("changes-diff-list")
+      .relative()
+      .size_full()
+      .child(
+        list(
+          self.diff.list.clone(),
+          cx.processor(|view, ix, window, cx| view.row(ix, window, cx)),
+        )
+        .size_full(),
       )
-      .size_full(),
+      .children(self.pinned_header(cx))
+  }
+
+  /// The card at the top of the list once its own header has scrolled
+  /// out of view, and how far below the list's top the card ends, when
+  /// that end is measured.
+  fn pinned_card(&self) -> Option<(usize, Option<Pixels>)> {
+    let list = &self.diff.list;
+    let top = list.logical_scroll_top();
+    let row = *self.diff.rows.get(top.item_ix)?;
+    let c = row.card()?;
+    // A head row starts with the `pt_4` gap above its card.
+    if matches!(row, Row::Head(..)) && top.offset_in_item <= self.diff.rem {
+      return None;
+    }
+    let end = top.item_ix
+      + self.diff.rows[top.item_ix..]
+        .iter()
+        .take_while(|r| r.card() == Some(c))
+        .count();
+    let room = list
+      .bounds_for_item(end)
+      .map(|b| (b.top() - list.viewport_bounds().top()).max(px(0.)));
+    Some((c, room))
+  }
+
+  /// The pinned card's header. It is cut to the room above the card's
+  /// end, so the next card pushes it up and out.
+  fn pinned_header(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    let pinned = self.pinned_card();
+    self.diff.pinned = pinned.map(|(c, _)| c);
+    let (c, room) = pinned?;
+    let p = theme::palette(self.dark);
+    let shut = self.diff.cards[c].shut;
+    let id = format!("pinned-file-header-{}", self.diff.cards[c].path);
+    let header = self.card_header(c, &p, cx);
+    Some(
+      div()
+        .selector(SharedString::from(id))
+        .absolute()
+        .top_0()
+        .left_0()
+        .right_0()
+        .when_some(room, |this, room| this.max_h(room))
+        .flex()
+        .flex_col()
+        .justify_end()
+        .overflow_hidden()
+        .block_mouse_except_scroll()
+        .child(
+          div()
+            .flex_none()
+            .border_x_1()
+            .border_t_1()
+            .when(shut, |this| this.border_b_1())
+            .border_color(p.border)
+            .bg(p.background)
+            .child(header),
+        )
+        .into_any_element(),
     )
   }
 
@@ -528,7 +598,10 @@ impl ChangesView {
     let bottom = card(self.diff.rows.get(ix + 1)) != Some(c);
     let path = self.diff.cards[c].path.clone();
     let content = match row {
-      Row::Head(..) => self.card_head(c, &p, cx),
+      Row::Head(..) => {
+        let pinned = self.diff.pinned == Some(c);
+        self.card_head(c, pinned, &p, cx)
+      }
       _ => ui::text(div(), TextSize::Code)
         .font_family(theme::MONO_FONT)
         .child(self.body_line(row, &p, cx))
