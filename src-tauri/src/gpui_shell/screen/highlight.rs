@@ -790,6 +790,37 @@ mod tests {
   }
 
   #[test]
+  fn a_hunk_starting_on_a_closing_heredoc_reads_on_as_code() {
+    let t = hunk_tokens(
+      "ex",
+      &[
+        "   \"\"\"",
+        "   def delete(%User{id: id}) do",
+        "-    from(sb in \"sources_backends\")",
+        "+    from(u in User, lock: \"FOR UPDATE\")",
+      ],
+    );
+    assert!(t[1].contains(&("def".into(), Token::Keyword)), "{:?}", t[1]);
+    let quoted = |s: &str| (format!("\"{s}\""), Token::String);
+    assert!(t[2].contains(&quoted("sources_backends")), "{:?}", t[2]);
+    assert!(t[3].contains(&quoted("FOR UPDATE")), "{:?}", t[3]);
+  }
+
+  #[test]
+  fn a_heredoc_opened_in_the_hunk_runs_past_its_end() {
+    let t = hunk_tokens(
+      "ex",
+      &[
+        "-  @moduledoc \"\"\"",
+        "+  @moduledoc \"\"\"",
+        "   Deletes a user's backends",
+      ],
+    );
+    assert_eq!(t[2].len(), 1, "{:?}", t[2]);
+    assert!(matches!(t[2][0].1, Token::String | Token::Comment), "{:?}", t[2]);
+  }
+
+  #[test]
   fn each_side_keeps_its_own_state() {
     let t = hunk_tokens(
       "js",
