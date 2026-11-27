@@ -1382,6 +1382,25 @@ fn changes_tab_comments_a_line_and_keeps_the_review(cx: &mut TestAppContext) {
   assert!(host.writes().contains(&"clear review 7".to_string()));
 }
 
+/// A Reload keeps comments on committed files whose lines are still there.
+#[gpui::test]
+fn a_reload_keeps_comments_on_committed_files(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host_with_committed(), committed_route(true));
+  hover_line(&mut h, "diff-line-c.rs-0-1");
+  h.click("add-comment-c.rs-0-1");
+  h.click("comment-input");
+  h.cx.simulate_input("On committed");
+  h.click("comment-submit");
+  h.cx.run_until_parked();
+  let mut edited = host.working.clone().expect("working");
+  edited.hunks_by_file[0].hunks[0].lines = vec!["-a".into(), "+e".into()];
+  *host.edited.lock().unwrap() = Some(edited);
+  bump_changes_revision(&mut h);
+  h.click("reload-stale");
+  h.cx.run_until_parked();
+  assert!(has_comment(&mut h, "^Comments on c.rs line \\d+$"));
+}
+
 #[gpui::test]
 fn changes_tab_edits_a_comment(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
