@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { DOWNLOAD_HREF, pickDownloads } from '../src/lib/downloads';
 
 const UA = {
@@ -69,6 +69,16 @@ test.describe('pickDownloads', () => {
 // canonical owner rather than an alias, so the owner is not pinned.
 const RELEASE_ASSET = /^https:\/\/github\.com\/[^/]+\/treq\/releases\/download\/v[\d.]+\//;
 
+// The navbar's Download button is the way in from the landing page.
+async function openDownloadPage(page: Page) {
+  await page.goto('/');
+  await page
+    .getByRole('navigation', { name: 'Main' })
+    .getByRole('link', { name: 'Download', exact: true })
+    .click();
+  await expect(page.getByRole('heading', { name: 'Download Treq', level: 1 })).toBeVisible();
+}
+
 test.describe('Download page', () => {
   for (const [ua, name, others] of [
     ['mac', 'macOS', ['Windows', 'Linux']],
@@ -79,7 +89,7 @@ test.describe('Download page', () => {
       test.use({ userAgent: UA[ua] });
 
       test(`focuses ${name} and lists the other platforms`, async ({ page }) => {
-        await page.goto('/download/');
+        await openDownloadPage(page);
         const focus = page.getByRole('region', { name: `Download for ${name}` });
         await expect(focus.getByText('Your system')).toBeVisible();
         await expect(focus.getByRole('link').first()).toHaveAttribute('href', RELEASE_ASSET);
@@ -96,7 +106,7 @@ test.describe('Download page', () => {
     test.use({ userAgent: UA.iphone });
 
     test('shows macOS without claiming it is the visitor’s system', async ({ page }) => {
-      await page.goto('/download/');
+      await openDownloadPage(page);
       const focus = page.getByRole('region', { name: 'Download for macOS' });
       await expect(focus.getByRole('link').first()).toHaveAttribute('href', RELEASE_ASSET);
       await expect(focus.getByText('Your system')).toHaveCount(0);
