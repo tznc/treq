@@ -146,11 +146,11 @@ test("changes: diff, inline comment add/edit, review bar", async ({ page }) => {
     ],
   });
 
-  await page.getByRole("button", { name: "Start review" }).click();
+  await page.getByRole("button", { name: "Review", exact: true }).click();
   await settle(page, 1000);
   await capture(page, {
     name: "05-changes-review-started",
-    title: "After Start review",
+    title: "After Review",
     screen: true,
     expectations: [
       "A 'Review started on feat/empty-event-message' toast reads 'Comments will appear inline'",

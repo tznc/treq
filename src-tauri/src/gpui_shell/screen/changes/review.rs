@@ -2178,7 +2178,7 @@ impl ChangesView {
       .gap_2()
       .disabled(self.starting_review)
       .icon(theme::ICON_BOT, 12.)
-      .label("Start review")
+      .label("Review")
       .on_click(cx.listener(|view, _, _, cx| view.start_review(cx)))
   }
 

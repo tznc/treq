@@ -1613,7 +1613,7 @@ impl ChangesView {
     );
   }
 
-  /// "Start review": a review agent with the repository's prompt.
+  /// "Review": a review agent with the repository's prompt.
   fn start_review(&mut self, cx: &mut Context<Self>) {
     let Some(workspace) = self.parent.workspace.clone() else {
       return;
@@ -3019,7 +3019,7 @@ impl ChangesView {
     }))
   }
 
-  /// `ReviewActionBar`: for now, "Start review" on workspaces.
+  /// `ReviewActionBar`: for now, "Review" on workspaces.
   fn action_bar(&mut self, p: &Palette, cx: &mut Context<Self>) -> Option<impl IntoElement> {
     self.parent.workspace.as_ref()?;
     let bar = if self.show_review_bar() {
