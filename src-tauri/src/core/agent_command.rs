@@ -875,6 +875,51 @@ mod tests {
   }
 
   #[test]
+  fn starts_opencode_with_the_prompt_file() {
+    let prompt = "\"$(cat -- '/tmp/treq-agent-1/prompt.txt')\"";
+    let edit = build_auto_command(&opts("opencode"), &files()).unwrap();
+    assert!(edit.contains(&format!("opencode --prompt {prompt}")));
+    let plan = build_auto_command(
+      &AutoCommand {
+        permission_mode: Some("plan"),
+        ..opts("opencode")
+      },
+      &files(),
+    )
+    .unwrap();
+    assert_eq!(plan, edit);
+  }
+
+  #[test]
+  fn prepares_opencode_with_the_task_in_the_prompt_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let prepared = prepare_auto_command(
+      &AgentPaths {
+        workspace_path: None,
+        repo_path: dir.path().to_str().unwrap(),
+        supporting_repo_paths: NONE,
+        project: None,
+        app_instructions: None,
+        repo_instructions: None,
+      },
+      &AutoCommand {
+        pending_prompt: Some("Fix the parser."),
+        ..opts("opencode")
+      },
+    )
+    .unwrap();
+    assert!(!prepared.command.contains(TASK_ARG), "{}", prepared.command);
+    let prompt = launch_files(&prepared)
+      .into_iter()
+      .find(|p| p.ends_with("prompt.txt"))
+      .unwrap();
+    assert!(std::fs::read_to_string(prompt)
+      .unwrap()
+      .ends_with(" Fix the parser."));
+    super::super::agent_cli::cleanup_agent_cli_files(&prepared.file_paths).unwrap();
+  }
+
+  #[test]
   fn tells_treq_when_the_agent_exits() {
     for agent in [
       "claude", "codex", "cursor", "copilot", "devin", "gemini", "opencode",
