@@ -1,68 +1,72 @@
 ---
 sidebar_position: 2
-description: Compare Treq and Superset for parallel coding agents, review workflows, stacked changes, and packaging.
+title: Treq vs Paradev (formerly Superset) Compared (2026)
+description: Treq vs Paradev, formerly Superset. Two desktop apps for parallel coding agents, compared on stacked PRs, rebasing, platforms and price.
 ---
 
-# Treq vs Superset
+# Treq vs Paradev (formerly Superset)
 
 _Two local-first ADEs for different workflows: stacked changes or broad agent control._
 
-Superset is now called Paradev. Its CLI is still `superset`. Treq and Superset both run coding agents in isolated workspaces and give you a place to review the result. They sit in the same product category. The workflow changes after the agents start writing code.
+Superset is now called Paradev. Its old site redirects to paradev.com, and its CLI is still `superset`. Treq and Paradev both run coding agents in isolated workspaces and give you a place to review the result. Facts about Paradev were checked against its site, docs and repository in November 2026.
 
-Treq is built around human review, stacked workspaces, auto-rebase, and sending conflicts back to the agent. Superset is built around running many CLI agents in parallel. It also sells paid plans for teams.
+Treq is built around human review, stacked workspaces, auto-rebase, and sending conflicts back to the agent. Paradev is built around running many CLI agents in parallel. It also sells paid plans for teams.
 
 ## At a Glance
 
-| | Treq | Superset |
+| | Treq | Paradev |
 | --- | --- | --- |
 | Positioning | Stacking ADE, open-source Graphite alternative | Desktop app for running CLI agents in parallel |
+| Desktop platforms | macOS, Windows and Linux | macOS, with an experimental Linux AppImage. No Windows build |
 | Isolation model | Jujutsu workspaces over a colocated Git repo | Git worktrees per task |
-| Review surface | PR-style diffs, line comments sent back to the agent | Diff and file review inside the app |
-| Stacked changes | Core workflow | Not emphasized publicly |
-| Auto-rebase | Core workflow | Not emphasized publicly |
+| Review surface | PR-style diffs, line comments sent back to the agent | Changes pane, plus a PR pane for checks, review threads and merge |
+| Stacked changes | Core workflow | PR pane shows GitHub stacks and merges a whole stack |
+| Auto-rebase | Core workflow | Not documented. A restack button appears after a lower layer merges |
 | Conflict handling | Send resolution instructions to the agent | Manual, unless you drive it yourself |
-| Provider model | Claude, Codex, Cursor, and Copilot | Very broad CLI agent support |
-| Remote or cloud workspaces | [Roadmap](/roadmap): SSH remote development | Remote workspaces and enterprise packaging |
+| Provider model | Claude, Codex, Cursor, and Copilot | Any CLI agent, with 15 listed as supported |
+| Remote or cloud workspaces | [Roadmap](/roadmap): SSH remote development | Remote access on Pro, cloud workspaces on Team and Ultra |
 | License | Apache 2.0 | MIT |
-| Pricing | Free desktop, [Pro](/pricing) at $15 per user per month | Free, Pro, Team, Ultra and Enterprise |
+| Pricing | Free desktop, [Pro](/pricing) at $15 per user per month | Free, Pro $20, Team $60, Ultra $200 per user per month, Enterprise custom |
 
 ## What Each Product Does
 
 **Treq** is a desktop Stacking ADE. Each agent gets an isolated workspace with its own working copy, terminal, and line of history. You arrange dependent workspaces into a stack, review each layer, and send comments back to the agent. When a lower layer moves, Treq rebases the workspaces above it. If a rebase hits a conflict, you send it to the agent instead of resolving it by hand.
 
-**Superset** is a local-first desktop workspace for many coding agents. It launches CLI agents in isolated Git worktrees and adds chat, browser, review, and automation tools. Its public materials focus on parallel scale, integrations with GitHub, Linear, and Slack, plus paid plans for teams.
+**Paradev** is a local-first desktop workspace for many coding agents. It launches CLI agents in isolated Git worktrees and adds chat, browser, review, and automation tools. Its public materials focus on parallel scale, integrations with GitHub, Linear, and Slack, plus paid plans for teams.
 
 Both products solve the same first problem. Several agents should not share one checkout, so each task gets its own directory. See [agent orchestration](/learn/concepts/ai-engineering/agent-orchestration) for why that isolation is required.
 
 ## Feature Comparison
 
-| Feature | Treq | Superset |
+| Feature | Treq | Paradev |
 | --- | --- | --- |
 | Local-first desktop app | Yes | Yes |
 | Parallel agent sessions | Yes | Yes, with an explicit 100+ agent ambition |
 | Workspace isolation | Yes | Yes |
 | Review and diff UI | PR-style diffs with line comments | Yes |
 | Comments sent back to the agent | Yes | Review surfaces exist, agent-loop feedback is not the center of the public pitch |
-| Stacked PR or stacked workspace support | Yes | Not emphasized publicly |
-| Auto-rebase of dependents | Yes | Not emphasized publicly |
+| Stacked PR or stacked workspace support | Yes | GitHub stacks in the PR pane |
+| Auto-rebase of dependents | Yes | No. Restack by hand after a lower layer merges |
 | Agent-driven conflict resolution | Yes | Not emphasized publicly |
 | Automations and scheduling | Not public on the site today | Yes |
-| Remote or cloud workspaces | Planned, not shipped | Yes |
+| Remote or cloud workspaces | Planned, not shipped | Yes, on paid plans |
 | Open source | Apache 2.0 | MIT |
 
 ## Where They Differ
 
-Both products run parallel agents in isolated workspaces. Git worktrees give Superset isolation. They do not give it Treq's automatic rebase of a dependent stack. Treq uses colocated [Jujutsu workspaces](/docs/concepts/workspaces) so a target move can rebase every layer above it in the background.
+Both products run parallel agents in isolated workspaces. Git worktrees give Paradev isolation. They do not give it Treq's automatic rebase of a dependent stack. Treq uses colocated [Jujutsu workspaces](/docs/concepts/workspaces) so a target move can rebase every layer above it in the background.
+
+Paradev's PR pane does understand stacks. It reads GitHub's own stack, or infers one from base branches, merges every open layer below a PR, and offers a restack once a lower layer has merged. It does not document rebasing dependent worktrees while the lower layer is still changing, which is the step Treq automates.
 
 Treq organizes agent work as linked, reviewable layers. A large feature should ship as smaller PRs that stay in sync. Diff comments return to the agent. Auto-rebase keeps the stack current. Conflicts stay in the review loop instead of becoming a separate merge chore.
 
-Superset focuses on breadth. Its public materials feature provider coverage, automations, remote workspaces, and team plans. This model fits teams that want one control plane for many agents, including agents Treq does not list today.
+Paradev focuses on breadth. Its public materials feature provider coverage, automations, remote workspaces, and team plans. This model fits teams that want one control plane for many agents, including agents Treq does not list today.
 
 Running many agents is becoming a standard feature. Treq's distinction is the stack that connects their work. That workflow must track each dependency, review layer, and rebase.
 
 ## Pricing and Licensing
 
-Treq's desktop app is free and open source under Apache 2.0. [Pricing](/pricing) lists Free for public GitHub repos and Pro at $15 per user per month. Local review stays on your machine either way.
+Treq's desktop app is free and open source under Apache 2.0. [Pricing](/pricing) lists Free for any repository and Pro at $15 per user per month. Local review stays on your machine either way.
 
 Paradev lists Free, Pro at $20, Team at $60, Ultra at $200, and custom Enterprise plans. Its code is open source under the MIT license.
 
@@ -77,15 +81,17 @@ Choose **Treq** if you:
 - Prefer Apache 2.0 and a local-only review loop until you opt into GitHub features.
 - Are looking for a Graphite-like stacked workflow built for coding agents.
 
-Choose **Superset** if you:
+Choose **Paradev** if you:
 
-- Need broad CLI agent support and frequent provider switching.
+- Work on a Mac and need broad CLI agent support and frequent provider switching.
 - Want remote workspaces, automations, and team or enterprise packaging today.
 - Prefer a product that already has self-serve team plans and compare content.
 - Care more about orchestration breadth than stacked PR discipline.
 
 ## Next Steps
 
+- [Orca vs Paradev](./orca-vs-superset.mdx): Paradev against an MIT-licensed app that runs on every desktop OS.
+- [Conductor vs Paradev](./conductor-vs-superset.mdx): Paradev against a free, Mac-only alternative.
 - [Treq vs Conductor](./treq-vs-conductor.mdx): Mac-native agent workspaces versus stacked review workflows.
 - [Treq vs Graphite for AI teams](./treq-vs-graphite-for-ai-teams.mdx): why stacked PR tooling matters once agents write most of the code.
 - [Human-in-the-loop review workflow](/learn/workflows/git/human-in-the-loop-review): how review comments become the next agent prompt.
