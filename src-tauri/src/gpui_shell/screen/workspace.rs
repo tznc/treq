@@ -1078,7 +1078,7 @@ impl WorkspaceView {
       }
       _ => {
         let host: Arc<dyn super::code_data::CodeHost> = self.code_host.clone();
-        self.title = Some(cx.new(|_| TitleEditor::new(host, repo, id, title, dark)));
+        self.title = Some(cx.new(|cx| TitleEditor::new(host, repo, id, title, dark, cx)));
       }
     }
   }
@@ -1097,7 +1097,17 @@ impl WorkspaceView {
     .size_full()
   }
 
-  fn hover_tooltip(&mut self, key: SharedString, hovered: bool, cx: &mut Context<Self>) {
+  /// The element whose tooltip shows.
+  #[cfg(test)]
+  pub(crate) fn shown_tooltip(&self) -> Option<SharedString> {
+    self
+      .tooltip
+      .clone()
+      .filter(|(_, shown)| *shown)
+      .map(|(k, _)| k)
+  }
+
+  pub(crate) fn hover_tooltip(&mut self, key: SharedString, hovered: bool, cx: &mut Context<Self>) {
     if !hovered {
       if self.tooltip.as_ref().is_some_and(|(k, _)| *k == key) {
         self.tooltip = None;
@@ -1105,10 +1115,9 @@ impl WorkspaceView {
       }
       return;
     }
-    if self.popover.is_some() {
+    if self.popover.is_some() || !crate::gpui_shell::tooltips::enter(&mut self.tooltip, &key) {
       return;
     }
-    self.tooltip = Some((key.clone(), false));
     cx.spawn(async move |this, cx| {
       cx.background_executor().timer(TOOLTIP_DELAY).await;
       this
