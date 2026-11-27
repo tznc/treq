@@ -345,6 +345,31 @@ fn changes_tab_offers_file_actions_on_unselected_rows(cx: &mut TestAppContext) {
   }
 }
 
+/// Once committed, a file's card shows the branch's diff, not a skeleton.
+#[gpui::test]
+fn a_committed_file_shows_its_diff_after_the_commit(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, tokened_changes_host(), committed_route(true));
+  h.drawn("changes-diff-viewer");
+  let mut committed = host.working.clone().expect("working");
+  committed.committed_files = std::mem::take(&mut committed.uncommitted_files);
+  committed.working_copy_token = Some("t2".into());
+  *host.edited.lock().unwrap() = Some(committed);
+  h.click("commit-message");
+  h.cx.simulate_input("Fix");
+  h.click("commit-button");
+  h.cx.run_until_parked();
+  assert!(h.shows(gpui::Role::Status, "Nothing to commit"));
+  let screen = h.rendered();
+  for id in ["diff-line-a.rs-0-1", "diff-line-b.rs-0-0"] {
+    assert!(
+      screen
+        .query_by_element_id(gpui::SharedString::from(id))
+        .is_some(),
+      "{id} still loading"
+    );
+  }
+}
+
 #[gpui::test]
 fn changes_tab_commits_only_staged_files(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
