@@ -3179,28 +3179,20 @@ impl ChangesView {
 
   /// A card's header and file comments, then the threads and comments with
   /// no line above its hunks, or what it shows in their place.
-  fn card_head(&mut self, c: usize, p: &Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
+  /// `pinned`: its header is drawn pinned over the list, which covers this
+  /// one, so it is hidden.
+  fn card_head(
+    &mut self,
+    c: usize,
+    pinned: bool,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> gpui::AnyElement {
     let card = &self.diff.cards[c];
-    let (path, status, old_path) = (
-      card.path.clone(),
-      card.status.clone(),
-      card.old_path.clone(),
-    );
-    let (committed, shut, kind, conflicted_file) =
-      (card.committed, card.shut, card.body, card.conflicted);
-    let counts = self.card_counts(c);
-    let header = self.file_header(
-      &path,
-      &status,
-      old_path.as_deref(),
-      committed,
-      shut,
-      counts,
-      p,
-      cx,
-    );
+    let (path, kind, conflicted_file) = (card.path.clone(), card.body, card.conflicted);
+    let header = self.card_header(c, p, cx);
     let card = div()
-      .child(header)
+      .child(div().when(pinned, |this| this.invisible()).child(header))
       .children(self.file_comments(&path, p, cx));
     let muted = p.muted_foreground;
     let placeholder =
@@ -3310,6 +3302,28 @@ impl ChangesView {
       Body::Collapsed => card,
     }
     .into_any_element()
+  }
+
+  /// A card's file header: its path, actions and counts.
+  fn card_header(&mut self, c: usize, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    let card = &self.diff.cards[c];
+    let (path, status, old_path) = (
+      card.path.clone(),
+      card.status.clone(),
+      card.old_path.clone(),
+    );
+    let (committed, shut) = (card.committed, card.shut);
+    let counts = self.card_counts(c);
+    self.file_header(
+      &path,
+      &status,
+      old_path.as_deref(),
+      committed,
+      shut,
+      counts,
+      p,
+      cx,
+    )
   }
 
   #[expect(
@@ -3460,6 +3474,7 @@ impl ChangesView {
         ui::Checkbox::new(format!("viewed-{path}"), p)
           .checked(viewed)
           .label("Viewed")
+          .name(format!("Viewed {path}"))
           .gap_1()
           .px_2()
           .py_0p5()
