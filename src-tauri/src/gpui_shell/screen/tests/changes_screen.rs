@@ -389,6 +389,24 @@ fn changes_tab_hides_row_actions_after_a_click_away(cx: &mut TestAppContext) {
   assert!(shows_hidden(&mut h, "Stage a.rs"), "still offered on hover");
 }
 
+/// The click that drops the row's highlight still reaches the diff control.
+#[gpui::test]
+fn changes_tab_click_away_reaches_the_diff_control(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  h.click("file-row-a.rs");
+  h.click("viewed-a.rs");
+  h.cx.run_until_parked();
+  assert!(!row_selected(&mut h, "a.rs"));
+  assert!(
+    host
+      .writes()
+      .iter()
+      .any(|w| w.starts_with("mark viewed a.rs ")),
+    "{:?}",
+    host.writes()
+  );
+}
+
 #[gpui::test]
 fn changes_tab_commits_only_staged_files(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
