@@ -1011,18 +1011,31 @@ fn deleting_the_last_comment_ends_the_review(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn an_edit_on_disk_after_the_last_comment_goes_shows_at_once(cx: &mut TestAppContext) {
+fn a_reload_that_drops_the_last_comment_ends_the_review(cx: &mut TestAppContext) {
   use gpui::Role;
   use gpui_testing_library::prelude::*;
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
   let screen = h.rendered();
   let user = screen.user();
-  user.click(&screen.get_by_role(by::role(Role::Button).name("Add file comment on a.rs")));
+  user.click(&screen.get_by_role(by::role(Role::Button).name("Add file comment on b.rs")));
   user.keyboard("Nit");
   user.click(&screen.get_by_role(by::role(Role::Button).name("Add comment")));
-  user.click(&screen.get_by_role(by::role(Role::Button).name("Delete comment")));
+  // b.rs leaves the working copy: the review holds the refresh back.
+  let mut without_b = host.working.clone().expect("working");
+  without_b.uncommitted_files.remove(1);
+  without_b.hunks_by_file.remove(1);
+  *host.edited.lock().unwrap() = Some(without_b.clone());
+  bump_changes_revision(&mut h);
+  assert!(shows_stale_banner(&mut h));
+  // Reload drops the comment on b.rs, the review's last.
+  let screen = h.rendered();
+  screen
+    .user()
+    .click(&screen.get_by_role(by::role(Role::Button).name("Reload")));
   h.cx.run_until_parked();
-  edit_a_rs(&mut h, &host);
+  without_b.hunks_by_file[0].hunks[0].lines = vec![" a".into(), "+b".into(), "+e".into()];
+  *host.edited.lock().unwrap() = Some(without_b);
+  bump_changes_revision(&mut h);
   assert!(!shows_stale_banner(&mut h), "no comments, no review");
   assert_eq!(shown_lines(&mut h, "a.rs"), [" a", "+b", "+e"]);
 }
