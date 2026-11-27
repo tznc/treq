@@ -921,6 +921,12 @@ fn every_typed_remote_request() -> Vec<crate::core::remote::TreqCommandRequest> 
       start_line: Some(1),
       end_line: Some(20),
     },
+    R::ReadFileVersion {
+      repo: repo(),
+      workspace: Some("1".into()),
+      path: "a.rs".into(),
+      version: "f0123abc".into(),
+    },
     R::ListCommits {
       repo: repo(),
       workspace: None,

@@ -610,6 +610,13 @@ pub(crate) fn parse_remote_command_request(
       start_line,
       end_line,
     }),
+    ("file", "read-version") => Ok(TreqCommandRequest::ReadFileVersion {
+      repo,
+      workspace,
+      path: path.ok_or_else(|| "--path is required".to_string())?,
+      version: get_arg_value(matches, "value")
+        .ok_or_else(|| "--value (the file version) is required".to_string())?,
+    }),
     ("file", "restore") => Ok(TreqCommandRequest::RestoreFile {
       repo,
       workspace,

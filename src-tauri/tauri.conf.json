@@ -540,7 +540,7 @@
               "index": 1,
               "takesValue": true,
               "required": true,
-              "description": "Action: list, search, read, restore, patch"
+              "description": "Action: list, search, read, read-version, restore, patch"
             },
             {
               "name": "repo",
@@ -576,7 +576,7 @@
             {
               "name": "value",
               "takesValue": true,
-              "description": "Search query for search, or base64-encoded patch content for patch"
+              "description": "Search query for search, base64-encoded patch content for patch, or the file version (a blob id such as f1a2b3) for read-version"
             },
             {
               "name": "idempotency-key",
