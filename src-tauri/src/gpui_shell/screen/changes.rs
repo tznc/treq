@@ -646,13 +646,13 @@ impl ChangesView {
             true
           }
           Ok(snapshot) if view.park(&snapshot) => true,
-          // The reviewed hunks were read from this same diff.
+          // The reviewed hunks were read from this same diff: only the committed side can differ.
           Ok(snapshot)
             if view.in_review()
               && snapshot.token.is_some()
               && snapshot.token == view.hunks_token =>
           {
-            false
+            view.apply(snapshot, cx)
           }
           Ok(snapshot) if view.in_review() && view.snapshot.is_some() => {
             view.recheck(snapshot, cx);
