@@ -128,7 +128,7 @@ function PlansSection(): ReactNode {
         <Link
           className={clsx('button', styles.planButton, styles.planButtonSecondary)}
           to="/download"
-          onClick={() => trackEvent('download_click', {location: 'pricing', platform: 'download-page'})}
+          onClick={() => trackEvent('download_cta_click', {location: 'pricing'})}
         >
           Download Treq
         </Link>

@@ -23,9 +23,7 @@ export function DownloadButton({
     <Link
       className={className ?? ''}
       to="/download"
-      onClick={() =>
-        trackEvent('download_click', {location, platform: 'download-page'})
-      }>
+      onClick={() => trackEvent('download_cta_click', {location})}>
       {icon}
       {label ?? (platform ? `Download for ${PLATFORM_NAMES[platform]}` : 'Download Treq')}
     </Link>
