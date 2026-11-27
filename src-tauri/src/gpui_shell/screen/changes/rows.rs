@@ -134,6 +134,9 @@ pub(super) struct DiffRows {
   pub(super) revision: u64,
   /// How long the last layout of the rows took.
   pub(super) layout_cost: Duration,
+  /// The card whose header is pinned this frame. Read while the list lays
+  /// out its rows, when its state can't be borrowed.
+  pinned: Option<usize>,
 }
 
 /// Every input of `layout_rows`. The snapshot, the hunks and the lines read
@@ -167,6 +170,7 @@ impl Default for DiffRows {
       key: None,
       revision: 0,
       layout_cost: Duration::ZERO,
+      pinned: None,
     }
   }
 }
@@ -499,7 +503,9 @@ impl ChangesView {
   /// The pinned card's header. It is cut to the room above the card's
   /// end, so the next card pushes it up and out.
   fn pinned_header(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
-    let (c, room) = self.pinned_card()?;
+    let pinned = self.pinned_card();
+    self.diff.pinned = pinned.map(|(c, _)| c);
+    let (c, room) = pinned?;
     let p = theme::palette(self.dark);
     let shut = self.diff.cards[c].shut;
     let id = format!("pinned-file-header-{}", self.diff.cards[c].path);
@@ -545,7 +551,10 @@ impl ChangesView {
     let bottom = card(self.diff.rows.get(ix + 1)) != Some(c);
     let path = self.diff.cards[c].path.clone();
     let content = match row {
-      Row::Head(..) => self.card_head(c, &p, cx),
+      Row::Head(..) => {
+        let pinned = self.diff.pinned == Some(c);
+        self.card_head(c, pinned, &p, cx)
+      }
       _ => ui::text(div(), TextSize::Code)
         .font_family(theme::MONO_FONT)
         .child(self.body_line(row, &p, cx))

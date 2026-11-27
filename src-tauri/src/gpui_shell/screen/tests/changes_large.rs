@@ -295,6 +295,15 @@ fn scrolling_through_a_file_keeps_its_header_in_place(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_header_scrolled_under_the_pinned_one_shows_once(cx: &mut TestAppContext) {
+  let mut h = expanded(cx);
+  // The card's own header is part way out of the top, under the pinned one.
+  scroll_diff(&mut h, 0, -24.);
+  seen(&mut h, gpui::Role::Heading, "src/module_0.rs");
+  seen(&mut h, gpui::Role::CheckBox, "Viewed src/module_0.rs");
+}
+
+#[gpui::test]
 fn the_next_file_pushes_the_pinned_header_out(cx: &mut TestAppContext) {
   let mut h = expanded(cx);
   click_seen(&mut h, gpui::Role::Button, "src/module_1.rs");
@@ -316,7 +325,7 @@ fn the_pinned_header_marks_its_file_viewed(cx: &mut TestAppContext) {
   click_seen(&mut h, gpui::Role::Button, "View changes");
   click_seen(&mut h, gpui::Role::Button, "src/module_0.rs");
   scroll_diff(&mut h, 0, -600.);
-  click_seen(&mut h, gpui::Role::CheckBox, "Viewed");
+  click_seen(&mut h, gpui::Role::CheckBox, "Viewed src/module_0.rs");
   assert!(
     host
       .writes()
