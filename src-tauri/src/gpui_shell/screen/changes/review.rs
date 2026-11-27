@@ -78,6 +78,7 @@ enum Field {
   Note,
   Summary,
   Suggestion,
+  LineEdit,
 }
 
 #[derive(Default)]
@@ -1074,6 +1075,12 @@ impl ChangesView {
           lines.lines().count().max(1),
         )
       }
+      Field::LineEdit if self.review.line_edit.is_some() => (
+        &self.review.line_edit_input,
+        self.review.line_edit_text.clone(),
+        "",
+        self.review.line_edit_text.lines().count().max(1),
+      ),
       _ => return None,
     };
     if let Some(input) = slot {
@@ -1097,6 +1104,7 @@ impl ChangesView {
             view.save_review(cx);
           }
           Field::Suggestion => view.review.suggestion_text = Some(value),
+          Field::LineEdit => view.review.line_edit_text = value,
         }
         cx.notify();
       }
@@ -1114,6 +1122,7 @@ impl ChangesView {
       Field::Note => self.review.note_input = Some(input),
       Field::Summary => self.review.summary_input = Some(input),
       Field::Suggestion => self.review.suggestion_input = Some(input),
+      Field::LineEdit => self.review.line_edit_input = Some(input),
     }
     Some(state)
   }
@@ -1126,6 +1135,7 @@ impl ChangesView {
       Field::Note,
       Field::Summary,
       Field::Suggestion,
+      Field::LineEdit,
     ] {
       self.input_for(field, window, cx);
     }

@@ -1,7 +1,7 @@
 //! The diff from the keyboard: Up and Down move a line cursor through
 //! every drawn file, Shift extends the selection within the file, Left
-//! opens the comment box on it, Enter edits the comment under it and
-//! Escape clears it.
+//! opens the comment box on it, Enter edits the comment under it, E edits
+//! its lines in place and Escape clears it.
 
 use super::review::LineSelection;
 use super::*;
@@ -50,6 +50,7 @@ impl ChangesView {
       Some(ui::ListKey::Last) => self.move_to_edge(false, shift, cx),
       Some(ui::ListKey::Open) if !shift => return self.edit_cursor_comment(cx),
       _ if key == "left" && !shift => self.comment_selection(cx),
+      _ if key == "e" && !shift => return self.start_line_edit(cx),
       _ => return false,
     }
     true

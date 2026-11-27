@@ -8,6 +8,7 @@ use super::*;
 use crate::core::review::editable_lines;
 use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::screen::commits_data::{selection, LineRef};
+use gpui::AnyElement;
 use gpui_kit::component::input::Textarea;
 
 impl ChangesView {
