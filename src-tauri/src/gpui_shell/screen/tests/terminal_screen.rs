@@ -2059,11 +2059,8 @@ fn terminal_divider_drag_fits_the_grids_in_one_frame(cx: &mut TestAppContext) {
   h.cx.run_until_parked();
   let ptys = host.ptys.lock().unwrap().clone();
   assert_eq!(ptys.len(), 2);
-  let left = h
-    .cx
-    .debug_bounds(super::changes_large::leak(format!("terminal-{}", ptys[0])))
-    .expect("left terminal");
-  let cols = grid(&host, &ptys[0]).cols;
+  let selector = super::changes_large::leak(format!("terminal-{}", ptys[0]));
+  let left = h.cx.debug_bounds(selector).expect("left terminal");
   let mut at = gpui::point(left.right() + gpui::px(2.), left.center().y);
   h.cx
     .simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
@@ -2074,7 +2071,8 @@ fn terminal_divider_drag_fits_the_grids_in_one_frame(cx: &mut TestAppContext) {
     h.cx
       .simulate_mouse_move(at, Some(MouseButton::Left), Modifiers::none());
   }
-  assert!(grid(&host, &ptys[0]).cols < cols);
+  let narrowed = h.cx.debug_bounds(selector).expect("left terminal");
+  assert_eq!(narrowed.size.width, left.size.width - gpui::px(60.));
   assert_eq!(frames.get() - drawn, 20);
 }
 
