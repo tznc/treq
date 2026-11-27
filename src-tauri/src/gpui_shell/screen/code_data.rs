@@ -17,6 +17,7 @@ use crate::{
     self,
     devcontainer::{self, DevcontainerStatus},
     feature_preview::{self, PreviewFeature},
+    stack_order::Reorder,
     MaybeEmptyParam, WorkspaceEntry,
   },
   github_stack::{GhStack, StackCache},
@@ -38,6 +39,8 @@ pub enum StackChange {
   Link(Vec<u64>),
   /// Takes stack `n`'s open pull requests out of it.
   Unstack(u64),
+  /// Points each branch's open pull request at its new base.
+  Bases(Vec<(String, String)>),
   /// Merges all of stack `n` with the repository's default merge method.
   Merge(u64),
 }
@@ -182,6 +185,13 @@ pub trait CodeHost: WorkspaceHost + SettingsHost {
   fn stack_cli_installed(&self) -> bool;
   /// Changes the repository's stacks on GitHub through `gh stack`.
   fn change_github_stack(&self, repo_path: &str, change: StackChange) -> Result<(), String>;
+  /// Moves a workspace up, down or out of its stack (`core::stack_order`).
+  fn reorder_workspace(
+    &self,
+    repo_path: &str,
+    workspace_id: i64,
+    how: Reorder,
+  ) -> Result<(), String>;
   fn set_submodule_synced(&self, repo_path: &str, path: &str, enabled: bool) -> Result<(), String>;
   fn set_description(
     &self,
@@ -314,10 +324,23 @@ impl CodeHost for Backend {
       StackChange::Install => core::github_cli::install_stack(),
       StackChange::Link(prs) => core::github_cli::link_stack(repo_path, &prs),
       StackChange::Unstack(n) => core::github_cli::unstack(repo_path, n),
+      StackChange::Bases(bases) => core::github_cli::retarget_prs(repo_path, &bases),
       StackChange::Merge(n) => core::github_cli::merge_stack(repo_path, n),
     };
     STACKS.clear();
     changed
+  }
+
+  fn reorder_workspace(
+    &self,
+    repo_path: &str,
+    workspace_id: i64,
+    how: Reorder,
+  ) -> Result<(), String> {
+    if self.remote_containing(repo_path).is_some() {
+      return Err(unsupported("Reordering a stack"));
+    }
+    core::stack_order::reorder_workspace(repo_path, workspace_id, how).map(drop)
   }
 
   fn set_submodule_synced(&self, repo_path: &str, path: &str, enabled: bool) -> Result<(), String> {

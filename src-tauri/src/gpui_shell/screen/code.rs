@@ -51,6 +51,7 @@ use crate::{
     pr_sync::{self, SyncState},
     rebase_guard::RebaseHold,
     running_checks::{CheckRun, ChecksTarget},
+    stack_order::Reorder,
     WorkspaceEntry,
   },
   github::PrInfo,
@@ -171,6 +172,48 @@ fn pr_chip(pr: &PrInfo, p: &Palette) -> impl IntoElement {
     .role(Role::Status)
     .aria_label(format!("Pull request #{}, {state}", pr.number))
     .child(ui::Badge::new(format!("#{}", pr.number), p).tone(tone))
+}
+
+/// What a GitHub stack becomes once a reorder moves the shown workspace.
+struct Relink {
+  /// Each moved branch's new pull request base.
+  bases: Vec<(String, String)>,
+  /// The open pull requests, bottom first.
+  prs: Vec<u64>,
+}
+
+/// [`Relink`] for `how` on `rows` (tip first), the order `core::stack_order`
+/// leaves: the taken-out workspace's pull request goes onto `default_branch`.
+fn relink(rows: &[StackRow], how: Reorder, default_branch: &str) -> Relink {
+  let mut order: Vec<&StackRow> = rows.iter().rev().collect();
+  let base = order
+    .first()
+    .and_then(|r| r.workspace.target_branch.clone())
+    .unwrap_or_else(|| default_branch.to_string());
+  let mut out = None;
+  if let Some(i) = order.iter().position(|r| r.current) {
+    match how {
+      Reorder::Up if i + 1 < order.len() => order.swap(i, i + 1),
+      Reorder::Down if i > 0 => order.swap(i, i - 1),
+      Reorder::Out => out = Some(order.remove(i)),
+      _ => {}
+    }
+  }
+  let below = std::iter::once(base).chain(order.iter().map(|r| r.workspace.branch_name.clone()));
+  let mut bases: Vec<(String, String)> = order
+    .iter()
+    .zip(below)
+    .filter(|(r, below)| r.workspace.target_branch.as_deref() != Some(below.as_str()))
+    .map(|(r, below)| (r.workspace.branch_name.clone(), below))
+    .collect();
+  bases.extend(out.map(|r| (r.workspace.branch_name.clone(), default_branch.to_string())));
+  let prs = order
+    .iter()
+    .filter_map(|r| r.pr.as_ref())
+    .filter(|pr| pr.state.eq_ignore_ascii_case("open"))
+    .map(|pr| pr.number)
+    .collect();
+  Relink { bases, prs }
 }
 
 /// The pull request the stack card speaks for: the shown workspace's, else
@@ -2205,10 +2248,73 @@ impl CodeView {
       .into_any_element()
   }
 
-  /// The stack menu: open, create, extend, unstack or merge the stack on
-  /// GitHub, once `gh stack` is installed.
-  fn stack_menu_items(&self, p: &Palette, cx: &mut Context<Self>) -> Vec<ui::MenuItem> {
+  /// The stack menu: reorder the stack, and manage it on GitHub.
+  fn stack_menu_items(&self, p: &Palette, cx: &mut Context<Self>) -> Vec<AnyElement> {
     let rows = self.stack.as_deref().unwrap_or_default();
+    let mut items = self.reorder_items(rows, p, cx);
+    items.push(ui::MenuSeparator::new(p).into_any_element());
+    items.extend(
+      self
+        .github_menu_items(rows, p, cx)
+        .into_iter()
+        .map(IntoElement::into_any_element),
+    );
+    items
+  }
+
+  /// Moves the shown workspace up, down or out of the stack.
+  fn reorder_items(
+    &self,
+    rows: &[StackRow],
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> Vec<AnyElement> {
+    let level = rows.len() - rows.iter().position(|r| r.current).unwrap_or(0);
+    [
+      (
+        "workspace-stack-up",
+        "Move up",
+        "Swap it with the workspace above",
+        Reorder::Up,
+        level < rows.len(),
+      ),
+      (
+        "workspace-stack-down",
+        "Move down",
+        "Swap it with the workspace below",
+        Reorder::Down,
+        level > 1,
+      ),
+      (
+        "workspace-stack-out",
+        "Take out of stack",
+        "Stack the one above on the one below",
+        Reorder::Out,
+        rows.len() > 1,
+      ),
+    ]
+    .into_iter()
+    .map(|(id, label, description, how, can)| {
+      ui::MenuItem::new(id, label, p)
+        .description(description)
+        .disabled(!can)
+        // A disabled item still hears clicks.
+        .when(can, |item| {
+          item.on_click(cx.listener(move |view, _, _, cx| view.reorder(how, cx)))
+        })
+        .into_any_element()
+    })
+    .collect()
+  }
+
+  /// The stack on GitHub: open, create, extend, unstack or merge it, once
+  /// `gh stack` is installed.
+  fn github_menu_items(
+    &self,
+    rows: &[StackRow],
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> Vec<ui::MenuItem> {
     // Rows are tip first; GitHub wants the bottom first.
     let open: Vec<u64> = rows
       .iter()
@@ -2280,6 +2386,89 @@ impl CodeView {
         .on_click(cx.listener(move |view, _, _, cx| view.ask_merge_stack(number, cx))),
     );
     items
+  }
+
+  /// Moves the shown workspace; for a stack on GitHub, asks first and
+  /// stacks the pull requests again in the new order.
+  fn reorder(&mut self, how: Reorder, cx: &mut Context<Self>) {
+    self.menu = None;
+    let Some(id) = self.parent.workspace_id() else {
+      return;
+    };
+    let rows = self.stack.as_deref().unwrap_or_default();
+    let github = self
+      .github_stack
+      .as_ref()
+      .filter(|_| self.stack_cli != Some(false))
+      .map(|stack| (stack.number, relink(rows, how, &self.parent.default_branch)));
+    let Some((number, relink)) = github else {
+      return self.run_reorder(id, how, None, cx);
+    };
+    let key = self.parent.key();
+    let question = Question::new(
+      format!("Reorder stack #{number} on GitHub too?"),
+      "Treq rebases the workspaces here, then stacks their pull requests again on GitHub in the new order.",
+      "Reorder",
+    );
+    confirm::ask(
+      &mut self.confirm,
+      question,
+      move |view: &mut Self, cx| {
+        if view.parent.key() == key {
+          view.run_reorder(id, how, Some((number, relink)), cx);
+        }
+      },
+      cx,
+    );
+  }
+
+  fn run_reorder(
+    &mut self,
+    id: i64,
+    how: Reorder,
+    github: Option<(u64, Relink)>,
+    cx: &mut Context<Self>,
+  ) {
+    if self.stack_busy {
+      return;
+    }
+    self.stack_busy = true;
+    self.read(
+      move |host, parent| {
+        let repo = parent.repo_path.as_str();
+        host
+          .reorder_workspace(repo, id, how)
+          .map_err(|e| ("Failed to reorder the stack", e))?;
+        let Some((number, relink)) = github else {
+          return Ok(());
+        };
+        [
+          StackChange::Unstack(number),
+          StackChange::Bases(relink.bases),
+          StackChange::Link(relink.prs),
+        ]
+        .into_iter()
+        .try_for_each(|change| host.change_github_stack(repo, change))
+        .map_err(|e| ("Failed to change the stack on GitHub", e))
+      },
+      |view, result, cx| {
+        view.stack_busy = false;
+        if let Err((title, err)) = result {
+          tell(
+            view.host.as_ref(),
+            Toast::error(title).description(err).into(),
+          );
+        }
+        tell(
+          view.host.as_ref(),
+          NativeEvent::WorkspaceChanged {
+            repo_path: view.parent.repo_path.clone(),
+          },
+        );
+        view.load(cx);
+      },
+      cx,
+    );
   }
 
   fn ask_merge_stack(&mut self, number: u64, cx: &mut Context<Self>) {

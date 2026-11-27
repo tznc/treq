@@ -348,3 +348,69 @@ fn a_failed_stack_change_says_why(cx: &mut TestAppContext) {
     host.calls()
   );
 }
+
+fn reorders(host: &FakeHost) -> Vec<String> {
+  host
+    .calls()
+    .into_iter()
+    .filter(|c| c.starts_with("reorder") || c.starts_with("change github stack"))
+    .collect()
+}
+
+#[gpui::test]
+fn moving_a_workspace_up_reorders_the_local_stack(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, open_prs_host(), code_route());
+  choose(&mut h, "Move up");
+  assert_eq!(reorders(&host), ["reorder workspace 7 Up"]);
+}
+
+#[gpui::test]
+fn taking_a_workspace_out_reorders_the_local_stack(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, open_prs_host(), code_route());
+  choose(&mut h, "Take out of stack");
+  assert_eq!(reorders(&host), ["reorder workspace 7 Out"]);
+}
+
+#[gpui::test]
+fn the_bottom_workspace_cannot_move_down(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, open_prs_host(), code_route());
+  choose(&mut h, "Move down");
+  assert!(reorders(&host).is_empty(), "{:?}", reorders(&host));
+}
+
+#[gpui::test]
+fn reordering_a_github_stack_asks_then_stacks_it_again(cx: &mut TestAppContext) {
+  let mut host = open_prs_host();
+  host.gh_stack = Some(github_stack(12));
+  let (mut h, host) = workspace_harness(cx, host, code_route());
+  choose(&mut h, "Move up");
+  assert!(
+    reorders(&host).is_empty(),
+    "nothing moves before the answer"
+  );
+  h.answer("Reorder");
+  assert_eq!(
+    reorders(&host),
+    [
+      "reorder workspace 7 Up",
+      "change github stack Unstack(12)",
+      r#"change github stack Bases([("feat/beta", "main"), ("feat/alpha", "feat/beta")])"#,
+      "change github stack Link([41, 40])",
+    ]
+  );
+}
+
+#[gpui::test]
+fn a_failed_reorder_says_why(cx: &mut TestAppContext) {
+  let mut host = open_prs_host();
+  host.reorder_error = Some("Only a stack without branches can be reordered".into());
+  let (mut h, host) = workspace_harness(cx, host, code_route());
+  choose(&mut h, "Move up");
+  assert!(
+    host
+      .calls()
+      .contains(&"notify toast Failed to reorder the stack".to_string()),
+    "{:?}",
+    host.calls()
+  );
+}
