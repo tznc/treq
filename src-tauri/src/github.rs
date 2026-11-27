@@ -361,7 +361,7 @@ const ETXTBSY: i32 = 26;
 /// for good.
 const GH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
-fn spawn_with_etxtbsy_retry(
+pub(crate) fn spawn_with_etxtbsy_retry(
   mut cmd: std::process::Command,
 ) -> Result<std::process::Output, String> {
   use std::process::Stdio;
@@ -485,7 +485,7 @@ fn run_gh_with_stdin(
 pub const GH_NOT_AUTHENTICATED: &str =
   "gh is not authenticated. Run `gh auth login` in a terminal, then try again.";
 
-fn check_gh_output(output: std::process::Output) -> Result<Vec<u8>, String> {
+pub(crate) fn check_gh_output(output: std::process::Output) -> Result<Vec<u8>, String> {
   if output.status.success() {
     Ok(output.stdout)
   } else {
@@ -1134,7 +1134,7 @@ pub fn gh_pr_file_impl(
 pub(crate) const REPLY_THREAD_MUTATION: &str = "mutation($threadId: ID!, $body: String!) { addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $threadId, body: $body}) { comment { id } } }";
 
 /// `gh api` exits 0 on GraphQL-level errors, so check the `errors` field.
-fn check_graphql_errors(bytes: &[u8]) -> Result<(), String> {
+pub(crate) fn check_graphql_errors(bytes: &[u8]) -> Result<(), String> {
   let value: serde_json::Value = serde_json::from_slice(bytes).unwrap_or_default();
   match value.get("errors").and_then(|e| e.as_array()) {
     Some(errors) if !errors.is_empty() => Err(

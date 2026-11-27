@@ -1,5 +1,9 @@
 //! GitHub's native stacked pull requests: which stack a pull request is in.
 
+use serde::Deserialize;
+
+use crate::github::{check_gh_output, check_graphql_errors, spawn_with_etxtbsy_retry};
+
 /// A stack of pull requests on GitHub.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GhStack {
@@ -19,16 +23,118 @@ pub struct GhStackEntry {
   pub state: String,
 }
 
+const PR_STACK_QUERY: &str = "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { stack { number baseRefName entries(first: 100) { nodes { position pullRequest { number headRefName state } } } } } } }";
+
+#[derive(Deserialize)]
+struct Response {
+  data: Option<Data>,
+}
+
+#[derive(Deserialize)]
+struct Data {
+  repository: Option<Repository>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Repository {
+  pull_request: Option<PullRequest>,
+}
+
+#[derive(Deserialize)]
+struct PullRequest {
+  stack: Option<StackNode>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StackNode {
+  number: u64,
+  base_ref_name: String,
+  entries: Entries,
+}
+
+#[derive(Deserialize)]
+struct Entries {
+  nodes: Vec<Option<EntryNode>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EntryNode {
+  position: u32,
+  pull_request: Option<EntryPr>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EntryPr {
+  number: u64,
+  head_ref_name: String,
+  state: String,
+}
+
+impl From<StackNode> for GhStack {
+  fn from(node: StackNode) -> Self {
+    let mut entries: Vec<EntryNode> = node.entries.nodes.into_iter().flatten().collect();
+    // Position 1 sits on the base branch.
+    entries.sort_by_key(|e| e.position);
+    GhStack {
+      number: node.number,
+      base_ref_name: node.base_ref_name,
+      entries: entries
+        .into_iter()
+        .filter_map(|e| e.pull_request)
+        .map(|pr| GhStackEntry {
+          number: pr.number,
+          head_ref_name: pr.head_ref_name,
+          state: pr.state,
+        })
+        .collect(),
+    }
+  }
+}
+
 /// The stack pull request `pr_number` is in on GitHub; `None` when it is in
 /// none. Runs in `repo_path`, so `gh` picks the repository it would for
 /// `gh pr view`.
 pub fn gh_pr_stack_impl(
-  _gh_path: &str,
-  _repo_path: &str,
-  _pr_number: u64,
-  _extended_path: &str,
+  gh_path: &str,
+  repo_path: &str,
+  pr_number: u64,
+  extended_path: &str,
 ) -> Result<Option<GhStack>, String> {
-  Err("unimplemented".into())
+  let query = format!("query={PR_STACK_QUERY}");
+  let number = format!("number={pr_number}");
+  let mut cmd = std::process::Command::new(gh_path);
+  cmd
+    // `{owner}` and `{repo}` are gh placeholders for the repository it finds here.
+    .args([
+      "api",
+      "graphql",
+      "-f",
+      &query,
+      "-F",
+      "owner={owner}",
+      "-F",
+      "name={repo}",
+      "-F",
+      &number,
+    ])
+    .current_dir(repo_path)
+    .env("PATH", extended_path);
+  let bytes = check_gh_output(spawn_with_etxtbsy_retry(cmd)?)?;
+  check_graphql_errors(&bytes)?;
+  let response: Response =
+    serde_json::from_slice(&bytes).map_err(|e| format!("Failed to parse gh output: {e}"))?;
+  Ok(
+    response
+      .data
+      .and_then(|d| d.repository)
+      .and_then(|r| r.pull_request)
+      .and_then(|pr| pr.stack)
+      .map(GhStack::from),
+  )
 }
 
 #[cfg(test)]
