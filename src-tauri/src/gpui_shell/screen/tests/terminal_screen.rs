@@ -326,6 +326,31 @@ fn terminal_pty_resizes_once_the_grid_settles(cx: &mut TestAppContext) {
   );
 }
 
+/// A width change reflows the scrollback once the grid settles, along
+/// with the PTY's resize, not per drag step: a reflow rewraps every line.
+#[gpui::test]
+fn terminal_grid_reflows_once_its_width_settles(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  let pty = agent_pty();
+  let wait = |h: &mut Harness, ms: u64| {
+    h.cx
+      .executor()
+      .advance_clock(std::time::Duration::from_millis(ms));
+    h.cx.run_until_parked();
+  };
+  wait(&mut h, 1000);
+  let cols = grid(&host, &pty).cols;
+  h.cx
+    .simulate_resize(gpui::size(gpui::px(1100.), gpui::px(900.)));
+  assert_eq!(grid(&host, &pty).cols, cols);
+  wait(&mut h, 100);
+  let settled = grid(&host, &pty);
+  assert!(settled.cols < cols);
+  let last = host.resizes.lock().unwrap().last().cloned();
+  assert_eq!(last, Some((pty, settled.cols as u16, settled.rows as u16)));
+}
+
 #[gpui::test]
 fn terminal_search_keeps_what_is_typed_out_of_the_pty(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
