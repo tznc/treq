@@ -384,6 +384,9 @@ impl WorkspaceView {
           view.busy.creating_pr = false;
           match created {
             Ok(number) => {
+              if view.route.workspace_id == Some(request.workspace_id) {
+                view.refresh_checks_later(cx);
+              }
               let url = format!("https://github.com/{}/pull/{number}", request.full_name);
               let opener = host.clone();
               view.host.notify(NativeEvent::from(

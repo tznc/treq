@@ -298,9 +298,9 @@ pub struct TabRow {
 /// cache, which the poller itself refreshes.
 const PR_POLL: Duration = Duration::from_secs(5);
 
-/// How long after a sync the branch's pull request is read again: GitHub
-/// starts the pushed commit's checks a moment after the push.
-const CHECKS_AFTER_SYNC: Duration = Duration::from_secs(5);
+/// How long after a sync or a new pull request the branch's pull request is
+/// read again: GitHub starts the pushed commit's checks a moment after.
+const CHECKS_AFTER_PUSH: Duration = Duration::from_secs(5);
 
 /// The header and tab row, drawn from what they read from the backend.
 pub struct WorkspaceView {
@@ -1024,8 +1024,8 @@ impl WorkspaceView {
   }
 
   /// Has the poller read the branch's pull request again once GitHub has
-  /// started a sync's new checks, rather than draw the old ones until its
-  /// next round.
+  /// started the checks of a sync or a new pull request, rather than draw
+  /// the old ones until its next round.
   fn refresh_checks_later(&self, cx: &mut Context<Self>) {
     let repo = self.route.repo_path.clone();
     let Some(branch) = self
@@ -1036,7 +1036,7 @@ impl WorkspaceView {
     };
     let (host, executor) = (self.actions.clone(), cx.background_executor().clone());
     cx.background_spawn(async move {
-      executor.timer(CHECKS_AFTER_SYNC).await;
+      executor.timer(CHECKS_AFTER_PUSH).await;
       host.refresh_pr_status(&repo, &branch);
     })
     .detach();
