@@ -2959,17 +2959,25 @@ impl ChangesView {
       .test_support();
       actions = actions.child(self.tip(tip_key, "Unstage file", el, cx));
     }
-    // Last, so it lines up with the committed rows' letters. The buttons
-    // take its place while they show.
-    let letter = self.status_letter(
-      format!("{list:?}-{}", file.path),
-      &file.status,
-      status_color,
-      cx,
-    );
-    actions = actions.child(match shown {
-      true => letter.hidden(),
-      false => letter.group_hover("file-row", |s| s.hidden()),
+    // Over the last button, at the committed rows' right edge, and hidden
+    // while the buttons show. Visibility, not display: a hover that changes
+    // layout can skip a child's prepaint and then panic in paint.
+    let letter = div()
+      .absolute()
+      .top_0()
+      .bottom_0()
+      .right_0()
+      .flex()
+      .items_center()
+      .child(self.status_letter(
+        format!("{list:?}-{}", file.path),
+        &file.status,
+        status_color,
+        cx,
+      ));
+    actions = actions.relative().child(match shown {
+      true => letter.invisible(),
+      false => letter.group_hover("file-row", |s| s.invisible()),
     });
     let (click, menu) = (path.clone(), path);
     ui::Row::new(
