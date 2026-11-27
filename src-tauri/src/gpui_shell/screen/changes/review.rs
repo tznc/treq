@@ -1771,7 +1771,6 @@ impl ChangesView {
       .border_1()
       .border_color(p.border)
       .overflow_hidden()
-      .font_family(theme::MONO_FONT)
       .children(
         original
           .into_iter()
@@ -1794,7 +1793,11 @@ impl ChangesView {
             .text_color(p.muted_foreground)
             .child("Preview"),
         )
-        .child(ui::text(preview, TextSize::Code).test_support()),
+        .child(
+          ui::text(preview, TextSize::Code)
+            .font_family(theme::MONO_FONT)
+            .test_support(),
+        ),
     )
   }
 
