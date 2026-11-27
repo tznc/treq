@@ -1078,7 +1078,7 @@ impl WorkspaceView {
       }
       _ => {
         let host: Arc<dyn super::code_data::CodeHost> = self.code_host.clone();
-        self.title = Some(cx.new(|_| TitleEditor::new(host, repo, id, title, dark)));
+        self.title = Some(cx.new(|cx| TitleEditor::new(host, repo, id, title, dark, cx)));
       }
     }
   }

@@ -6,9 +6,11 @@
 use crate::gpui_shell::native::Toast;
 use std::sync::Arc;
 
+use gpui_kit::base::{SelectableText, TextSelection, TextSelectionHandle};
 use gpui_kit::component::input::{Enter, Escape, InputEvent, Textarea, TextareaState};
 use tauri_plugin_gpui::gpui::{
-  deferred, div, prelude::*, Context, Entity, FontWeight, SharedString, Subscription, Window,
+  deferred, div, prelude::*, ClipboardItem, Context, Entity, FocusHandle, FontWeight, KeyDownEvent,
+  SharedString, Subscription, Window,
 };
 
 use super::code::menu_panel;
@@ -31,6 +33,9 @@ pub struct TitleEditor {
   menu_open: bool,
   /// The workspace follows a pull request, read when the editor opens.
   follows_pr: bool,
+  /// Focused as a drag selects in the title, so ⌘C / Ctrl+C reaches it.
+  focus: FocusHandle,
+  selection: TextSelectionHandle,
   _subscriptions: Vec<Subscription>,
 }
 
@@ -41,7 +46,17 @@ impl TitleEditor {
     workspace_id: i64,
     title: String,
     dark: bool,
+    cx: &mut Context<Self>,
   ) -> Self {
+    let focus = cx.focus_handle();
+    let selection = TextSelectionHandle::new(title.clone(), cx);
+    selection.focus_with(
+      {
+        let focus = focus.clone();
+        move |window, cx| focus.focus(window, cx)
+      },
+      cx,
+    );
     Self {
       host,
       repo_path,
@@ -52,6 +67,8 @@ impl TitleEditor {
       saving: false,
       menu_open: false,
       follows_pr: false,
+      focus,
+      selection,
       _subscriptions: Vec::new(),
     }
   }
@@ -233,7 +250,24 @@ impl Render for TitleEditor {
             .min_w_0()
             .truncate()
             .debug_selector(|| "workspace-title-text".into())
-            .child(self.title.clone()),
+            .track_focus(&self.focus)
+            .on_key_down(|e: &KeyDownEvent, window, cx| {
+              let held = crate::gpui_shell::keys::held(e.keystroke.modifiers);
+              let text = TextSelection::selected_text(window, cx);
+              if e.keystroke.key == "c"
+                && (held.platform || held.control)
+                && !held.shift
+                && !text.is_empty()
+              {
+                cx.write_to_clipboard(ClipboardItem::new_string(text));
+                cx.stop_propagation();
+              }
+            })
+            .child(SelectableText::with_handle(
+              "workspace-title-selectable",
+              self.selection.clone(),
+              self.title.clone(),
+            )),
         )
         .child(
           Button::new("workspace-title-edit", &p)
