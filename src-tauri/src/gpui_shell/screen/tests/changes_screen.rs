@@ -458,9 +458,6 @@ fn a_viewed_committed_file_stays_viewed_across_reloads(cx: &mut TestAppContext) 
   assert!(!host.writes().contains(&"unmark viewed c.rs".to_string()));
 }
 
-/// The committed card's "Show more lines" reads the working copy, which
-/// a file with no uncommitted edits shares with the branch head.
-
 /// Hiding Committed switches a dirty committed file from its branch diff
 /// to the working copy's; the file stays viewed.
 #[gpui::test]
@@ -488,6 +485,9 @@ fn hiding_committed_keeps_a_viewed_mark(cx: &mut TestAppContext) {
     host.writes()
   );
 }
+
+/// The committed card's "Show more lines" reads the working copy, which
+/// a file with no uncommitted edits shares with the branch head.
 #[gpui::test]
 fn show_more_lines_expands_a_committed_file(cx: &mut TestAppContext) {
   let mut host = changes_host();
