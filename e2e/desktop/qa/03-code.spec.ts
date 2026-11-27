@@ -65,6 +65,21 @@ test("code: workspace Code tab, action row, alerts and Agent", async ({ page }) 
     ],
   });
 
+  await page.getByRole("button", { name: /^Stack level \d+ of \d+, GitHub stack #7$/ }).click();
+  await expect(page.getByRole("menuitem", { name: "Unstack on GitHub" })).toBeVisible();
+  await settle(page, 400);
+  await capture(page, {
+    name: "03-code-stack-menu",
+    title: "Stack card: the GitHub stack menu",
+    expectations: [
+      "A menu under the level button lists Open on GitHub, Unstack on GitHub and Merge stack…, each with a description",
+      "The menu is fully inside the stack card's column and draws over the rows",
+    ],
+  });
+  await page.keyboard.press("Escape");
+  await page.mouse.click(1200, 1000);
+  await settle(page, 400);
+
   const alerts = page.getByRole("button", { name: /^Alerts/ });
   await alerts.click();
   const conflicts = page.getByRole("alert", { name: "1 file has conflicts" });

@@ -73,6 +73,10 @@ struct FakeHost {
   branch_prs: HashMap<String, Option<crate::github::PrInfo>>,
   /// The native GitHub stack the pull request is in.
   gh_stack: Option<crate::github_stack::GhStack>,
+  /// The `gh stack` extension is not installed.
+  stack_cli_missing: bool,
+  /// Why changing a GitHub stack fails, when it does.
+  stack_change_error: Option<String>,
   /// What the merge preview reads, and whether merging fails.
   merge: merge::Preview,
   merge_error: Option<String>,
@@ -823,6 +827,15 @@ impl code_data::CodeHost for FakeHost {
   fn github_stack(&self, _: &str, pr_number: u64) -> Option<crate::github_stack::GhStack> {
     self.record(format!("read github stack {pr_number}"));
     self.gh_stack.clone()
+  }
+
+  fn stack_cli_installed(&self) -> bool {
+    !self.stack_cli_missing
+  }
+
+  fn change_github_stack(&self, _: &str, change: code_data::StackChange) -> Result<(), String> {
+    self.record(format!("change github stack {change:?}"));
+    self.stack_change_error.clone().map_or(Ok(()), Err)
   }
 
   fn set_submodule_synced(&self, _: &str, path: &str, enabled: bool) -> Result<(), String> {
