@@ -912,9 +912,15 @@ fn an_edit_on_disk_during_a_review_waits_behind_the_stale_banner(cx: &mut TestAp
 
 #[gpui::test]
 fn an_edit_on_disk_after_the_last_comment_goes_shows_at_once(cx: &mut TestAppContext) {
+  use gpui::Role;
+  use gpui_testing_library::prelude::*;
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
-  comment_line(&mut h, "Nit");
-  click_named(&mut h, gpui::Role::Button, "Delete comment");
+  let screen = h.rendered();
+  let user = screen.user();
+  user.click(&screen.get_by_role(by::role(Role::Button).name("Add file comment on a.rs")));
+  user.keyboard("Nit");
+  user.click(&screen.get_by_role(by::role(Role::Button).name("Add comment")));
+  user.click(&screen.get_by_role(by::role(Role::Button).name("Delete comment")));
   h.cx.run_until_parked();
   edit_a_rs(&mut h, &host);
   assert!(!shows_stale_banner(&mut h), "no comments, no review");
