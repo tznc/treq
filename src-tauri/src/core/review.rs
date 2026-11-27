@@ -391,10 +391,12 @@ pub fn pending_for_selection(
   })
 }
 
-/// The file version one side of a `content_id` (`before>after`) names:
-/// `None` when that side is absent, conflicted or not a file.
+/// The file version one side of a `content_id` (`before>after`, then the
+/// diff's `:style`) names: `None` when that side is absent, conflicted or
+/// not a file.
 pub fn side_version(content_id: &str, side: Side) -> Option<&str> {
-  let (before, after) = content_id.split_once('>')?;
+  let ids = content_id.split(':').next()?;
+  let (before, after) = ids.split_once('>')?;
   let id = match side {
     Side::Old => before,
     Side::New => after,
@@ -948,6 +950,8 @@ mod tests {
   #[test]
   fn each_side_names_its_file_version() {
     assert_eq!(side_version("fold>fnew", Side::New), Some("fnew"));
+    // The diff's conflict marker style follows the ids.
+    assert_eq!(side_version("fold>fnew:git", Side::New), Some("fnew"));
     assert_eq!(side_version("fold>xnew", Side::Old), Some("fold"));
     // Absent, conflicted, or not a file: no version to follow.
     assert_eq!(side_version("->fnew", Side::Old), None);
