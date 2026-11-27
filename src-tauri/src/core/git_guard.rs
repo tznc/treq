@@ -1,13 +1,14 @@
-//! Keeps agents in a Treq workspace off `git`. A workspace is a jj
-//! workspace with no `.git` of its own, so `git` there finds the home
-//! repository: reads show the home repo's state and writes change its
-//! working tree.
+//! Steers agents in a Treq workspace from `git` to the treq CLI. A
+//! workspace is a jj workspace with no `.git` of its own, so `git` there
+//! finds the home repository: reads show the home repo's state and writes
+//! change its working tree.
 
 use serde_json::{json, Value};
 
-/// Shown to the agent in place of the refused command's output.
+/// Added to the agent's context when it runs `git` in a workspace.
 pub const GIT_IN_WORKSPACE_REASON: &str = "This Treq workspace has no `.git` folder, so `git` \
-here reads and writes the home repository. Use `treq st` instead of `git status`, `treq diff` \
+here runs against the home repository: its output does not show this workspace's changes, and \
+commands that write change the home repository. Use `treq st` instead of `git status`, `treq diff` \
 (or `treq diff --stat`) instead of `git diff`, `jj log` instead of `git log`, `jj show <rev>` \
 instead of `git show`, `jj file annotate <path>` instead of `git blame`, `jj restore <path>` \
 instead of `git checkout -- <path>`, and `treq commit` (only when the user asks) instead of \
@@ -23,8 +24,10 @@ const PREFIX_WORDS: &[&str] = &[
 /// Shells whose `-c` argument is a command of its own.
 const SHELLS: &[&str] = &["sh", "bash", "zsh", "dash"];
 
-/// Claude Code's PreToolUse hook for Bash: the JSON that refuses a call
-/// that runs `git`, or `None` to let every other call through.
+/// Claude Code's PreToolUse hook for Bash: for a call that runs `git`, the
+/// JSON that adds treq instructions to the agent's context. It makes no
+/// permission decision, so the call still runs through the normal flow.
+/// `None` for every other call.
 pub fn pre_bash_hook_output(input: &str) -> Option<String> {
   let input: Value = serde_json::from_str(input).ok()?;
   let command = input.pointer("/tool_input/command")?.as_str()?;
@@ -32,8 +35,7 @@ pub fn pre_bash_hook_output(input: &str) -> Option<String> {
     json!({
       "hookSpecificOutput": {
         "hookEventName": "PreToolUse",
-        "permissionDecision": "deny",
-        "permissionDecisionReason": GIT_IN_WORKSPACE_REASON,
+        "additionalContext": GIT_IN_WORKSPACE_REASON,
       }
     })
     .to_string()
@@ -248,16 +250,17 @@ mod tests {
   }
 
   #[test]
-  fn hook_refuses_a_bash_call_that_runs_git() {
+  fn hook_adds_treq_instructions_without_blocking_a_git_call() {
     let input = r#"{"tool_name":"Bash","tool_input":{"command":"git diff --stat"},"cwd":"/ws"}"#;
     let output: serde_json::Value =
-      serde_json::from_str(&pre_bash_hook_output(input).expect("refusal")).unwrap();
-    let decision = &output["hookSpecificOutput"];
-    assert_eq!(decision["hookEventName"], "PreToolUse");
-    assert_eq!(decision["permissionDecision"], "deny");
-    let reason = decision["permissionDecisionReason"].as_str().unwrap();
-    assert!(reason.contains("`treq diff`"), "{reason}");
-    assert!(reason.contains("`treq st`"), "{reason}");
+      serde_json::from_str(&pre_bash_hook_output(input).expect("instructions")).unwrap();
+    let hook = &output["hookSpecificOutput"];
+    assert_eq!(hook["hookEventName"], "PreToolUse");
+    // No decision: the call runs through the normal permission flow.
+    assert!(hook.get("permissionDecision").is_none(), "{hook}");
+    let context = hook["additionalContext"].as_str().unwrap();
+    assert!(context.contains("`treq diff`"), "{context}");
+    assert!(context.contains("`treq st`"), "{context}");
   }
 
   #[test]

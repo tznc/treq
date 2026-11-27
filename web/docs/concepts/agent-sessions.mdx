@@ -46,7 +46,7 @@ The same prompt also allows `treq` CLI commands that create or manage other work
 
 In a workspace, the prompt tells the agent not to run `git`. A workspace has no `.git` folder, so Git reads and changes the home repository instead. The agent uses `treq st`, [`treq diff`](/docs/reference/cli#treq-diff), and `jj` for status, diffs, and history.
 
-Claude Code sessions in a workspace also get a hook, [`treq hook pre-bash`](/docs/reference/cli#treq-hook). It refuses any Bash command that runs `git` and tells the agent what to run instead. Codex gets the same refusal as a `forbidden` rule in `.codex/rules/treq.rules`, which Codex loads in trusted projects. GitHub Copilot CLI gets it as `--deny-tool` flags.
+Claude Code sessions in a workspace also get a hook, [`treq hook pre-bash`](/docs/reference/cli#treq-hook). When a Bash command runs `git`, the hook tells the agent what to run instead. The command still runs. Codex and GitHub Copilot CLI have no way to add that note, so they refuse `git` instead: Codex through a `forbidden` rule in `.codex/rules/treq.rules`, which it loads in trusted projects, and Copilot through `--deny-tool` flags.
 
 This boundary separates concurrent tasks at the file-system level. Repository history remains shared across workspaces, while each agent sees the working copy for its assigned workspace.
 

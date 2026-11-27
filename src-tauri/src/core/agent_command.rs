@@ -176,10 +176,10 @@ fn add_allow_rules(settings: &mut Map<String, Value>, rules: &[&str]) {
   }
 }
 
-/// The Claude hook that refuses `git` in a workspace (`core::git_guard`).
+/// The Claude hook that steers `git` calls in a workspace to treq (`core::git_guard`).
 const GIT_GUARD_HOOK_COMMAND: &str = "treq hook pre-bash";
 
-/// Adds the Bash PreToolUse hook that refuses `git`, keeping other hooks.
+/// Adds the Bash PreToolUse hook for `git` calls, keeping other hooks.
 fn add_git_guard_hook(settings: &mut Map<String, Value>) {
   let hook = json!({
     "matcher": "Bash",
@@ -996,7 +996,7 @@ mod tests {
   }
 
   #[test]
-  fn workspace_claude_settings_refuse_git_through_a_hook() {
+  fn workspace_claude_settings_add_the_git_hook() {
     let dir = tempfile::tempdir().unwrap();
     let cwd = dir.path().to_str().unwrap();
     let prepared = prepare_auto_command(
