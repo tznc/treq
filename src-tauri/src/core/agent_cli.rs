@@ -38,6 +38,7 @@ pub fn write_agent_cli_files(
 ) -> Result<AgentCliFiles, String> {
   let dir = std::env::temp_dir().join(format!("{FILE_PREFIX}{}", uuid::Uuid::new_v4()));
   create_private_dir(&dir).map_err(|e| format!("Failed to create agent temp dir: {e}"))?;
+  let dir = resolve_symlinks(dir);
 
   let skill_dir = write_treq_skill_pack(&dir)?;
   let mut skill_write_warnings = Vec::new();
@@ -52,9 +53,15 @@ pub fn write_agent_cli_files(
     None => (None, None),
   };
 
+  // Agents may read the workspace copy without a permission prompt.
+  let skill_md = claude_skill_path
+    .as_ref()
+    .or(agents_skill_path.as_ref())
+    .map(|path| Path::new(path).join("SKILL.md"))
+    .unwrap_or_else(|| skill_dir.join("skills/treq/SKILL.md"));
   let prompt_with_skill = format!(
-    "{prompt} The bundled Treq skill file is at {}/skills/treq/SKILL.md.",
-    skill_dir.to_string_lossy()
+    "{prompt} The Treq skill file is at {}.",
+    skill_md.to_string_lossy()
   );
   let prompt_path = dir.join("prompt.txt");
   write_private(&prompt_path, &prompt_with_skill)
@@ -113,6 +120,17 @@ fn create_private_dir(path: &Path) -> std::io::Result<()> {
   #[cfg(unix)]
   std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
   builder.create(path)
+}
+
+/// Resolves symlinks in the temp dir path: macOS TMPDIR is /var/folders/...,
+/// a symlink to /private/var/..., and agents check access against the resolved
+/// path. Skipped on Windows, where canonicalize returns a `\\?\` path.
+fn resolve_symlinks(dir: PathBuf) -> PathBuf {
+  #[cfg(unix)]
+  if let Ok(resolved) = dir.canonicalize() {
+    return resolved;
+  }
+  dir
 }
 
 /// Delete temp files previously created by [`write_agent_cli_files`].
@@ -405,6 +423,34 @@ mod tests {
     .expect("cleanup");
     assert!(!Path::new(&agents_dir).exists());
     assert!(!Path::new(&claude_dir).exists());
+  }
+
+  #[test]
+  fn prompt_points_at_project_skill_inside_cwd_when_installed() {
+    let cwd = tempfile::TempDir::new().expect("cwd");
+    let files = write_agent_cli_files("prompt", None, cwd.path().to_str()).expect("write");
+    let prompt = fs::read_to_string(&files.prompt_path).expect("read prompt");
+    let skill_md = cwd.path().join(".claude/skills/treq/SKILL.md");
+    assert!(prompt.contains(&*skill_md.to_string_lossy()));
+    assert!(!prompt.contains(&files.skill_dir));
+    cleanup_agent_cli_files(&[
+      files.dir,
+      files.agents_skill_path.unwrap(),
+      files.claude_skill_path.unwrap(),
+    ])
+    .expect("cleanup");
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn temp_dir_paths_are_canonical() {
+    // macOS TMPDIR is /var/folders/..., a symlink to /private/var/...; agents
+    // resolve it, so allow rules on the unresolved path would not match.
+    let files = write_agent_cli_files("prompt", None, None).expect("write");
+    let canonical = Path::new(&files.dir).canonicalize().expect("canonicalize");
+    assert_eq!(Path::new(&files.dir), canonical);
+    assert!(Path::new(&files.skill_dir).starts_with(&canonical));
+    cleanup_agent_cli_files(&[files.dir]).expect("cleanup");
   }
 
   #[test]
