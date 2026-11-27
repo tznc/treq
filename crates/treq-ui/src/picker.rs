@@ -349,8 +349,11 @@ mod tests {
       move |_, _| Hovered { seen }
     });
     cx.run_until_parked();
-    let picker = cx.debug_bounds("project").expect("the picker is drawn");
-    cx.simulate_mouse_move(picker.center(), None, gpui::Modifiers::none());
+    let window = cx.update(|window, _| window.window_handle());
+    let screen = Screen::new(cx, window);
+    screen.redraw();
+    let picker = screen.get_by_role(by::role(gpui::Role::Button).name("Event platform"));
+    screen.user().hover(&picker);
     assert_eq!(seen.get(), Some(true));
   }
 
