@@ -102,16 +102,18 @@ pub enum RemoteAgentId {
   Copilot,
   Devin,
   Gemini,
+  OpenCode,
 }
 
 impl RemoteAgentId {
-  pub const ALL: [Self; 6] = [
+  pub const ALL: [Self; 7] = [
     Self::Claude,
     Self::Codex,
     Self::CursorAgent,
     Self::Copilot,
     Self::Devin,
     Self::Gemini,
+    Self::OpenCode,
   ];
 
   pub fn binary_name(self) -> &'static str {
@@ -122,6 +124,7 @@ impl RemoteAgentId {
       Self::Copilot => "copilot",
       Self::Devin => "devin",
       Self::Gemini => "gemini",
+      Self::OpenCode => "opencode",
     }
   }
 }
@@ -542,7 +545,8 @@ mod tests {
         "cursor-agent",
         "copilot",
         "devin",
-        "gemini"
+        "gemini",
+        "opencode"
       ]
     );
   }

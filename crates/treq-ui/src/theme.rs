@@ -27,6 +27,7 @@ icons! {
   ICON_AGENT_CURSOR => "agent-cursor",
   ICON_AGENT_DEVIN => "agent-devin",
   ICON_AGENT_GEMINI => "agent-gemini",
+  ICON_AGENT_OPENCODE => "agent-opencode",
   ICON_ARCHIVE => "archive",
   // GitHub's reaction emoji, from Twemoji (CC-BY 4.0), drawn with `img()`
   // in color: the bundled fonts have no color emoji.

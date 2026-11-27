@@ -876,7 +876,9 @@ mod tests {
 
   #[test]
   fn tells_treq_when_the_agent_exits() {
-    for agent in ["claude", "codex", "cursor", "copilot", "devin", "gemini"] {
+    for agent in [
+      "claude", "codex", "cursor", "copilot", "devin", "gemini", "opencode",
+    ] {
       let command = build_auto_command(
         &AutoCommand {
           treq_bin_dir: Some("/opt/treq/bin"),

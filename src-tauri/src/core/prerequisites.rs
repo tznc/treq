@@ -4,7 +4,7 @@
 use serde::Serialize;
 
 /// Executables the checklist reports on, in display order.
-pub const PREREQUISITE_BINARIES: [&str; 8] = [
+pub const PREREQUISITE_BINARIES: [&str; 9] = [
   "git",
   "claude",
   "codex",
@@ -12,13 +12,14 @@ pub const PREREQUISITE_BINARIES: [&str; 8] = [
   "copilot",
   "devin",
   "gemini",
+  "opencode",
   "gh",
 ];
 
 /// What a machine Treq works on over SSH (or in a container) needs: the
 /// local list plus jj, which the host runs itself, and tmux, which a host
 /// set to tmux terminals needs.
-pub const HOST_BINARIES: [&str; 10] = [
+pub const HOST_BINARIES: [&str; 11] = [
   "git",
   "jj",
   "tmux",
@@ -28,6 +29,7 @@ pub const HOST_BINARIES: [&str; 10] = [
   "copilot",
   "devin",
   "gemini",
+  "opencode",
   "gh",
 ];
 

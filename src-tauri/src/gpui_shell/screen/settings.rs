@@ -367,6 +367,7 @@ fn agent_options(default: &str) -> Vec<SelectOption> {
     ("copilot", "Copilot"),
     ("devin", "Devin"),
     ("gemini", "Gemini"),
+    ("opencode", "OpenCode"),
   ])
 }
 
