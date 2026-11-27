@@ -136,6 +136,22 @@ pub fn link_stack(repo_path: &str, prs: &[u64]) -> Result<(), String> {
   crate::github_stack::gh_stack_link_impl(&gh, repo_path, prs, &path)
 }
 
+/// Points the open pull request of each `(branch, base)` at `base`.
+pub fn retarget_prs(repo_path: &str, bases: &[(String, String)]) -> Result<(), String> {
+  let (gh, path) = gh()?;
+  let remote = remote(repo_path)?.ok_or("The repository has no GitHub remote")?;
+  let failed: Vec<String> =
+    github::gh_retarget_open_prs_impl(&gh, repo_path, &remote.full_name, bases, &path)
+      .into_iter()
+      .filter(|note| note.starts_with("Could not"))
+      .collect();
+  if failed.is_empty() {
+    Ok(())
+  } else {
+    Err(failed.join("; "))
+  }
+}
+
 pub fn unstack(repo_path: &str, number: u64) -> Result<(), String> {
   let (gh, path) = gh()?;
   crate::github_stack::gh_stack_unstack_impl(&gh, repo_path, number, &path)

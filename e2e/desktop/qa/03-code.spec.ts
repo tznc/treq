@@ -72,7 +72,7 @@ test("code: workspace Code tab, action row, alerts and Agent", async ({ page }) 
     name: "03-code-stack-menu",
     title: "Stack card: the GitHub stack menu",
     expectations: [
-      "A menu under the level button lists Open on GitHub, Unstack on GitHub and Merge stack…, each with a description",
+      "A menu under the level button: Move up (greyed, the top level), Move down and Take out of stack, a line, then Open on GitHub, Unstack on GitHub and Merge stack…",
       "The menu is fully inside the stack card's column and draws over the rows",
     ],
   });

@@ -77,6 +77,8 @@ struct FakeHost {
   stack_cli_missing: bool,
   /// Why changing a GitHub stack fails, when it does.
   stack_change_error: Option<String>,
+  /// Why reordering a stack fails, when it does.
+  reorder_error: Option<String>,
   /// What the merge preview reads, and whether merging fails.
   merge: merge::Preview,
   merge_error: Option<String>,
@@ -836,6 +838,16 @@ impl code_data::CodeHost for FakeHost {
   fn change_github_stack(&self, _: &str, change: code_data::StackChange) -> Result<(), String> {
     self.record(format!("change github stack {change:?}"));
     self.stack_change_error.clone().map_or(Ok(()), Err)
+  }
+
+  fn reorder_workspace(
+    &self,
+    _: &str,
+    workspace_id: i64,
+    how: crate::core::stack_order::Reorder,
+  ) -> Result<(), String> {
+    self.record(format!("reorder workspace {workspace_id} {how:?}"));
+    self.reorder_error.clone().map_or(Ok(()), Err)
   }
 
   fn set_submodule_synced(&self, _: &str, path: &str, enabled: bool) -> Result<(), String> {
