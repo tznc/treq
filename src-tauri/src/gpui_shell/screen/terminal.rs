@@ -4204,6 +4204,12 @@ impl TerminalPane {
           .size_full(),
       )
       .on_hover(cx.listener(move |pane, hovered: &bool, _, cx| {
+        // A drag step lands the mouse in a column before the divider
+        // catches up: hovering it would cost a frame (and the sidebar's
+        // highlight) per step.
+        if pane.drag.is_some() {
+          return;
+        }
         let id = Some(hover_id.clone());
         if *hovered {
           pane.hovered_column = id;
@@ -4259,6 +4265,15 @@ impl TerminalPane {
             if !text.is_empty() {
               on_files.update(cx, |view, cx| view.insert(&text.join(" "), cx));
             }
+          })
+          // Measured before the view draws: a resized view renders in this
+          // frame's prepaint, ahead of its own measure, so it would fit
+          // its grid a frame late.
+          .child({
+            let bounds = view.read(cx).bounds.clone();
+            gpui::canvas(move |b, _, _| bounds.set(Some(b)), |_, _, _, _| {})
+              .absolute()
+              .inset_0()
           })
           // Its own redraws (output, the blink) leave the other
           // terminals' drawing as it was.

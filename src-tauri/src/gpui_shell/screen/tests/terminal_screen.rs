@@ -1883,3 +1883,65 @@ fn shows_hidden(h: &mut Harness, role: gpui::Role, name: &str) -> bool {
     .query_by_role(gpui_testing_library::by::role(role).name(name).hidden(true))
     .is_some()
 }
+
+/// The grid size of the terminal drawing `pty`.
+fn grid(host: &Arc<FakeHost>, pty: &str) -> terminal_emu::Size {
+  let host: terminal_data::Host = host.clone();
+  let (live, _) = terminal_data::attach(&host, pty, 80, 24);
+  let size = live.emulator.lock().unwrap().size();
+  size
+}
+
+/// A divider drag draws a frame per step: each grid fits its new column in
+/// the frame the divider moves, not in a second frame after it.
+#[gpui::test]
+fn terminal_divider_drag_fits_the_grids_in_one_frame(cx: &mut TestAppContext) {
+  let (mut h, host, frames) =
+    super::idle::counted(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  click_terminal(&mut h);
+  h.cx.simulate_keystrokes("cmd-\\");
+  h.cx.run_until_parked();
+  let ptys = host.ptys.lock().unwrap().clone();
+  assert_eq!(ptys.len(), 2);
+  let left = h
+    .cx
+    .debug_bounds(super::changes_large::leak(format!("terminal-{}", ptys[0])))
+    .expect("left terminal");
+  let cols = grid(&host, &ptys[0]).cols;
+  let mut at = gpui::point(left.right() + gpui::px(2.), left.center().y);
+  h.cx
+    .simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
+  let drawn = frames.get();
+  // A hand moves a few pixels per event, and the divider keeps up.
+  for _ in 0..20 {
+    at.x -= gpui::px(3.);
+    h.cx
+      .simulate_mouse_move(at, Some(MouseButton::Left), Modifiers::none());
+  }
+  assert!(grid(&host, &ptys[0]).cols < cols);
+  assert_eq!(frames.get() - drawn, 20);
+}
+
+/// Dragging the pane's top edge draws a frame per step: the grid fits the
+/// new height in the frame the edge moves.
+#[gpui::test]
+fn terminal_height_drag_fits_the_grid_in_one_frame(cx: &mut TestAppContext) {
+  let (mut h, host, frames) =
+    super::idle::counted(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  click_terminal(&mut h);
+  let rows = grid(&host, &agent_pty()).rows;
+  let pane = h.cx.debug_bounds("workspace-terminal-pane").expect("pane");
+  let mut at = gpui::point(pane.center().x, pane.top() - gpui::px(2.));
+  h.cx
+    .simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
+  let drawn = frames.get();
+  for _ in 0..20 {
+    at.y -= gpui::px(3.);
+    h.cx
+      .simulate_mouse_move(at, Some(MouseButton::Left), Modifiers::none());
+  }
+  assert!(grid(&host, &agent_pty()).rows > rows);
+  assert_eq!(frames.get() - drawn, 20);
+}

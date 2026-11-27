@@ -108,3 +108,62 @@ fn terminal_perf_many(cx: &mut TestAppContext) {
     .collect();
   report("8 terms: resize", &mut samples);
 }
+
+/// Drags the divider between two full-scrollback terminals, then the
+/// pane's top edge, a few pixels per mouse move as a hand does.
+#[gpui::test]
+#[ignore = "benchmark"]
+fn terminal_perf_drag(cx: &mut TestAppContext) {
+  use gpui::{point, px, Modifiers, MouseButton};
+  let (mut h, host, ptys) = pane(cx, 1);
+  for (i, pty) in ptys.iter().enumerate() {
+    host.output(pty, &lines(i * 10_000, 6000));
+  }
+  frame(&mut h);
+  let left = h
+    .cx
+    .debug_bounds(super::changes_large::leak(format!("terminal-{}", ptys[0])))
+    .expect("left column");
+  let mut at = point(left.right() + px(2.), left.center().y);
+  h.cx
+    .simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
+  host.resizes.lock().unwrap().clear();
+  let mut samples: Vec<_> = (0..60)
+    .map(|_| {
+      at.x -= px(3.);
+      timed(&mut h, |h| {
+        h.cx
+          .simulate_mouse_move(at, Some(MouseButton::Left), Modifiers::none())
+      })
+    })
+    .collect();
+  h.cx
+    .simulate_mouse_up(at, MouseButton::Left, Modifiers::none());
+  report("drag divider: move + frame", &mut samples);
+  println!(
+    "drag divider: pty resizes {}",
+    host.resizes.lock().unwrap().len()
+  );
+
+  let pane = h.cx.debug_bounds("workspace-terminal-pane").expect("pane");
+  let mut at = point(pane.center().x, pane.top() - px(2.));
+  h.cx
+    .simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
+  host.resizes.lock().unwrap().clear();
+  let mut samples: Vec<_> = (0..60)
+    .map(|_| {
+      at.y -= px(3.);
+      timed(&mut h, |h| {
+        h.cx
+          .simulate_mouse_move(at, Some(MouseButton::Left), Modifiers::none())
+      })
+    })
+    .collect();
+  h.cx
+    .simulate_mouse_up(at, MouseButton::Left, Modifiers::none());
+  report("drag height: move + frame", &mut samples);
+  println!(
+    "drag height: pty resizes {}",
+    host.resizes.lock().unwrap().len()
+  );
+}
