@@ -910,6 +910,9 @@ pub enum Body {
   Loading,
   Error,
   Empty,
+  /// The diff was read and holds no hunks, such as a mode change: the card
+  /// is its header alone, with nothing to collapse.
+  Bare,
   /// A generated file whose diff waits behind "Load diff".
   Generated,
   /// Changed lines past [`LARGE_FILE_LINES`].
@@ -935,6 +938,16 @@ pub struct BodyInput<'a> {
 /// and a deleted one a placeholder, so their hunks are not read.
 pub fn draws_hunks(path: &str, status: &str) -> bool {
   !is_binary(path) && status != "D"
+}
+
+/// Whether the card is its header alone ([`Body::Bare`]): the diff was read
+/// and holds no hunks. A conflicted file keeps its note instead.
+pub fn is_bare(input: &BodyInput, conflicted: bool) -> bool {
+  !conflicted
+    && draws_hunks(input.path, input.status)
+    && input
+      .data
+      .is_some_and(|d| !d.loading && d.error.is_none() && d.hunks.is_empty())
 }
 
 /// Whether the file card is shut: comments keep it open; binary files and

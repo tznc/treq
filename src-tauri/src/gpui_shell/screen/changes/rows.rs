@@ -29,8 +29,8 @@ use crate::{
   gpui_shell::{
     screen::{
       changes_data::{
-        body, conflict_lines, conflicts, context_row_numbers, is_collapsed, line_counts, Body,
-        BodyInput, Conflict, FileHunks,
+        body, conflict_lines, conflicts, context_row_numbers, is_bare, is_collapsed, line_counts,
+        Body, BodyInput, Conflict, FileHunks,
       },
       changes_review::FILE_HUNK,
       commits_data::{line_number, line_numbers},
@@ -273,12 +273,15 @@ impl ChangesView {
         generated: self.is_generated(&path),
         loaded_generated: self.loaded_generated.contains(&path),
       };
-      let shut = is_collapsed(&input);
-      let kind = body(&input);
+      let conflicted_file = conflicted.contains(&path);
+      let bare = is_bare(&input, conflicted_file);
+      // A bare header has nothing below it unless file comments follow.
+      let shut = is_collapsed(&input) || (bare && !input.comment_activity);
+      let kind = if bare { Body::Bare } else { body(&input) };
       let c = cards.len();
       rows.push(Row::Head(c, kind));
       let mut card = Card {
-        conflicted: conflicted.contains(&path),
+        conflicted: conflicted_file,
         path,
         status,
         old_path,
