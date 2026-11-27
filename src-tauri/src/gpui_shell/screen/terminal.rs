@@ -1278,7 +1278,7 @@ impl TerminalView {
     }
     // Shift+Enter continues the line, as React's terminal did.
     if k.key == "enter" && m.shift && !m.control && !m.alt && !m.platform {
-      self.write("\\", cx);
+      self.write("\\\r", cx);
       return;
     }
     let app_cursor = self.with_emulator(|e| e.app_cursor()).unwrap_or(false);
