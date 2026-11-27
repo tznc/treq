@@ -20,6 +20,7 @@ table agent_review_comments
   column hunk_id|TEXT|0|NULL|0
   column id|TEXT|0|NULL|1
   column line_hash|TEXT|0|NULL|0
+  column outdated|INTEGER|1|0|0
   column quoted_text|TEXT|0|NULL|0
   column repo_path|TEXT|1|NULL|0
   column resolved_at|TEXT|0|NULL|0
@@ -30,6 +31,7 @@ table agent_review_comments
   column suggested_replacement|TEXT|0|NULL|0
   column target_id|TEXT|1|NULL|0
   column target_type|TEXT|1|NULL|0
+  column version|TEXT|0|NULL|0
   index idx_agent_review_comments_target|0|repo_path,target_type,target_id
 table changed_files
   column file_path|TEXT|1|NULL|0

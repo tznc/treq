@@ -51,7 +51,7 @@ pub fn keep_sent_comments(
       Some(crate::core::review::Side::Old) => "old",
       _ => "new",
     };
-    local_db::create_agent_review_comment(
+    let kept = local_db::create_agent_review_comment(
       repo_path,
       crate::core::agent_launch::REVIEW_TARGET,
       &id,
@@ -65,6 +65,17 @@ pub fn keep_sent_comments(
       SENT_REVIEW_SOURCE,
       Some(&c.line_content.join("\n")),
     )?;
+    // It follows the file from the version it was written on.
+    if let Some(version) = &c.version {
+      local_db::carry_agent_review_comment(
+        repo_path,
+        &kept.id,
+        kept.start_line,
+        kept.end_line,
+        Some(version),
+        c.outdated,
+      )?;
+    }
   }
   Ok(())
 }
@@ -354,9 +365,23 @@ mod tests {
     assert_eq!(c.side.as_deref(), Some("old"));
     assert_eq!(c.comment_text, "Rename this");
     assert_eq!(c.quoted_text.as_deref(), Some("a\nb"));
+    assert_eq!(c.version, None);
 
     resolve_comment(repo, &c.id).unwrap();
     assert_eq!(workspace_comments(repo, 3).unwrap()[0].status, "resolved");
+  }
+
+  #[test]
+  fn sent_comments_keep_the_file_version_they_were_written_on() {
+    let root = tempfile::TempDir::new().unwrap();
+    let repo = root.path().to_str().unwrap();
+    let mut versioned = line("a.rs", "h1");
+    versioned.version = Some("fv1".into());
+    keep_sent_comments(repo, 3, &[versioned]).unwrap();
+    assert_eq!(
+      workspace_comments(repo, 3).unwrap()[0].version.as_deref(),
+      Some("fv1")
+    );
   }
 
   #[test]

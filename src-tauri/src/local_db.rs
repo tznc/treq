@@ -154,6 +154,13 @@ pub struct AgentReviewComment {
   /// draft whose lines no longer hash the same is outdated.
   #[serde(default)]
   pub line_hash: Option<String>,
+  /// The version of its side's file its lines are numbered in
+  /// (`review::side_version`), as GitHub keeps a thread's commit.
+  #[serde(default)]
+  pub version: Option<String>,
+  /// Its lines changed after it was written: it stays off them.
+  #[serde(default)]
+  pub outdated: bool,
 }
 
 /// Pending review session for the FileBrowser, kept separate from `PendingReview`
@@ -1766,7 +1773,7 @@ pub fn clear_pending_review(repo_path: &str, workspace_id: i64) -> Result<(), St
 const AGENT_REVIEW_COMMENT_SELECT: &str =
   "SELECT id, repo_path, target_type, target_id, file_path, hunk_id, start_line, end_line, side,
             comment_text, suggested_replacement, status, source, created_at, resolved_at, quoted_text,
-            line_hash
+            line_hash, version, outdated
      FROM agent_review_comments";
 
 fn agent_review_comment_from_row(row: &Row<'_>) -> rusqlite::Result<AgentReviewComment> {
@@ -1788,6 +1795,8 @@ fn agent_review_comment_from_row(row: &Row<'_>) -> rusqlite::Result<AgentReviewC
     resolved_at: row.get(14)?,
     quoted_text: row.get(15)?,
     line_hash: row.get(16)?,
+    version: row.get(17)?,
+    outdated: row.get(18)?,
   })
 }
 
@@ -1829,6 +1838,8 @@ pub fn create_agent_review_comment(
     resolved_at: None,
     quoted_text: quoted_text.map(|s| s.to_string()),
     line_hash: None,
+    version: None,
+    outdated: false,
   };
 
   conn.execute(
@@ -1965,6 +1976,28 @@ pub fn update_agent_review_comment(
       params![id, comment_text, line_hash, quoted_text],
     )
     .map_err(|e| format!("Failed to update agent review comment: {e}"))?;
+  Ok(())
+}
+
+/// Where a comment is now: its lines at file `version`, or `outdated`
+/// once they changed (`review::carry`).
+pub fn carry_agent_review_comment(
+  repo_path: &str,
+  id: &str,
+  start_line: i64,
+  end_line: i64,
+  version: Option<&str>,
+  outdated: bool,
+) -> Result<(), String> {
+  let conn = get_connection(repo_path)?;
+  conn
+    .execute(
+      "UPDATE agent_review_comments
+         SET start_line = ?2, end_line = ?3, version = ?4, outdated = ?5
+       WHERE id = ?1",
+      params![id, start_line, end_line, version, outdated],
+    )
+    .map_err(|e| format!("Failed to carry agent review comment: {e}"))?;
   Ok(())
 }
 
@@ -2598,6 +2631,38 @@ mod tests {
     assert_eq!(stored.line_hash.as_deref(), Some("h1"));
     assert_eq!(stored.quoted_text.as_deref(), Some("+a\n+b"));
     assert_eq!(stored.source, "local-human");
+  }
+
+  #[test]
+  fn a_carried_comment_keeps_its_new_lines_version_and_outdatedness() {
+    let dir = TempDir::new().unwrap();
+    let repo = dir.path().to_str().unwrap();
+    let sent = create_agent_review_comment(
+      repo,
+      "workspace_diff",
+      "7",
+      "a.rs",
+      None,
+      2,
+      3,
+      Some("new"),
+      "Fix",
+      None,
+      "sent-review",
+      Some("+b\n+c"),
+    )
+    .unwrap();
+    assert_eq!((sent.version.as_deref(), sent.outdated), (None, false));
+    carry_agent_review_comment(repo, &sent.id, 4, 5, Some("fv2"), false).unwrap();
+    let read = || get_agent_review_comment(repo, &sent.id).unwrap().unwrap();
+    let carried = read();
+    assert_eq!((carried.start_line, carried.end_line), (4, 5));
+    assert_eq!(
+      (carried.version.as_deref(), carried.outdated),
+      (Some("fv2"), false)
+    );
+    carry_agent_review_comment(repo, &sent.id, 4, 5, Some("fv2"), true).unwrap();
+    assert!(read().outdated);
   }
 
   #[test]

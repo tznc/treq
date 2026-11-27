@@ -1326,6 +1326,8 @@ mod tests {
       resolved_at: None,
       quoted_text: None,
       line_hash: None,
+      version: None,
+      outdated: false,
     };
     assert_eq!(
       review_comment_prompt(&comment, "/ws"),
