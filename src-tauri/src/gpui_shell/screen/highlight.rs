@@ -253,7 +253,7 @@ pub(super) fn hunk_spans(language: &'static str, lines: &[String]) -> Rc<Vec<Spa
   // `\ No newline at end of file` is on neither side, and stays plain.
   let mut out: Vec<Spans> = vec![Rc::default(); lines.len()];
   // Context lines are on both sides, and keep the new side's spans.
-  for side in [b'-', b'+'] {
+  for side in *b"-+" {
     let on_side: Vec<usize> = (0..lines.len())
       .filter(|&i| {
         let marker = lines[i].bytes().next().unwrap_or(b' ');
