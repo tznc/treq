@@ -199,6 +199,8 @@ pub struct ChangesView {
   committed_collapsed: bool,
   pub(super) collapsed_files: HashSet<String>,
   pub(super) expanded_large: HashSet<String>,
+  /// Committed hunks opened while Committed is hidden, by path and header.
+  pub(super) opened_hunks: HashSet<(String, String)>,
   /// Generated files whose diff "Load diff" read.
   pub(super) loaded_generated: HashSet<String>,
   /// The file list's filter: generated files left out of the list and diff.
@@ -310,6 +312,7 @@ impl ChangesView {
       committed_collapsed: false,
       collapsed_files: HashSet::new(),
       expanded_large: HashSet::new(),
+      opened_hunks: HashSet::new(),
       loaded_generated: HashSet::new(),
       hide_generated: false,
       changeset_expanded: false,
@@ -365,6 +368,10 @@ impl ChangesView {
     let reread = moved
       || self.options.revision != options.revision
       || self.options.show_committed != options.show_committed;
+    // Hiding Committed shuts every committed hunk again.
+    if moved || self.options.show_committed != options.show_committed {
+      self.opened_hunks.clear();
+    }
     // The status's conflicts stand in until the diff lists its own.
     if moved || self.parent.conflicted_files != parent.conflicted_files {
       self.layout_gen += 1;
@@ -614,7 +621,7 @@ impl ChangesView {
       return;
     }
     self.loading = true;
-    let show = self.show_committed();
+    let show = self.options.show_committed;
     // What shows now, so the read compares against it off the main thread.
     let shown = self.snapshot.clone();
     self.run_changed(
@@ -1357,6 +1364,8 @@ impl ChangesView {
                   .into(),
               );
               view.committed_collapsed = true;
+              // Its own write: the read after it is not stale.
+              view.review.apply_next = true;
               if action == CommitAction::Pr {
                 view.send_react(
                   ScreenAction::Press {
@@ -3170,28 +3179,20 @@ impl ChangesView {
 
   /// A card's header and file comments, then the threads and comments with
   /// no line above its hunks, or what it shows in their place.
-  fn card_head(&mut self, c: usize, p: &Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
+  /// `pinned`: its header is drawn pinned over the list, which covers this
+  /// one, so it is hidden.
+  fn card_head(
+    &mut self,
+    c: usize,
+    pinned: bool,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> gpui::AnyElement {
     let card = &self.diff.cards[c];
-    let (path, status, old_path) = (
-      card.path.clone(),
-      card.status.clone(),
-      card.old_path.clone(),
-    );
-    let (committed, shut, kind, conflicted_file) =
-      (card.committed, card.shut, card.body, card.conflicted);
-    let counts = self.card_counts(c);
-    let header = self.file_header(
-      &path,
-      &status,
-      old_path.as_deref(),
-      committed,
-      shut,
-      counts,
-      p,
-      cx,
-    );
+    let (path, kind, conflicted_file) = (card.path.clone(), card.body, card.conflicted);
+    let header = self.card_header(c, p, cx);
     let card = div()
-      .child(header)
+      .child(div().when(pinned, |this| this.invisible()).child(header))
       .children(self.file_comments(&path, p, cx));
     let muted = p.muted_foreground;
     let placeholder =
@@ -3301,6 +3302,28 @@ impl ChangesView {
       Body::Collapsed => card,
     }
     .into_any_element()
+  }
+
+  /// A card's file header: its path, actions and counts.
+  fn card_header(&mut self, c: usize, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    let card = &self.diff.cards[c];
+    let (path, status, old_path) = (
+      card.path.clone(),
+      card.status.clone(),
+      card.old_path.clone(),
+    );
+    let (committed, shut) = (card.committed, card.shut);
+    let counts = self.card_counts(c);
+    self.file_header(
+      &path,
+      &status,
+      old_path.as_deref(),
+      committed,
+      shut,
+      counts,
+      p,
+      cx,
+    )
   }
 
   #[expect(
@@ -3451,6 +3474,7 @@ impl ChangesView {
         ui::Checkbox::new(format!("viewed-{path}"), p)
           .checked(viewed)
           .label("Viewed")
+          .name(format!("Viewed {path}"))
           .gap_1()
           .px_2()
           .py_0p5()

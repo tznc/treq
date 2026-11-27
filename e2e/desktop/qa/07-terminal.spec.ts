@@ -215,3 +215,65 @@ test("terminal: sessions survive a trip to Settings", async ({ page }) => {
     ],
   });
 });
+
+// Shift+Enter sends `\` then Enter, which the shell and Claude Code read as a
+// new line. Pressing it must not leave a run of backslashes on the prompt.
+test("terminal: Shift+Enter continues the line", async ({ page }) => {
+  await openWorkspace(page, BRANCH);
+  await openTab(page, "Commits");
+  await row(page, BRANCH).hover();
+  await row(page, BRANCH).getByRole("button", { name: "Open shell" }).click();
+  await settle(page, 2500);
+  await page.mouse.click(1000, 780);
+  await page.keyboard.type("PS1='$ '; PS2='> '; clear\n");
+  await settle(page, 800);
+  await page.keyboard.type("echo first ");
+  await page.keyboard.press("Shift+Enter");
+  await page.keyboard.type("second ");
+  await page.keyboard.press("Shift+Enter");
+  await page.keyboard.type("third");
+  await settle(page, 800);
+  await capture(page, {
+    name: "07-terminal-shift-enter-01-continued",
+    title: "Terminal: Shift+Enter twice while typing a command",
+    expectations: [
+      "The prompt line reads `$ echo first \\` with a single trailing backslash",
+      "Two `> ` continuation lines follow, holding `second \\` and `third`",
+      "No run of backslashes such as `\\\\\\` sits on any line",
+    ],
+  });
+  await page.keyboard.press("Enter");
+  await settle(page, 800);
+  await capture(page, {
+    name: "07-terminal-shift-enter-02-run",
+    title: "Terminal: the continued command after Enter",
+    expectations: ["The shell prints `first second third` on one line, then a fresh `$ ` prompt"],
+  });
+});
+
+// The same keys in a real Claude Code prompt. QA_CLAUDE_CMD is a shell
+// command that starts an onboarded, signed-in `claude`; skipped without one.
+test("terminal: Shift+Enter in Claude Code", async ({ page }) => {
+  const claude = process.env.QA_CLAUDE_CMD;
+  test.skip(!claude, "set QA_CLAUDE_CMD to start a signed-in Claude Code");
+  await openWorkspace(page, BRANCH);
+  await openTab(page, "Commits");
+  await row(page, BRANCH).hover();
+  await row(page, BRANCH).getByRole("button", { name: "Open shell" }).click();
+  await settle(page, 2500);
+  await page.mouse.click(1000, 780);
+  await page.keyboard.type(`clear; ${claude}\n`);
+  await settle(page, 10000);
+  await page.keyboard.type("first");
+  await page.keyboard.press("Shift+Enter");
+  await page.keyboard.type("second");
+  await settle(page, 1500);
+  await capture(page, {
+    name: "07-terminal-shift-enter-03-claude",
+    title: "Terminal: Shift+Enter in a Claude Code prompt",
+    expectations: [
+      "Claude Code's prompt box holds `first` and `second` on two lines",
+      "No backslash follows `first`",
+    ],
+  });
+});
