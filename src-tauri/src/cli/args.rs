@@ -251,7 +251,12 @@ mod tests {
   fn diff_takes_stat_and_conflicts_flags() {
     let flag = |argv: &[&str], name: &str| {
       let sub = parse(argv.iter().copied()).unwrap().subcommand.unwrap();
-      sub.matches.args.get(name).and_then(|arg| arg.value.as_bool()) == Some(true)
+      sub
+        .matches
+        .args
+        .get(name)
+        .and_then(|arg| arg.value.as_bool())
+        == Some(true)
     };
     assert!(flag(&["treq", "diff", "feat/x", "--stat"], "stat"));
     assert!(flag(&["treq", "diff", "--conflicts"], "conflicts"));

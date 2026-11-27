@@ -253,7 +253,7 @@ pub(crate) fn format_focused_workspace_status(
       conflict_count
     };
     lines.push(format!("  Conflicts: {n} files"));
-    lines.push("  run `treq diff` to inspect conflicts".to_string());
+    lines.push("  run `treq diff --conflicts` to inspect conflicts".to_string());
   }
   lines.push(format!(
     "  Commits: {}",
@@ -324,6 +324,101 @@ pub(crate) fn format_workspace_diff_lines(
     }
   }
   lines
+}
+
+/// Each diffed file with its status (`M`, `A`, `D`, `R` or `C`) and the
+/// path it had before.
+fn files_with_status(
+  diff: &crate::jj::JjRevisionDiff,
+) -> impl Iterator<Item = (&crate::jj::JjFileDiff, &str, &str)> {
+  let changes: HashMap<&str, &crate::jj::JjFileChange> = diff
+    .committed_files
+    .iter()
+    .map(|change| (change.path.as_str(), change))
+    .collect();
+  diff.hunks_by_file.iter().map(move |file| {
+    let change = changes.get(file.path.as_str()).copied();
+    let status = change.map_or("M", |c| c.status.as_str());
+    let old = change
+      .and_then(|c| c.previous_path.as_deref())
+      .unwrap_or(&file.path);
+    (file, status, old)
+  })
+}
+
+/// `treq diff`: one git-style section per file, as `git diff` prints it.
+pub(crate) fn format_workspace_patch(diff: &crate::jj::JjRevisionDiff) -> String {
+  let mut out = String::new();
+  for (file, status, old) in files_with_status(diff) {
+    out.push_str(&format!("diff --git a/{old} b/{}\n", file.path));
+    // `git apply` needs the mode line to create or delete a file; the
+    // diff does not carry modes, so this assumes a regular file.
+    match status {
+      "A" => out.push_str("new file mode 100644\n"),
+      "D" => out.push_str("deleted file mode 100644\n"),
+      "R" => out.push_str(&format!("rename from {old}\nrename to {}\n", file.path)),
+      "C" => out.push_str(&format!("copy from {old}\ncopy to {}\n", file.path)),
+      _ => {}
+    }
+    if file.hunks.is_empty() {
+      continue;
+    }
+    let from = if status == "A" {
+      "/dev/null".to_string()
+    } else {
+      format!("a/{old}")
+    };
+    let to = if status == "D" {
+      "/dev/null".to_string()
+    } else {
+      format!("b/{}", file.path)
+    };
+    out.push_str(&format!("--- {from}\n+++ {to}\n"));
+    for hunk in &file.hunks {
+      out.push_str(&hunk.header);
+      out.push('\n');
+      for line in &hunk.lines {
+        out.push_str(line);
+        out.push('\n');
+      }
+    }
+  }
+  out
+}
+
+/// `treq diff --stat`: each file with its added and removed lines, then the
+/// totals, as `git diff --stat` sums them up.
+pub(crate) fn format_workspace_stat_lines(diff: &crate::jj::JjRevisionDiff) -> Vec<String> {
+  let (mut added_total, mut removed_total) = (0, 0);
+  let mut lines = Vec::new();
+  for (file, status, old) in files_with_status(diff) {
+    let name = if old == file.path {
+      file.path.clone()
+    } else {
+      format!("{old} -> {}", file.path)
+    };
+    let body = file.hunks.iter().flat_map(|hunk| &hunk.lines);
+    let added = body.clone().filter(|line| line.starts_with('+')).count();
+    let removed = body.filter(|line| line.starts_with('-')).count();
+    added_total += added;
+    removed_total += removed;
+    lines.push(format!("{status} {name} (+{added} -{removed})"));
+  }
+  lines.push(format!(
+    "{} files changed, {added_total} insertions(+), {removed_total} deletions(-)",
+    diff.hunks_by_file.len()
+  ));
+  lines
+}
+
+/// Printed before the patch when the workspace has conflicts, since the
+/// patch alone does not say so.
+pub(crate) fn format_patch_conflict_note(files: usize, commits: usize) -> Option<String> {
+  (files > 0 || commits > 0).then(|| {
+    format!(
+      "Conflicts: {files} files, {commits} commits; run `treq diff --conflicts` for the conflict hunks"
+    )
+  })
 }
 
 #[cfg(test)]
@@ -695,7 +790,10 @@ mod tests {
         file_change("lib/b.rs", "R", Some("src/b.rs")),
       ],
       hunks_by_file: vec![
-        file_diff("src/a.rs", Some(("@@ -1,2 +1,2 @@", &[" keep", "-old", "+new"]))),
+        file_diff(
+          "src/a.rs",
+          Some(("@@ -1,2 +1,2 @@", &[" keep", "-old", "+new"])),
+        ),
         file_diff("new.txt", Some(("@@ -0,0 +1 @@", &["+hello"]))),
         file_diff("old.txt", Some(("@@ -1 +0,0 @@", &["-bye"]))),
         file_diff("lib/b.rs", None),
@@ -721,11 +819,13 @@ mod tests {
         "-old\n",
         "+new\n",
         "diff --git a/new.txt b/new.txt\n",
+        "new file mode 100644\n",
         "--- /dev/null\n",
         "+++ b/new.txt\n",
         "@@ -0,0 +1 @@\n",
         "+hello\n",
         "diff --git a/old.txt b/old.txt\n",
+        "deleted file mode 100644\n",
         "--- a/old.txt\n",
         "+++ /dev/null\n",
         "@@ -1 +0,0 @@\n",
