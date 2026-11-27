@@ -506,7 +506,10 @@ fn the_header_title_copies_the_part_dragged_over(cx: &mut TestAppContext) {
   use gpui::{Modifiers, MouseButton};
   let (mut h, _) = workspace_harness(cx, code_host(), code_route());
   h.cx.run_until_parked();
-  let text = h.cx.debug_bounds("workspace-title-text").expect("title text");
+  let text = h
+    .cx
+    .debug_bounds("workspace-title-text")
+    .expect("title text");
   let y = text.center().y;
   let (start, end) = (
     gpui::point(text.left() + gpui::px(1.), y),
