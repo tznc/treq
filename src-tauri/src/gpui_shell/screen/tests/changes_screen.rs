@@ -1052,23 +1052,35 @@ fn a_suggested_change_is_drawn_and_applied_to_the_file(cx: &mut TestAppContext) 
 
 #[gpui::test]
 fn a_commit_during_a_review_lists_what_is_left_at_once(cx: &mut TestAppContext) {
+  use gpui::Role;
+  use gpui_testing_library::prelude::*;
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
-  comment_line(&mut h, "Nit");
+  let screen = h.rendered();
+  let user = screen.user();
+  user.click(&screen.get_by_role(by::role(Role::Button).name("Add file comment on a.rs")));
+  user.keyboard("Nit");
+  user.click(&screen.get_by_role(by::role(Role::Button).name("Add comment")));
   // The commit takes b.rs out of the working copy.
   let mut committed = host.working.clone().expect("working");
   committed.committed_files = vec![committed.uncommitted_files.remove(1)];
   *host.edited.lock().unwrap() = Some(committed);
-  h.click("commit-message");
-  h.cx.simulate_input("Fix");
-  h.click("commit-button");
-  h.cx.run_until_parked();
-  assert!(!shows_stale_banner(&mut h), "its own write shows at once");
-  assert!(!h.shows(gpui::Role::Button, "b.rs"), "b.rs left the list");
-  assert!(h.shows(gpui::Role::Button, "a.rs"));
-  assert!(
-    has_comment(&mut h, "^Comments on a.rs line \\d+$"),
-    "the review stays"
+  user.type_text(
+    &screen.get_by_role(by::role(Role::MultilineTextInput).name("Message")),
+    "Fix",
   );
+  user.click(&screen.get_by_role(by::role(Role::Button).name("Commit")));
+  h.cx.run_until_parked();
+
+  let screen = h.rendered();
+  assert!(!shows_stale_banner(&mut h), "its own write shows at once");
+  assert!(
+    screen
+      .query_by_role(by::role(Role::Button).name("b.rs"))
+      .is_none(),
+    "b.rs left the list"
+  );
+  expect(screen.get_by_role(by::role(Role::Button).name("a.rs"))).to_be_visible();
+  expect(screen.get_by_role(by::role(Role::Button).name("Edit comment"))).to_be_visible();
 }
 
 #[gpui::test]
