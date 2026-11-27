@@ -38,7 +38,7 @@ async function chevronAtEnd(page: Page, name: string, title: string): Promise<vo
   const button = page.getByRole("button", { name: /^Project: /, expanded: false });
   await expect(button).toBeVisible();
   const b = await button.boundingBox();
-  const c = await page.getByTestId("project-chevron").boundingBox();
+  const c = await page.getByTestId("project-button-chevron").boundingBox();
   if (!b || !c) throw new Error("no project button or chevron");
   expect(b.x + b.width - (c.x + c.width)).toBeLessThanOrEqual(10);
   await capture(page, {

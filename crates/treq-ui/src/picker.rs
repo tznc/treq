@@ -8,8 +8,8 @@ use gpui::{
 };
 
 use crate::{
-  icon, text, theme, theme::Palette, zpx, Button, OnClick, SelectorExt as _, Size, TextSize,
-  Variant,
+  icon, text, theme, theme::Palette, zpx, Button, OnClick, OnHover, SelectorExt as _, Size,
+  TextSize, Variant,
 };
 
 /// The gap between a [`Picker::full_width`] and its menu: tighter than a
@@ -55,6 +55,7 @@ pub struct Picker {
   open: bool,
   disabled: bool,
   on_click: Option<OnClick>,
+  on_hover: Option<OnHover>,
 }
 
 impl Picker {
@@ -72,6 +73,7 @@ impl Picker {
       open: false,
       disabled: false,
       on_click: None,
+      on_hover: None,
     }
   }
 
@@ -99,6 +101,12 @@ impl Picker {
   /// value.
   pub fn badge(mut self, initial: impl Into<SharedString>) -> Self {
     self.badge = Some(initial.into());
+    self
+  }
+
+  /// Runs `f` as the pointer comes to rest on it or leaves.
+  pub fn on_hover(mut self, f: impl Fn(&bool, &mut Window, &mut App) + 'static) -> Self {
+    self.on_hover = Some(Rc::new(f));
     self
   }
 
@@ -209,10 +217,19 @@ impl RenderOnce for Picker {
           .when(empty, |el| el.text_color(p.muted_foreground))
           .child(value),
       )
-      .child(chevron)
+      .child(
+        div()
+          .selector(format!("{id}-chevron"))
+          .flex()
+          .flex_none()
+          .child(chevron),
+      )
       .when(full_width, |b| b.w_full().expanded(open))
       .when_some(self.on_click, |b, f| {
         b.on_click(move |e, w, cx| f(e, w, cx))
+      })
+      .when_some(self.on_hover, |b, f| {
+        b.on_hover(move |hovered, w, cx| f(hovered, w, cx))
       })
   }
 }
@@ -289,6 +306,55 @@ mod tests {
           .open(self.open),
       )
     }
+  }
+
+  #[gpui::test]
+  fn a_full_width_pickers_chevron_ends_it(cx: &mut TestAppContext) {
+    cx.update(theme::init);
+    let (_, cx) = cx.add_window_view(|_, _| Column { open: false });
+    cx.run_until_parked();
+    let picker = cx.debug_bounds("project").expect("the picker is drawn");
+    let chevron = cx
+      .debug_bounds("project-chevron")
+      .expect("the chevron is drawn");
+    assert!(
+      picker.right() - chevron.right() <= px(12.),
+      "{chevron:?} in {picker:?}"
+    );
+  }
+
+  /// A picker that records the last hover it reported.
+  struct Hovered {
+    seen: std::rc::Rc<std::cell::Cell<Option<bool>>>,
+  }
+
+  impl Render for Hovered {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+      let p = theme::palette(false);
+      let seen = self.seen.clone();
+      div().w(px(300.)).child(
+        Picker::new("project", &p)
+          .value("Event platform")
+          .on_hover(move |hovered, _, _| seen.set(Some(*hovered))),
+      )
+    }
+  }
+
+  #[gpui::test]
+  fn a_picker_tells_when_the_pointer_rests_on_it(cx: &mut TestAppContext) {
+    cx.update(theme::init);
+    let seen = std::rc::Rc::new(std::cell::Cell::new(None));
+    let (_, cx) = cx.add_window_view({
+      let seen = seen.clone();
+      move |_, _| Hovered { seen }
+    });
+    cx.run_until_parked();
+    let window = cx.update(|window, _| window.window_handle());
+    let screen = Screen::new(cx, window);
+    screen.redraw();
+    let picker = screen.get_by_role(by::role(gpui::Role::Button).name("Event platform"));
+    screen.user().hover(&picker);
+    assert_eq!(seen.get(), Some(true));
   }
 
   #[gpui::test]

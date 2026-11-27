@@ -1226,7 +1226,7 @@ fn project_button_opens_the_project_menu(cx: &mut TestAppContext) {
 fn project_button_chevron_ends_the_button(cx: &mut TestAppContext) {
   let mut h = Harness::new(cx, snapshot(vec![]));
   let button = h.bounds("project-button").expect("button");
-  let chevron = h.bounds("project-chevron").expect("chevron");
+  let chevron = h.bounds("project-button-chevron").expect("chevron");
   // A short name leaves room; the chevron still trails at the button's
   // right edge (inside its border and padding), not after the name.
   assert!(
