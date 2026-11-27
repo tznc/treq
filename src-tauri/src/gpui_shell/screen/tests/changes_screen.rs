@@ -910,6 +910,18 @@ fn an_edit_on_disk_during_a_review_waits_behind_the_stale_banner(cx: &mut TestAp
   assert_eq!(shown_lines(&mut h, "a.rs"), [" a", "+b", "+e"]);
 }
 
+/// Deleting the last comment ends the review: edits on disk show again.
+#[gpui::test]
+fn deleting_the_last_comment_ends_the_review(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  comment_line(&mut h, "Nit");
+  click_named(&mut h, gpui::Role::Button, "Delete comment");
+  h.cx.run_until_parked();
+  edit_a_rs(&mut h, &host);
+  assert!(!shows_stale_banner(&mut h));
+  assert_eq!(shown_lines(&mut h, "a.rs"), [" a", "+b", "+e"]);
+}
+
 #[gpui::test]
 fn arrow_keys_move_and_extend_the_line_selection(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());

@@ -612,6 +612,10 @@ impl ChangesView {
       return;
     }
     self.review.comments.retain(|c| c.id != id);
+    // The last comment gone ends the review: refreshes show as they land.
+    if self.review.comments.is_empty() {
+      self.review.user_added = false;
+    }
     if self.review.editing.as_deref() == Some(id) {
       self.cancel_edit(cx);
     }
