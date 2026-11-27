@@ -552,6 +552,8 @@ struct Metadata {
   linear_issue_key: Option<String>,
   linear_issue_url: Option<String>,
   linear_issue_title: Option<String>,
+  /// When auto-rebase last moved the branch onto its target (RFC 3339).
+  last_rebased_at: Option<String>,
 }
 
 fn plural(n: usize, word: &str) -> String {
@@ -787,15 +789,15 @@ pub fn workspace_view(
       ahead: ahead as u32,
       behind: behind as u32,
       not_on_remote,
-      rebased: workspace.and_then(|w| {
-        Some(Rebased {
+      rebased: workspace
+        .zip(metadata.last_rebased_at.clone())
+        .map(|(w, at)| Rebased {
           target: w
             .target_branch
             .clone()
             .unwrap_or_else(|| route.default_target().to_string()),
-          at: local_db::last_rebased_at_of(w)?,
-        })
-      }),
+          at,
+        }),
       disabled: busy,
       spinning: matches!(pending, Pending::Sync | Pending::Reset),
     }),

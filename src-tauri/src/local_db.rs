@@ -1251,16 +1251,6 @@ pub fn last_rebased_commit_of(workspace: &Workspace) -> Option<String> {
     .map(|s| s.to_string())
 }
 
-/// When the workspace was last rebased onto its target (RFC 3339), as
-/// stored in its metadata.
-pub fn last_rebased_at_of(workspace: &Workspace) -> Option<String> {
-  let json = serde_json::from_str::<serde_json::Value>(workspace.metadata.as_deref()?).ok()?;
-  json
-    .get("last_rebased_at")
-    .and_then(|v| v.as_str())
-    .map(str::to_string)
-}
-
 /// Why the workspace's last rebase was held back (`core::rebase_guard`), as
 /// stored in its metadata.
 pub fn rebase_hold_of(workspace: &Workspace) -> Option<serde_json::Value> {
@@ -3682,7 +3672,7 @@ mod tests {
       .expect("read")
       .expect("row");
     assert_eq!(last_rebased_commit_of(&workspace).as_deref(), Some("abc"));
-    let at = last_rebased_at_of(&workspace).expect("rebase time");
+    let at = rebased_at(&workspace).expect("rebase time");
     assert!(chrono::DateTime::parse_from_rfc3339(&at).is_ok(), "{at}");
   }
 
@@ -3708,12 +3698,18 @@ mod tests {
         .expect("read")
         .expect("row")
     };
-    let rebased_at = last_rebased_at_of(&read());
+    let before = rebased_at(&read());
 
     update_workspace_last_rebased_commit(repo_path, id, "def").expect("update");
 
     assert_eq!(last_rebased_commit_of(&read()).as_deref(), Some("def"));
-    assert_eq!(last_rebased_at_of(&read()), rebased_at);
+    assert_eq!(rebased_at(&read()), before);
+  }
+
+  fn rebased_at(workspace: &Workspace) -> Option<String> {
+    let metadata: serde_json::Value =
+      serde_json::from_str(workspace.metadata.as_deref()?).expect("json");
+    metadata["last_rebased_at"].as_str().map(str::to_string)
   }
 
   /// Another writer commits between the read and the write of a new
