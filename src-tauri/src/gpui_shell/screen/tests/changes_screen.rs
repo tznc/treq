@@ -238,9 +238,19 @@ fn changes_host_committed_only() -> FakeHost {
   host
 }
 
+/// Where `selector` is drawn, from the top.
+fn top_of(h: &mut Harness, selector: &'static str) -> gpui::Pixels {
+  h.cx.run_until_parked();
+  h.cx
+    .debug_bounds(selector)
+    .unwrap_or_else(|| panic!("{selector} not drawn"))
+    .origin
+    .y
+}
+
 /// With nothing uncommitted there is nothing to commit: no commit box, and
-/// the "No changes" placeholder where the Changes group would be, whether
-/// the Committed group's files are shown or hidden.
+/// the Changes group holds the "No changes" placeholder, above the
+/// Committed group whether its files are shown or hidden.
 #[gpui::test]
 fn changes_tab_offers_no_commit_box_with_nothing_to_commit(cx: &mut TestAppContext) {
   for show in [true, false] {
@@ -256,12 +266,81 @@ fn changes_tab_offers_no_commit_box_with_nothing_to_commit(cx: &mut TestAppConte
       !h.shows(gpui::Role::MultilineTextInput, "Message"),
       "show: {show}"
     );
+    assert!(
+      h.shows(gpui::Role::Button, "Collapse Changes"),
+      "show: {show}"
+    );
     assert!(h.shows(gpui::Role::Status, "No changes"), "show: {show}");
     assert!(
       !h.shows(gpui::Role::Status, "Nothing to commit"),
       "show: {show}"
     );
+    let header = top_of(&mut h, "changes-section-toggle");
+    let empty = top_of(&mut h, "changes-empty");
+    let committed = top_of(&mut h, "committed-section-toggle");
+    assert!(header < empty, "placeholder under the Changes header");
+    assert!(empty < committed, "the Committed group follows");
   }
+}
+
+/// Collapsing the empty Changes group folds its placeholder away.
+#[gpui::test]
+fn changes_tab_collapses_the_empty_changes_group(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host_committed_only(), committed_route(true));
+  h.click("changes-section-toggle");
+  h.cx.run_until_parked();
+  assert!(h.shows(gpui::Role::Button, "Expand Changes"));
+  assert!(!h.shows(gpui::Role::Status, "No changes"));
+  assert!(h.shows(gpui::Role::Button, "Collapse Committed"));
+}
+
+/// A workspace with nothing changed or committed still shows the Changes
+/// group, holding the placeholder.
+#[gpui::test]
+fn changes_tab_holds_the_placeholder_in_the_changes_group_with_no_changes(cx: &mut TestAppContext) {
+  let mut host = changes_host();
+  host.working = serde_json::from_value(serde_json::json!({
+    "committed_files": [],
+    "uncommitted_files": [],
+    "hunks_by_file": [],
+    "too_large_to_render": false
+  }))
+  .ok();
+  let (mut h, _) = workspace_harness(cx, host, changes_route());
+  assert!(h.shows(gpui::Role::Button, "Collapse Changes"));
+  assert!(h.shows(gpui::Role::Status, "No changes"));
+  let header = top_of(&mut h, "changes-section-toggle");
+  let empty = top_of(&mut h, "changes-empty");
+  assert!(header < empty, "placeholder under the Changes header");
+}
+
+/// With only conflicts left, the Changes group between Conflicts and
+/// Committed holds the placeholder.
+#[gpui::test]
+fn changes_tab_holds_the_placeholder_between_conflicts_and_committed(cx: &mut TestAppContext) {
+  let mut host = changes_host();
+  host.working = serde_json::from_value(serde_json::json!({
+    "committed_files": [
+      {"path": "c.rs", "status": "M", "previous_path": null, "changed_line_count": 1, "diff_deferred": false}
+    ],
+    "uncommitted_files": [],
+    "conflicted_files": ["c.rs"],
+    "hunks_by_file": [
+      {"path": "c.rs", "hunks": [{"id": "h", "header": "@@ -1 +1 @@", "lines": ["-c", "+d"], "patch": ""}]}
+    ],
+    "too_large_to_render": false
+  }))
+  .ok();
+  let (mut h, _) = workspace_harness(cx, host, committed_route(true));
+  assert!(!h.shows(gpui::Role::Status, "Nothing to commit"));
+  assert!(h.shows(gpui::Role::Status, "No changes"));
+  let conflicts = top_of(&mut h, "conflicts-section-toggle");
+  let header = top_of(&mut h, "changes-section-toggle");
+  let empty = top_of(&mut h, "changes-empty");
+  let committed = top_of(&mut h, "committed-section-toggle");
+  assert!(conflicts < header, "Conflicts above Changes");
+  assert!(header < empty, "placeholder under the Changes header");
+  assert!(empty < committed, "the Committed group follows");
 }
 
 /// The commit box sits in the Changes group: under its header, above its
