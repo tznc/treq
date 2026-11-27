@@ -46,6 +46,8 @@ The same prompt also allows `treq` CLI commands that create or manage other work
 
 In a workspace, the prompt tells the agent not to run `git`. A workspace has no `.git` folder, so Git reads and changes the home repository instead. The agent uses `treq st`, [`treq diff`](/docs/reference/cli#treq-diff), and `jj` for status, diffs, and history.
 
+Claude Code sessions in a workspace also get a hook, [`treq hook pre-bash`](/docs/reference/cli#treq-hook). When a Bash command runs `git`, the hook tells the agent what to run instead. The command still runs.
+
 This boundary separates concurrent tasks at the file-system level. Repository history remains shared across workspaces, while each agent sees the working copy for its assigned workspace.
 
 ## Bundled Treq skill

@@ -28,6 +28,7 @@ pub mod editor_apps;
 pub mod feature_preview;
 pub mod files;
 pub mod generated;
+pub mod git_guard;
 pub mod github_cli;
 pub mod github_direct;
 pub mod github_http;

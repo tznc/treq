@@ -139,6 +139,18 @@
             }
           ]
         },
+        "hook": {
+          "description": "Run a hook Treq registers with agent CLIs; reads the hook's JSON from stdin",
+          "args": [
+            {
+              "name": "event",
+              "index": 1,
+              "takesValue": true,
+              "required": true,
+              "description": "Hook to run: pre-bash tells the agent to use treq when a Bash command runs git in a workspace"
+            }
+          ]
+        },
         "mv": {
           "description": "Move selected changes from source workspace to destination workspace",
           "args": [
