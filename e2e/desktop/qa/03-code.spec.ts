@@ -8,7 +8,7 @@
 // seed deterministic).
 import { expect, test, type Page } from "@playwright/test";
 import { capture } from "./capture.ts";
-import { home, mod, openTab, openWorkspace, settle, xPointer } from "./helpers.ts";
+import { home, mod, openTab, openWorkspace, palette, settle, xPointer } from "./helpers.ts";
 
 const BRANCH = "feat/empty-event-message";
 
@@ -266,6 +266,53 @@ test("code: workspace title in the header, edited inline", async ({ page }) => {
   });
   await page.keyboard.press("Escape");
   await expect(input).toHaveCount(0);
+  await home(page);
+});
+
+test("code: part of the header title selects and copies", async ({ page }) => {
+  await openWorkspace(page, BRANCH);
+  await openTab(page, "Code");
+  await overview(page);
+  await settle(page, 1500);
+  const edit = page.getByRole("button", { name: "Edit workspace title" });
+  await edit.click();
+  const input = page.getByRole("textbox", { name: "Workspace title" });
+  const title = await input.inputValue();
+  await page.keyboard.press("Escape");
+  await expect(input).toHaveCount(0);
+
+  // From just left of the pencil, leftwards over the title's tail.
+  const pencil = await edit.boundingBox();
+  if (!pencil) throw new Error("no pencil");
+  const y = pencil.y + pencil.height / 2;
+  await page.mouse.move(pencil.x - 6, y);
+  await page.mouse.down();
+  for (let dx = 20; dx <= 80; dx += 20) await page.mouse.move(pencil.x - 6 - dx, y);
+  await page.mouse.up();
+  await settle(page, 300);
+  await capture(page, {
+    name: "03-code-title-selected",
+    title: "Header: the title's tail selected by a drag",
+    expectations: [
+      "The last few characters of the header title have a selection highlight; the rest of it does not",
+      "The title is not in edit mode: no text box, Cancel or Save",
+    ],
+  });
+
+  await page.keyboard.press(`${mod}+c`);
+  await palette(page);
+  await page.keyboard.press(`${mod}+v`);
+  const search = page.getByRole("textbox", { name: "Type a command or search…" });
+  const pasted = await search.inputValue();
+  await capture(page, {
+    name: "03-code-title-pasted",
+    title: "The copied part pasted into the palette",
+    expectations: ["The palette's search box holds only the selected tail of the workspace title"],
+  });
+  expect(pasted.length).toBeGreaterThan(0);
+  expect(pasted.length).toBeLessThan(title.length);
+  expect(title.endsWith(pasted)).toBe(true);
+  await page.keyboard.press("Escape");
   await home(page);
 });
 

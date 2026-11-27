@@ -420,10 +420,18 @@ impl Screen {
   /// asks for (the sidebar's hover or spinning status dot) reuses the last
   /// drawing instead of rendering the whole screen again. The screen and
   /// the views inside it notify themselves for everything they draw.
+  /// The screen, cached, after the window's text-selection layer, without
+  /// which no `SelectableText` in it can be selected. The layer paints every
+  /// frame, so it stays outside the cache.
   pub fn element(this: &Entity<Self>) -> impl IntoElement {
-    this
-      .clone()
-      .cached(gpui::StyleRefinement::default().size_full())
+    div()
+      .size_full()
+      .child(gpui_kit::base::TextSelectionLayer)
+      .child(
+        this
+          .clone()
+          .cached(gpui::StyleRefinement::default().size_full()),
+      )
   }
 
   /// Whether the screen may run `action` itself ([`Screen::run`]).

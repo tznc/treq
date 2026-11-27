@@ -5,6 +5,7 @@ use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
+use gpui_kit::base::ObservedElement;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::input::{Escape, InputEvent, InputState, MoveDown, MoveUp};
 use serde::Deserialize;
@@ -12,6 +13,7 @@ use tauri_plugin_gpui::gpui::{
   self, deferred, div, prelude::*, ClipboardItem, Context, Entity, FontWeight, SharedString,
   Subscription, Window,
 };
+use treq_ui::SelectorExt as _;
 
 use super::Env;
 use crate::{
@@ -431,10 +433,15 @@ impl StashView {
 }
 
 impl StashView {
-  fn list(&self, entries: &[StashEntry], p: &Palette, cx: &mut Context<Self>) -> gpui::Div {
+  fn list(
+    &self,
+    entries: &[StashEntry],
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> ObservedElement<gpui::Stateful<gpui::Div>> {
     let muted = p.muted_foreground;
     div()
-      .debug_selector(|| "stash-list".into())
+      .selector("stash-list")
       .w(zpx(288.))
       .flex_none()
       .h_full()
@@ -513,9 +520,13 @@ impl StashView {
       )
   }
 
-  fn detail(&mut self, p: &Palette, cx: &mut Context<Self>) -> gpui::Div {
+  fn detail(
+    &mut self,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> ObservedElement<gpui::Stateful<gpui::Div>> {
     let pane = div()
-      .debug_selector(|| "stash-detail".into())
+      .selector("stash-detail")
       .flex_1()
       .min_w_0()
       .h_full()
@@ -742,10 +753,9 @@ impl StashView {
     let new_entry = entry.clone();
     let new_active = selected == filtered.len();
     let panel = div()
-      .id("stash-apply-popover")
+      .selector("stash-apply-popover")
       .role(gpui::Role::Dialog)
       .aria_label("Apply stash")
-      .debug_selector(|| "stash-apply-popover".into())
       .absolute()
       .top(zpx(32.))
       .right_0()
@@ -780,7 +790,7 @@ impl StashView {
           .border_color(p.border)
           .child(
             div()
-              .debug_selector(|| "stash-apply-workspace-select".into())
+              .selector("stash-apply-workspace-select")
               .w_full()
               .child(ui::input(&input).appearance(false).bordered(false).flex_1()),
           ),
@@ -863,10 +873,9 @@ impl StashView {
         .into_any_element();
     }
     div()
-      .id("stash-diff-pane")
+      .selector("stash-diff-pane")
       .role(gpui::Role::Group)
       .aria_label("Stash diff")
-      .debug_selector(|| "stash-diff-pane".into())
       .size_full()
       .child(
         gpui::list(
