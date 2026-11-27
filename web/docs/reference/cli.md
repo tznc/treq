@@ -230,3 +230,13 @@ treq notify <message>
 The notification title is the workspace branch name. In the home repository it is the repository directory name. Treq shows the notification only while no Treq window is focused. Turn notifications off with **Notify when an agent finishes** in **Settings › Application**. A skipped notification still exits with `0` and prints the reason.
 
 The [bundled Treq skill](/docs/concepts/agent-sessions#bundled-treq-skill) tells agents to run `treq notify` with a one-line summary. Treq must already have this repository open.
+
+### `treq hook`
+
+Run a hook that Treq registers with an agent CLI. The hook reads its input as JSON from stdin.
+
+```bash
+treq hook pre-bash
+```
+
+- `pre-bash`: a Claude Code `PreToolUse` hook for Bash. It refuses a command that runs `git` and tells the agent which `treq` or `jj` command to use instead. Treq adds it to Claude Code sessions in a workspace, so you never run it yourself.

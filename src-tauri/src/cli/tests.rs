@@ -41,6 +41,7 @@ fn supports_new_top_level_commands() {
   assert!(is_supported_cli_command("file"));
   assert!(is_supported_cli_command("commits"));
   assert!(is_supported_cli_command("conflicts"));
+  assert!(is_supported_cli_command("hook"));
   assert!(!is_supported_cli_command("open"));
 }
 

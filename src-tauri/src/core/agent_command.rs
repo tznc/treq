@@ -176,6 +176,26 @@ fn add_allow_rules(settings: &mut Map<String, Value>, rules: &[&str]) {
   }
 }
 
+/// The Claude hook that refuses `git` in a workspace (`core::git_guard`).
+const GIT_GUARD_HOOK_COMMAND: &str = "treq hook pre-bash";
+
+/// Adds the Bash PreToolUse hook that refuses `git`, keeping other hooks.
+fn add_git_guard_hook(settings: &mut Map<String, Value>) {
+  let hook = json!({
+    "matcher": "Bash",
+    "hooks": [{ "type": "command", "command": GIT_GUARD_HOOK_COMMAND, "timeout": 10 }],
+  });
+  let hooks = settings.entry("hooks").or_insert_with(|| json!({}));
+  if let Value::Object(hooks) = hooks {
+    let pre_tool_use = hooks.entry("PreToolUse").or_insert_with(|| json!([]));
+    if let Value::Array(pre_tool_use) = pre_tool_use {
+      if !pre_tool_use.contains(&hook) {
+        pre_tool_use.push(hook);
+      }
+    }
+  }
+}
+
 const CODEX_RULE_PATH: &str = ".codex/rules/treq.rules";
 
 /// Allows `gh pr diff` in a Treq-owned Codex project rule, kept out of
@@ -394,7 +414,11 @@ pub fn prepare_auto_command(
           Value::Object(map) => Some(map),
           _ => None,
         });
-      let merged = merge_claude_local_settings(existing, claude_filesystem_settings(paths));
+      let mut merged = merge_claude_local_settings(existing, claude_filesystem_settings(paths));
+      // A workspace has no `.git`, so `git` there reads the home repository.
+      if let (Some(_), Value::Object(settings)) = (paths.workspace_path, &mut merged) {
+        add_git_guard_hook(settings);
+      }
       let json = serde_json::to_string_pretty(&merged).map_err(|e| e.to_string())?;
       (system, Some(json))
     }
@@ -951,7 +975,53 @@ mod tests {
     let written: Value = serde_json::from_str(&std::fs::read_to_string(settings).unwrap()).unwrap();
     assert_eq!(written["extra"], 1);
     assert!(written.get("sandbox").is_none());
+    // The home repository is a real Git checkout, so git stays allowed.
+    assert!(written.get("hooks").is_none());
     super::super::agent_cli::cleanup_agent_cli_files(&prepared.file_paths).unwrap();
+  }
+
+  #[test]
+  fn workspace_claude_settings_refuse_git_through_a_hook() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().to_str().unwrap();
+    let prepared = prepare_auto_command(
+      &AgentPaths {
+        workspace_path: Some(cwd),
+        repo_path: "/repos/app",
+        supporting_repo_paths: NONE,
+        project: None,
+        app_instructions: None,
+        repo_instructions: None,
+      },
+      &opts("claude"),
+    )
+    .unwrap();
+    let files = launch_files(&prepared);
+    let settings = files.iter().find(|p| p.ends_with(".json")).unwrap();
+    let written: Value = serde_json::from_str(&std::fs::read_to_string(settings).unwrap()).unwrap();
+    assert_eq!(
+      written["hooks"]["PreToolUse"],
+      json!([{
+        "matcher": "Bash",
+        "hooks": [{ "type": "command", "command": "treq hook pre-bash", "timeout": 10 }],
+      }])
+    );
+    super::super::agent_cli::cleanup_agent_cli_files(&prepared.file_paths).unwrap();
+  }
+
+  #[test]
+  fn git_guard_hook_keeps_local_hooks_and_is_added_once() {
+    let Value::Object(mut settings) =
+      json!({ "hooks": { "PreToolUse": [{ "matcher": "Edit", "hooks": [] }] } })
+    else {
+      unreachable!()
+    };
+    add_git_guard_hook(&mut settings);
+    add_git_guard_hook(&mut settings);
+    let pre_tool_use = settings["hooks"]["PreToolUse"].as_array().unwrap();
+    assert_eq!(pre_tool_use.len(), 2);
+    assert_eq!(pre_tool_use[0], json!({ "matcher": "Edit", "hooks": [] }));
+    assert_eq!(pre_tool_use[1]["hooks"][0]["command"], "treq hook pre-bash");
   }
 
   #[test]

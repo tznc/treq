@@ -933,6 +933,7 @@ pub fn handle_cli_command(subcommand: &SubcommandMatches) -> Option<i32> {
     "resolve" => workspace_handlers::handle_resolve(&subcommand.matches),
     "send" => workspace_handlers::handle_send(&subcommand.matches),
     "notify" => workspace_handlers::handle_notify(&subcommand.matches),
+    "hook" => handle_hook(&subcommand.matches),
     "project" => run_structured(&subcommand.matches, |format| {
       project_handlers::handle_project_command(&subcommand.matches, format)
     }),
@@ -1206,6 +1207,7 @@ pub(super) fn is_supported_cli_command(name: &str) -> bool {
       | "resolve"
       | "send"
       | "notify"
+      | "hook"
       | "repo"
       | "workspace"
       | "changes"
@@ -1217,6 +1219,26 @@ pub(super) fn is_supported_cli_command(name: &str) -> bool {
       | "agent-review"
       | "pty-remote"
   )
+}
+
+/// `treq hook <event>`: a hook Treq registers with agent CLIs. It reads the
+/// hook's JSON from stdin and never fails the agent's call on bad input.
+fn handle_hook(matches: &Matches) -> bool {
+  match get_arg_value(matches, "event").as_deref() {
+    Some("pre-bash") => {
+      let mut input = String::new();
+      if std::io::Read::read_to_string(&mut std::io::stdin(), &mut input).is_ok() {
+        if let Some(output) = core::git_guard::pre_bash_hook_output(&input) {
+          println!("{output}");
+        }
+      }
+      true
+    }
+    other => {
+      log_cli_error(&format!("Unknown hook: {}", other.unwrap_or_default()));
+      false
+    }
+  }
 }
 
 pub(super) fn parse_agent_mode(mode: &str) -> Result<&'static str, String> {

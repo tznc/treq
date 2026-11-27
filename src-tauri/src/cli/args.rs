@@ -264,6 +264,16 @@ mod tests {
   }
 
   #[test]
+  fn hook_takes_its_event() {
+    let sub = parse(["treq", "hook", "pre-bash"])
+      .unwrap()
+      .subcommand
+      .unwrap();
+    assert_eq!(sub.name, "hook");
+    assert_eq!(sub.matches.args["event"].value, Value::from("pre-bash"));
+  }
+
+  #[test]
   fn usage_errors_exit_with_code_two() {
     assert_eq!(run(["treq", "bogus"]), USAGE_ERROR_EXIT_CODE);
     assert_eq!(run(["treq", "commit", "feat/x"]), USAGE_ERROR_EXIT_CODE);
