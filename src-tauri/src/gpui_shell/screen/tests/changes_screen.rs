@@ -416,6 +416,31 @@ fn changes_tab_offers_file_actions_on_unselected_rows(cx: &mut TestAppContext) {
   }
 }
 
+/// Unhiding Committed during a review reads the committed diffs it hid,
+/// though the working copy did not change.
+#[gpui::test]
+fn unhiding_committed_in_a_review_shows_the_committed_diffs(cx: &mut TestAppContext) {
+  let mut host = changes_host_with_committed();
+  if let Some(working) = host.working.as_mut() {
+    working.working_copy_token = Some("t1".into());
+  }
+  let (mut h, _) = workspace_harness(cx, host, committed_route(false));
+  comment_line(&mut h, "Why?");
+  h.update(|s| {
+    if let View::Workspace(r) = &mut s.view {
+      r.show_committed = Some(true);
+    }
+  });
+  h.cx.run_until_parked();
+  let screen = h.rendered();
+  assert!(
+    screen
+      .query_by_element_id(gpui::SharedString::from("diff-line-c.rs-0-0"))
+      .is_some(),
+    "c.rs is still loading"
+  );
+}
+
 /// An uncommitted row's status letter lines up with a committed row's.
 #[gpui::test]
 fn changes_tab_aligns_status_letters_across_lists(cx: &mut TestAppContext) {
