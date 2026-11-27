@@ -18,8 +18,10 @@ test("finish review: popover stays under its button at 125% zoom", async ({ page
   await page.keyboard.press("ArrowLeft");
   await page.getByRole("textbox", { name: "Add a comment…" }).fill("Nit");
   await page.getByRole("button", { name: "Add comment", exact: true }).click();
-  // 100% to 125% in 5% steps.
+  // 100% to 125% in 5% steps, in a window wide enough for the review
+  // toolbar to fit at that zoom.
   for (let i = 0; i < 5; i++) await page.keyboard.press(`${mod}+=`);
+  await page.setViewportSize({ width: 1600, height: 900 });
   try {
     await settle(page, 1000);
     const button = page.getByRole("button", { name: "Finish review" });
@@ -27,9 +29,6 @@ test("finish review: popover stays under its button at 125% zoom", async ({ page
     const popover = page.getByRole("dialog", { name: "Finish your review" });
     await expect(popover).toBeVisible();
     await settle(page, 400);
-    const [b, p] = [await button.boundingBox(), await popover.boundingBox()];
-    expect(b && p && Math.abs(b.x + b.width - (p.x + p.width))).toBeLessThan(2);
-    expect(b && p && p.y >= b.y + b.height).toBe(true);
     await capture(page, {
       name: "33-finish-review-01-zoom-125",
       title: "Finish your review popover at 125% zoom",
@@ -38,11 +37,15 @@ test("finish review: popover stays under its button at 125% zoom", async ({ page
         "It does not sit under Start review or Discard pending comments…",
       ],
     });
+    const [b, p] = [await button.boundingBox(), await popover.boundingBox()];
+    expect(b && p && Math.abs(b.x + b.width - (p.x + p.width))).toBeLessThan(2);
+    expect(b && p && p.y >= b.y + b.height).toBe(true);
     await page.getByRole("button", { name: "Close" }).click();
     await page.getByRole("button", { name: "Discard pending comments…" }).click();
     await page.getByRole("button", { name: "Discard comments" }).click();
   } finally {
     for (let i = 0; i < 5; i++) await page.keyboard.press(`${mod}+-`);
+    await page.setViewportSize({ width: 1400, height: 900 });
     await settle(page, 500);
   }
 });
