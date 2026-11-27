@@ -1250,6 +1250,17 @@ fn changes_tab_sends_the_review_to_an_agent(cx: &mut TestAppContext) {
     .contains(&"keep sent comments 7 a.rs:Nit".to_string()));
 }
 
+/// Zoomed in, the popover still opens under Finish review, right edges
+/// aligned, rather than flipping left of the button.
+#[gpui::test]
+fn changes_tab_finish_popover_stays_under_its_button_when_zoomed(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  zoom(&mut h, 125);
+  comment_line(&mut h, "Nit");
+  h.click("finish-review");
+  assert_right_aligned_under(&mut h, "finish-review", "finish-review-popover");
+}
+
 #[gpui::test]
 fn changes_tab_starts_an_ai_review_in_a_new_terminal(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
