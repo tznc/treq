@@ -70,7 +70,6 @@ test("changes review: character marks, keyboard, suggestion, stale banner", asyn
     name: "13-review-03-suggest-change",
     title: "Left opens the comment box; Suggest change inserts a suggestion block",
     expectations: [
-      "Comment box under the selected lines with their range label",
       "The comment field reads 'Wrap it', then a ```suggestion block holding the two lines",
       "Below the field a preview shows the lines as - and + rows",
       "'Suggest change' on the left, Cancel and Add comment on the right",

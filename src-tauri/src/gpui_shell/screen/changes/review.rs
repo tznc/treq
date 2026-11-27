@@ -1052,10 +1052,14 @@ impl ChangesView {
       return Some(input.state.clone());
     }
     let state = cx.new(|cx| {
-      TextareaState::new(window, cx)
-        .rows(rows)
-        .placeholder(placeholder)
-        .default_value(text)
+      let state = TextareaState::new(window, cx);
+      // The comment grows to show a suggestion block, as GitHub's does.
+      let state = if field == Field::Draft {
+        state.auto_grow(rows, 12)
+      } else {
+        state.rows(rows)
+      };
+      state.placeholder(placeholder).default_value(text)
     });
     let changes = cx.subscribe(&state, move |view, state, event: &InputEvent, cx| {
       if let InputEvent::Change = event {
