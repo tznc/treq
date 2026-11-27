@@ -911,6 +911,42 @@ fn an_edit_on_disk_during_a_review_waits_behind_the_stale_banner(cx: &mut TestAp
 }
 
 #[gpui::test]
+fn a_comment_follows_its_line_when_lines_are_added_above(cx: &mut TestAppContext) {
+  let mut host = tokened_changes_host();
+  host.versions = HashMap::from([
+    ("fv1".to_string(), "a\nb\nc\n".to_string()),
+    ("fv2".to_string(), "new\na\nb\nc\n".to_string()),
+  ]);
+  if let Some(working) = host.working.as_mut() {
+    working.uncommitted_files[0].content_id = Some("fbase>fv1:git".into());
+  }
+  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  comment_line(&mut h, "Nit");
+  let mut edited = host.working.clone().expect("working");
+  edited.hunks_by_file[0].hunks[0] = serde_json::from_value(serde_json::json!({
+    "id": "h", "header": "@@ -1,1 +1,4 @@", "lines": ["+new", " a", "+b", "+c"], "patch": ""
+  }))
+  .expect("hunk");
+  edited.uncommitted_files[0].content_id = Some("fbase>fv2:git".into());
+  edited.working_copy_token = Some("t2".into());
+  *host.edited.lock().unwrap() = Some(edited);
+  h.update(|s| {
+    if let View::Workspace(r) = &mut s.view {
+      r.changes_revision += 1;
+    }
+  });
+  h.cx.run_until_parked();
+  h.click("reload-stale");
+  settle_save(&mut h);
+  let saved: serde_json::Value =
+    serde_json::from_str(&host.review.lock().unwrap().clone().unwrap_or_default())
+      .expect("saved review");
+  assert_eq!(saved[0]["start_line"], 3, "{saved}");
+  assert_eq!(saved[0]["version"], "fv2", "{saved}");
+  assert!(has_comment(&mut h, "^Comments on a.rs line 3$"));
+}
+
+#[gpui::test]
 fn arrow_keys_move_and_extend_the_line_selection(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
   // a.rs: " a", "+b", "+c"; b.rs: "+d".

@@ -108,6 +108,8 @@ struct FakeHost {
   gitattributes: String,
   /// The kept review's comments JSON.
   review: Mutex<Option<String>>,
+  /// File texts by version (`review::side_version`).
+  versions: HashMap<String, String>,
   /// The pull request's review threads and the review agent's comments.
   threads: Vec<crate::github::GhReviewThread>,
   agent: Mutex<Vec<crate::local_db::AgentReviewComment>>,
@@ -1021,6 +1023,17 @@ impl changes_data::ChangesHost for FakeHost {
   ) -> Result<Vec<String>, String> {
     self.record(format!("read lines {path} {start}..{end}"));
     Ok((start..=end).map(|n| format!("line {n}")).collect())
+  }
+
+  fn file_version(
+    &self,
+    _: &str,
+    _: Option<i64>,
+    path: &str,
+    version: &str,
+  ) -> Result<Option<String>, String> {
+    self.record(format!("read version {path} {version}"));
+    Ok(self.versions.get(version).cloned())
   }
 
   fn generated_files(&self, _: &str, _: Option<i64>) -> crate::core::generated::GeneratedFiles {

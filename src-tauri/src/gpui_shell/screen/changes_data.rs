@@ -78,6 +78,15 @@ pub trait ChangesHost: CommitsHost {
     start: usize,
     end: usize,
   ) -> Result<Vec<String>, String>;
+  /// `path`'s text at `version` (`review::side_version`), `None` once jj no
+  /// longer has it; an error where it cannot be read.
+  fn file_version(
+    &self,
+    repo_path: &str,
+    workspace_id: Option<i64>,
+    path: &str,
+    version: &str,
+  ) -> Result<Option<String>, String>;
   /// The workspace's `linguist-generated` rules (`.gitattributes`).
   fn generated_files(&self, repo_path: &str, workspace_id: Option<i64>) -> GeneratedFiles;
   fn discard_file(&self, workspace_path: &str, path: &str) -> Result<(), String>;
@@ -232,6 +241,19 @@ impl ChangesHost for Backend {
         core::get_file_lines(repo_path, workspace_id, path, false, start, end).map(|l| l.lines)
       }
     }
+  }
+
+  fn file_version(
+    &self,
+    repo_path: &str,
+    workspace_id: Option<i64>,
+    path: &str,
+    version: &str,
+  ) -> Result<Option<String>, String> {
+    if self.remote_containing(repo_path).is_some() {
+      return Err("Remote hosts do not read file versions yet".into());
+    }
+    core::changes::read_file_version(repo_path, workspace_id, path, version)
   }
 
   fn generated_files(&self, repo_path: &str, workspace_id: Option<i64>) -> GeneratedFiles {
