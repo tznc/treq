@@ -325,8 +325,9 @@ jobs:
     name: ios build (gpui)
     needs: prepare
     if: needs.prepare.outputs.should_run == 'true'
-    # App Store Connect only accepts builds from the iOS 26 SDK (Xcode 26).
-    runs-on: macos-26
+    # App Store Connect requires the iOS 27 SDK (Xcode 27) from April 2027
+    # (ITMS-90725).
+    runs-on: xcode-27
     timeout-minutes: 90
     # The signing secrets live in the prod environment, as for the desktop
     # release job.
@@ -367,8 +368,11 @@ jobs:
           grep -qx 'crate-type = \["staticlib", "rlib"\]' src-tauri/Cargo.toml
           rm src-tauri/Cargo.toml.bak
 
-      - name: Show Xcode version
-        run: xcodebuild -version
+      - name: Require Xcode 27 or later
+        run: |
+          xcodebuild -version
+          major=$(xcodebuild -version | awk '/^Xcode/ {split($2, v, "."); print v[1]}')
+          [ "$major" -ge 27 ] || { echo "::error::Xcode $major found; App Store Connect needs Xcode 27+"; exit 1; }
 
       - name: Generate the Xcode project
         env:
