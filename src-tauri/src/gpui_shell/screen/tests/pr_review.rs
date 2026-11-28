@@ -491,6 +491,16 @@ fn pr_review_file_list_scrolls_to_the_file(cx: &mut TestAppContext) {
   assert!(h.shows(gpui::Role::Heading, "b.rs"));
 }
 
+/// Zoomed in, the finish popover still opens under its button, right edges
+/// aligned, rather than flipping left of it.
+#[gpui::test]
+fn the_finish_popover_stays_under_its_button_when_zoomed(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, pr_host(), pr_route());
+  zoom(&mut h, 125);
+  h.click("pr-review-finish");
+  assert_right_aligned_under(&mut h, "pr-review-finish", "pr-review-popover");
+}
+
 /// The finish popover's verdicts are radio buttons named by their label,
 /// checked when chosen, so a user (and the QA specs) pick one by name.
 #[gpui::test]

@@ -772,6 +772,7 @@ impl AgentPromptView {
       agent: agent.id().into(),
       mode: "acceptEdits".into(),
       save_as_repo_default: self.save_default && agent != configured,
+      profile: None,
     };
     read!(
       self,

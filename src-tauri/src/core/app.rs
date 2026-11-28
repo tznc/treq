@@ -209,10 +209,37 @@ pub fn init_deferring_rebase(repo_path: &str) -> Result<bool, InitError> {
   };
   let repo_path = repo_path.to_string();
   std::thread::spawn(move || {
-    rebase_workspaces(&repo_path, &conflict_style);
+    // Without workspaces the fetch's git import would only pre-empt the home reconcile.
+    let has_workspaces = local_db::get_workspaces(&repo_path).is_ok_and(|w| !w.is_empty());
+    if has_workspaces {
+      sync_with_remote(&repo_path, &conflict_style).warn_on_err("sync with remote");
+    }
     prune_operation_log_daily(&repo_path);
   });
   Ok(true)
+}
+
+/// Fetches origin, fast-forwards each trunk target (one no workspace is on)
+/// to its remote, then rebases the workspaces behind their targets. The
+/// rebase pass alone compares against local targets, which only this moves.
+/// Errs with the fetch error after rebasing onto the local targets.
+pub fn sync_with_remote(repo_path: &str, conflict_style: &str) -> Result<(), String> {
+  let workspaces = local_db::get_workspaces(repo_path)?;
+  let fetched = jj::jj_git_fetch(repo_path).map_err(|e| e.to_string());
+  if fetched.is_ok() {
+    let branches: std::collections::HashSet<&str> =
+      workspaces.iter().map(|w| w.branch_name.as_str()).collect();
+    let targets: std::collections::BTreeSet<&str> = workspaces
+      .iter()
+      .map(|w| w.target_branch.as_deref().unwrap_or("main"))
+      .filter(|target| !branches.contains(target))
+      .collect();
+    for target in targets {
+      crate::core::rebase_guard::fast_forward_target(repo_path, target);
+    }
+  }
+  rebase_workspaces(repo_path, conflict_style);
+  fetched.map(drop)
 }
 
 /// Everything [`init`] does but the rebase pass. The conflict marker style

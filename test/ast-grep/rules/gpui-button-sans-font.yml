@@ -1,0 +1,58 @@
+id: gpui-button-sans-font
+language: rust
+severity: error
+message: >
+  Buttons use the sans font. `ui::Button` sets `theme::SANS_FONT` on its own
+  root so a mono parent (a diff row, a code card) never reaches its label; do
+  not set a font on a button.
+note: >
+  For a mono value inside a button (a commit hash, a path), set
+  `.font_family(theme::MONO_FONT)` on that child element instead.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+  - "src-tauri/src/mobile/**/*.rs"
+  - "crates/treq-ui/src/**/*.rs"
+ignores:
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+rule:
+  any:
+    # `ui::Button` renders with the sans font, whatever its parent sets.
+    - all:
+        - kind: impl_item
+        - has:
+            field: trait
+            regex: ^RenderOnce$
+        - has:
+            field: type
+            regex: ^Button$
+        - not:
+            has:
+              stopBy: end
+              kind: call_expression
+              all:
+                - has:
+                    field: function
+                    kind: field_expression
+                    has:
+                      field: field
+                      regex: ^font_family$
+                - has:
+                    field: arguments
+                    regex: SANS_FONT
+    # No call site sets the font on a chain rooted at a button: the
+    # receiver's text starts with the chain's root.
+    - all:
+        - pattern: $R.font_family($$$)
+        - has:
+            field: function
+            has:
+              field: value
+              regex: ^([a-z_]+::)*(Button|IconButton|SplitButton|CopyButton)::new\(
+  not:
+    inside:
+      kind: mod_item
+      has:
+        field: name
+        regex: ^tests$
+      stopBy: end
