@@ -1,0 +1,250 @@
+id: no-assert-is-ok-rust
+snapshots:
+  ? |
+    fn asserts_across_lines() {
+      assert!(
+        parse_with(&config, "x")
+          .await
+          .is_err(),
+        "x should be rejected"
+      );
+    }
+  : labels:
+    - source: |-
+        assert!(
+            parse_with(&config, "x")
+              .await
+              .is_err(),
+            "x should be rejected"
+          )
+      style: primary
+      start: 30
+      end: 128
+    - source: assert
+      style: secondary
+      start: 30
+      end: 36
+    - source: ','
+      style: secondary
+      start: 96
+      end: 97
+    - source: ()
+      style: secondary
+      start: 94
+      end: 96
+    - source: .
+      style: secondary
+      start: 87
+      end: 88
+    - source: is_err
+      style: secondary
+      start: 88
+      end: 94
+    - source: |-
+        (
+            parse_with(&config, "x")
+              .await
+              .is_err(),
+            "x should be rejected"
+          )
+      style: secondary
+      start: 37
+      end: 128
+  ? |
+    fn asserts_not_err() {
+      assert!(!parse("1").is_err());
+    }
+  : labels:
+    - source: assert!(!parse("1").is_err())
+      style: primary
+      start: 25
+      end: 54
+    - source: assert
+      style: secondary
+      start: 25
+      end: 31
+    - source: )
+      style: secondary
+      start: 53
+      end: 54
+    - source: ()
+      style: secondary
+      start: 51
+      end: 53
+    - source: .
+      style: secondary
+      start: 44
+      end: 45
+    - source: is_err
+      style: secondary
+      start: 45
+      end: 51
+    - source: (!parse("1").is_err())
+      style: secondary
+      start: 32
+      end: 54
+  ? |
+    fn asserts_ok() {
+      assert!(parse("1").is_ok());
+    }
+  : labels:
+    - source: assert!(parse("1").is_ok())
+      style: primary
+      start: 20
+      end: 47
+    - source: assert
+      style: secondary
+      start: 20
+      end: 26
+    - source: )
+      style: secondary
+      start: 46
+      end: 47
+    - source: ()
+      style: secondary
+      start: 44
+      end: 46
+    - source: .
+      style: secondary
+      start: 38
+      end: 39
+    - source: is_ok
+      style: secondary
+      start: 39
+      end: 44
+    - source: (parse("1").is_ok())
+      style: secondary
+      start: 27
+      end: 47
+  ? |
+    fn asserts_ok_with_message() {
+      assert!(result.is_ok(), "parse failed: {:?}", result);
+    }
+  : labels:
+    - source: 'assert!(result.is_ok(), "parse failed: {:?}", result)'
+      style: primary
+      start: 33
+      end: 86
+    - source: assert
+      style: secondary
+      start: 33
+      end: 39
+    - source: ','
+      style: secondary
+      start: 55
+      end: 56
+    - source: ()
+      style: secondary
+      start: 53
+      end: 55
+    - source: .
+      style: secondary
+      start: 47
+      end: 48
+    - source: is_ok
+      style: secondary
+      start: 48
+      end: 53
+    - source: '(result.is_ok(), "parse failed: {:?}", result)'
+      style: secondary
+      start: 40
+      end: 86
+  ? |
+    fn asserts_with_args_that_have_commas() {
+      assert!(resolve(&peers, "a", Some(1)).is_err());
+    }
+  : labels:
+    - source: assert!(resolve(&peers, "a", Some(1)).is_err())
+      style: primary
+      start: 44
+      end: 91
+    - source: assert
+      style: secondary
+      start: 44
+      end: 50
+    - source: )
+      style: secondary
+      start: 90
+      end: 91
+    - source: ()
+      style: secondary
+      start: 88
+      end: 90
+    - source: .
+      style: secondary
+      start: 81
+      end: 82
+    - source: is_err
+      style: secondary
+      start: 82
+      end: 88
+    - source: (resolve(&peers, "a", Some(1)).is_err())
+      style: secondary
+      start: 51
+      end: 91
+  ? |
+    fn debug_asserts_err_with_message() {
+      debug_assert!(!state.advance(next).is_err(), "{state:?}");
+    }
+  : labels:
+    - source: debug_assert!(!state.advance(next).is_err(), "{state:?}")
+      style: primary
+      start: 40
+      end: 97
+    - source: debug_assert
+      style: secondary
+      start: 40
+      end: 52
+    - source: ','
+      style: secondary
+      start: 83
+      end: 84
+    - source: ()
+      style: secondary
+      start: 81
+      end: 83
+    - source: .
+      style: secondary
+      start: 74
+      end: 75
+    - source: is_err
+      style: secondary
+      start: 75
+      end: 81
+    - source: (!state.advance(next).is_err(), "{state:?}")
+      style: secondary
+      start: 53
+      end: 97
+  ? |
+    fn uses_a_path() {
+      std::assert!(parse("1").is_ok());
+    }
+  : labels:
+    - source: std::assert!(parse("1").is_ok())
+      style: primary
+      start: 21
+      end: 53
+    - source: std::assert
+      style: secondary
+      start: 21
+      end: 32
+    - source: )
+      style: secondary
+      start: 52
+      end: 53
+    - source: ()
+      style: secondary
+      start: 50
+      end: 52
+    - source: .
+      style: secondary
+      start: 44
+      end: 45
+    - source: is_ok
+      style: secondary
+      start: 45
+      end: 50
+    - source: (parse("1").is_ok())
+      style: secondary
+      start: 33
+      end: 53
