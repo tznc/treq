@@ -316,6 +316,29 @@ test("code: part of the header title selects and copies", async ({ page }) => {
   await home(page);
 });
 
+test("code: header icon buttons show tooltips", async ({ page }) => {
+  await openWorkspace(page, BRANCH);
+  await openTab(page, "Code");
+  await overview(page);
+  await settle(page, 1500);
+  for (const [name, button, tip] of [
+    ["03-code-tooltip-more", "More workspace actions", "More workspace actions"],
+    ["03-code-tooltip-view-pr-menu", "Open PR on web", "Open PR on web"],
+  ] as const) {
+    const el = page.getByRole("button", { name: button, exact: true });
+    await expect(el).toBeVisible();
+    await el.hover();
+    await settle(page, 1500);
+    await capture(page, {
+      name,
+      title: `Tooltip: ${button}`,
+      screen: true,
+      rest: false,
+      expectations: [`One tooltip reading "${tip}" shows next to the hovered button`],
+    });
+  }
+});
+
 test("code: Go to file shrinks in a narrow window", async ({ page }) => {
   await openWorkspace(page, BRANCH);
   await openTab(page, "Code");

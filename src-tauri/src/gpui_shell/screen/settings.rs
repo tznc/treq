@@ -3356,6 +3356,7 @@ impl SettingsView {
           .child(
             Button::new(format!("skill-uninstall-{id}"), p)
               .aria_label(format!("Uninstall {}", row.name))
+              .tooltip(format!("Uninstall {}", row.name))
               .variant(Variant::DestructiveOutline)
               .size(Size::IconSm)
               .disabled(row.busy)

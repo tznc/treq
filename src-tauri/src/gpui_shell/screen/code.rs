@@ -1773,6 +1773,7 @@ impl CodeView {
               .child(
                 Button::new("workspace-description-edit", p)
                   .aria_label("Edit description")
+                  .tooltip("Edit description")
                   .variant(Variant::Ghost)
                   .size(Size::Icon)
                   .w(zpx(20.))

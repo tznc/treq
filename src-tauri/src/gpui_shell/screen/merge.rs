@@ -809,6 +809,7 @@ impl Render for MergeView {
       .child(
         Button::new("merge-back", &p)
           .aria_label("Back")
+          .tooltip("Back")
           .variant(Variant::Ghost)
           .size(Size::Sm)
           .icon(theme::ICON_ARROW_LEFT, 16.)
@@ -901,6 +902,7 @@ impl MergeView {
       .on_click(self.press("merge.confirm"));
     let menu = Button::new("merge-strategy", p)
       .aria_label("Merge strategy")
+      .tooltip("Merge strategy")
       .disabled(disabled)
       .variant(Variant::Success)
       .rounded_l_none()

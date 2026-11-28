@@ -2432,6 +2432,7 @@ impl ChangesView {
       .child(
         Button::new("commit-options", p)
           .aria_label("More commit options")
+          .tooltip("More commit options")
           .variant(Variant::Outline)
           .size(Size::Sm)
           .h_auto()

@@ -400,6 +400,7 @@ impl PromptHistoryView {
           move |copied| {
             Button::new("prompt-history-copy", &p)
               .aria_label("Copy")
+              .tooltip("Copy")
               .variant(Variant::Ghost)
               .size(Size::Sm)
               .h(zpx(24.))

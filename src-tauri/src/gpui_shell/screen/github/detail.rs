@@ -278,6 +278,7 @@ impl GithubView {
       .child(
         Button::new("github-detail-close", p)
           .aria_label("Close")
+          .tooltip("Close")
           .variant(Variant::Ghost)
           .size(Size::Icon)
           .w(zpx(28.))
@@ -568,6 +569,7 @@ impl GithubView {
           .child(
             Button::new("github-edit", p)
               .aria_label("Edit issue")
+              .tooltip("Edit issue")
               .variant(Variant::Ghost)
               .size(Size::Icon)
               .w(zpx(32.))
@@ -586,6 +588,7 @@ impl GithubView {
           .child(
             Button::new("github-delete", p)
               .aria_label("Delete issue")
+              .tooltip("Delete issue")
               .variant(Variant::DestructiveGhost)
               .size(Size::Icon)
               .w(zpx(32.))
@@ -678,6 +681,7 @@ impl GithubView {
         .child(
           Button::new("github-close-options", p)
             .aria_label("Close options")
+            .tooltip("Close options")
             .variant(Variant::Outline)
             .size(Size::Sm)
             .rounded_l_none()

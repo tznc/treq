@@ -38,6 +38,7 @@ pub struct SplitButton {
   on_right_click: Option<OnRightClick>,
   on_hover: Option<OnHover>,
   on_menu_hover: Option<OnHover>,
+  tooltip: Option<SharedString>,
 }
 
 impl SplitButton {
@@ -64,7 +65,14 @@ impl SplitButton {
       on_right_click: None,
       on_hover: None,
       on_menu_hover: None,
+      tooltip: None,
     }
+  }
+
+  /// Shown on hover over the command half; the menu half shows its label.
+  pub fn tooltip(mut self, text: impl Into<SharedString>) -> Self {
+    self.tooltip = Some(text.into());
+    self
   }
 
   /// A leading icon, in the label's color.
@@ -184,6 +192,7 @@ impl RenderOnce for SplitButton {
     .when_some(self.icon, |b, icon| b.icon(icon, 16.))
     .label(self.label)
     .when_some(self.aria_label, |b, name| b.aria_label(name))
+    .when_some(self.tooltip, |b, text| b.tooltip(text))
     .h(zpx(theme::CONTROL_MD))
     .px_3()
     .gap_1p5()
@@ -202,6 +211,7 @@ impl RenderOnce for SplitButton {
     });
     let menu = toned(
       Button::new(format!("{}-menu", self.id), p)
+        .tooltip(self.menu_label.clone())
         .variant(variant)
         .size(Size::IconXs)
         .disabled(self.disabled)

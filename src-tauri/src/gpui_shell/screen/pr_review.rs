@@ -479,6 +479,7 @@ impl PrReviewView {
       let (host, url) = (self.host.clone(), pr.url.clone());
       Button::new("pr-review-open-github", p)
         .aria_label("Open on GitHub")
+        .tooltip("Open on GitHub")
         .variant(Variant::Ghost)
         .size(Size::Icon)
         .w(zpx(32.))
@@ -516,6 +517,7 @@ impl PrReviewView {
       .child(
         Button::new("pr-review-back", p)
           .aria_label("Back")
+          .tooltip("Back")
           .variant(Variant::Ghost)
           .size(Size::Icon)
           .w(zpx(32.))

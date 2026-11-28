@@ -646,6 +646,7 @@ impl SettingsView {
               };
               let revoke = Button::new(format!("teams-revoke-{id}"), p)
                 .aria_label(format!("Revoke invite for {}", invite.email))
+                .tooltip(format!("Revoke invite for {}", invite.email))
                 .variant(Variant::Ghost)
                 .size(Size::Icon)
                 .disabled(pending)
