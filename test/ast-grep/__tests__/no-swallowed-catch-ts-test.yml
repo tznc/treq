@@ -1,0 +1,78 @@
+id: no-swallowed-catch-ts
+valid:
+  # The error propagates or is handled.
+  - |
+    try { run(); } catch (err) { log.error("run failed", err); throw err; }
+  - |
+    try { run(); } catch (err) {
+      if (isNotFound(err)) return null;
+      throw err;
+    }
+  # Ignoring is deliberate and the comment says why and which error.
+  - |
+    try { unlinkSync(path); } catch {
+      // ENOENT: the socket file may already be gone.
+    }
+  - |
+    try { return JSON.parse(text); } catch {
+      // Not JSON: the caller treats this as a plain-text body.
+      return null;
+    }
+  - |
+    p.catch(() => {
+      // Abort errors are expected when the user closes the tab.
+    });
+  - |
+    p.catch(() => {
+      // The lock file may not exist on the first run.
+      return false;
+    });
+  # Catches that return a real value or recover are not silent.
+  - |
+    try { return read(); } catch { return fallbackConfig(); }
+  - |
+    p.catch((err) => reportError(err));
+  - |
+    p.catch(console.error);
+  - |
+    p.then(() => {});
+invalid:
+  - |
+    try { run(); } catch {}
+  - |
+    try { run(); } catch (e: unknown) {
+    }
+  - |
+    try { return read(); } catch { return null; }
+  - |
+    try { return read(); } catch { return []; }
+  - |
+    try { return read(); } catch { return {}; }
+  - |
+    try { return check(); } catch { return false; }
+  - |
+    try { run(); } catch { return; }
+  - |
+    try { run(); } catch (e) { void e; }
+  # A short comment does not explain anything.
+  - |
+    try { run(); } catch {
+      // ignore
+    }
+  - |
+    try { run(); } catch {
+      /* best effort */
+      return null;
+    }
+  - |
+    p.catch(() => {});
+  - |
+    p.catch(() => null);
+  - |
+    p.catch(() => ({}));
+  - |
+    p.catch((e) => { return null; });
+  - |
+    p.catch(function () {});
+  - |
+    p.catch(async () => {});

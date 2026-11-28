@@ -1,0 +1,202 @@
+id: no-swallowed-catch-ts
+snapshots:
+  ? |
+    p.catch(() => ({}));
+  : labels:
+    - source: p.catch(() => ({}))
+      style: primary
+      start: 0
+      end: 19
+    - source: ({})
+      style: secondary
+      start: 14
+      end: 18
+  ? |
+    p.catch(() => null);
+  : labels:
+    - source: p.catch(() => null)
+      style: primary
+      start: 0
+      end: 19
+    - source: 'null'
+      style: secondary
+      start: 14
+      end: 18
+  ? |
+    p.catch(() => {});
+  : labels:
+    - source: p.catch(() => {})
+      style: primary
+      start: 0
+      end: 17
+    - source: '{}'
+      style: secondary
+      start: 14
+      end: 16
+  ? |
+    p.catch((e) => { return null; });
+  : labels:
+    - source: p.catch((e) => { return null; })
+      style: primary
+      start: 0
+      end: 32
+    - source: '{ return null; }'
+      style: secondary
+      start: 15
+      end: 31
+  ? |
+    p.catch(async () => {});
+  : labels:
+    - source: p.catch(async () => {})
+      style: primary
+      start: 0
+      end: 23
+    - source: '{}'
+      style: secondary
+      start: 20
+      end: 22
+  ? |
+    p.catch(function () {});
+  : labels:
+    - source: p.catch(function () {})
+      style: primary
+      start: 0
+      end: 23
+    - source: '{}'
+      style: secondary
+      start: 20
+      end: 22
+  ? |
+    try { return check(); } catch { return false; }
+  : labels:
+    - source: catch { return false; }
+      style: primary
+      start: 24
+      end: 47
+    - source: '{ return false; }'
+      style: secondary
+      start: 30
+      end: 47
+  ? |
+    try { return read(); } catch { return []; }
+  : labels:
+    - source: catch { return []; }
+      style: primary
+      start: 23
+      end: 43
+    - source: '{ return []; }'
+      style: secondary
+      start: 29
+      end: 43
+  ? |
+    try { return read(); } catch { return null; }
+  : labels:
+    - source: catch { return null; }
+      style: primary
+      start: 23
+      end: 45
+    - source: '{ return null; }'
+      style: secondary
+      start: 29
+      end: 45
+  ? |
+    try { return read(); } catch { return {}; }
+  : labels:
+    - source: catch { return {}; }
+      style: primary
+      start: 23
+      end: 43
+    - source: '{ return {}; }'
+      style: secondary
+      start: 29
+      end: 43
+  ? |
+    try { run(); } catch (e) { void e; }
+  : labels:
+    - source: catch (e) { void e; }
+      style: primary
+      start: 15
+      end: 36
+    - source: '{ void e; }'
+      style: secondary
+      start: 25
+      end: 36
+  ? |
+    try { run(); } catch (e: unknown) {
+    }
+  : labels:
+    - source: |-
+        catch (e: unknown) {
+        }
+      style: primary
+      start: 15
+      end: 37
+    - source: |-
+        {
+        }
+      style: secondary
+      start: 34
+      end: 37
+  ? |
+    try { run(); } catch {
+      /* best effort */
+      return null;
+    }
+  : labels:
+    - source: |-
+        catch {
+          /* best effort */
+          return null;
+        }
+      style: primary
+      start: 15
+      end: 59
+    - source: |-
+        {
+          /* best effort */
+          return null;
+        }
+      style: secondary
+      start: 21
+      end: 59
+  ? |
+    try { run(); } catch {
+      // ignore
+    }
+  : labels:
+    - source: |-
+        catch {
+          // ignore
+        }
+      style: primary
+      start: 15
+      end: 36
+    - source: |-
+        {
+          // ignore
+        }
+      style: secondary
+      start: 21
+      end: 36
+  ? |
+    try { run(); } catch { return; }
+  : labels:
+    - source: catch { return; }
+      style: primary
+      start: 15
+      end: 32
+    - source: '{ return; }'
+      style: secondary
+      start: 21
+      end: 32
+  ? |
+    try { run(); } catch {}
+  : labels:
+    - source: catch {}
+      style: primary
+      start: 15
+      end: 23
+    - source: '{}'
+      style: secondary
+      start: 21
+      end: 23
