@@ -125,6 +125,17 @@ async function importEd25519PrivateKey(seed: Uint8Array): Promise<CryptoKey> {
   return await crypto.subtle.importKey("pkcs8", der as BufferSource, { name: "Ed25519" }, false, ["sign"]);
 }
 
+// Whether the seed is the private half of the public key: a mismatched pair
+// signs certificates that machines trusting the public key refuse.
+export async function caKeyPairMatches(ca: CaKeyMaterial): Promise<boolean> {
+  const message = new TextEncoder().encode("treq-ssh-ca-check");
+  const signature = await signEd25519(ca.privateSeed, message);
+  const publicKey = await crypto.subtle.importKey("raw", ca.publicKey as BufferSource, { name: "Ed25519" }, false, [
+    "verify",
+  ]);
+  return await crypto.subtle.verify("Ed25519", publicKey, signature as BufferSource, message as BufferSource);
+}
+
 async function signEd25519(seed: Uint8Array, message: Uint8Array): Promise<Uint8Array> {
   const key = await importEd25519PrivateKey(seed);
   const signature = await crypto.subtle.sign("Ed25519", key, message as BufferSource);

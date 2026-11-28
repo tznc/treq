@@ -31,6 +31,8 @@
 //   "force_migration" {migration_id, reason}
 //   "refresh_ca_trust" {limit?, after?}         - rewrite the trusted SSH CAs on running machines
 //                                                (a CA roll; page with next_after, ca-trust-refresh.ts)
+//   "ca_status"                                - the SSH CA the functions see and running machines on
+//                                                another trust set (scripts/remote-ca/verify.ts, ca-status.ts)
 //
 // Operator actions are audited as `admin_*` events, not as the affected
 // user's own actions.
@@ -46,6 +48,7 @@ import { createStripeClient } from "../_shared/billing/stripe-api.ts";
 import { reconcileStaleSubscriptions, reconcileStoreFor } from "../_shared/billing/reconcile.ts";
 import * as ops from "../_shared/remote/operator-controls.ts";
 import { refreshCaTrust, supabaseCaTrustRefreshStore } from "../_shared/remote/ca-trust-refresh.ts";
+import { caStatus, supabaseCaStatusStore } from "../_shared/remote/ca-status.ts";
 import { isProviderStubEnabled } from "../_shared/remote/local-provider.ts";
 import { errorMessage } from "../_shared/error-message.ts";
 
@@ -137,6 +140,7 @@ const ACTIONS: Record<string, (ctx: Ctx, body: Record<string, unknown>) => Promi
       ops.batch(body.limit),
       typeof body.after === "string" ? body.after : null,
     ),
+  ca_status: (ctx) => caStatus(supabaseCaStatusStore(ctx.supabase)),
 };
 
 Deno.serve(async (req) => {
