@@ -303,7 +303,7 @@ pub(super) fn start_deep_link(host: &dyn WindowHost, request: &AgentDeepLinkRequ
     agent: Some(request.agent.clone()),
     session_name: None,
     link: None,
-    profile: None,
+    profile: request.profile.clone(),
   };
   match host.launch(&launched, true) {
     Ok(()) => launch::deep_links()

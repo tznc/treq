@@ -299,7 +299,7 @@ proptest! {
     pid in any::<u32>(), times in any::<[u64; 3]>(), focused in any::<bool>(), supporting in any::<bool>(),
   ) {
     let [request_id, repo, branch, prompt, mode, agent] = fields;
-    let req = AgentDispatchRequest { request_id, repo, branch, prompt, mode, agent };
+    let req = AgentDispatchRequest { request_id, repo, branch, prompt, mode, agent, profile: reason.clone() };
     let back: AgentDispatchRequest = serde_json::from_slice(&serde_json::to_vec(&req).unwrap()).unwrap();
     prop_assert_eq!(&back, &req);
 

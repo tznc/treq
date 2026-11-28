@@ -718,6 +718,7 @@ mod tests {
       prompt: "hi".into(),
       mode: "plan".into(),
       agent: "claude".into(),
+      profile: None,
     };
     let agent_json = serde_json::to_string(&agent).unwrap();
     match parse_ipc_payload(&agent_json).unwrap() {

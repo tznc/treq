@@ -547,6 +547,13 @@ pub(super) fn start_agent_kind(matches: &Matches, repo_path: &str) -> Result<Str
   })
 }
 
+/// `--profile`: the agent's account profile to start with.
+pub(super) fn start_profile(matches: &Matches) -> Option<String> {
+  get_arg_value(matches, "profile")
+    .map(|p| p.trim().to_string())
+    .filter(|p| !p.is_empty())
+}
+
 fn handle_agent_start(matches: &Matches) -> bool {
   let Some(branch) = get_arg_value(matches, "branch") else {
     super::log_cli_error("Error: branch is required");
@@ -621,6 +628,7 @@ fn handle_agent_start(matches: &Matches) -> bool {
     &prompt,
     &mode,
     &agent,
+    start_profile(matches).as_deref(),
     &request_id,
   ) {
     super::log_cli_error(&format!("Error dispatching agent request: {}", error));
