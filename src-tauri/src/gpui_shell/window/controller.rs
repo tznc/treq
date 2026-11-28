@@ -91,9 +91,7 @@ impl WindowController {
     // A project's remote repository opens on its machine, as its recent would.
     let remote = repo.as_deref().and_then(crate::core::projects::remote_repo);
     let repo = repo.filter(|_| remote.is_none());
-    // A saved folder that is no longer a repository opens onboarding, and
-    // opens the folder as the picker does, which offers to initialize it,
-    // before a read writes `.treq/` into it.
+    // A saved folder that is no repository opens onboarding before a read writes `.treq/` into it.
     let refused = repo.clone().filter(|r| !host.is_repo(r));
     if refused.is_some() {
       host.save_setting("last_opened_repo_path", "");
@@ -128,17 +126,12 @@ impl WindowController {
     let host = this.host.clone();
     cx.background_spawn(async move { host.detect_editors() })
       .detach();
-    // The saved theme, zoom and sidebar width are in the first frame, not a
-    // frame later: a read of a few settings costs far less than a flash of
-    // the default theme.
+    // Prefs apply in the first frame: reading a few settings costs less than a default-theme flash.
     let (values, flags) = read_prefs(&*this.host, &settings_keys(&this.model.main_repo));
     this.apply_prefs(&values, flags);
     let mut effects = vec![Effect::Refresh { revision: false }];
     match repo {
-      // The first read races `prepare_repo`'s jj init: a branch read before
-      // `.jj` exists fails, and only a refresh reads the branch again. So
-      // once the repository is prepared, read again if the branch is still
-      // unknown, waiting for a read in flight to tell.
+      // A read racing `prepare_repo`'s jj init misses the branch: reread it once prepared.
       Some(repo) => this.background(
         move |host| host.prepare_repo(&repo),
         |this, (), cx| {
@@ -251,8 +244,7 @@ impl WindowController {
         .detach();
     }
     let effects = self.model.native_event(event, &self.data);
-    // After the model: leaving a removed workspace reads its stack parent
-    // from the list the rows are about to leave.
+    // After the model: leaving a removed workspace reads its stack parent from rows about to go.
     match event {
       NativeEvent::WorkspacesRemoving { repo_path, ids } => self.data.hide(repo_path, ids),
       NativeEvent::WorkspacesRestored { repo_path, ids } => self.data.unhide(repo_path, ids),
@@ -314,8 +306,7 @@ impl WindowController {
   /// The watched checkout changed on disk: the Changes tab reads again.
   pub fn files_changed(&mut self, cx: &mut Context<Self>) {
     self.model.view.changes_revision += 1;
-    // A checkout outside treq (`git checkout`, a new jj op) moves the home
-    // branch, which only the detail read picks up.
+    // Only the detail read sees the home branch move after `git checkout` or a jj op outside treq.
     self.read(
       Read {
         detail: true,
@@ -621,8 +612,7 @@ impl WindowController {
         |this, (path, result), cx| {
           let effects = match result {
             Ok(()) if this.model.main_repo == path => {
-              // The window's main repository left: the next one takes over,
-              // or the project shows empty.
+              // The main repository left: the next takes over, or the project shows empty.
               let next = this
                 .data
                 .supporting()
@@ -961,8 +951,7 @@ impl WindowController {
       return;
     }
     self.background(
-      // A read that panics must not leave `reading` set, or the window
-      // never reads again.
+      // A read that panics must not leave `reading` set, or the window never reads again.
       move |host| {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
           read_all(host, &main, supporting, read, &known)

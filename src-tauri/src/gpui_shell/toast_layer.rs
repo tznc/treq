@@ -133,8 +133,7 @@ fn item(toast: &Toast, palette: Palette, on_click: ToastClick) -> AnyElement {
       ))
     })
     .when(!compact, |this| {
-      // `rounded-md p-1 text-muted-foreground/70 hover:bg-accent
-      // hover:text-foreground`
+      // `rounded-md p-1 text-muted-foreground/70 hover:bg-accent hover:text-foreground`
       this.child(
         div()
           .selector(format!("toast-close-{}", toast.id))

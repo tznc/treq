@@ -615,8 +615,7 @@ fn workspace_dialogs_survive_random_input() {
     (vec(step(), 1..20), 0u8..3),
     |cx, (steps, which)| {
       let run = fuzz(cx, dialog_scenario(which), &steps);
-      // Only a valid branch name is created, or renamed to once the dry
-      // run accepts it.
+      // Only a valid branch name is created, or renamed to once the dry run accepts it.
       let workspaces = workspace_host().workspaces;
       for call in effects(&run.host) {
         let branch = call
@@ -782,16 +781,14 @@ fn machine_terminal_controls_change_nothing_unconfirmed() {
       };
       let mut run = fuzz(cx, scenario, &steps);
       run.settle();
-      // A change to a host's terminals follows its confirmation, so there
-      // are never more of them than confirmations answered with the action.
+      // Each terminal change follows a confirmation, so changes never outnumber confirmations.
       let changes = run
         .host
         .calls()
         .iter()
         .filter(|c| c.starts_with("terminals ") || c.starts_with("reset terminals "))
         .count();
-      // Confirmations: a click on the dialog's action, or Enter/Space on
-      // its focused button.
+      // Confirmations: a click on the dialog's action, or Enter/Space on its focused button.
       let confirmed = run
         .log
         .iter()
@@ -808,8 +805,7 @@ fn machine_terminal_controls_change_nothing_unconfirmed() {
         "{changes} terminal changes for {confirmed} confirmations {}",
         run.context()
       );
-      // An open popover never stays on "Asking the host…" once the host
-      // has answered.
+      // An open popover never stays on "Asking the host…" once the host has answered.
       if run.h.drawn("machine-terminals-status") {
         let asking = run
           .screen

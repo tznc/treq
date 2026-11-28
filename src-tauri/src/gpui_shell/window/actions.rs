@@ -613,8 +613,7 @@ impl Model {
           prompt: value["prompt"].as_str().map(str::to_string),
           mode: Some("acceptEdits".into()),
           name: Some("AI Review".into()),
-          // The reviewer stays on the screen they started it from; the
-          // terminal pane shows the agent on every screen.
+          // The user stays put: the terminal pane shows the agent on every screen.
           select: false,
         });
       }
@@ -815,8 +814,7 @@ impl Model {
               .collect()
           })
           .unwrap_or_default();
-        // An agent's turn ended: it may have rewritten history outside
-        // treq, so the tab counts and the Changes tab read again.
+        // A finished turn may have rewritten history, so tab counts and the Changes tab read again.
         if streaming(&self.terminals) < was {
           self.view.changes_revision += 1;
         }

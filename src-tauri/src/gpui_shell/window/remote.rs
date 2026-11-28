@@ -467,8 +467,7 @@ impl Remote {
           .into_iter()
           .collect();
       }
-      // A folder that holds no repository: offer to clone or initialize
-      // one there, as a probe of it would.
+      // A folder with no repository offers clone or init there, as a probe of it would.
       "remoteRepo.useFolder" => {
         self.form.probe = Some(RemoteRepoProbe {
           host: String::new(),
@@ -726,8 +725,7 @@ pub fn open(
         };
         return Err((Some(probe), message.into()));
       }
-      // A plain Git repository needs jj colocated before its workspaces and
-      // commits load; one that has it is left as it is.
+      // Workspaces and commits need jj colocated, and init leaves an existing jj repo as it is.
       change(TreqCommandRequest::InitRepo {
         repo: canonical,
         idempotency_key: String::new(),
