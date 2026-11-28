@@ -46,7 +46,7 @@ export class SshWriter {
   // misread as negative.
   writeMpintFromUnsigned(bytes: Uint8Array): this {
     let value = bytes;
-    if (value.length > 0 && (value[0] & 0x80) !== 0) {
+    if (((value[0] ?? 0) & 0x80) !== 0) {
       const padded = new Uint8Array(value.length + 1);
       padded.set(value, 1);
       value = padded;

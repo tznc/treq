@@ -10,7 +10,7 @@ import {
   type IntegrationSecretStore,
   provisionIntegrationCredential,
 } from "../_shared/remote/integration-credential.ts";
-import { fakeProvider } from "./helpers/remote_fakes.ts";
+import { defined, fakeProvider } from "./helpers/remote_fakes.ts";
 
 function recorder() {
   const execs: string[] = [];
@@ -42,14 +42,15 @@ Deno.test("provisionIntegrationCredential saves a new secret, then writes the co
   const { provider, execs, envs } = recorder();
   const store = memoryStore();
   await provisionIntegrationCredential(store, provider, "m1", "pl-1", PROXY);
-  const secret = store.saved["pl-1"];
+  const secret = defined(store.saved["pl-1"]);
   assertMatch(secret, /^[0-9a-f]{64}$/);
   assertEquals(execs.length, 2);
-  assert(execs[0].includes(INTEGRATION_CONFIG_FILE));
+  const exec = defined(execs[0]);
+  assert(exec.includes(INTEGRATION_CONFIG_FILE));
   assertEquals(execs[1], configureGithubHelpersCommand().join(" "));
   // The secret travels in the exec environment, never the command line.
-  assert(!execs[0].includes(secret), "secret must not be in the command line");
-  assertEquals(JSON.parse(envs[0][INTEGRATION_CONFIG_ENV]), {
+  assert(!exec.includes(secret), "secret must not be in the command line");
+  assertEquals(JSON.parse(defined(envs[0]?.[INTEGRATION_CONFIG_ENV])), {
     placement_id: "pl-1",
     proxy_url: PROXY,
     secret,
@@ -100,10 +101,10 @@ Deno.test("provisionPlacementServices starts the gateway, then installs the inte
     PROXY,
   );
   assertEquals(execs.length, 3);
-  assert(execs[0].includes("/etc/treq/gateway.secret"));
-  assert(execs[1].includes(INTEGRATION_CONFIG_FILE));
-  assertMatch(gateway.saved["pl-1"], /^[0-9a-f]{64}$/);
-  assertMatch(integration.saved["pl-1"], /^[0-9a-f]{64}$/);
+  assert(execs[0]?.includes("/etc/treq/gateway.secret"));
+  assert(execs[1]?.includes(INTEGRATION_CONFIG_FILE));
+  assertMatch(defined(gateway.saved["pl-1"]), /^[0-9a-f]{64}$/);
+  assertMatch(defined(integration.saved["pl-1"]), /^[0-9a-f]{64}$/);
   assert(gateway.saved["pl-1"] !== integration.saved["pl-1"], "two different secrets");
 });
 

@@ -54,7 +54,7 @@ const MANAGED_SSH_USER = "treq";
 // security-relevant option on the command line so a base-image
 // sshd_config cannot widen access: loopback only, no passwords, and user
 // certificates signed by the Treq CA (written by `installCaTrustCommand`).
-export function installSshdCommand(): string[] {
+export function installSshdCommand(): [string, string, string] {
   const script = `#!/bin/sh
 set -eu
 SUDO=""

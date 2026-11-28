@@ -631,8 +631,7 @@ mod tests {
 
   /// UI tests through gpui-kit's harness: real clicks and typing, no backend.
   mod ui {
-    // Explicit imports only: a `gpui_kit::*` glob would shadow the `#[test]`
-    // that `#[gpui_kit::test]` expands to.
+    // Explicit imports: a `gpui_kit::*` glob would shadow the `#[test]` `#[gpui_kit::test]` emits.
     use gpui_kit::test::TestWindowExt;
     use gpui_kit::{
       base::Root, px, size, AppContext, Bounds, Context, Entity, Point, TestAppContext,

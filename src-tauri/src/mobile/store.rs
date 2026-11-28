@@ -131,8 +131,7 @@ mod tests {
           .collect::<Vec<_>>(),
       );
     });
-    // A machine list of 4 hosts reads the hosts twice and each host's
-    // repositories once per frame.
+    // A machine list of 4 hosts reads the hosts twice and each host's repositories once per frame.
     println!(
       "hosts query {hosts:?}, repositories query {repos:?}, cached repositories {cached:?}; \
        4-host machine-list frame: {:?} from the database",

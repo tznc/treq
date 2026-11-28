@@ -5,8 +5,10 @@
 use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
+use gpui_kit::base::ObservedElement;
 use gpui_kit::base::TestSupportExt as _;
 use std::time::Duration;
+use treq_ui::SelectorExt as _;
 
 use gpui::{AnyElement, StrikethroughStyle, StyledText, Task};
 
@@ -40,6 +42,8 @@ pub(in crate::gpui_shell::screen) struct Threads {
   collapsed: HashSet<String>,
   seen: HashSet<String>,
   pub(in crate::gpui_shell::screen) agent: Vec<AgentReviewComment>,
+  /// Resolved sent comments unfolded.
+  expanded: HashSet<String>,
   /// Agent comments with an action running.
   busy: HashSet<String>,
   placed: Placed,
@@ -127,7 +131,7 @@ impl ChangesView {
     self.threads.revision += 1;
   }
 
-  fn read_agent(&mut self, cx: &mut Context<Self>) {
+  pub(super) fn read_agent(&mut self, cx: &mut Context<Self>) {
     let Some(id) = self.parent.workspace_id() else {
       return;
     };
@@ -234,6 +238,13 @@ impl ChangesView {
     );
   }
 
+  fn toggle_sent(&mut self, id: &str, cx: &mut Context<Self>) {
+    if !self.threads.expanded.remove(id) {
+      self.threads.expanded.insert(id.to_string());
+    }
+    cx.notify();
+  }
+
   fn toggle_thread(&mut self, id: &str, cx: &mut Context<Self>) {
     if !self.threads.collapsed.remove(id) {
       self.threads.collapsed.insert(id.to_string());
@@ -300,11 +311,9 @@ impl ChangesView {
       .filter(|c| c.status != "resolved")
       .count();
     (open > 0).then(|| {
-      // Short label (['count']): 11px is fine.
-      // ast-grep-ignore: gpui-text-xs-short-label-only
+      // Short label (count). ast-grep-ignore: gpui-text-xs-short-label-only
       ui::text(div(), TextSize::Xs)
-        .id("agent-review-comment-count")
-        .debug_selector(|| "agent-review-comment-count".into())
+        .selector("agent-review-comment-count")
         .role(gpui::Role::Label)
         .aria_label(count_label(open, "local review comment"))
         .text_color(Tone::GitMerged.color(p))
@@ -336,7 +345,7 @@ impl ChangesView {
       .get(&(path.to_string(), number, side))
     {
       let mut list = div()
-        .debug_selector(|| "agent-review-inline-list".into())
+        .selector("agent-review-inline-list")
         .border_y_1()
         .border_color(violet(p, 0.3))
         .bg(violet(p, 0.03))
@@ -379,10 +388,9 @@ impl ChangesView {
   ) -> Option<impl IntoElement> {
     let threads = self.threads.placed.unplaced.get(path)?;
     let mut section = div()
-      .id(SharedString::from(format!(
+      .selector(SharedString::from(format!(
         "github-outdated-threads-{path}"
       )))
-      .debug_selector(|| "github-outdated-threads".into())
       .role(gpui::Role::Group)
       .aria_label(format!("Outdated threads on {path}"))
       .border_b_1()
@@ -428,8 +436,7 @@ impl ChangesView {
     let muted = p.muted_foreground;
     let id = thread.id.clone();
     let mut toggle = div()
-      .id(SharedString::from(format!("github-thread-{}", thread.id)))
-      .debug_selector(|| "github-thread-toggle".into())
+      .selector(SharedString::from(format!("github-thread-{}", thread.id)))
       .role(gpui::Role::Button)
       .aria_label(if collapsed {
         "Show review thread"
@@ -442,8 +449,7 @@ impl ChangesView {
       .items_center()
       .gap_2()
       .cursor_pointer();
-    // Expanded: a compact pill above the comments. Collapsed: a full-width row
-    // holding the preview.
+    // Expanded: a pill above the comments. Collapsed: a full-width row holding the preview.
     toggle = if collapsed {
       toggle
         .w_full()
@@ -484,8 +490,7 @@ impl ChangesView {
     // Expanded threads show the badge beside the pill rather than inside it.
     let resolved = thread.is_resolved.then(|| {
       let grey = p.muted_foreground;
-      // Short label (['status pill']): 11px is fine.
-      // ast-grep-ignore: gpui-text-xs-short-label-only
+      // Short label (status pill). ast-grep-ignore: gpui-text-xs-short-label-only
       ui::text(div(), TextSize::Xs)
         .flex_none()
         .flex()
@@ -509,8 +514,7 @@ impl ChangesView {
     if let (true, Some(first)) = (collapsed, first) {
       toggle = toggle.child(
         ui::text(div(), TextSize::Sm)
-          .id("github-thread-collapsed-preview")
-          .debug_selector(|| "github-thread-collapsed-preview".into())
+          .selector("github-thread-collapsed-preview")
           .role(gpui::Role::Paragraph)
           .aria_label(preview(&first.body))
           .min_w_0()
@@ -523,8 +527,7 @@ impl ChangesView {
     if !collapsed {
       let n = thread.comments.len();
       toggle = toggle.child(
-        // Short label (['count']): 11px is fine.
-        // ast-grep-ignore: gpui-text-xs-short-label-only
+        // Short label (count). ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .text_color(muted)
           .child(format!("{n} comment{}", if n == 1 { "" } else { "s" })),
@@ -555,7 +558,7 @@ impl ChangesView {
     if !collapsed {
       // One card per thread; replies follow flush, split by a rule.
       let mut comments = div()
-        .debug_selector(|| "github-thread-comments".into())
+        .selector("github-thread-comments")
         .min_w_0()
         .flex()
         .flex_col()
@@ -567,7 +570,7 @@ impl ChangesView {
       for (i, comment) in thread.comments.iter().enumerate() {
         let id = comment.id.clone();
         let mut c = div()
-          .debug_selector(move || format!("github-comment-{id}"))
+          .selector(format!("github-comment-{id}"))
           .child(self.thread_comment(comment, lines, path, anchor.clone(), line, side, p, cx));
         if i > 0 {
           c = c.border_t_1().border_color(p.border.opacity(0.6));
@@ -582,7 +585,12 @@ impl ChangesView {
 
   /// A GitHub comment's text, its ```` ```suggestion ```` block drawn as a
   /// diff against the line it replaces rather than as a code block.
-  fn github_comment_body(&self, comment: &GhReviewComment, lines: usize, p: &Palette) -> Div {
+  fn github_comment_body(
+    &self,
+    comment: &GhReviewComment,
+    lines: usize,
+    p: &Palette,
+  ) -> ObservedElement<gpui::Stateful<Div>> {
     let md = |key: &str, text: &str| {
       super::super::code::markdown(
         format!("github-comment-{}{key}", comment.id),
@@ -591,7 +599,7 @@ impl ChangesView {
         self.dark,
       )
     };
-    let body = div().debug_selector(|| "github-comment-body".into());
+    let body = div().selector("github-comment-body");
     let Some(s) = crate::core::review::parse_suggestion(&comment.body) else {
       return body.child(md("", &comment.body));
     };
@@ -626,11 +634,10 @@ impl ChangesView {
     let quoted = comment.clone();
     let file = path.to_string();
     div()
-      .id(SharedString::from(format!(
+      .selector(SharedString::from(format!(
         "github-comment-card-{}",
         comment.id
       )))
-      .debug_selector(|| "github-comment-card".into())
       .role(gpui::Role::Group)
       .aria_label(format!("Comment by {}", comment.author.login))
       .min_w_0()
@@ -644,8 +651,7 @@ impl ChangesView {
           .child(avatar(&comment.author.login, 32., p))
           .child(profile_link(&comment.author.login, p, cx))
           .child(
-            // Short label (['timestamp']): 11px is fine.
-            // ast-grep-ignore: gpui-text-xs-short-label-only
+            // Short label (timestamp). ast-grep-ignore: gpui-text-xs-short-label-only
             ui::text(div(), TextSize::Xs)
               .text_color(p.muted_foreground)
               .child(comment_date(&comment.created_at, this_year)),
@@ -663,23 +669,21 @@ impl ChangesView {
           cx,
         )
         .child(
-          div()
-            .debug_selector(|| "github-comment-quote".into())
-            .child(
-              self.tip(
-                format!("quote-{}", comment.id),
-                "Quote this comment",
-                Button::new(SharedString::from(format!("quote-{}", comment.id)), p)
-                  .variant(Variant::Outline)
-                  .size(Size::Xs)
-                  .icon(theme::ICON_BOT, 12.)
-                  .label("Quote")
-                  .on_click(cx.listener(move |view, _, _, cx| {
-                    view.quote(&quoted, &file, anchor.clone(), line, side, cx)
-                  })),
-                cx,
-              ),
+          div().selector("github-comment-quote").child(
+            self.tip(
+              format!("quote-{}", comment.id),
+              "Quote this comment",
+              Button::new(SharedString::from(format!("quote-{}", comment.id)), p)
+                .variant(Variant::Outline)
+                .size(Size::Xs)
+                .icon(theme::ICON_BOT, 12.)
+                .label("Quote")
+                .on_click(cx.listener(move |view, _, _, cx| {
+                  view.quote(&quoted, &file, anchor.clone(), line, side, cx)
+                })),
+              cx,
             ),
+          ),
         ),
       )
       .test_support()
@@ -692,27 +696,37 @@ impl ChangesView {
     original: Option<String>,
     p: &Palette,
     cx: &mut Context<Self>,
-  ) -> impl IntoElement {
+  ) -> AnyElement {
     let busy = self.threads.busy.contains(&comment.id);
     let muted = p.muted_foreground;
+    // A comment from a review the user sent to an agent, not the agent's.
+    let sent = comment.source == crate::core::agent_review::SENT_REVIEW_SOURCE;
+    let resolved = comment.status == "resolved";
+    if sent && resolved && !self.threads.expanded.contains(&comment.id) {
+      return self.folded_sent_card(comment, p, cx).into_any_element();
+    }
+    let (tone, label) = if sent {
+      (Tone::Primary, "Sent to agent")
+    } else {
+      (Tone::GitMerged, "Local")
+    };
     let range = if comment.end_line != comment.start_line {
       format!("{}-{}", comment.start_line, comment.end_line)
     } else {
       comment.start_line.to_string()
     };
     let mut card = div()
-      .id(SharedString::from(format!(
+      .selector(SharedString::from(format!(
         "agent-review-comment-card-{}",
         comment.id
       )))
-      .debug_selector(|| "agent-review-comment-card".into())
       .max_w(zpx(CARD_MAX_W))
       .role(gpui::Role::Group)
       .aria_label(format!(
-        "Agent comment on {} line {range}",
+        "{} comment on {} line {range}",
+        if sent { "Sent" } else { "Agent" },
         comment.file_path
       ))
-      .font_family(theme::MONO_FONT)
       .rounded(radius::MD)
       .border_1()
       .border_color(violet(p, 0.4))
@@ -726,14 +740,19 @@ impl ChangesView {
           .flex()
           .items_center()
           .gap_2()
-          .child(ui::icon(theme::ICON_BOT, 14., Tone::GitMerged.color(p)))
           .child(
-            // Short label (['tag']): 11px is fine.
-            // ast-grep-ignore: gpui-text-xs-short-label-only
-            ui::text(div(), TextSize::Xs)
-              .font_weight(FontWeight::MEDIUM)
-              .text_color(Tone::GitMerged.color(p))
-              .child("Local"),
+            div()
+              .flex()
+              .items_center()
+              .gap_2()
+              .child(ui::icon(theme::ICON_BOT, 14., tone.color(p)))
+              .child(
+                // Short label (tag). ast-grep-ignore: gpui-text-xs-short-label-only
+                ui::text(div(), TextSize::Xs)
+                  .font_weight(FontWeight::MEDIUM)
+                  .text_color(tone.color(p))
+                  .child(label),
+              ),
           )
           .child(
             ui::text(div(), TextSize::Sm)
@@ -742,7 +761,7 @@ impl ChangesView {
           ),
       )
       .child(
-        div()
+        ui::text(div(), TextSize::Sm)
           .whitespace_normal()
           .child(comment.comment_text.clone()),
       );
@@ -750,7 +769,13 @@ impl ChangesView {
       card = card.child(suggestion_box(original.as_deref(), suggested, p));
     }
     let id = comment.id.clone();
-    let mut actions = div().flex().flex_wrap().items_center().gap_2();
+    // Buttons read in the UI font, not the card's mono.
+    let mut actions = div()
+      .flex()
+      .flex_wrap()
+      .items_center()
+      .gap_2()
+      .font_family(theme::SANS_FONT);
     if comment.suggested_replacement.is_some() {
       let id = id.clone();
       actions = actions.child(
@@ -765,18 +790,22 @@ impl ChangesView {
           ),
       );
     }
-    let sent = comment.clone();
+    let comment_sent = comment.clone();
     actions = actions
-      .child(
-        Button::new(SharedString::from(format!("agent-send-{id}")), p)
-          .variant(Variant::Outline)
-          .size(Size::Sm)
-          .gap_1p5()
-          .disabled(busy)
-          .icon(theme::ICON_TERMINAL, 12.)
-          .label("Send to agent")
-          .on_click(cx.listener(move |view, _, _, cx| view.send_agent_comment(&sent, cx))),
-      )
+      .when(!sent, |a| {
+        a.child(
+          Button::new(SharedString::from(format!("agent-send-{id}")), p)
+            .variant(Variant::Outline)
+            .size(Size::Sm)
+            .gap_1p5()
+            .disabled(busy)
+            .icon(theme::ICON_TERMINAL, 12.)
+            .label("Send to agent")
+            .on_click(
+              cx.listener(move |view, _, _, cx| view.send_agent_comment(&comment_sent, cx)),
+            ),
+        )
+      })
       .child({
         let id = id.clone();
         Button::new(SharedString::from(format!("agent-resolve-{id}")), p)
@@ -790,20 +819,91 @@ impl ChangesView {
             cx.listener(move |view, _, _, cx| view.agent_action(&id, AgentAction::Resolve, cx)),
           )
       })
-      .child(
-        Button::new(SharedString::from(format!("agent-delete-{id}")), p)
-          .variant(Variant::Ghost)
-          .size(Size::Sm)
-          .gap_1p5()
-          .text_color(muted)
-          .disabled(busy)
-          .icon(theme::ICON_TRASH, 12.)
-          .label("Delete")
-          .on_click(
-            cx.listener(move |view, _, _, cx| view.agent_action(&id, AgentAction::Delete, cx)),
+      .when(!sent, |a| {
+        a.child(
+          Button::new(SharedString::from(format!("agent-delete-{id}")), p)
+            .variant(Variant::Ghost)
+            .size(Size::Sm)
+            .gap_1p5()
+            .disabled(busy)
+            .icon(theme::ICON_TRASH, 12.)
+            .label("Delete")
+            .on_click(
+              cx.listener(move |view, _, _, cx| view.agent_action(&id, AgentAction::Delete, cx)),
+            ),
+        )
+      });
+    if resolved {
+      // A resolved sent comment, unfolded: it only folds again.
+      let id = comment.id.clone();
+      return card
+        .child(
+          div().flex().font_family(theme::SANS_FONT).child(
+            Button::new(SharedString::from(format!("sent-review-expanded-{id}")), p)
+              .variant(Variant::Ghost)
+              .size(Size::Sm)
+              .gap_1p5()
+              .icon(theme::ICON_CHEVRON_DOWN, 12.)
+              .label("Hide resolved comment")
+              .on_click(cx.listener(move |view, _, _, cx| view.toggle_sent(&id, cx))),
           ),
-      );
-    card.child(actions).test_support()
+        )
+        .test_support()
+        .into_any_element();
+    }
+    card.child(actions).test_support().into_any_element()
+  }
+
+  /// A resolved sent comment, folded to one line that unfolds it.
+  fn folded_sent_card(
+    &self,
+    comment: &AgentReviewComment,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> impl IntoElement {
+    let muted = p.muted_foreground;
+    let id = comment.id.clone();
+    let first_line = comment
+      .comment_text
+      .lines()
+      .next()
+      .unwrap_or("")
+      .to_string();
+    div()
+      .id(SharedString::from(format!("sent-review-collapsed-{id}")))
+      .role(gpui::Role::Button)
+      .aria_label("Show resolved comment")
+      .aria_expanded(false)
+      .max_w(zpx(CARD_MAX_W))
+      .min_w_0()
+      .flex()
+      .items_center()
+      .gap_2()
+      .px_3()
+      .py_1p5()
+      .rounded(radius::MD)
+      .border_1()
+      .border_color(p.border)
+      .cursor_pointer()
+      .hover(move |s| s.bg(p.hover()))
+      .on_click(cx.listener(move |view, _, _, cx| view.toggle_sent(&id, cx)))
+      .child(ui::icon(theme::ICON_CHEVRON_RIGHT, 12., muted))
+      .child(ui::icon(theme::ICON_BOT, 14., muted))
+      .child(
+        // Short label (tag). ast-grep-ignore: gpui-text-xs-short-label-only
+        ui::text(div(), TextSize::Xs)
+          .font_weight(FontWeight::MEDIUM)
+          .text_color(muted)
+          .child("Resolved"),
+      )
+      .child(
+        ui::text(div(), TextSize::Sm)
+          .min_w_0()
+          .truncate()
+          .text_color(muted)
+          .child(first_line),
+      )
+      .test_support()
   }
 }
 
@@ -824,8 +924,7 @@ fn violet(p: &Palette, alpha: f32) -> Hsla {
 
 /// `AuthorAvatar`'s fallback: the login's initial in a circle.
 fn avatar(login: &str, size: f32, p: &Palette) -> impl IntoElement {
-  // Short label (['avatar initial']): 11px is fine.
-  // ast-grep-ignore: gpui-text-xs-short-label-only
+  // Short label (avatar initial). ast-grep-ignore: gpui-text-xs-short-label-only
   ui::text(div(), TextSize::Xs)
     .size(zpx(size))
     .flex_none()
@@ -848,8 +947,7 @@ fn avatar(login: &str, size: f32, p: &Palette) -> impl IntoElement {
 /// `AuthorProfileLink`: "@login", opening the GitHub profile.
 fn profile_link(login: &str, p: &Palette, cx: &mut Context<ChangesView>) -> impl IntoElement {
   let url = format!("https://github.com/{login}");
-  // Short label (['username']): 11px is fine.
-  // ast-grep-ignore: gpui-text-xs-short-label-only
+  // Short label (username). ast-grep-ignore: gpui-text-xs-short-label-only
   ui::text(div(), TextSize::Xs)
     .id(SharedString::from(format!("profile-{login}")))
     .role(gpui::Role::Link)
@@ -879,8 +977,7 @@ pub(in crate::gpui_shell::screen) fn suggestion_box(
   suggested: &str,
   p: &Palette,
 ) -> impl IntoElement {
-  // Short label (['section heading']): 11px is fine.
-  // ast-grep-ignore: gpui-text-xs-short-label-only
+  // Short label (section heading). ast-grep-ignore: gpui-text-xs-short-label-only
   let header = ui::text(div(), TextSize::Xs)
     .id("suggested-change")
     .role(gpui::Role::Heading)
@@ -896,8 +993,7 @@ pub(in crate::gpui_shell::screen) fn suggestion_box(
   let body = match suggestion_diff(original, suggested) {
     Some(rows) => {
       let mut el = ui::text(div(), TextSize::Sm)
-        .id("agent-review-suggestion")
-        .debug_selector(|| "agent-review-suggestion".into())
+        .selector("agent-review-suggestion")
         .role(gpui::Role::Group)
         .aria_label("Suggestion")
         .font_family(theme::MONO_FONT);
@@ -951,8 +1047,7 @@ pub(in crate::gpui_shell::screen) fn suggestion_box(
       el.test_support().into_any_element()
     }
     None => ui::text(div(), TextSize::Sm)
-      .id("agent-review-suggestion")
-      .debug_selector(|| "agent-review-suggestion".into())
+      .selector("agent-review-suggestion")
       .role(gpui::Role::Group)
       .aria_label("Suggestion")
       .font_family(theme::MONO_FONT)

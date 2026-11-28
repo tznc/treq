@@ -39,11 +39,14 @@ async function launch(): Promise<void> {
     env: { ...appEnv(fixture), GPUI_PLAYWRIGHT: String(sshPort), GDK_SCALE: process.env.GDK_SCALE ?? "2" },
   });
   const deadline = Date.now() + 120_000;
+  let lastError: unknown;
   for (;;) {
     try {
       if ((await fetch(`http://127.0.0.1:${sshPort}/`)).ok) break;
-    } catch {}
-    if (Date.now() > deadline) throw new Error("ssh app did not start");
+    } catch (err) {
+      lastError = err;
+    }
+    if (Date.now() > deadline) throw new Error("ssh app did not start", { cause: lastError });
     await new Promise((r) => setTimeout(r, 500));
   }
   // The server can answer before the window is ready for a context.
@@ -53,7 +56,7 @@ async function launch(): Promise<void> {
       page = await (await browser.newContext()).newPage();
       break;
     } catch (error) {
-      await browser?.close().catch(() => {});
+      await browser?.close();
       if (attempt >= 10) throw error;
       await new Promise((r) => setTimeout(r, 1000));
     }
@@ -116,7 +119,7 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  await browser?.close().catch(() => {});
+  await browser?.close();
   app?.kill("SIGTERM");
 });
 
@@ -395,7 +398,7 @@ test("ssh remote: the machine shows the daemon holding its terminals after a res
   expect(before.daemon?.sessions).toBeGreaterThanOrEqual(1);
   // Quit the app and come back to the Overview: the terminals keep running
   // on the host without it.
-  await browser.close().catch(() => {});
+  await browser.close();
   app.kill("SIGTERM");
   await new Promise((r) => app.once("exit", r));
   const { DatabaseSync } = await import("node:sqlite");

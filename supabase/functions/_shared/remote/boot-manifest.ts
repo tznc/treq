@@ -7,12 +7,7 @@ export interface BootManifestAgent {
   version: string;
 }
 
-/**
- * SHA-256 of the treq CLI release archive per arch, pinned here so the boot
- * script does not trust a checksum served by the same release. A value
- * starting with PLACEHOLDER makes bootstrap fail closed; ops replace it with
- * the real digest when the release ships.
- */
+/** SHA-256 of a Linux release archive per arch. A value starting with PLACEHOLDER makes bootstrap fail closed. */
 export interface TreqSha256 {
   x86_64: string;
   aarch64: string;
@@ -20,8 +15,6 @@ export interface TreqSha256 {
 
 export interface BootManifest {
   manifest_version: number;
-  treq_version: string;
-  treq_sha256: TreqSha256;
   jj_version: string;
   jj_sha256: TreqSha256;
   git_version: string;
@@ -29,6 +22,13 @@ export interface BootManifest {
 }
 
 export const CURRENT_MANIFEST_VERSION = 5;
+
+// Manifests pin no treq release: treq-release.ts resolves one at boot. Without
+// it (the committed sandbox-image/bootstrap.sh) bootstrap fails closed.
+export const UNRESOLVED_TREQ: { version: string; sha256: TreqSha256 } = {
+  version: "unresolved",
+  sha256: { x86_64: "PLACEHOLDER-unresolved", aarch64: "PLACEHOLDER-unresolved" },
+};
 
 // sha256 of jj-v0.40.0-<arch>-unknown-linux-musl.tar.gz.
 const JJ_0_40_SHA256: TreqSha256 = {
@@ -39,8 +39,6 @@ const JJ_0_40_SHA256: TreqSha256 = {
 const MANIFESTS: Record<number, BootManifest> = {
   1: {
     manifest_version: 1,
-    treq_version: "0.3.0",
-    treq_sha256: { x86_64: "PLACEHOLDER-treq-0.3.0-x86_64", aarch64: "PLACEHOLDER-treq-0.3.0-aarch64" },
     jj_version: "0.24.0",
     jj_sha256: { x86_64: "PLACEHOLDER-jj-0.24.0-x86_64", aarch64: "PLACEHOLDER-jj-0.24.0-aarch64" },
     git_version: "2.45",
@@ -53,8 +51,6 @@ const MANIFESTS: Record<number, BootManifest> = {
   // open repositories that treq has written.
   2: {
     manifest_version: 2,
-    treq_version: "0.3.0",
-    treq_sha256: { x86_64: "PLACEHOLDER-treq-0.3.0-x86_64", aarch64: "PLACEHOLDER-treq-0.3.0-aarch64" },
     jj_version: "0.40.0",
     jj_sha256: JJ_0_40_SHA256,
     git_version: "2.45",
@@ -67,9 +63,6 @@ const MANIFESTS: Record<number, BootManifest> = {
   // runs as its SSH gateway (machine-setup.ts provisionGateway).
   3: {
     manifest_version: 3,
-    treq_version: "0.4.0",
-    // The release workflow pins these (scripts/bump-boot-manifest.ts).
-    treq_sha256: { x86_64: "PLACEHOLDER-treq-0.4.0-x86_64", aarch64: "PLACEHOLDER-treq-0.4.0-aarch64" },
     jj_version: "0.40.0",
     jj_sha256: JJ_0_40_SHA256,
     git_version: "2.45",
@@ -82,9 +75,6 @@ const MANIFESTS: Record<number, BootManifest> = {
   // recorded the version as done; 4 makes those machines run the real ones.
   4: {
     manifest_version: 4,
-    treq_version: "0.4.0",
-    // The release workflow pins these (scripts/bump-boot-manifest.ts).
-    treq_sha256: { x86_64: "PLACEHOLDER-treq-0.4.0-x86_64", aarch64: "PLACEHOLDER-treq-0.4.0-aarch64" },
     jj_version: "0.40.0",
     jj_sha256: JJ_0_40_SHA256,
     git_version: "2.45",
@@ -98,9 +88,6 @@ const MANIFESTS: Record<number, BootManifest> = {
   // sandbox image can run it.
   5: {
     manifest_version: 5,
-    treq_version: "0.4.0",
-    // The release workflow pins these (scripts/bump-boot-manifest.ts).
-    treq_sha256: { x86_64: "PLACEHOLDER-treq-0.4.0-x86_64", aarch64: "PLACEHOLDER-treq-0.4.0-aarch64" },
     jj_version: "0.40.0",
     jj_sha256: JJ_0_40_SHA256,
     git_version: "2.45",
@@ -116,11 +103,6 @@ export const BASE_PACKAGES = ["curl", "ca-certificates", "tar", "git", "openssh-
 
 export function manifestForVersion(version: number): BootManifest | null {
   return MANIFESTS[version] ?? null;
-}
-
-/** Every manifest up to the current one, oldest first. */
-export function allManifests(): BootManifest[] {
-  return Object.values(MANIFESTS).filter((m) => m.manifest_version <= CURRENT_MANIFEST_VERSION);
 }
 
 // The exec entrypoint installed as a Fly machine's `init.exec`, so a
@@ -143,6 +125,7 @@ export function bootstrapScript(requestedVersion: number, overrides: BootstrapOv
   // version number, so the rendered script stays internally consistent.
   const manifestVersion = requested ? requestedVersion : CURRENT_MANIFEST_VERSION;
   const manifest = requested ?? MANIFESTS[CURRENT_MANIFEST_VERSION];
+  if (!manifest) throw new Error(`no boot manifest ${CURRENT_MANIFEST_VERSION}`);
   const agentLines = manifest.agents
     .map((agent) => `install_agent "${agent.name}" "${agent.version}"\n`)
     .join("");
@@ -153,9 +136,9 @@ export function bootstrapScript(requestedVersion: number, overrides: BootstrapOv
 set -eu
 
 TREQ_MANIFEST_VERSION="${manifestVersion}"
-TREQ_VERSION="${overrides.treqVersion ?? manifest.treq_version}"
-TREQ_SHA256_X86_64="${(overrides.treqSha256 ?? manifest.treq_sha256).x86_64}"
-TREQ_SHA256_AARCH64="${(overrides.treqSha256 ?? manifest.treq_sha256).aarch64}"
+TREQ_VERSION="${overrides.treqVersion ?? UNRESOLVED_TREQ.version}"
+TREQ_SHA256_X86_64="${(overrides.treqSha256 ?? UNRESOLVED_TREQ.sha256).x86_64}"
+TREQ_SHA256_AARCH64="${(overrides.treqSha256 ?? UNRESOLVED_TREQ.sha256).aarch64}"
 JJ_VERSION="${manifest.jj_version}"
 JJ_SHA256_X86_64="${manifest.jj_sha256.x86_64}"
 JJ_SHA256_AARCH64="${manifest.jj_sha256.aarch64}"
@@ -220,9 +203,9 @@ install_treq() {
     aarch64|arm64) ARCH=aarch64; expected="$TREQ_SHA256_AARCH64" ;;
     *) echo "treq bootstrap: unsupported arch $(uname -m)" >&2; exit 1 ;;
   esac
-  # The digest is pinned in the manifest, not read from the release.
+  # The control plane passes the digest; the release's own .sha256 is never read.
   case "$expected" in
-    PLACEHOLDER*) echo "treq bootstrap: no pinned sha256 for treq $TREQ_VERSION $ARCH" >&2; exit 1 ;;
+    PLACEHOLDER*) echo "treq bootstrap: no sha256 for treq $TREQ_VERSION $ARCH" >&2; exit 1 ;;
   esac
   url="https://github.com/tznc/treq/releases/download/v$TREQ_VERSION/treq-cli-$TREQ_VERSION-linux-$ARCH.tar.gz"
   tmp="$(mktemp -d)"

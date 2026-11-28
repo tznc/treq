@@ -13,7 +13,7 @@ import {
   idleTimeoutMinutes,
 } from "../_shared/remote/idle-controller.ts";
 import type { ManagedInstanceState, MachineExecResult } from "../_shared/remote/provider.ts";
-import { providerInstance } from "./helpers/remote_fakes.ts";
+import { defined, providerInstance } from "./helpers/remote_fakes.ts";
 
 const NOW = new Date("2026-10-28T12:00:00Z");
 const NOW_SEC = NOW.getTime() / 1000;
@@ -118,7 +118,7 @@ Deno.test("an active workspace records last_active_at = now and pushes the provi
   const result = await run(store, provider);
   assertEquals(result.stopped, []);
   assertEquals(provider.calls, ["get:bx_1", "exec:bx_1", "keepalive:bx_1"]);
-  const [rec] = store.records;
+  const rec = defined(store.records[0]);
   assertEquals(rec.last_active_at, NOW.toISOString());
   assertEquals(rec.probe_ok, true);
   assertEquals(rec.probe_failures, 0);
@@ -131,7 +131,7 @@ Deno.test("last_active_at follows the agent log's age, not the probe time", asyn
   const store = new FakeStore([candidate({ last_active_at: minutesAgo(30) })]);
   const provider = new FakeProvider("ready", () => ({ exitCode: 0, stdout: probe({ agentLogAgeSec: 120 }), stderr: "" }));
   await run(store, provider);
-  assertEquals(store.records[0].last_active_at, minutesAgo(2));
+  assertEquals(store.records[0]?.last_active_at, minutesAgo(2));
 });
 
 Deno.test("a workspace idle for the timeout is stopped and billing closes", async () => {
@@ -141,10 +141,10 @@ Deno.test("a workspace idle for the timeout is stopped and billing closes", asyn
   assertEquals(result.stopped, ["inst-1"]);
   assertEquals(provider.calls, ["get:bx_1", "exec:bx_1", "stop:bx_1"]);
   assertEquals(store.states, [["pl-1", "suspended"]]);
-  assertEquals(store.records[0].last_state, "stopped");
-  assertEquals(store.records[0].stopped_at, NOW.toISOString());
+  assertEquals(store.records[0]?.last_state, "stopped");
+  assertEquals(store.records[0]?.stopped_at, NOW.toISOString());
   // The busy orphan is reported but did not keep it awake.
-  assertEquals(store.records[0].summary?.processes[0].pid, 500);
+  assertEquals(store.records[0]?.summary?.processes[0]?.pid, 500);
 });
 
 Deno.test("idle shorter than the timeout keeps the workspace running", async () => {
@@ -152,7 +152,7 @@ Deno.test("idle shorter than the timeout keeps the workspace running", async () 
   const provider = new FakeProvider();
   const result = await run(store, provider);
   assertEquals(result.stopped, []);
-  assertEquals(store.records[0].last_active_at, minutesAgo(14));
+  assertEquals(store.records[0]?.last_active_at, minutesAgo(14));
   assertEquals(provider.calls.includes("keepalive:bx_1"), false);
 });
 
@@ -162,8 +162,8 @@ Deno.test("a live pin keeps an otherwise idle workspace awake", async () => {
   const provider = new FakeProvider("ready", () => ({ exitCode: 0, stdout: probe({ orphanCpu: 1 }), stderr: "" }));
   const result = await run(store, provider);
   assertEquals(result.stopped, []);
-  assertEquals(store.records[0].last_active_at, NOW.toISOString());
-  assertEquals(store.records[0].summary?.processes[0].pinned, true);
+  assertEquals(store.records[0]?.last_active_at, NOW.toISOString());
+  assertEquals(store.records[0]?.summary?.processes[0]?.pinned, true);
 });
 
 Deno.test("never stops during an open migration", async () => {
@@ -194,30 +194,30 @@ Deno.test("probe failures do not count as activity but stop only after N in a ro
   const store = new FakeStore([candidate({ last_active_at: minutesAgo(60), probe_failures: 1 })]);
   let result = await run(store, new FakeProvider("ready", failing));
   assertEquals(result.stopped, []);
-  assertEquals(store.records[0].probe_ok, false);
-  assertEquals(store.records[0].probe_failures, 2);
-  assertEquals(store.records[0].last_active_at, minutesAgo(60));
-  assertEquals(store.records[0].summary, undefined);
+  assertEquals(store.records[0]?.probe_ok, false);
+  assertEquals(store.records[0]?.probe_failures, 2);
+  assertEquals(store.records[0]?.last_active_at, minutesAgo(60));
+  assertEquals(defined(store.records[0]).summary, undefined);
 
   const third = new FakeStore([candidate({ last_active_at: minutesAgo(60), probe_failures: 2 })]);
   const provider = new FakeProvider("ready", () => Promise.reject(new Error("exec timed out")));
   result = await run(third, provider);
   assertEquals(result.stopped, ["inst-1"]);
-  assertEquals(third.records[0].probe_failures, 3);
+  assertEquals(third.records[0]?.probe_failures, 3);
 });
 
 Deno.test("the idle clock restarts when a stopped workspace is seen running again", async () => {
   const store = new FakeStore([candidate({ last_state: "stopped", last_active_at: minutesAgo(600) })]);
   const result = await run(store, new FakeProvider());
   assertEquals(result.stopped, []);
-  assertEquals(store.records[0].last_active_at, NOW.toISOString());
-  assertEquals(store.records[0].last_state, "running");
+  assertEquals(store.records[0]?.last_active_at, NOW.toISOString());
+  assertEquals(store.records[0]?.last_state, "running");
 });
 
 Deno.test("the first probe of a workspace starts its idle clock", async () => {
   const store = new FakeStore([candidate({ last_active_at: null })]);
   await run(store, new FakeProvider());
-  assertEquals(store.records[0].last_active_at, NOW.toISOString());
+  assertEquals(store.records[0]?.last_active_at, NOW.toISOString());
 });
 
 Deno.test("reconcile: a provider auto-stop is recorded as suspended, closing billing", async () => {
@@ -227,7 +227,7 @@ Deno.test("reconcile: a provider auto-stop is recorded as suspended, closing bil
   assertEquals(result.reconciled, [{ instance_id: "inst-1", from: "ready", to: "suspended" }]);
   assertEquals(store.states, [["pl-1", "suspended"]]);
   assertEquals(provider.calls, ["get:bx_1"]);
-  assertEquals(store.records[0].last_state, "stopped");
+  assertEquals(store.records[0]?.last_state, "stopped");
 });
 
 Deno.test("reconcile: a machine running while we think it is stopped opens billing and is probed", async () => {

@@ -1,0 +1,59 @@
+id: no-stringified-error-js
+snapshots:
+  ? |
+    main().catch((e) => log(`failed: ${e}`));
+  : labels:
+    - source: ${e}
+      style: primary
+      start: 33
+      end: 37
+    - source: e
+      style: secondary
+      start: 35
+      end: 36
+    - source: 'main().catch((e) => log(`failed: ${e}`))'
+      style: secondary
+      start: 0
+      end: 40
+  ? |
+    try { run(); } catch (err) { log("failed: " + err); }
+  : labels:
+    - source: '"failed: " + err'
+      style: primary
+      start: 33
+      end: 49
+    - source: +
+      style: secondary
+      start: 44
+      end: 45
+    - source: err
+      style: secondary
+      start: 46
+      end: 49
+    - source: '"failed: "'
+      style: secondary
+      start: 33
+      end: 43
+    - source: err
+      style: secondary
+      start: 22
+      end: 25
+    - source: 'catch (err) { log("failed: " + err); }'
+      style: secondary
+      start: 15
+      end: 53
+  ? |
+    try { run(); } catch (err) { log(err instanceof Error ? err.message : String(err)); }
+  : labels:
+    - source: String(err)
+      style: primary
+      start: 70
+      end: 81
+    - source: err
+      style: secondary
+      start: 22
+      end: 25
+    - source: 'catch (err) { log(err instanceof Error ? err.message : String(err)); }'
+      style: secondary
+      start: 15
+      end: 85

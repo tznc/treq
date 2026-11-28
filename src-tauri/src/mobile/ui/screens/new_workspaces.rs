@@ -63,8 +63,7 @@ pub fn open(repo: String, stack_on: Option<String>, done: OnDone, cx: &mut App) 
     None => "New workspaces".into(),
   };
   let title = SharedString::from(title);
-  // The sheet draws its own title row, which changes with the step and
-  // holds the help button.
+  // The sheet draws its own title row, which changes with the step and holds the help button.
   sheet::open(None, cx, move |window, cx| {
     cx.new(|cx| NewWorkspacesSheet::new(repo, stack_on, title, done, window, cx))
   });
@@ -368,8 +367,7 @@ impl NewWorkspacesSheet {
     v_flex()
       .children(to_make(rows).enumerate().map(|(i, row)| {
         let error = row.error.clone().filter(|_| row.step.is_some() || !ran);
-        // A stacked row hangs off the row above; a top-level one needs no
-        // icon unless it failed.
+        // Stacked rows hang off the row above. Top-level rows get an icon only when they fail.
         let icon = if row.error.is_some() {
           Some(IconName::TriangleAlert.into())
         } else if row.depth > 0 {

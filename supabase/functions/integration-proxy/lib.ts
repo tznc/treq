@@ -69,7 +69,7 @@ export async function mintSandboxToken(
 async function verifySandboxToken(token: string, deps: AuthDeps): Promise<Caller | null> {
   const parts = token.split(".");
   if (parts.length !== 4) return null;
-  const [, placementId, expiryText, mac] = parts;
+  const [, placementId = "", expiryText = "", mac = ""] = parts;
   if (mac.length !== 64 || !/^\d+$/.test(expiryText)) return null;
   const expiry = Number(expiryText);
   const now = (deps.nowSec ?? (() => Math.floor(Date.now() / 1000)))();

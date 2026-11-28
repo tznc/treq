@@ -113,8 +113,7 @@ fn overlays_filter_and_select_consistently() {
         let (entries, order, selected, search) = h.overlay.read_with(&h.cx, |o, _| {
           (o.entries(), o.order(), o.selected, o.search.clone())
         });
-        // The selection is an entry the search shows, and one can be chosen
-        // whenever the search shows any.
+        // The selection is a shown entry, and there is one whenever the search shows any.
         if let Some(i) = selected {
           assert!(
             i < entries.len(),

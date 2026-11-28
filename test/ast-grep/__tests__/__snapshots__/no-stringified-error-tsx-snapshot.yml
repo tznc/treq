@@ -1,0 +1,32 @@
+id: no-stringified-error-tsx
+snapshots:
+  ? |
+    load().catch((e) => onError(`Failed: ${e}`));
+  : labels:
+    - source: ${e}
+      style: primary
+      start: 37
+      end: 41
+    - source: e
+      style: secondary
+      start: 39
+      end: 40
+    - source: 'load().catch((e) => onError(`Failed: ${e}`))'
+      style: secondary
+      start: 0
+      end: 44
+  ? |
+    try { run(); } catch (e) { setError(`Failed: ${e instanceof Error ? e.message : String(e)}`); }
+  : labels:
+    - source: String(e)
+      style: primary
+      start: 80
+      end: 89
+    - source: e
+      style: secondary
+      start: 22
+      end: 23
+    - source: 'catch (e) { setError(`Failed: ${e instanceof Error ? e.message : String(e)}`); }'
+      style: secondary
+      start: 15
+      end: 95

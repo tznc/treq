@@ -241,9 +241,7 @@ fn collect_garbage(
       "Operation head moved before garbage collection".into(),
     ));
   }
-  // Operations rewritten by this prune are recent files; their unreachable
-  // originals stay for a day, which also protects heads a concurrent process
-  // may have just created.
+  // Rewritten ops are new files, and a day's grace spares heads a concurrent process just made.
   let ops_newer = SystemTime::now() - Duration::from_secs(24 * 60 * 60);
   block_on(repo.op_store().gc(std::slice::from_ref(head), ops_newer))
     .map_err(|e| io_err("Failed to collect operations", e))?;

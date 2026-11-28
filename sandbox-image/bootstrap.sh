@@ -4,9 +4,9 @@
 set -eu
 
 TREQ_MANIFEST_VERSION="5"
-TREQ_VERSION="0.4.0"
-TREQ_SHA256_X86_64="PLACEHOLDER-treq-0.4.0-x86_64"
-TREQ_SHA256_AARCH64="PLACEHOLDER-treq-0.4.0-aarch64"
+TREQ_VERSION="unresolved"
+TREQ_SHA256_X86_64="PLACEHOLDER-unresolved"
+TREQ_SHA256_AARCH64="PLACEHOLDER-unresolved"
 JJ_VERSION="0.40.0"
 JJ_SHA256_X86_64="5c8979f46873e052f59bdd9535636dca6e6f9f70571b73f6d63c3b92acfaa037"
 JJ_SHA256_AARCH64="b26f24ff7a34838fbafe8788e6a94a9cdcf51601ef8c9af8fab4fa22c06ddbee"
@@ -71,9 +71,9 @@ install_treq() {
     aarch64|arm64) ARCH=aarch64; expected="$TREQ_SHA256_AARCH64" ;;
     *) echo "treq bootstrap: unsupported arch $(uname -m)" >&2; exit 1 ;;
   esac
-  # The digest is pinned in the manifest, not read from the release.
+  # The control plane passes the digest; the release's own .sha256 is never read.
   case "$expected" in
-    PLACEHOLDER*) echo "treq bootstrap: no pinned sha256 for treq $TREQ_VERSION $ARCH" >&2; exit 1 ;;
+    PLACEHOLDER*) echo "treq bootstrap: no sha256 for treq $TREQ_VERSION $ARCH" >&2; exit 1 ;;
   esac
   url="https://github.com/tznc/treq/releases/download/v$TREQ_VERSION/treq-cli-$TREQ_VERSION-linux-$ARCH.tar.gz"
   tmp="$(mktemp -d)"

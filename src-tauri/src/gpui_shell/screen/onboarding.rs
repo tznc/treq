@@ -13,7 +13,9 @@
 use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
+use gpui_kit::base::ObservedElement;
 use std::{collections::HashMap, rc::Rc, sync::Arc, time::Instant};
+use treq_ui::SelectorExt as _;
 
 use gpui_kit::base::TestSupportExt as _;
 use serde::Deserialize;
@@ -646,8 +648,7 @@ fn live_status(
     },
   };
   div()
-    .id("machine-terminals-status")
-    .debug_selector(|| "machine-terminals-status".into())
+    .selector("machine-terminals-status")
     .role(gpui::Role::Status)
     .aria_label(gpui::SharedString::from(line.clone()))
     .flex()
@@ -796,7 +797,7 @@ impl OnboardingView {
     let busy = matches!(state, Some(None));
     let switchable = matches!(machine.place, Place::Ssh { .. });
     div()
-      .debug_selector(|| "machine-terminals".into())
+      .selector("machine-terminals")
       .pt_2()
       .border_t_1()
       .border_color(p.border)
@@ -854,7 +855,11 @@ impl OnboardingView {
   }
 
   /// The left panel: the machines by section, and adding one.
-  fn machines_panel(&self, ctx: &Ctx, cx: &mut Context<Self>) -> Div {
+  fn machines_panel(
+    &self,
+    ctx: &Ctx,
+    cx: &mut Context<Self>,
+  ) -> ObservedElement<gpui::Stateful<Div>> {
     let p = ctx.palette;
     let mut sections: Vec<(&'static str, Vec<AnyElement>)> = Vec::new();
     for machine in &self.listing.machines {
@@ -966,7 +971,7 @@ impl OnboardingView {
         .into_any_element(),
     });
     div()
-      .debug_selector(|| "onboarding-machines".into())
+      .selector("onboarding-machines")
       .flex_none()
       .w(zpx(MACHINES_WIDTH))
       .h_full()
@@ -995,7 +1000,7 @@ impl OnboardingView {
             let empty = rows.is_empty();
             let group = group_id(section);
             div()
-              .debug_selector(move || group.into())
+              .selector(group)
               .pb_3()
               .child(
                 div()
@@ -1111,7 +1116,7 @@ impl OnboardingView {
         }
         let form = with_form.then(|| {
           div()
-            .debug_selector(|| "onboarding-remote-form".into())
+            .selector("onboarding-remote-form")
             .mx_2()
             .mt_2()
             .p_3()
@@ -1132,7 +1137,7 @@ impl OnboardingView {
         });
         Some(
           div()
-            .debug_selector(|| "onboarding-recent-group".into())
+            .selector("onboarding-recent-group")
             .pb_5()
             .child(
               div()
@@ -1215,7 +1220,7 @@ impl OnboardingView {
       .collect();
     let projects = (!shown.is_empty() || switcher.is_some()).then(|| {
       div()
-        .debug_selector(|| "onboarding-projects".into())
+        .selector("onboarding-projects")
         .pb_5()
         .child(
           ui::text(div(), TextSize::Sm)
@@ -1295,8 +1300,7 @@ impl OnboardingView {
       )
       .child(
         div()
-          .id("onboarding-recents")
-          .debug_selector(|| "onboarding-recents".into())
+          .selector("onboarding-recents")
           .flex_1()
           .min_h_0()
           .overflow_y_scroll()

@@ -85,14 +85,15 @@ pub fn handle(
       let Some(index) = snapshot.repos.iter().position(|r| &r.path == repo_path) else {
         return false;
       };
+      let remote = crate::core::projects::remote_repo(repo_path).is_some();
       let menu = HomeMenu {
         repo_path: repo_path.clone(),
         missing: snapshot.repos[index].missing,
         supporting: index > 0,
         // Any local repository can leave; the next takes over the window,
         // or the project shows empty. A remote window's one repository stays.
-        removable: snapshot.repos.len() > 1
-          || crate::core::projects::remote_repo(repo_path).is_none(),
+        removable: snapshot.repos.len() > 1 || !remote,
+        remote,
       };
       let items = context_menu::home_items(&menu, editors(&*backend));
       show(app, label, backend, items);
@@ -304,6 +305,17 @@ fn workspace_menu(
   true
 }
 
+/// Fetches `repo_path` and rebases its workspaces, then has the window
+/// read the repository again. Blocks.
+fn sync_with_remote(backend: &Backend, repo_path: String) {
+  let style = backend.with_db(core::resolve_conflict_marker_style_from_db);
+  match core::sync_with_remote(&repo_path, &style) {
+    Ok(()) => backend.toast(ToastTone::Success, "Synced with remote", ""),
+    Err(err) => backend.toast(ToastTone::Error, "Sync with remote failed", err),
+  }
+  backend.notify(NativeEvent::WorkspaceChanged { repo_path });
+}
+
 fn pr_url(repo_path: &str, workspace: &Workspace) -> Option<String> {
   crate::pr_status::global()
     .get_cached(repo_path, &workspace.branch_name)
@@ -330,6 +342,9 @@ fn run(app: &AppHandle, backend: Arc<Backend>, action: MenuAction) {
   let open = |what| WorkspaceHost::notify(&*backend, NativeEvent::Open { what });
   match action {
     MenuAction::OpenBranchSwitcher(repo_path) => open(OpenRequest::BranchSwitcher { repo_path }),
+    MenuAction::SyncWithRemote(repo_path) => {
+      std::thread::spawn(move || sync_with_remote(&backend, repo_path));
+    }
     MenuAction::SaveProject => open(OpenRequest::SaveProject { closing: false }),
     MenuAction::ProjectContext => open(OpenRequest::ProjectContext),
     MenuAction::SetProjectOwner(org_id) => {

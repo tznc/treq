@@ -19,12 +19,10 @@ export class UnsupportedKeyError extends Error {}
 
 // Parses a single "authorized_keys"-format line: "<algorithm> <base64> [comment]".
 export async function parseOpenSshPublicKey(line: string): Promise<ParsedPublicKey> {
-  const trimmed = line.trim();
-  const parts = trimmed.split(/\s+/);
-  if (parts.length < 2) {
+  const [algorithm, encoded, ...commentParts] = line.trim().split(/\s+/);
+  if (encoded === undefined) {
     throw new UnsupportedKeyError("public key must be in 'algorithm base64 [comment]' format");
   }
-  const [algorithm, encoded, ...commentParts] = parts;
   let blob: Uint8Array;
   try {
     blob = base64Decode(encoded);

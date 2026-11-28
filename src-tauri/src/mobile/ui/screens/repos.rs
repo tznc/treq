@@ -89,8 +89,7 @@ impl ReposScreen {
           remote::read::<RemoteRepoProbe>(TreqCommandRequest::ProbeRepo { repo: repo.clone() })
             .await?;
         if probe.exists && probe.is_repo {
-          // A plain Git repository needs jj colocated before its workspaces
-          // load; one that has it is left as it is.
+          // A plain Git repo needs jj colocated before its workspaces load.
           let repo = if probe.path.is_empty() {
             repo
           } else {

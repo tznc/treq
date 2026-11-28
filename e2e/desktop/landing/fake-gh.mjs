@@ -232,6 +232,27 @@ for (const pr of prs) pr.statusCheckRollup = (checks[pr.headRefName] ?? []).map(
 const reviewThreads = {
   418: [
     {
+      id: "PRRT_client_suggestion",
+      isResolved: false,
+      isOutdated: false,
+      path: "packages/web/src/lib/client.ts",
+      line: 5,
+      diffSide: "RIGHT",
+      comments: {
+        nodes: [
+          {
+            id: "PRRC_client_suggestion",
+            body: "Trim before checking length:\n\n```suggestion\n    typeof body.event_message === \"string\" && body.event_message.trim().length > 0\n```",
+            createdAt: "2026-08-12T16:10:00Z",
+            url: `${REPO}/pull/418#discussion_r3`,
+            diffHunk:
+              '@@ -0,0 +1,5 @@\n+import type { EventBody } from "../../../api/src/schema";\n+\n+export async function postEvent(body: EventBody): Promise<Response> {\n+  const message =\n+    typeof body.event_message === "string" && body.event_message.length > 0',
+            author: author("zoe"),
+          },
+        ],
+      },
+    },
+    {
       id: "PRRT_client_stringify",
       isResolved: true,
       isOutdated: false,

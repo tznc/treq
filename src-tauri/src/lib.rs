@@ -171,8 +171,7 @@ pub(crate) fn unwatch_unshown_repos(app: &AppHandle) {
   let Some(state) = app.try_state::<AppState>() else {
     return;
   };
-  // Normalized on both sides: reads watch a repo by whichever spelling they
-  // were given, and a mismatch would unwatch then re-watch (a full poll).
+  // Both sides normalized: a spelling mismatch would unwatch, then re-watch with a full poll.
   let normalize = agent_dispatch::normalize_repo_path;
   let mut shown: std::collections::HashSet<String> = state
     .window_repo_paths
@@ -314,8 +313,7 @@ fn skill_install_deep_link(app: &AppHandle, url: &str) {
     log::info!("skill deep link ignored (malformed id)");
     return;
   };
-  // A link that launched Treq comes before any window: the first window
-  // to start shows it.
+  // A link that launched Treq comes before any window: the first window to start shows it.
   let Some(label) = resolve_menu_target_label(app) else {
     crate::core::skills::queue_pending_skill_install(skill_id);
     return;
@@ -492,9 +490,7 @@ fn schedule_open_repo_in_new_window(app: AppHandle) {
   if !open_new_window::OPEN_NEW_WINDOW_GATE.try_begin() {
     return;
   }
-  // Leave the AppKit menu-tracking run loop before showing NSOpenPanel.
-  // Showing the panel nested in the menu action redelivers the same item
-  // when the new window becomes key, which retriggers the folder picker.
+  // Leave AppKit's menu loop first, or the item fires again when the new window becomes key.
   std::thread::spawn(move || {
     let app_for_main = app.clone();
     if app
@@ -698,10 +694,7 @@ pub fn run() {
   #[cfg(desktop)]
   gpui_shell::force_x11_on_wayland();
   let builder = tauri::Builder::default();
-  // Must be the first plugin. On Windows and Linux a `treq://` link starts a
-  // second process; this plugin makes it exit and hands its arguments to the
-  // running app. The `deep-link` feature passes the link on to `on_open_url`
-  // below, so the callback only brings the app to the front.
+  // Must be first. Deep-link hands a second instance's link to `on_open_url`, so this only focuses.
   #[cfg(desktop)]
   let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
     focus_target_window(app);
@@ -722,10 +715,7 @@ pub fn run() {
       .plugin(tauri_plugin_dialog::init())
       .plugin(tauri_plugin_deep_link::init())
       .plugin(tauri_plugin_notification::init());
-    // Device-key storage for the mobile connectivity flow (mobile PRD,
-    // "Security and key custody") - both plugins are `#[cfg(mobile)]`-gated
-    // upstream and have no desktop implementation worth shipping, see
-    // `core::remote_device_key`.
+    // Device keys (mobile PRD "Security and key custody"): both plugins are mobile-only upstream.
     #[cfg(mobile)]
     let builder = builder
       .plugin(tauri_plugin_keystore::init())
@@ -742,8 +732,7 @@ pub fn run() {
       if let tauri::WindowEvent::Focused(focused) = event {
         gpui_shell::window_focused(window.app_handle(), window.label(), *focused);
       }
-      // A shell window losing focus closes its tooltips and menus, as
-      // native ones would.
+      // A shell window losing focus closes its tooltips and menus, as native ones would.
       #[cfg(feature = "gpui-shell")]
       #[cfg(desktop)]
       if !window.label().starts_with("gpui-popup-") {
@@ -753,8 +742,7 @@ pub fn run() {
           _ => {}
         }
       }
-      // Closing a window on an unsaved project of several repositories
-      // asks to save it first (`core::projects::close_action`).
+      // An unsaved multi-repo project asks to be saved on close (`core::projects::close_action`).
       #[cfg(feature = "gpui-shell")]
       #[cfg(desktop)]
       if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -762,11 +750,7 @@ pub fn run() {
           api.prevent_close();
         }
       }
-      // Fires once, after the window is actually gone (not on a
-      // cancellable close request), whichever UI path closed it. A
-      // window's terminals outlive it while another repo window is open,
-      // so another window can show them; the last repo window closes
-      // every terminal.
+      // Fires once the window is gone. Its terminals live on until the last repo window closes.
       if let tauri::WindowEvent::Destroyed = event {
         let label = window.label().to_string();
         core::agent_launch::forget_window(&label);
@@ -832,14 +816,10 @@ pub fn run() {
       #[cfg(feature = "e2e")]
       let saved_repo_path = gpui_shell::e2e::repo().or(saved_repo_path);
 
-      // Resolve the login-shell PATH off the main thread, before anything
-      // else can wait on it, so the first terminal doesn't wait on shell
-      // startup.
+      // Resolving the login-shell PATH early spares the first terminal a wait on shell startup.
       std::thread::spawn(binary_paths::get_extended_path);
 
-      // Cached paths and editors are read from the database here; what was
-      // never looked for is detected in the background once the state is
-      // managed (`detect_binaries`, and the window's `detect_editors`).
+      // Cached paths load here, and `detect_binaries` and `detect_editors` find the rest later.
       let (binary_paths, undetected_binaries) = commands::load_cached_binary_paths(&db);
       binary_paths::init_binary_paths_cache(binary_paths);
       if let Some(editor_apps) = commands::load_cached_editor_apps(&db) {
@@ -852,8 +832,7 @@ pub fn run() {
       // Background PR-status poller (sidebar reads from its cache)
       crate::pr_status::set_app_handle(app.handle().clone());
 
-      // Automatic reviews: jj operations signal, the window launches the
-      // review terminal.
+      // Automatic reviews: jj operations signal, the window launches the review terminal.
       #[cfg(feature = "gpui-shell")]
       #[cfg(desktop)]
       {
@@ -885,9 +864,7 @@ pub fn run() {
       }
       #[cfg(not(mobile))]
       let remote_exec_state = commands::remote_control::RemoteExecState::default();
-      // Mobile authenticates with the device key held in the OS
-      // keystore rather than a file under `~/.ssh`, so its pool gets a
-      // loader for that reserved key reference.
+      // Mobile uses the OS keystore's device key, not `~/.ssh`, so its pool gets a loader for it.
       #[cfg(mobile)]
       let remote_exec_state = commands::remote_control::RemoteExecState(std::sync::Arc::new(
         crate::core::remote_ssh_transport::SshConnectionPool::new().with_device_key_provider(
@@ -898,8 +875,7 @@ pub fn run() {
         &remote_exec_state,
       ));
       app.manage(remote_exec_state);
-      // Only now: a window's model reads the database and the binary
-      // caches as soon as the window is made.
+      // Only now: a new window's model reads the database and binary caches at once.
       #[cfg(feature = "gpui-shell")]
       #[cfg(desktop)]
       match gpui_shell::init(app) {
@@ -925,10 +901,7 @@ pub fn run() {
       #[cfg(desktop)]
       {
         use tauri_plugin_deep_link::DeepLinkExt;
-        // Installers register `treq://` with the OS. An AppImage or a dev
-        // build is not installed, so it registers itself at startup.
-        // It rewrites a launcher entry and runs `xdg-mime`, so it stays off
-        // the startup path.
+        // Uninstalled builds register `treq://` themselves, on a thread since it runs `xdg-mime`.
         #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
         {
           let handle = app.handle().clone();
@@ -980,10 +953,7 @@ pub fn run() {
         });
       }
 
-      // Create menu
-      //
-      // Native menus (tauri::menu) have no mobile implementation; gate the
-      // whole block so mobile targets (Android/iOS) build.
+      // Menus: `tauri::menu` has no mobile implementation, so mobile builds skip this block.
       #[cfg(desktop)]
       {
         #[cfg(target_os = "macos")]
@@ -1024,10 +994,7 @@ pub fn run() {
             .item(&add_repository_item)
             .build()?;
 
-          // Edit menu. The predefined items send `paste:` and the like to
-          // the first responder, which GPUI's view does not answer, and
-          // their key equivalents keep Cmd+V... from ever reaching GPUI.
-          // These type their keys into the window instead.
+          // Edit menu: predefined items send `paste:` where GPUI won't answer and eat Cmd+V.
           let mut edit_menu = SubmenuBuilder::new(app, "Edit");
           for &(id, text, accelerator, _) in EDIT_MENU {
             if id == "edit_cut" {
@@ -1082,12 +1049,7 @@ pub fn run() {
               .build()?
           };
 
-          // Window menu
-          //
-          // Close Window intentionally has no keyboard accelerator: the OS-default
-          // Cmd+W is repurposed in the window to close the selected terminal (or
-          // do nothing) instead of closing the whole treq window. The menu item is
-          // still clickable and closes the focused window via the handler below.
+          // Close Window takes no Cmd+W: in the window that closes the selected terminal.
           let close_window_item =
             MenuItemBuilder::with_id("close_window", "Close Window").build(app)?;
 
@@ -1262,15 +1224,7 @@ pub fn run() {
       if let tauri::RunEvent::Ready = event {
         startup::mark("event loop ready");
       }
-      // Local and remote PTY children (and their reader threads) are
-      // otherwise only closed by an explicit `pty_close`/`remote_pty_close`
-      // call from the frontend. Neither happens when a window is closed
-      // via dashboard teardown or the native "Close Window" menu, so
-      // without this the PTY processes and reader threads outlive the
-      // window (and, on platforms that keep the app running with no
-      // windows open, outlive it indefinitely). `Exit` fires once, after
-      // every window has closed or `app.exit()` was called, so this is
-      // the one place that's safe to tear every session down at once.
+      // Closing a window skips `pty_close`: `Exit` fires once, after all windows, so PTYs end here.
       if let tauri::RunEvent::Exit = event {
         if let Some(state) = app_handle.try_state::<AppState>() {
           state.pty_manager.close_all();

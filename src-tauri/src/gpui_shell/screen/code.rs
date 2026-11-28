@@ -14,6 +14,7 @@ use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use crate::result_ext::ResultExt;
+use gpui_kit::base::ObservedElement;
 use std::{
   cell::{Cell, RefCell},
   collections::HashMap,
@@ -22,6 +23,7 @@ use std::{
   sync::{Arc, LazyLock},
   time::Duration,
 };
+use treq_ui::SelectorExt as _;
 
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::{
@@ -441,13 +443,11 @@ impl CodeView {
     if current == &parent {
       return;
     }
-    // The conflicted files or the workspace's record changing alone (the
-    // header's read landing after the window's listing) don't read again.
+    // Conflicted files or the workspace record changing alone (a late header read) don't reread.
     let reread = current.key() != parent.key()
       || current.revision != parent.revision
       || current.default_branch != parent.default_branch;
-    // A new title or description (an edit, or the PR's text synced in)
-    // can start or stop following the pull request.
+    // A new title or description, edited or synced from the PR, can start or stop following it.
     let text = |p: &Parent| {
       p.workspace
         .as_ref()
@@ -455,9 +455,7 @@ impl CodeView {
     };
     let resync = !reread && text(current) != text(&parent);
     if parent.key() != self.parent.key() {
-      // Another workspace: keep drawing this one until the new one is read,
-      // then swap them in one frame (`apply`), so the tab never draws empty.
-      // Read ahead, it swaps now, and reads again behind.
+      // Another workspace swaps in one frame once read (`apply`), so the tab never draws empty.
       let now = cx.background_executor().now();
       let ahead = self
         .prefetched
@@ -563,8 +561,7 @@ impl CodeView {
       None if self.parent.key() == parent.key() => false,
       _ => return,
     };
-    // A read again that found what shows already (a revalidation) draws
-    // nothing new.
+    // A revalidation that finds what already shows draws nothing new.
     let unchanged = !moved
       && !(self.history_loading && self.history_limit > HISTORY_PAGE)
       && self.overview.as_ref() == Some(&read.overview)
@@ -824,8 +821,7 @@ impl CodeView {
     let sync = self.pr_sync()?;
     let note = |id: &'static str, text: String| {
       ui::text(div(), TextSize::Sm)
-        .id(id)
-        .debug_selector(move || id.into())
+        .selector(id)
         .role(Role::Label)
         .aria_label(SharedString::from(text.clone()))
         .test_support()
@@ -1061,7 +1057,11 @@ impl CodeView {
     );
   }
 
-  fn close_menu_on_outside(&self, panel: Stateful<Div>, cx: &mut Context<Self>) -> Stateful<Div> {
+  fn close_menu_on_outside(
+    &self,
+    panel: ObservedElement<Stateful<Div>>,
+    cx: &mut Context<Self>,
+  ) -> ObservedElement<Stateful<Div>> {
     panel.dismiss_with("code-menu", cx, |view, cx| {
       let open = view.menu.take().is_some();
       if open {
@@ -1098,10 +1098,9 @@ fn section(p: &Palette) -> Div {
 }
 
 /// A dropdown's panel (`DropdownMenuContent`), drawn over the tab.
-pub(super) fn menu_panel(id: &'static str, p: &Palette) -> Stateful<Div> {
+pub(super) fn menu_panel(id: &'static str, p: &Palette) -> ObservedElement<Stateful<Div>> {
   div()
-    .id(id)
-    .debug_selector(move || id.into())
+    .selector(id)
     .absolute()
     .p_1()
     .rounded(radius::MD)
@@ -1143,11 +1142,9 @@ pub(super) fn scrolling_markdown(
 
 fn markdown_text_size(size: f32) -> TextSize {
   match size {
-    // Short label (["maps the user's font-size setting onto the scale"]): 11px is fine.
-    // ast-grep-ignore: gpui-text-xs-short-label-only
+    // Maps the user's font size onto the scale. ast-grep-ignore: gpui-text-xs-short-label-only
     s if s <= 11. => TextSize::Xs,
-    // Maps the user's font-size setting onto the scale.
-    // ast-grep-ignore: gpui-sans-text-min-size
+    // Maps the user's font size onto the scale. ast-grep-ignore: gpui-sans-text-min-size
     s if s <= 12. => TextSize::Code,
     s if s <= 14. => TextSize::Sm,
     s if s <= 17. => TextSize::Lg,
@@ -1263,8 +1260,7 @@ impl Render for CodeView {
           .children(self.readme(&p)),
       );
     div()
-      .id("workspace-code")
-      .debug_selector(|| "workspace-code".into())
+      .selector("workspace-code")
       .role(gpui::Role::Group)
       .aria_label("Code")
       .size_full()
@@ -1327,7 +1323,7 @@ fn rebase_alert(hold: &RebaseHold, p: &Palette) -> ui::Alert {
 fn skeleton(p: &Palette) -> impl IntoElement {
   let bar = |h: f32| div().h(zpx(h)).rounded(radius::SM).bg(p.muted.opacity(0.4));
   div()
-    .debug_selector(|| "workspace-overview-skeleton".into())
+    .selector("workspace-overview-skeleton")
     .flex()
     .flex_col()
     .gap_4()
@@ -1395,8 +1391,7 @@ impl CodeView {
   /// and Go to file on the right.
   fn action_row(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     div()
-      .id("code-action-row")
-      .debug_selector(|| "code-action-row".into())
+      .selector("code-action-row")
       .role(gpui::Role::Toolbar)
       .aria_label("Code actions")
       .flex()
@@ -1701,8 +1696,7 @@ impl CodeView {
   /// The pull request's title and body as GitHub has them, read-only.
   fn github_text(&self, p: &Palette) -> impl IntoElement {
     let panel = div()
-      .id("workspace-about-github")
-      .debug_selector(|| "workspace-about-github".into())
+      .selector("workspace-about-github")
       .role(gpui::Role::Group)
       .aria_label("Pull request on GitHub")
       .flex()
@@ -1748,8 +1742,7 @@ impl CodeView {
   ) -> Option<impl IntoElement> {
     let text = self.parent.workspace.as_ref().and_then(description)?;
     let card = div()
-      .id("workspace-description")
-      .debug_selector(|| "workspace-description".into())
+      .selector("workspace-description")
       .role(gpui::Role::Group)
       .aria_label("Description")
       .relative();
@@ -1805,8 +1798,7 @@ impl CodeView {
             .flex()
             .flex_col()
             .gap_2()
-            // ⌘/Ctrl+Enter is unbound in inputs (`treq_ui::theme`), so
-            // read the key itself.
+            // ⌘/Ctrl+Enter is unbound in inputs (`treq_ui::theme`), so the key is read directly.
             .capture_key_down(cx.listener(|view, e: &KeyDownEvent, _, cx| {
               let k = &e.keystroke;
               if k.key == "enter" && k.modifiers.secondary() {
@@ -1821,7 +1813,7 @@ impl CodeView {
             }))
             .child(
               ui::text(div(), TextSize::Sm)
-                .debug_selector(|| "workspace-description-input".into())
+                .selector("workspace-description-input")
                 .child(Textarea::new(&draft).aria_label("Workspace description")),
             )
             .child(
@@ -1902,8 +1894,7 @@ impl CodeView {
       .child(help)
       .children(self.stack_button(p, cx))
       .child(
-        // Short label (['position count']): 11px is fine.
-        // ast-grep-ignore: gpui-text-xs-short-label-only
+        // Short label (position count). ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .ml_auto()
           .font_weight(FontWeight::NORMAL)
@@ -1989,7 +1980,7 @@ impl CodeView {
           .min_w_0()
           .max_w(zpx(220.))
           .truncate()
-          .debug_selector(|| "workspace-branch".into())
+          .selector("workspace-branch")
           .child(card.branch.clone()),
       );
     if let Some(target) = &card.target {
@@ -2095,8 +2086,7 @@ impl CodeView {
       format!("stack-time-{}", row.workspace.id),
       Side::Top,
       Some(TooltipContent::Text(time::full(&created).into())),
-      // Short label (['timestamp']): 11px is fine.
-      // ast-grep-ignore: gpui-text-xs-short-label-only
+      // Short label (timestamp). ast-grep-ignore: gpui-text-xs-short-label-only
       ui::text(div(), TextSize::Xs)
         .text_color(p.muted_foreground)
         .child(time::relative(&created)),
@@ -2241,9 +2231,7 @@ impl CodeView {
       .overview
       .as_ref()
       .map_or(&[][..], |o| o.entries.as_slice());
-    // Untouched entries fold behind a toggle, below the changed ones;
-    // submodule rows carry their own controls, and an entry without a status
-    // may have changed, so both stay up top.
+    // Untouched entries fold behind a toggle, but submodules and status-less entries stay on top.
     let untouched =
       |e: &WorkspaceEntry| e.submodule_pin.is_none() && e.status.as_deref() == Some("untouched");
     let (rest, mut entries): (Vec<&WorkspaceEntry>, Vec<&WorkspaceEntry>) =
@@ -2299,11 +2287,6 @@ impl CodeView {
       // A row has something above it: an earlier row, or the toggle.
       let divided = i > 0 || (i >= changed && untouched_count > 0);
       let id = SharedString::from(format!("code-entry-{}", entry.name));
-      let selector = if submodule {
-        format!("submodule-row-{}", entry.name)
-      } else {
-        id.to_string()
-      };
       let open = (*entry).clone();
       let synced = entry.submodule_synced.unwrap_or(false);
       let path = entry.name.clone();
@@ -2311,8 +2294,11 @@ impl CodeView {
       let row_label = format!("Submodule {}", entry.name);
       list = list.child(
         div()
-          .id(SharedString::from(format!("code-entry-row-{}", entry.name)))
-          .debug_selector(move || selector)
+          .selector(if submodule {
+            format!("submodule-row-{}", entry.name)
+          } else {
+            format!("code-entry-{}", entry.name)
+          })
           .when(submodule, |row| {
             row.role(gpui::Role::Group).aria_label(row_label)
           })
@@ -2382,8 +2368,7 @@ impl CodeView {
             this.child(
               ui::text(
                 ui::Checkbox::new(format!("submodule-sync-{path}"), p),
-                // Short label (['checkbox label']): 11px is fine.
-                // ast-grep-ignore: gpui-text-xs-short-label-only
+                // Short label (checkbox label). ast-grep-ignore: gpui-text-xs-short-label-only
                 TextSize::Xs,
               )
               .checked(synced)
@@ -2404,8 +2389,7 @@ impl CodeView {
           .test_support(),
       );
     }
-    // The toggle closes the list when nothing drawn follows it; one scrolled
-    // above the drawn rows stays undrawn with them.
+    // The toggle ends the list only when no drawn row follows. Scrolled above, it stays undrawn.
     if changed >= shown.end {
       list = list.children(toggle);
     }
@@ -2450,11 +2434,9 @@ impl CodeView {
     } else {
       format!("Show {count} unchanged files")
     };
-    // Short label (['toggle label']): 11px is fine.
-    // ast-grep-ignore: gpui-text-xs-short-label-only
+    // Short label (toggle label). ast-grep-ignore: gpui-text-xs-short-label-only
     ui::text(div(), TextSize::Xs)
-      .id("code-unchanged-toggle")
-      .debug_selector(|| "code-unchanged-toggle".into())
+      .selector("code-unchanged-toggle")
       .role(Role::Button)
       .aria_label(label.clone())
       .aria_expanded(show)
@@ -2619,8 +2601,7 @@ impl CodeView {
     deferred(
       anchored().snap_to_window_with_margin(px(8.)).child(
         div()
-          .id(id)
-          .debug_selector(move || id.into())
+          .selector(id)
           .mt_1()
           .w(zpx(360.))
           .p_2()
@@ -2726,8 +2707,7 @@ impl CodeView {
     }
     let mut first = true;
     for (label, commits) in group_by_day(own.iter().copied()) {
-      // `first:mt-0` never applies (the track line is the first child);
-      // block layout collapses the margin as Chromium does.
+      // `first:mt-0` never applies, as the track line is first. Block layout collapses the margin.
       let mut group = div().mt_5();
       group = group.child(day_label(&label, p));
       for commit in &commits {
@@ -2838,8 +2818,7 @@ impl CodeView {
       format!("commit-time-{}", commit.commit_id),
       Side::Top,
       Some(TooltipContent::Text(time::full(&ts).into())),
-      // Short label (['timestamp']): 11px is fine.
-      // ast-grep-ignore: gpui-text-xs-short-label-only
+      // Short label (timestamp). ast-grep-ignore: gpui-text-xs-short-label-only
       ui::text(div(), TextSize::Xs)
         .text_color(p.muted_foreground)
         .child(time::relative(&ts)),
@@ -2848,13 +2827,11 @@ impl CodeView {
     let (green, red) = (ui::Tone::DiffAdded.text(p), ui::Tone::DiffRemoved.text(p));
     let change = commit.change_id.clone();
     let id = SharedString::from(format!("commit-item-{}", commit.commit_id));
-    let selector = id.to_string();
     let column = p.background.blend(p.muted.opacity(0.2));
     let body = div()
-      .id(id)
+      .selector(id)
       .role(gpui::Role::Button)
       .aria_label(title.clone())
-      .debug_selector(move || selector)
       .flex_1()
       .min_w_0()
       .pt_0p5()
@@ -2902,8 +2879,7 @@ impl CodeView {
           .child(time)
           .when(commit.insertions > 0 || commit.deletions > 0, |this| {
             this.child(
-              // Short label (['timestamp and diff counts']): 11px is fine.
-              // ast-grep-ignore: gpui-text-xs-short-label-only
+              // Timestamp and diff counts. ast-grep-ignore: gpui-text-xs-short-label-only
               ui::text(div(), TextSize::Xs)
                 .ml_auto()
                 .flex()
@@ -2965,8 +2941,7 @@ enum Kind {
 }
 
 fn day_label(label: &str, p: &Palette) -> impl IntoElement {
-  // Short label (['section heading']): 11px is fine.
-  // ast-grep-ignore: gpui-text-xs-short-label-only
+  // Short label (section heading). ast-grep-ignore: gpui-text-xs-short-label-only
   ui::text(div(), TextSize::Xs)
     .mb_1()
     .pl_7()
@@ -2993,8 +2968,7 @@ fn separator(label: Div, p: &Palette) -> impl IntoElement {
       .gap_2()
       .child(dashes())
       .child(
-        // Short label (['divider label']): 11px is fine.
-        // ast-grep-ignore: gpui-text-xs-short-label-only
+        // Short label (divider label). ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(label, TextSize::Xs)
           .whitespace_nowrap()
           .px_2()
@@ -3042,8 +3016,7 @@ fn loc_indicator(
   let (added, removed) = (ui::Tone::DiffAdded, ui::Tone::DiffRemoved);
   let (green, red) = (added.color(p), removed.color(p));
   let count = |text: String, color: Hsla, ch: usize| {
-    // Short label (['diff count']): 11px is fine.
-    // ast-grep-ignore: gpui-text-xs-short-label-only
+    // Short label (diff count). ast-grep-ignore: gpui-text-xs-short-label-only
     ui::text(div(), TextSize::Xs)
       .flex_none()
       .whitespace_nowrap()
@@ -3053,7 +3026,7 @@ fn loc_indicator(
       .child(text)
   };
   div()
-    .debug_selector(|| "workspace-loc-indicator".into())
+    .selector("workspace-loc-indicator")
     .flex()
     .items_center()
     .gap_1p5()

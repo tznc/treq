@@ -260,9 +260,7 @@ impl CodeHost for Backend {
     if let Some(remote) = self.remote_containing(repo_path) {
       return remote.workspaces();
     }
-    // The stored records: the stack needs only branches and targets, and
-    // the window poll keeps them in step with jj. Statuses would rediscover
-    // every workspace under the repo's commit lock, behind any rebase.
+    // Stored records suffice for branches and targets. Statuses would wait on the commit lock.
     core::list_all_workspaces(repo_path)
   }
 

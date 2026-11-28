@@ -13,13 +13,14 @@ import { recordEndpointHostKey, updateInstance } from "./instance-store.ts";
 import { provisionManagedSshd, readManagedHostKeys } from "./managed-sshd.ts";
 import type { MachineSetup, MigrationRow, PlacementRow } from "./migration-engine.ts";
 import { type ManagedComputeProvider, ProviderError, type SandboxProvider } from "./provider.ts";
-import { caKeyMaterialFromEnv, caPublicKeyLine } from "./ssh-cert.ts";
+import { caFingerprint, caTrustLines, trustedCaKeysFromEnv } from "./ssh-cert.ts";
 import { generateGatewaySecret } from "./gateway-token.ts";
 import {
   GATEWAY_LISTEN,
   GATEWAY_SECRET_ENV,
   GATEWAY_SERVICE_NAME,
   gatewayServiceSpec,
+  installCaTrustCommand,
   installGatewaySecretCommand,
   MANAGED_SSHD_LAUNCHER,
   MANAGED_SSHD_SERVICE_NAME,
@@ -105,17 +106,49 @@ function supabasePlacementSecrets(supabase: SupabaseClient) {
   return { gateway: supabaseGatewaySecrets(supabase), integration: supabaseIntegrationSecrets(supabase) };
 }
 
+// The trusted CAs as the machine's CA file holds them, with their fingerprints.
+async function caTrust(): Promise<{ lines: string; fingerprints: string[] }> {
+  const keys = trustedCaKeysFromEnv();
+  return { lines: caTrustLines(keys).join("\n"), fingerprints: await Promise.all(keys.map(caFingerprint)) };
+}
+
+/** Writes the trusted SSH CAs to the machine; returns their fingerprints. */
+export async function installCaTrust(provider: ManagedComputeProvider, providerResourceId: string): Promise<string[]> {
+  const trust = await caTrust();
+  await execOk(provider, providerResourceId, installCaTrustCommand(trust.lines), "ca trust install");
+  return trust.fingerprints;
+}
+
+async function sshdInstalled(provider: SandboxProvider, providerResourceId: string): Promise<boolean> {
+  return (await provider.execOnMachine(providerResourceId, ["test", "-x", MANAGED_SSHD_LAUNCHER])).exitCode === 0;
+}
+
 /**
  * A pidfile-supervised service (Boat, Daytona) does not survive a stop and
  * start, so after a wake sshd and the gateway are started again. A provider
  * with a real supervisor restarts them on its own.
+ *
+ * `finishSetup` runs instead when sshd was never installed (the machine's
+ * setup stopped early, for example with no SSH CA), and the wake fails if
+ * sshd is still missing after it.
  */
 export async function reensureServicesAfterWake(
   provider: SandboxProvider,
   providerResourceId: string,
   placementId: string | null,
+  finishSetup?: () => Promise<void>,
 ): Promise<void> {
   const caps = provider.capabilities();
+  if (!caps.serviceSupervisor && finishSetup && !(await sshdInstalled(provider, providerResourceId))) {
+    await finishSetup();
+    if (!(await sshdInstalled(provider, providerResourceId))) {
+      throw new ProviderError("other", "sshd is not installed after finishing the machine setup");
+    }
+    return;
+  }
+  // The trusted CAs may have changed while it slept (a CA roll); sshd reads
+  // the file on every login, so this applies before anyone logs in.
+  await installCaTrust(provider, providerResourceId);
   if (caps.serviceSupervisor) return;
   await provider.ensureService(providerResourceId, MANAGED_SSHD_SERVICE_NAME, { cmd: MANAGED_SSHD_LAUNCHER, args: [] });
   if (placementId) {
@@ -226,13 +259,14 @@ export async function establishSshTrust(
 ): Promise<void> {
   if (p.stub) return await recordStubHostKey(supabase, p);
   try {
-    await provisionManagedSshd(provider, p.providerResourceId, caPublicKeyLine(caKeyMaterialFromEnv()));
+    const trust = await caTrust();
+    await provisionManagedSshd(provider, p.providerResourceId, trust.lines);
     await recordAuditEvent(supabase, {
       ownerUserId: p.ownerUserId,
       instanceId: p.instanceId,
       endpointId: p.endpointId,
       eventType: "ca_trust_installed",
-      detail: { generation: p.generation },
+      detail: { generation: p.generation, ca_fingerprints: trust.fingerprints },
       correlationId: p.correlationId,
     });
   } catch (err) {
@@ -283,7 +317,7 @@ export function supabaseMachineSetup(
     async bootstrap(provider, providerResourceId, placementId) {
       if (opts.stub) return;
       await runBootManifest(provider, providerResourceId);
-      await provisionManagedSshd(provider, providerResourceId, caPublicKeyLine(caKeyMaterialFromEnv()));
+      await provisionManagedSshd(provider, providerResourceId, (await caTrust()).lines);
       if (placementId) {
         await provisionPlacementServices(
           supabasePlacementSecrets(supabase),
