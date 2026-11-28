@@ -21,7 +21,7 @@ pub(super) use workspace_data::WorkspaceHost;
 use super::{
   confirm,
   popup::{PopupRequest, PopupSink},
-  theme,
+  theme, ui,
 };
 
 pub mod account_data;
@@ -581,9 +581,30 @@ impl Ctx<'_> {
   }
 }
 
+/// Draws `Button::tooltip`s in this window's tooltip popup.
+fn tooltip_host(popups: PopupSink, dark: bool) -> ui::tooltip::TooltipHost {
+  use crate::gpui_shell::popup::{Side, TooltipContent};
+  Rc::new(move |event, cx| match event {
+    ui::tooltip::TooltipEvent::Show { anchor, text, side } => popups(
+      PopupRequest::ShowTooltip {
+        anchor,
+        side: match side {
+          ui::tooltip::Side::Bottom => Side::Bottom,
+          ui::tooltip::Side::Top => Side::Top,
+        },
+        content: TooltipContent::Text(text),
+        dark,
+      },
+      cx,
+    ),
+    ui::tooltip::TooltipEvent::Hide => popups(PopupRequest::HideTooltip, cx),
+  })
+}
+
 impl Render for Screen {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let dark = self.snapshot.dark;
+    ui::tooltip::set_host(window, tooltip_host(self.popups.clone(), dark));
     self.track_overlay_focus(window, cx);
     let confirm = confirm::render(Self::confirm_slot, self, window, &theme::palette(dark), cx);
     if !matches!(self.snapshot.view, View::Onboarding(_)) {
@@ -902,7 +923,6 @@ impl Screen {
     let env = || modal::Env {
       host: self.host.clone(),
       react: self.sink.clone(),
-      popups: self.popups.clone(),
     };
     let route = self.modal.clone();
     if !matches!(route, Some(Modal::AgentPrompt(_))) && self.agent_prompt.take().is_some() {

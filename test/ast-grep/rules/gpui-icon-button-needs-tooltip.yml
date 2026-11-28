@@ -3,14 +3,13 @@ language: rust
 severity: error
 message: >
   An icon-only button needs a tooltip: the icon alone does not say what it
-  does. Wrap it with the view's `Tooltips::wrap(..)` (or its
-  `with_tooltip(..)`), or show one from `.on_hover(..)`, with text that
-  names the action.
+  does. Give it `.tooltip(..)` with text that names the action, or use
+  `ui::IconButton`, which shows its label.
 note: >
-  Checked: `IconButton::new(..)`, and a `Button::new(..)` chain that takes
-  `.icon(..)`, `.copy_icon(..)` or `.size(Size::Icon*)` and no `.label(..)`.
-  A button bound with `let` passes when a later statement in the same block
-  hands it to a tooltip wrapper.
+  Checked: a `Button::new(..)` chain that takes `.icon(..)`, `.copy_icon(..)`
+  or `.size(Size::Icon*)` and no `.label(..)`. It also passes with
+  `.on_hover(..)` or inside a `Tooltips::wrap(..)`/`with_tooltip(..)`, or
+  bound with `let` and handed to one later in the same block.
 files:
   - "src-tauri/src/gpui_shell/**/*.rs"
   - "crates/treq-ui/src/**/*.rs"
@@ -22,24 +21,18 @@ ignores:
   - "crates/treq-ui/src/icon_button.rs"
   # Baseline: files that already have icon buttons without tooltips. Do not
   # add to it; fix a file and drop it from this list instead.
-  - "crates/treq-ui/src/dialog.rs"
-  - "crates/treq-ui/src/path_field.rs"
   - "crates/treq-ui/src/split_button.rs"
   - "src-tauri/src/gpui_shell/popover/checks.rs"
   - "src-tauri/src/gpui_shell/screen/changes.rs"
   - "src-tauri/src/gpui_shell/screen/changes/review.rs"
   - "src-tauri/src/gpui_shell/screen/code.rs"
-  - "src-tauri/src/gpui_shell/screen/file_browser.rs"
   - "src-tauri/src/gpui_shell/screen/file_browser/review.rs"
   - "src-tauri/src/gpui_shell/screen/github.rs"
   - "src-tauri/src/gpui_shell/screen/github/detail.rs"
   - "src-tauri/src/gpui_shell/screen/github/new_pr.rs"
   - "src-tauri/src/gpui_shell/screen/linear.rs"
-  - "src-tauri/src/gpui_shell/screen/logs.rs"
   - "src-tauri/src/gpui_shell/screen/merge.rs"
   - "src-tauri/src/gpui_shell/screen/modal/prompt_history.rs"
-  - "src-tauri/src/gpui_shell/screen/onboarding.rs"
-  - "src-tauri/src/gpui_shell/screen/onboarding_remote.rs"
   - "src-tauri/src/gpui_shell/screen/pr_review.rs"
   - "src-tauri/src/gpui_shell/screen/reactions.rs"
   - "src-tauri/src/gpui_shell/screen/settings.rs"
@@ -100,7 +93,7 @@ utils:
       kind: field_expression
       has:
         field: field
-        regex: ^on_hover$
+        regex: ^(on_hover|tooltip)$
   tooltip-call:
     kind: call_expression
     has:
@@ -115,27 +108,22 @@ utils:
         - kind: scoped_identifier
           regex: (^|::)(with_tooltip|tooltip)$
   icon-button:
-    any:
+    all:
       - kind: call_expression
         has:
           field: function
-          regex: (^|::)IconButton::new$
-      - all:
-          - kind: call_expression
-            has:
-              field: function
-              regex: (^|::)Button::new$
-          - inside:
-              stopBy:
-                not:
-                  matches: in-chain
-              matches: icon-step
-          - not:
-              inside:
-                stopBy:
-                  not:
-                    matches: in-chain
-                matches: label-step
+          regex: (^|::)Button::new$
+      - inside:
+          stopBy:
+            not:
+              matches: in-chain
+          matches: icon-step
+      - not:
+          inside:
+            stopBy:
+              not:
+                matches: in-chain
+            matches: label-step
 rule:
   matches: icon-button
   not:

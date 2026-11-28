@@ -28,7 +28,6 @@ use super::{fuzzy_matches, Env};
 use crate::core::agent_launch::{self as launch, IssueAttachment, TaskRequest};
 use crate::gpui_shell::{
   native::NativeEvent,
-  popup::{Side, TooltipContent},
   screen::{
     code::{agent_icon, menu_panel},
     code_data::{
@@ -39,7 +38,6 @@ use crate::gpui_shell::{
     file_picker::{FilePicker, FilePickerEvent, Scope},
   },
   theme::{self, Palette},
-  tooltips::{HasTooltips, Tooltips},
   ui::{self, Button, Size, TextSize, Variant},
 };
 
@@ -151,7 +149,6 @@ struct Picker {
 
 pub struct AgentPromptView {
   env: Env,
-  tips: Tooltips,
   pub(in crate::gpui_shell::screen) route: Route,
   dark: bool,
   /// The chosen workspace; `None` runs in the default branch.
@@ -183,12 +180,6 @@ pub struct AgentPromptView {
   _subscriptions: Vec<Subscription>,
 }
 
-impl HasTooltips for AgentPromptView {
-  fn tooltips(&mut self) -> &mut Tooltips {
-    &mut self.tips
-  }
-}
-
 /// Runs `f` on the dialog's host in the background, then `apply`s it.
 macro_rules! read {
   ($self:ident, $cx:ident, |$host:ident, $route:ident| $read:expr, |$view:ident, $value:ident, $cx2:ident| $apply:expr) => {{
@@ -215,10 +206,8 @@ macro_rules! read {
 
 impl AgentPromptView {
   pub fn new(env: Env, route: Route, dark: bool, cx: &mut Context<Self>) -> Self {
-    let tips = Tooltips::new(env.popups.clone(), dark);
     let mut this = Self {
       env,
-      tips,
       selected: route
         .initial_workspace_id
         .filter(|id| route.workspaces.iter().any(|w| w.id == *id)),
@@ -253,7 +242,6 @@ impl AgentPromptView {
   pub fn set_route(&mut self, route: Route, dark: bool, cx: &mut Context<Self>) {
     if self.dark != dark {
       self.dark = dark;
-      self.tips.dark = dark;
       self.dark_changed = true;
     }
     if self.route == route && !self.dark_changed {
@@ -1243,17 +1231,10 @@ impl AgentPromptView {
     let send = ui::IconButton::new("task-submit", theme::ICON_SEND, "Send", p)
       .primary()
       .disabled(disabled)
+      .tooltip(crate::gpui_shell::keys::hint("⌘ + Enter"))
+      .tooltip_side(ui::tooltip::Side::Top)
       .on_click(cx.listener(|view, _, _, cx| view.submit(cx)));
-    let buttons = self.tips.wrap(
-      "task-submit",
-      Side::Top,
-      Some(TooltipContent::Text(
-        crate::gpui_shell::keys::hint("⌘ + Enter").into(),
-      )),
-      send,
-      cx,
-    );
-    right = right.child(buttons);
+    right = right.child(send);
 
     div()
       .px_2()
@@ -1361,7 +1342,6 @@ impl AgentPromptView {
 
 impl Render for AgentPromptView {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-    self.tips.sync(cx);
     let p = theme::palette(self.dark);
     if let Some(insertion) = self.insert.take() {
       self.insert_text(&insertion, window, cx);

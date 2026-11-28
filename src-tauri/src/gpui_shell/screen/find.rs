@@ -13,9 +13,7 @@ use tauri_plugin_gpui::gpui::{
 };
 
 use crate::gpui_shell::{
-  popup::{Side, TooltipContent},
   theme::{self, Palette},
-  tooltips::HasTooltips,
   ui::{self, radius, TextSize},
 };
 use crate::result_ext::ResultExt;
@@ -44,7 +42,7 @@ pub(in crate::gpui_shell::screen) struct Find {
 
 /// A view with a find bar.
 pub(in crate::gpui_shell::screen) trait Findable:
-  HasTooltips + Sized + 'static
+  Sized + 'static
 {
   fn find(&mut self) -> &mut Find;
   /// Whether Cmd+F opens the bar now.
@@ -316,24 +314,19 @@ pub(in crate::gpui_shell::screen) fn bar<V: Findable>(
   let empty = find.query.trim().is_empty();
   let total = find.total;
   let shown = if total > 0 { find.current + 1 } else { 0 };
-  let mut button =
-    |part: &str, icon, label: &'static str, tip: &'static str, delta: Option<isize>| {
-      let button = ui::IconButton::new(SharedString::from(format!("{id}-{part}")), icon, label, p)
-        .size(ui::IconButtonSize::Small);
-      let button = match delta {
-        Some(delta) => button.disabled(empty).when(!empty, |this| {
-          this.on_click(cx.listener(move |view, _, _, cx| step(view, delta, cx)))
-        }),
-        None => button.on_click(cx.listener(|view, _, _, cx| close(view, cx))),
-      };
-      view.tooltips().wrap(
-        format!("{id}-{part}-tip"),
-        Side::Top,
-        Some(TooltipContent::Text(tip.into())),
-        button,
-        cx,
-      )
+  let button = |part: &str, icon, label: &'static str, tip: &'static str, delta: Option<isize>| {
+    let button = ui::IconButton::new(SharedString::from(format!("{id}-{part}")), icon, label, p)
+      .size(ui::IconButtonSize::Small)
+      .tooltip(tip)
+      .tooltip_side(ui::tooltip::Side::Top);
+    let button = match delta {
+      Some(delta) => button.disabled(empty).when(!empty, |this| {
+        this.on_click(cx.listener(move |view, _, _, cx| step(view, delta, cx)))
+      }),
+      None => button.on_click(cx.listener(|view, _, _, cx| close(view, cx))),
     };
+    button
+  };
   let prev = button(
     "prev",
     theme::ICON_CHEVRON_UP,
