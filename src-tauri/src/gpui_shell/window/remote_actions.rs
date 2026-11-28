@@ -233,6 +233,7 @@ impl Model {
     let id = match agent {
       RemoteAgentId::Claude => "claude",
       RemoteAgentId::Codex => "codex",
+      RemoteAgentId::Gemini => "gemini",
       _ => return (None, Vec::new()),
     };
     let settings = &self.prefs.agent_settings;
@@ -365,6 +366,29 @@ mod tests {
       launch["args"],
       json!(["--model", "opus", "--effort", "high"])
     );
+  }
+
+  #[test]
+  fn starts_gemini_on_its_default_profile_mode_on_the_host() {
+    let mut model = remote_model();
+    model.prefs.default_agent = Some("gemini".into());
+    model.prefs.agent_settings = [
+      (
+        "agent_profiles".to_string(),
+        r#"[{"agent":"gemini","name":"work"}]"#.to_string(),
+      ),
+      ("default_profile_gemini".to_string(), "work".to_string()),
+      (
+        "agent_modes".to_string(),
+        r#"[{"agent":"gemini","profile":"work","default":"pro","modes":[{"name":"pro","model":"gemini-3-pro-preview"}]}]"#.to_string(),
+      ),
+    ]
+    .into();
+    model.start_remote_agent(None, &Data::default());
+    let launch = &model.commands[0]["remote"]["launch"];
+    assert_eq!(launch["agent"], "gemini");
+    assert_eq!(launch["profile"], "work");
+    assert_eq!(launch["args"], json!(["-m", "gemini-3-pro-preview"]));
   }
 
   #[test]
