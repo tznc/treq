@@ -30,7 +30,7 @@ import { postStripeEvent } from "../stripe";
 
 const WEB_URL = "http://localhost:3001";
 
-type StripeCall = { method: string; path: string; params?: StripeParams };
+type StripeCall = { method: string; path: string; params: StripeParams | undefined };
 
 function stubStripe(customerId: string) {
   const calls: StripeCall[] = [];
@@ -148,7 +148,7 @@ it("sells Team to an organization's owner and gives every member Pro", async () 
       "/v1/prices",
       "/v1/checkout/sessions",
     ]);
-    expect(asOwner.calls[0].params).toMatchObject({
+    expect(asOwner.calls[0]?.params).toMatchObject({
       "metadata[owner_type]": "organization",
       "metadata[owner_id]": orgId,
     });
@@ -246,7 +246,7 @@ it("sells Team to an organization's owner and gives every member Pro", async () 
       organizationId: orgId,
     });
     expect(portalResult.status).toBe(200);
-    expect(portal.calls[0].params).toEqual({
+    expect(portal.calls[0]?.params).toEqual({
       customer: customerId,
       return_url: `${WEB_URL}/dashboard?tab=team`,
     });

@@ -90,12 +90,12 @@ describe("sandboxGithubTokens", () => {
       );
     }
     const mints = calls.filter(([url]) => url.includes("/access_tokens"));
-    expect(JSON.parse(String(mints[0][1].body)).permissions).toEqual(
+    expect(JSON.parse(String(mints[0]?.[1].body)).permissions).toEqual(
       TOKEN_PERMISSIONS,
     );
-    expect((mints[0][1].headers as Record<string, string>).Authorization).toBe(
-      "Bearer app-jwt",
-    );
+    expect(
+      (mints[0]?.[1].headers as Record<string, string>).Authorization,
+    ).toBe("Bearer app-jwt");
   });
 
   it("lists repositories it refused, and still mints for the rest", async () => {

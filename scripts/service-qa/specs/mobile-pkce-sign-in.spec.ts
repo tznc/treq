@@ -50,8 +50,8 @@ async function magicLinkFor(email: string): Promise<string> {
     const id = list.messages?.[0]?.ID;
     if (id) {
       const msg = await (await fetch(`${MAILPIT}/api/v1/message/${id}`)).json();
-      const match = /href="([^"]*\/auth\/v1\/verify[^"]*)"/.exec(msg.HTML ?? "");
-      if (match) return match[1].replaceAll("&amp;", "&");
+      const href = /href="([^"]*\/auth\/v1\/verify[^"]*)"/.exec(msg.HTML ?? "")?.[1];
+      if (href) return href.replaceAll("&amp;", "&");
     }
     await new Promise((r) => setTimeout(r, 250));
   }

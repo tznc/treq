@@ -234,13 +234,13 @@ describe("githubInstallationAccess", () => {
 
     await expect(access.exchangeCode(CODE)).resolves.toEqual(GRANT);
     expect(calls).toHaveLength(1);
-    expect(calls[0].url).toBe("https://github.com/login/oauth/access_token");
-    expect(calls[0].init.method).toBe("POST");
-    expect(new Headers(calls[0].init.headers).get("accept")).toBe(
+    expect(calls[0]?.url).toBe("https://github.com/login/oauth/access_token");
+    expect(calls[0]?.init.method).toBe("POST");
+    expect(new Headers(calls[0]?.init.headers).get("accept")).toBe(
       "application/json",
     );
     expect(
-      Object.fromEntries(new URLSearchParams(String(calls[0].init.body))),
+      Object.fromEntries(new URLSearchParams(String(calls[0]?.init.body))),
     ).toEqual({
       client_id: "Iv1.client",
       client_secret: "secret-value",
@@ -301,7 +301,7 @@ describe("githubInstallationAccess", () => {
       "https://api.github.com/user/installations?per_page=100&page=1",
       "https://api.github.com/user/installations?per_page=100&page=2",
     ]);
-    expect(new Headers(calls[0].init.headers).get("authorization")).toBe(
+    expect(new Headers(calls[0]?.init.headers).get("authorization")).toBe(
       `Bearer ${USER_TOKEN}`,
     );
   });

@@ -120,6 +120,7 @@ export async function linkGithubRepo(
     opts?.repoId ?? Math.floor(Math.random() * 1_000_000_000) + 2_000_000;
   const fullName = opts?.fullName ?? `service-qa/repo-${repoId}`;
   const [owner, name] = fullName.split("/");
+  if (!owner || !name) throw new Error(`linkGithubRepo: fullName must be owner/name, got ${fullName}`);
   const defaultBranch = opts?.defaultBranch ?? "main";
 
   const { error: installError } = await admin

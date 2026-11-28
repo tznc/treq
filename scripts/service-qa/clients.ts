@@ -24,9 +24,12 @@ type LocalKeys = {
   serviceRoleKey: string;
 };
 
+/** What `supabase status` printed: a key it left out is undefined. */
+type StatusKeys = { [K in keyof LocalKeys]: string | undefined };
+
 let cachedKeys: LocalKeys | null = null;
 
-function parseStatusEnv(stdout: string): Partial<LocalKeys> {
+function parseStatusEnv(stdout: string): StatusKeys {
   const pick = (name: string): string | undefined => {
     const match = stdout.match(new RegExp(`^${name}=\"?([^\"]+)\"?$`, "m"));
     return match?.[1];
@@ -42,7 +45,7 @@ function parseStatusEnv(stdout: string): Partial<LocalKeys> {
 export function resolveLocalKeys(): LocalKeys {
   if (cachedKeys) return cachedKeys;
 
-  let fromStatus: Partial<LocalKeys> = {};
+  let fromStatus: Partial<StatusKeys> = {};
   try {
     const stdout = execFileSync("supabase", ["status", "-o", "env"], {
       encoding: "utf8",

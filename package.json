@@ -39,6 +39,7 @@
     "test:db": "supabase test db --local",
     "format": "biome format --write ./test && cargo fmt",
     "check:format": "biome format ./test",
+    "typecheck": "tsc -p .",
     "check": "ast-grep test",
     "check:functions": "deno check --config supabase/functions/deno.json supabase/functions/*/index.ts supabase/functions/tests/*.ts",
     "test:functions": "deno test --config supabase/functions/deno.json --allow-env --allow-run=bash,git --allow-write --allow-read --allow-net=example.invalid supabase/functions/tests/",
@@ -65,6 +66,7 @@
     "express": "^4.22.3",
     "jest": "^30.5.2",
     "pngjs": "^7.0.0",
+    "typescript": "~5.9.2",
     "vitest": "^4.0.15"
   }
 }

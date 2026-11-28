@@ -74,6 +74,7 @@ jobs:
               - "supabase/functions/**"
               - "package.json"
               - "package-lock.json"
+              - "tsconfig.json"
               - "biome.json"
               - "sgconfig.yml"
               - ".tool-versions"
@@ -115,6 +116,11 @@ jobs:
       - name: check:format
         if: ${{ !cancelled() && env.JS == 'true' }}
         run: npm run check:format
+
+      # vitest and jest strip types without checking them.
+      - name: typecheck
+        if: ${{ !cancelled() && env.JS == 'true' }}
+        run: npm run typecheck
 
       # lint runs ast-grep rules over src-tauri, so it also runs on Rust changes.
       - name: lint

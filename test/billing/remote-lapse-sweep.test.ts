@@ -150,8 +150,8 @@ describe("sweepLapsedInstances", () => {
     expect(result.stopped).toEqual(["inst-1"]);
     expect(provider.stopInstance).toHaveBeenCalledWith("dev-treq-user-1");
     expect(provider.deleteInstance).not.toHaveBeenCalled();
-    expect(rows[0].lapsed_at).toBe(NOW.toISOString());
-    expect(rows[0].status).toBe("suspended");
+    expect(rows[0]?.lapsed_at).toBe(NOW.toISOString());
+    expect(rows[0]?.status).toBe("suspended");
     expect(audits).toEqual([
       { eventType: "instance_lapse_stopped", instanceId: "inst-1" },
     ]);
@@ -179,7 +179,7 @@ describe("sweepLapsedInstances", () => {
 
     expect(result.stopped).toEqual(["inst-1"]);
     expect(provider.stopInstance).toHaveBeenCalledTimes(1);
-    expect(rows[0].lapsed_at).toBe(daysAgo(3));
+    expect(rows[0]?.lapsed_at).toBe(daysAgo(3));
   });
 
   it("deletes the instance after 30 days without Pro", async () => {
@@ -194,7 +194,7 @@ describe("sweepLapsedInstances", () => {
     expect(provider.deleteInstance).toHaveBeenCalledWith("dev-treq-user-1", {
       placementId: null,
     });
-    expect(rows[0].status).toBe("deleted");
+    expect(rows[0]?.status).toBe("deleted");
     expect(audits).toEqual([
       { eventType: "instance_lapse_deleted", instanceId: "inst-1" },
     ]);
@@ -239,7 +239,7 @@ describe("sweepLapsedInstances", () => {
     const result = await run();
 
     expect(result.restored).toEqual(["inst-1"]);
-    expect(rows[0].lapsed_at).toBeNull();
+    expect(rows[0]?.lapsed_at).toBeNull();
     expect(store.claimDeletion).not.toHaveBeenCalled();
     expect(provider.stopInstance).not.toHaveBeenCalled();
     expect(provider.deleteInstance).not.toHaveBeenCalled();
@@ -257,7 +257,7 @@ describe("sweepLapsedInstances", () => {
 
     expect(result.stopped).toEqual([]);
     expect(provider.stopInstance).not.toHaveBeenCalled();
-    expect(rows[0].status).toBe("ready");
+    expect(rows[0]?.status).toBe("ready");
   });
 
   it("deletes an instance that never got a provider resource without calling the provider", async () => {
@@ -275,7 +275,7 @@ describe("sweepLapsedInstances", () => {
 
     expect(result.deleted).toEqual(["inst-1"]);
     expect(provider.deleteInstance).not.toHaveBeenCalled();
-    expect(rows[0].status).toBe("deleted");
+    expect(rows[0]?.status).toBe("deleted");
   });
 
   it("keeps sweeping other instances when one provider call fails", async () => {
@@ -444,7 +444,7 @@ describe("sweepLapsedInstances", () => {
       { kind: "daytona", op: "delete", id: "daytona-old" },
     ]);
     expect(closed).toEqual(["pl-new", "pl-old", "pl-none"]);
-    expect(rows[0].status).toBe("deleted");
+    expect(rows[0]?.status).toBe("deleted");
   });
 
   it("treats a machine that is already gone as deleted", async () => {
@@ -459,6 +459,6 @@ describe("sweepLapsedInstances", () => {
     const result = await run();
 
     expect(result.deleted).toEqual(["inst-1"]);
-    expect(rows[0].status).toBe("deleted");
+    expect(rows[0]?.status).toBe("deleted");
   });
 });

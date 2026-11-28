@@ -219,8 +219,8 @@ describe("createStripeClient", () => {
 type Call = {
   method: string;
   path: string;
-  params?: StripeParams;
-  idempotencyKey?: string;
+  params: StripeParams | undefined;
+  idempotencyKey: string | undefined;
 };
 
 function fakeStripe(responses: Record<string, unknown>): {

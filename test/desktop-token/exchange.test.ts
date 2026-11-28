@@ -91,7 +91,7 @@ describe("consumeDesktopToken", () => {
       },
     ]);
     expect(await consumeDesktopToken(table, "t1", NOW)).toBeNull();
-    expect(rows[0].used).toBe(false);
+    expect(rows[0]?.used).toBe(false);
   });
 });
 

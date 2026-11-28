@@ -257,7 +257,7 @@ it("takes a price edit from treq_internal.admin_config without a migration", asy
   expect(readError).toBeNull();
   const original = row as Record<string, unknown>;
   const edited = structuredClone(original) as {
-    tiers: Record<string, { managed_usd_per_hour: number }>;
+    tiers: { m: { managed_usd_per_hour: number } };
   };
   edited.tiers.m.managed_usd_per_hour = 0.36;
 

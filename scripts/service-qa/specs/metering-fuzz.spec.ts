@@ -312,10 +312,8 @@ it(`keeps the usage ledger and reports consistent over ${SEEDS} random timelines
         s: ms(i.started_at),
         e: i.ended_at ? ms(i.ended_at) : now,
       }));
-      for (let a = 0; a < spans.length; a++) {
-        for (let b = a + 1; b < spans.length; b++) {
-          const x = spans[a],
-            y = spans[b];
+      for (const [a, x] of spans.entries()) {
+        for (const y of spans.slice(a + 1)) {
           if (
             x.s < y.e &&
             y.s < x.e &&

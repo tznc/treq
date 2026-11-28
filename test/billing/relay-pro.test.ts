@@ -20,6 +20,7 @@ function store(pro: boolean, capped = false): RelayStore {
       id: "inst-1",
       status: "suspended",
       provider_resource_id: "dev-treq-user-1",
+      provider_kind: "local",
     }),
     getClientKey: async () => ({ id: "key-1", revoked_at: null }),
     hasPro: vi.fn(async () => pro),
