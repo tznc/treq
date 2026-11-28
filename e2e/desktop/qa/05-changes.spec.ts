@@ -45,7 +45,7 @@ test("changes: conflict card and resolve popover", async ({ page }) => {
     title: "Changes tab: conflicts and committed files",
     expectations: [
       "File list: Conflicts (Home.tsx, C) above Committed 3 (A/A/M badges)",
-      "Review bar: '0 comments pending', Start Review, Reset, red Resolve conflicts…",
+      "Review bar: a red '1 comment' pill, Start Review, Reset, red Resolve conflicts…",
       "No commit box: nothing is uncommitted, so 'Nothing to commit' sits between Conflicts and Committed",
     ],
   });
@@ -116,7 +116,7 @@ test("changes: diff, inline comment add/edit, review bar", async ({ page }) => {
     title: "Inline comment added; review bar counts it",
     expectations: [
       "Comment card under line 6 with author and text",
-      "Review bar reads '1 comment pending'",
+      "Review bar's pill reads '2 comments'",
     ],
   });
   // Clicking a comment's body edits it.

@@ -364,10 +364,11 @@ pub fn preview(body: &str) -> String {
     .join(" ")
 }
 
-/// The action bar's count of open comments, and its breakdown by source
-/// for the tooltip: `("3 comments", "2 GitHub comments, 1 local review
-/// comment")`. Comments on resolved GitHub threads are left out.
+/// The action bar's count of pending and open comments, and its breakdown
+/// by source for the tooltip: `("3 comments", "1 pending comment, 2 GitHub
+/// comments")`. Comments on resolved GitHub threads are left out.
 pub fn comment_summary(
+  pending: usize,
   github: &[GhReviewThread],
   agent: &[AgentReviewComment],
 ) -> Option<(String, String)> {
@@ -377,13 +378,17 @@ pub fn comment_summary(
     .map(|t| t.comments.len())
     .sum::<usize>();
   let local = agent.iter().filter(|c| c.status != "resolved").count();
-  let total = github + local;
+  let total = pending + github + local;
   (total > 0).then(|| {
-    let sources: Vec<String> = [(github, "GitHub comment"), (local, "local review comment")]
-      .into_iter()
-      .filter(|&(n, _)| n > 0)
-      .map(|(n, word)| count_label(n, word))
-      .collect();
+    let sources: Vec<String> = [
+      (pending, "pending comment"),
+      (github, "GitHub comment"),
+      (local, "local review comment"),
+    ]
+    .into_iter()
+    .filter(|&(n, _)| n > 0)
+    .map(|(n, word)| count_label(n, word))
+    .collect();
     (count_label(total, "comment"), sources.join(", "))
   })
 }
@@ -621,10 +626,10 @@ mod tests {
       agent("b.rs", 1, 1, None, "resolved"),
     ];
     assert_eq!(
-      comment_summary(&[resolved, replied], &agents),
+      comment_summary(1, &[resolved, replied], &agents),
       Some((
-        "3 comments".into(),
-        "2 GitHub comments, 1 local review comment".into()
+        "4 comments".into(),
+        "1 pending comment, 2 GitHub comments, 1 local review comment".into()
       ))
     );
   }
@@ -633,9 +638,13 @@ mod tests {
   fn lists_only_sources_with_open_comments() {
     let github = [thread("a.rs", Some(1), "RIGHT")];
     assert_eq!(
-      comment_summary(&github, &[]),
+      comment_summary(0, &github, &[]),
       Some(("1 comment".into(), "1 GitHub comment".into()))
     );
-    assert_eq!(comment_summary(&[], &[]), None);
+    assert_eq!(
+      comment_summary(2, &[], &[]),
+      Some(("2 comments".into(), "2 pending comments".into()))
+    );
+    assert_eq!(comment_summary(0, &[], &[]), None);
   }
 }

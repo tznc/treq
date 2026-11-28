@@ -19,7 +19,7 @@ pub(super) const CARD_MAX_W: f32 = 820.;
 use crate::{
   github::{GhReviewComment, GhReviewThread},
   gpui_shell::screen::{
-    changes_review::{number_and_side, Pending, Quote, Side},
+    changes_review::{count_label, number_and_side, Pending, Quote, Side},
     changes_threads::{
       agent_by_line, comment_date, comment_summary, github_suggestion_original, original_text,
       place_threads, preview, suggestion_diff, suggestion_span, Placed, RowKind,
@@ -301,23 +301,43 @@ impl ChangesView {
     counts
   }
 
-  /// `ReviewActionBar`'s count of open GitHub and local comments; its
-  /// tooltip says how many came from each.
+  /// `ReviewActionBar`'s pill counting pending, GitHub and local comments;
+  /// its tooltip says how many came from each. With `always`, it reads
+  /// "0 comments" rather than not showing.
   pub(super) fn comment_count(
     &self,
+    always: bool,
     p: &Palette,
     cx: &mut Context<Self>,
-  ) -> Option<impl IntoElement> {
-    let (label, sources) = comment_summary(&self.threads.github, &self.threads.agent)?;
-    // Short label (count). ast-grep-ignore: gpui-text-xs-short-label-only
-    let count = ui::text(div(), TextSize::Xs)
+  ) -> Option<AnyElement> {
+    let pending = self.review.comments.len() + self.review.notes.len();
+    let (label, sources) = match comment_summary(pending, &self.threads.github, &self.threads.agent)
+    {
+      Some((label, sources)) => (label, Some(sources)),
+      None if always => (count_label(0, "comment"), None),
+      None => return None,
+    };
+    let tone = if self.conflicted().is_empty() {
+      Tone::Neutral
+    } else {
+      Tone::Danger
+    };
+    let pill = div()
       .selector("review-comment-count")
       .role(gpui::Role::Label)
       .aria_label(label.clone())
-      .text_color(Tone::GitMerged.color(p))
-      .child(label)
+      .child(
+        ui::Badge::new(label, p)
+          .tone(tone)
+          .icon(theme::ICON_MESSAGE),
+      )
       .test_support();
-    Some(self.tip("review-comment-count-tip".into(), sources, count, cx))
+    Some(match sources {
+      Some(sources) => self
+        .tip("review-comment-count-tip".into(), sources, pill, cx)
+        .into_any_element(),
+      None => pill.into_any_element(),
+    })
   }
 
   /// What a diff line carries from others: agent comments, then threads.

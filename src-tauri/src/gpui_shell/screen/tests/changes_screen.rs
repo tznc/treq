@@ -1440,6 +1440,17 @@ fn changes_tab_counts_open_github_and_local_comments(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn the_comment_count_adds_pending_review_comments(cx: &mut TestAppContext) {
+  let mut host = changes_host();
+  host.threads = vec![gh_thread("t1", 2, false)];
+  let (mut h, _) = workspace_harness(cx, host, changes_route());
+  assert!(h.shows(gpui::Role::Label, "1 comment"));
+  comment_line(&mut h, "Nit");
+  assert!(h.shows(gpui::Role::Label, "2 comments"));
+  assert!(!h.shows(gpui::Role::Label, "1 comment"));
+}
+
+#[gpui::test]
 fn the_comment_count_tooltip_breaks_it_down_by_source(cx: &mut TestAppContext) {
   use crate::gpui_shell::popup::{PopupRequest, TooltipContent};
   let mut host = changes_host();

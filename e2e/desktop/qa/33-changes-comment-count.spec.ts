@@ -1,6 +1,6 @@
-// The Changes tab's action bar counts open GitHub and local review
-// comments as "N comments"; hovering the count lists how many came from
-// each source.
+// The Changes tab's action bar counts pending, open GitHub and local
+// review comments in one "N comments" pill; hovering it lists how many came
+// from each source.
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
@@ -48,13 +48,24 @@ test("changes: comment count and its source tooltip", async ({ page }) => {
   );
   // Agent comments are read every 10s.
   await expect(count).toHaveAccessibleName("2 comments", { timeout: 15_000 });
+
+  // A pending review comment on the diff joins the same pill.
+  const add = page.getByRole("button", { name: /^Add comment on .* line \d+$/ }).first();
+  const at = await add.boundingBox();
+  expect(at).not.toBeNull();
+  await page.mouse.move(at!.x + at!.width / 2, at!.y + at!.height / 2, { steps: 4 });
+  await page.mouse.click(at!.x + at!.width / 2, at!.y + at!.height / 2);
+  const input = page.getByRole("textbox", { name: "Add a comment…" });
+  await input.fill("Name the fallback.");
+  await page.getByRole("button", { name: "Add comment", exact: true }).click();
+  await expect(count).toHaveAccessibleName("3 comments");
   await settle(page, 800);
   await capture(page, {
     name: "33-comment-count-01-action-bar",
-    title: "Action bar: one GitHub and one local comment",
+    title: "Action bar: one pending, one GitHub and one local comment",
     expectations: [
-      "The action bar reads '2 comments' left of the Review button",
-      "The count and button sit on one row, vertically centred",
+      "One pill with a message icon reads '3 comments'; no separate 'pending' text",
+      "The pill is tinted red (the workspace has conflicts) and sits on the bar's left, vertically centred",
     ],
   });
 
@@ -68,7 +79,7 @@ test("changes: comment count and its source tooltip", async ({ page }) => {
     screen: true,
     rest: false,
     expectations: [
-      "A tooltip next to '2 comments' reads '1 GitHub comment, 1 local review comment'",
+      "A tooltip by the '3 comments' pill reads '1 pending comment, 1 GitHub comment, 1 local review comment'",
       "The tooltip text sits on one line, not clipped",
     ],
   });
