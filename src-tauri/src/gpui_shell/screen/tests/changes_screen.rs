@@ -1702,6 +1702,35 @@ fn changes_tab_draws_a_github_suggestion_as_a_diff(cx: &mut TestAppContext) {
   assert!(h.shows(gpui::Role::Heading, "Suggested change"));
 }
 
+/// Text in a review comment selects like any other text, and Quote then
+/// quotes only the selection.
+#[gpui::test]
+fn changes_tab_quotes_the_selected_text_of_a_review_comment(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  // One line, longer than half the card, so its middle is a word.
+  const BODY: &str =
+    "Why two lines here, when a single line reads the same and keeps the diff smaller?";
+  let mut host = changes_host();
+  let mut thread = gh_thread("t1", 2, false);
+  thread.comments[0].body = BODY.into();
+  host.threads = vec![thread];
+  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  let screen = a11y_screen(&mut h);
+  let user = screen.user();
+  user.dbl_click(&screen.get_by_role(by::role(gpui::Role::Article).name(BODY)));
+  let word = user.copy().expect("a word is selected");
+  assert!(BODY.contains(&word) && word != BODY, "{word:?}");
+  user.click(&screen.get_by_role(by::role(gpui::Role::Button).name("Quote")));
+  let input = screen.get_by_role(by::role(gpui::Role::MultilineTextInput).name("Add a comment…"));
+  user.type_text(&input, "Agreed");
+  user.click(&screen.get_by_role(by::role(gpui::Role::Button).name("Add comment")));
+  settle_save(&mut h);
+  let saved: serde_json::Value =
+    serde_json::from_str(&host.review.lock().unwrap().clone().unwrap_or_default())
+      .expect("saved review");
+  assert_eq!(saved[0]["line_content"], serde_json::json!([word]));
+}
+
 #[gpui::test]
 fn changes_tab_reacts_to_a_review_comment(cx: &mut TestAppContext) {
   let mut host = changes_host();

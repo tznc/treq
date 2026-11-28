@@ -12,6 +12,8 @@ use treq_ui::SelectorExt as _;
 
 use gpui::{AnyElement, StrikethroughStyle, StyledText, Task};
 
+use crate::gpui_shell::screen::changes_threads::quoted_text;
+
 use super::*;
 
 /// Comment cards cap their width so lines stay readable on wide screens.
@@ -56,6 +58,9 @@ pub(in crate::gpui_shell::screen) struct Threads {
   poll: Option<Task<()>>,
   /// The review comment whose reaction picker is open.
   reaction_picker: Option<String>,
+  /// The text selected when the pointer was last let go: a press clears
+  /// the selection before Quote's click reads it.
+  pub(super) selected: String,
 }
 
 impl ChangesView {
@@ -89,6 +94,13 @@ impl ChangesView {
 
   pub(super) fn stop_threads(&mut self) {
     self.threads.poll = None;
+  }
+
+  /// The pointer let go: ends a drag over the diff, and keeps what is
+  /// selected for Quote.
+  pub(super) fn end_pointer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    self.end_drag(cx);
+    self.threads.selected = gpui_kit::base::TextSelection::selected_text(window, cx);
   }
 
   fn read_threads(&mut self, github: bool, cx: &mut Context<Self>) {
@@ -273,7 +285,7 @@ impl ChangesView {
         at,
         start_line: line,
         end_line: line,
-        line_content: vec![comment.body.clone()],
+        line_content: vec![quoted_text(&comment.body, &self.threads.selected)],
         side,
         quote: Some(Quote {
           author: comment.author.login.clone(),
@@ -599,7 +611,10 @@ impl ChangesView {
         self.dark,
       )
     };
-    let body = div().selector("github-comment-body");
+    let body = div()
+      .selector("github-comment-body")
+      .role(gpui::Role::Article)
+      .aria_label(preview(&comment.body));
     let Some(s) = crate::core::review::parse_suggestion(&comment.body) else {
       return body.child(md("", &comment.body));
     };
