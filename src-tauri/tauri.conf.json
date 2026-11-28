@@ -226,7 +226,7 @@
                   "name": "profile",
                   "short": "p",
                   "takesValue": true,
-                  "description": "Account profile to start with, e.g. work (default: the agent's default profile)"
+                  "description": "Account profile to start with, and optionally one of its modes: work or work/deep (default: the agent's default profile and its default mode)"
                 }
               ]
             },

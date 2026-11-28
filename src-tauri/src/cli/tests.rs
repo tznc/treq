@@ -2056,6 +2056,24 @@ fn agent_start_takes_the_harness_to_start() {
 }
 
 #[test]
+fn agent_start_takes_a_profile_mode_with_the_profile() {
+  let sub = parsed_subcommand(&[
+    "treq",
+    "agent",
+    "start",
+    "feat/x",
+    "do it",
+    "-p",
+    "work/deep",
+  ]);
+  let start = sub.matches.subcommand.expect("start subcommand");
+  assert_eq!(
+    super::workspace_handlers::start_profile(&start.matches),
+    Some("work/deep".to_string())
+  );
+}
+
+#[test]
 fn agent_start_takes_the_profile_to_start() {
   let profile = |argv: &[&str]| {
     let sub = parsed_subcommand(argv);
