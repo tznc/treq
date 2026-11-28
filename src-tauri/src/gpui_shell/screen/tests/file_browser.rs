@@ -254,6 +254,17 @@ fn file_browser_keeps_comments_and_finishes_the_review(cx: &mut TestAppContext) 
   assert!(host.calls().contains(&"clear browser review 7".to_string()));
 }
 
+/// Zoomed in, the popover still opens under Finish review, right edges
+/// aligned, rather than flipping left of the button.
+#[gpui::test]
+fn file_browser_finish_popover_stays_under_its_button_when_zoomed(cx: &mut TestAppContext) {
+  let (mut h, _) = harness(cx, serde_json::json!({}));
+  zoom(&mut h, 125);
+  comment_line_one(&mut h, "Say who");
+  h.click("finish-review");
+  assert_right_aligned_under(&mut h, "finish-review", "finish-review-popover");
+}
+
 #[gpui::test]
 fn file_browser_loads_the_kept_review(cx: &mut TestAppContext) {
   let host = browser_host();

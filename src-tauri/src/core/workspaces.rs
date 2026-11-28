@@ -2644,6 +2644,27 @@ mod tests {
   }
 
   #[test]
+  fn workspace_cli_patch_covers_commits_and_working_copy() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = init_workspace_creation_repo(&temp);
+    let ws = super::create_workspace(&repo_path, "fix/patch", None, None, None, None, None)
+      .expect("create workspace");
+    let ws_dir = temp
+      .path()
+      .join(".treq/workspaces")
+      .join(&ws.workspace_path);
+    fs::write(ws_dir.join("committed.txt"), "one\n").expect("write committed file");
+    super::commit_workspace(&repo_path, ws.id, "add committed file").expect("commit");
+    fs::write(ws_dir.join("dirty.txt"), "two\n").expect("write dirty file");
+
+    let diff = super::workspace_cli_patch(&repo_path, ws.id).expect("patch");
+
+    let mut paths: Vec<&str> = diff.hunks_by_file.iter().map(|f| f.path.as_str()).collect();
+    paths.sort();
+    assert_eq!(paths, ["committed.txt", "dirty.txt"]);
+  }
+
+  #[test]
   fn archive_moves_directory_out_before_background_removal() {
     let temp = TempDir::new().expect("tempdir");
     let repo_path = init_workspace_creation_repo(&temp);
@@ -4986,11 +5007,41 @@ fn resolve_workspace_diff_conflict_marker_style(repo_path: &str) -> Result<Strin
   }
 }
 
-fn workspace_diff_with_conflict_style(
+/// The workspace's whole change for `treq diff`: its commits and working
+/// copy, from the fork point with its target to `@`, one diff per file.
+pub fn workspace_cli_patch(
   repo_path: &str,
   workspace_id: i64,
-  conflict_marker_style: &str,
 ) -> Result<jj::JjRevisionDiff, String> {
+  let Some(range) = load_workspace_diff_range(repo_path, workspace_id)? else {
+    return Ok(jj::empty_revision_diff());
+  };
+  let mut diff = range
+    .repo
+    .merge_diff_between_revisions(
+      &range.base_revision,
+      "@",
+      super::DEFAULT_CONFLICT_MARKER_STYLE,
+    )
+    .map_err(|e| format!("Failed to get workspace diff: {}", e))?;
+  diff.conflicted_files = range.working_copy.conflicted;
+  Ok(diff)
+}
+
+/// A workspace loaded for a diff: its repo, a working-copy snapshot, and
+/// the fork point and tip the diff spans.
+struct WorkspaceDiffRange {
+  repo: jj::WorkspaceRepo,
+  working_copy: jj::WorkingCopyChanges,
+  base_revision: String,
+  tip_revision: String,
+}
+
+/// `None` when the workspace folder is gone.
+fn load_workspace_diff_range(
+  repo_path: &str,
+  workspace_id: i64,
+) -> Result<Option<WorkspaceDiffRange>, String> {
   let workspace = local_db::get_workspace_by_id(repo_path, workspace_id)
     .map_err(|e| format!("Failed to get workspace: {}", e))?
     .ok_or_else(|| format!("Workspace not found: {}", workspace_id))?;
@@ -5002,8 +5053,8 @@ fn workspace_diff_with_conflict_style(
   let workspace_dir_str = workspace_dir
     .to_str()
     .ok_or("Failed to convert workspace path to string")?;
-  if let Some(empty) = jj::revision_diff_if_workspace_missing(&workspace_dir) {
-    return Ok(empty);
+  if !workspace_dir.exists() {
+    return Ok(None);
   }
   // One load, lock and snapshot: the revision queries below see what the uncommitted files saw.
   let (repo, working_copy) = jj::WorkspaceRepo::load_working_copy(workspace_dir_str)
@@ -5015,6 +5066,28 @@ fn workspace_diff_with_conflict_style(
     base_revision
   } else {
     jj::fork_point_revset(&base_revision, &tip_revision)
+  };
+  Ok(Some(WorkspaceDiffRange {
+    repo,
+    working_copy,
+    base_revision,
+    tip_revision,
+  }))
+}
+
+fn workspace_diff_with_conflict_style(
+  repo_path: &str,
+  workspace_id: i64,
+  conflict_marker_style: &str,
+) -> Result<jj::JjRevisionDiff, String> {
+  let Some(WorkspaceDiffRange {
+    repo,
+    working_copy,
+    base_revision,
+    tip_revision,
+  }) = load_workspace_diff_range(repo_path, workspace_id)?
+  else {
+    return Ok(jj::empty_revision_diff());
   };
 
   let mut diff = repo

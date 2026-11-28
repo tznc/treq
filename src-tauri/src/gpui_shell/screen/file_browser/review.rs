@@ -246,7 +246,7 @@ impl FileBrowserView {
     let anchor = self.anchors.borrow().get("finish-review").copied()?;
     let n = self.comments.len();
     let width = 320.;
-    let at = point(anchor.right() - px(width), anchor.bottom() + px(4.));
+    let at = point(anchor.right(), anchor.bottom() + px(4.));
     let checked = self.use_idle;
     let checkbox = div()
       .selector("use-idle-agent")
@@ -366,7 +366,15 @@ impl FileBrowserView {
               ),
           ),
       );
-    Some(deferred(anchored().position(at).child(panel)).with_priority(1))
+    Some(
+      deferred(
+        anchored()
+          .anchor(gpui::Anchor::TopRight)
+          .position(at)
+          .child(panel),
+      )
+      .with_priority(1),
+    )
   }
 
   /// "Discard review?".

@@ -675,6 +675,26 @@ impl Palette {
     rgb(if self.dark { 0xf87171 } else { 0xdc2626 }).into()
   }
 
+  /// Behind the characters an added line changed against its pair. Dark
+  /// deepens the row to green-950 and light lightens it to green-200, so
+  /// syntax colors keep their contrast on top.
+  pub fn diff_added_mark(&self) -> Hsla {
+    if self.dark {
+      tw::color(tw::GREEN_950).opacity(0.8)
+    } else {
+      tw::color(tw::GREEN_200)
+    }
+  }
+
+  /// Behind the characters a removed line changed: red-950 or red-200.
+  pub fn diff_removed_mark(&self) -> Hsla {
+    if self.dark {
+      tw::color(tw::RED_950).opacity(0.8)
+    } else {
+      tw::color(tw::RED_200)
+    }
+  }
+
   /// The GitHub button's fill: GitHub's own near-black in light, and its
   /// dark-theme button grey in dark, where near-black meets the background.
   pub fn github(&self) -> Hsla {
@@ -1008,7 +1028,9 @@ pub mod tw {
   pub const RED_950: u32 = 0x450a0a;
   pub const YELLOW_950: u32 = 0x422006;
   pub const GREEN_400: u32 = 0x4ade80;
+  pub const GREEN_200: u32 = 0xbbf7d0;
   pub const GREEN_700: u32 = 0x15803d;
+  pub const GREEN_950: u32 = 0x052e16;
   pub const YELLOW_400: u32 = 0xfacc15;
   pub const YELLOW_700: u32 = 0xa16207;
   pub const YELLOW_600: u32 = 0xca8a04;

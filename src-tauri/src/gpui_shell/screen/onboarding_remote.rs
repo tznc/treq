@@ -11,12 +11,13 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
-use gpui_kit::base::TestSupportExt as _;
+use gpui_kit::base::ObservedElement;
 use gpui_kit::component::input::{InputEvent, InputState};
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
   self, div, prelude::*, App, ClickEvent, Context, Div, Entity, FontWeight, Subscription, Window,
 };
+use treq_ui::SelectorExt as _;
 
 use super::{ActionSink, ScreenAction};
 use crate::gpui_shell::{
@@ -222,8 +223,7 @@ fn field(
 /// `rounded-md border border-border/60 bg-background px-2 py-1.5`.
 fn input(id: &'static str, state: &Entity<InputState>, p: &Palette) -> impl IntoElement {
   div()
-    .id(id)
-    .debug_selector(|| id.into())
+    .selector(id)
     .w_full()
     .h(zpx(34.))
     .px_2()
@@ -244,7 +244,7 @@ fn caption(text: &'static str) -> impl IntoElement {
 
 /// The directory browser: home and the path's breadcrumbs, Show hidden,
 /// and the folders in it; a folder opens on click.
-fn browser(form: &Form, react: &ActionSink, p: &Palette) -> Div {
+fn browser(form: &Form, react: &ActionSink, p: &Palette) -> ObservedElement<gpui::Stateful<Div>> {
   let crumbs = crumbs(&form.path);
   let last = crumbs.len().saturating_sub(1);
   let crumb_row = div()
@@ -270,8 +270,7 @@ fn browser(form: &Form, react: &ActionSink, p: &Palette) -> Div {
         })
         .child(
           ui::text(div(), TextSize::Sm)
-            .id(("remote-browse-crumb", i))
-            .debug_selector(move || format!("remote-browse-crumb-{i}"))
+            .selector(format!("remote-browse-crumb-{i}"))
             .role(gpui::Role::Button)
             .aria_label(format!("Go to {path}"))
             .px_1()
@@ -284,14 +283,12 @@ fn browser(form: &Form, react: &ActionSink, p: &Palette) -> Div {
                 .hover(move |s| s.bg(p.hover()))
                 .on_click(field(react, "remoteRepo.browse", path.clone().into()))
             })
-            .child(name)
-            .test_support(),
+            .child(name),
         )
     }));
   let show_hidden = form.show_hidden;
   let hidden_toggle = ui::text(div(), TextSize::Sm)
-    .id("remote-browse-hidden")
-    .debug_selector(|| "remote-browse-hidden".into())
+    .selector("remote-browse-hidden")
     .role(gpui::Role::CheckBox)
     .aria_label("Show hidden folders")
     .flex()
@@ -301,8 +298,7 @@ fn browser(form: &Form, react: &ActionSink, p: &Palette) -> Div {
     .cursor_pointer()
     .on_click(field(react, "remoteRepo.showHidden", (!show_hidden).into()))
     .child(ui::Checkbox::new("remote-browse-hidden-box", p).checked(show_hidden))
-    .child("Show hidden")
-    .test_support();
+    .child("Show hidden");
   let folders: Vec<_> = form
     .listing
     .iter()
@@ -344,7 +340,7 @@ fn browser(form: &Form, react: &ActionSink, p: &Palette) -> Div {
     ),
   };
   div()
-    .debug_selector(|| "remote-browser".into())
+    .selector("remote-browser")
     .flex()
     .flex_col()
     .rounded(radius::MD)
@@ -365,8 +361,7 @@ fn browser(form: &Form, react: &ActionSink, p: &Palette) -> Div {
     )
     .child(
       div()
-        .id("remote-browse-folders")
-        .debug_selector(|| "remote-browse-folders".into())
+        .selector("remote-browse-folders")
         .max_h(zpx(260.))
         .overflow_y_scroll()
         .p_1()
@@ -376,7 +371,13 @@ fn browser(form: &Form, react: &ActionSink, p: &Palette) -> Div {
     )
 }
 
-fn selector(form: &Form, inputs: &Inputs, react: &ActionSink, p: &Palette, cx: &App) -> Div {
+fn selector(
+  form: &Form,
+  inputs: &Inputs,
+  react: &ActionSink,
+  p: &Palette,
+  cx: &App,
+) -> ObservedElement<gpui::Stateful<Div>> {
   let here_is_repo = form.listing.as_ref().is_some_and(|l| l.is_repo);
   let listed = form.listing.is_some();
   let clone_url = inputs
@@ -413,8 +414,7 @@ fn selector(form: &Form, inputs: &Inputs, react: &ActionSink, p: &Palette, cx: &
     .map(|probe| {
       let confirm = form.confirm_init;
       div()
-        .id("remote-repo-not-a-repo")
-        .debug_selector(|| "remote-repo-not-a-repo".into())
+        .selector("remote-repo-not-a-repo")
         .role(tauri_plugin_gpui::gpui::Role::Group)
         .aria_label("Not a repository")
         .flex()
@@ -466,20 +466,17 @@ fn selector(form: &Form, inputs: &Inputs, react: &ActionSink, p: &Palette, cx: &
               .on_click(press(react, "remoteRepo.init")),
           ),
         )
-        .test_support()
     });
   let error = form.error.clone().map(|error| {
     ui::text(div(), TextSize::Sm)
-      .id("remote-repo-error")
-      .debug_selector(|| "remote-repo-error".into())
+      .selector("remote-repo-error")
       .role(tauri_plugin_gpui::gpui::Role::Alert)
       .aria_label(error.clone())
       .text_color(Tone::Danger.text(p))
       .child(error)
-      .test_support()
   });
   div()
-    .debug_selector(|| "remote-repository-selector".into())
+    .selector("remote-repository-selector")
     .flex()
     .flex_col()
     .gap_3()
@@ -497,10 +494,10 @@ pub fn render(
   _dark: bool,
   p: &Palette,
   cx: &App,
-) -> Div {
+) -> ObservedElement<gpui::Stateful<Div>> {
   let cutoff = form.cutoff.as_ref().map(|reason| {
     ui::text(div(), TextSize::Sm)
-      .debug_selector(|| "remote-repo-cutoff".into())
+      .selector("remote-repo-cutoff")
       .rounded(radius::MD)
       .border_1()
       .border_color(Tone::Danger.border(p))
@@ -527,7 +524,7 @@ pub fn render(
   });
   let show_selector = form.selector && form.cutoff.is_none();
   div()
-    .debug_selector(|| "remote-repo-form".into())
+    .selector("remote-repo-form")
     .flex()
     .flex_col()
     .gap_3()
