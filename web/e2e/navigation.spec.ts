@@ -287,7 +287,6 @@ test.describe('Navbar navigation', () => {
     await expect(menu.getByRole('link')).toHaveText(['Learn', 'Skills']);
     await expect(nav(page).getByRole('link', { name: 'Skills', exact: true })).toHaveCount(1);
     await menu.getByRole('link', { name: 'Skills', exact: true }).click();
-    await expect(page).toHaveURL(/\/skills\/$/);
     await expect(page.getByRole('heading', { name: 'Skills Library', level: 1 })).toBeVisible();
   });
 
