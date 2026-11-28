@@ -814,7 +814,7 @@ impl ChangesView {
             .size(Size::Sm)
             .gap_1p5()
             .disabled(busy)
-            .icon(theme::ICON_TERMINAL, 12.)
+            .icon(theme::ICON_SEND, 12.)
             .label("Send to agent")
             .on_click(
               cx.listener(move |view, _, _, cx| view.send_agent_comment(&comment_sent, cx)),
