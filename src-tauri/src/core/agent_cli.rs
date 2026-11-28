@@ -368,6 +368,24 @@ mod tests {
   }
 
   #[test]
+  fn review_skill_holds_findings_to_a_reporting_bar() {
+    let skill = review_skill_md(None);
+    for rule in [
+      // Scope: only what the change introduces.
+      "Flag only problems the change introduces",
+      // Each finding is checked before it is recorded.
+      "Before you record a finding, check it",
+      // Severity tags and the closing verdict.
+      "[P0]",
+      "Verdict:",
+      // Project rules scoped to the changed files.
+      "AGENTS.md",
+    ] {
+      assert!(skill.contains(rule), "missing {rule:?}");
+    }
+  }
+
+  #[test]
   fn adds_repository_instructions_to_the_review_skill() {
     assert_eq!(review_skill_md(None), TREQ_REVIEW_SKILL_MD);
     assert_eq!(review_skill_md(Some(" \n")), TREQ_REVIEW_SKILL_MD);
