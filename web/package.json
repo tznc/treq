@@ -38,7 +38,6 @@
     "remark-gfm": "^4.0.1",
     "remark-parse": "^11.0.0",
     "remark-rehype": "^11.1.2",
-    "roughjs": "^4.6.6",
     "sql.js": "^1.14.1",
     "three": "^0.185.1",
     "unified": "^11.0.5"
@@ -55,7 +54,6 @@
     "@types/sql.js": "^1.4.11",
     "autoprefixer": "^10.5.4",
     "babel-jest": "^30.5.2",
-    "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "gray-matter": "^4.0.3",
     "jest": "^30.5.2",

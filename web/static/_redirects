@@ -89,9 +89,25 @@
 /learn/workflows/stacks/rust-refactoring /learn/workflows/ai/ai-refactoring/ 301
 /learn/workflows/stacks/tauri-development/ /learn/workflows/ai/ai-feature-development/ 301
 /learn/workflows/stacks/tauri-development /learn/workflows/ai/ai-feature-development/ 301
-# Tools that were removed: the tools index.
-/tools/dag-visualizer/ /tools/ 301
-/tools/dag-visualizer /tools/ 301
+# The Tools section was removed: Learn, its neighbour in the Discover menu.
+/tools/ /learn/ 301
+/tools /learn/ 301
+/tools/branch-visualizer/ /learn/ 301
+/tools/branch-visualizer /learn/ 301
+/tools/dag-visualizer/ /learn/ 301
+/tools/dag-visualizer /learn/ 301
+/tools/gherkin-editor/ /learn/ 301
+/tools/gherkin-editor /learn/ 301
+/tools/markdown-annotator/ /learn/ 301
+/tools/markdown-annotator /learn/ 301
+/tools/markdown-annotator-embed/ /learn/ 301
+/tools/markdown-annotator-embed /learn/ 301
+/tools/rubber-duck/ /learn/ 301
+/tools/rubber-duck /learn/ 301
+/tools/vcs-simulator/ /learn/ 301
+/tools/vcs-simulator /learn/ 301
+/tools/vibe-idea-generator/ /learn/ 301
+/tools/vibe-idea-generator /learn/ 301
 # Skills an upstream repo renamed or removed: the new name, else the author page.
 /skills/mattpocock/engineering/resolving-merge-conflicts/ /skills/mattpocock/ 301
 /skills/mattpocock/engineering/resolving-merge-conflicts /skills/mattpocock/ 301
