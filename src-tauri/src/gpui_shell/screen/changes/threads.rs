@@ -473,78 +473,22 @@ impl ChangesView {
   ) -> AnyElement {
     let collapsed = self.threads.collapsed.contains(&thread.id);
     let first = thread.comments.first();
-    let muted = p.muted_foreground;
     let id = thread.id.clone();
-    let mut toggle = div()
-      .selector(SharedString::from(format!("github-thread-{}", thread.id)))
-      .role(gpui::Role::Button)
-      .aria_label(if collapsed {
-        "Show review thread"
-      } else {
-        "Hide review thread"
-      })
-      .aria_expanded(!collapsed)
-      .min_w_0()
-      .flex()
-      .items_center()
-      .gap_2()
-      .cursor_pointer();
-    // Expanded: a pill above the comments. Collapsed: a full-width row holding the preview.
-    toggle = if collapsed {
-      toggle
-        .w_full()
-        .px_3()
-        .py_1p5()
-        .hover(move |s| s.bg(p.hover()))
-    } else {
-      toggle
-        .flex_none()
-        .gap_1()
-        .px_2()
-        .py_0p5()
-        .rounded(radius::SM)
-        .bg(sky(p, 0.1))
-        .hover(move |s| s.bg(p.hover()))
-    };
-    let muted = if collapsed {
-      muted
-    } else {
-      Tone::Primary.text(p)
-    };
-    toggle = toggle
-      .on_click(cx.listener(move |view, _, _, cx| view.toggle_thread(&id, cx)))
-      .child(ui::icon(
-        if collapsed {
-          theme::ICON_CHEVRON_RIGHT
-        } else {
-          theme::ICON_CHEVRON_DOWN
-        },
-        12.,
-        muted,
-      ));
+    let mut toggle = fold_toggle(
+      format!("github-thread-{}", thread.id),
+      "review thread",
+      collapsed,
+      Tone::Primary,
+      p,
+    )
+    .on_click(cx.listener(move |view, _, _, cx| view.toggle_thread(&id, cx)));
     if let (true, Some(first)) = (collapsed, first) {
       toggle = toggle
         .child(avatar(&first.author.login, 20., p))
         .child(profile_link(&first.author.login, TextSize::Sm, p, cx));
     }
     // Expanded threads show the badge beside the pill rather than inside it.
-    let resolved = thread.is_resolved.then(|| {
-      let grey = p.muted_foreground;
-      // Short label (status pill). ast-grep-ignore: gpui-text-xs-short-label-only
-      ui::text(div(), TextSize::Xs)
-        .flex_none()
-        .flex()
-        .items_center()
-        .gap_1()
-        .px_1p5()
-        .py_0p5()
-        .rounded(radius::SM)
-        .bg(p.muted)
-        .text_color(grey)
-        .font_weight(FontWeight::MEDIUM)
-        .child(ui::icon(theme::ICON_CIRCLE_CHECK, 12., grey))
-        .child("Resolved")
-    });
+    let resolved = thread.is_resolved.then(|| resolved_badge(p));
     let resolved = if collapsed {
       toggle = toggle.children(resolved);
       None
@@ -559,7 +503,7 @@ impl ChangesView {
           .aria_label(preview(&first.body))
           .min_w_0()
           .truncate()
-          .text_color(muted.opacity(0.7))
+          .text_color(p.muted_foreground.opacity(0.7))
           .child(preview(&first.body))
           .test_support(),
       );
@@ -569,25 +513,11 @@ impl ChangesView {
       toggle = toggle.child(
         // Short label (count). ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
-          .text_color(muted)
+          .text_color(Tone::Primary.text(p))
           .child(format!("{n} comment{}", if n == 1 { "" } else { "s" })),
       );
     }
-    let mut card = div()
-      .min_w_0()
-      .max_w(zpx(CARD_MAX_W))
-      .font_family(theme::SANS_FONT);
-    if collapsed {
-      card = card
-        .rounded(radius::MD)
-        .border_1()
-        .border_color(sky(p, 0.3))
-        .bg(sky(p, 0.05))
-        .overflow_hidden();
-    } else {
-      card = card.flex().flex_col().items_start().gap_1p5();
-    }
-    card = card.child(
+    let mut card = fold_frame(collapsed, Tone::Primary, p).child(
       div()
         .flex()
         .items_center()
@@ -745,7 +675,7 @@ impl ChangesView {
     let sent = comment.source == crate::core::agent_review::SENT_REVIEW_SOURCE;
     let resolved = comment.status == "resolved";
     if sent && resolved && !self.threads.expanded.contains(&comment.id) {
-      return self.folded_sent_card(comment, p, cx).into_any_element();
+      return self.resolved_sent_card(comment, None, p, cx);
     }
     let (tone, label) = if sent {
       (Tone::Primary, "Sent to agent")
@@ -782,19 +712,22 @@ impl ChangesView {
           .flex()
           .items_center()
           .gap_2()
-          .child(
-            div()
-              .flex()
-              .items_center()
-              .gap_2()
-              .child(ui::icon(theme::ICON_BOT, 14., tone.color(p)))
-              .child(
-                ui::text(div(), TextSize::Sm)
-                  .font_weight(FontWeight::MEDIUM)
-                  .text_color(tone.color(p))
-                  .child(label),
-              ),
-          )
+          // Resolved, the tag sits on the fold toggle's row instead.
+          .when(!resolved, |row| {
+            row.child(
+              div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(ui::icon(theme::ICON_BOT, 14., tone.color(p)))
+                .child(
+                  ui::text(div(), TextSize::Sm)
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(tone.color(p))
+                    .child(label),
+                ),
+            )
+          })
           .child(
             ui::text(div(), TextSize::Sm)
               .text_color(muted)
@@ -875,75 +808,61 @@ impl ChangesView {
         )
       });
     if resolved {
-      // A resolved sent comment, unfolded: it only folds again.
-      let id = comment.id.clone();
-      return card
-        .child(
-          div().flex().font_family(theme::SANS_FONT).child(
-            Button::new(SharedString::from(format!("sent-review-expanded-{id}")), p)
-              .variant(Variant::Ghost)
-              .size(Size::Sm)
-              .gap_1p5()
-              .icon(theme::ICON_CHEVRON_DOWN, 12.)
-              .label("Hide resolved comment")
-              .on_click(cx.listener(move |view, _, _, cx| view.toggle_sent(&id, cx))),
-          ),
-        )
-        .test_support()
-        .into_any_element();
+      // A resolved sent comment, unfolded: no actions, only its fold toggle.
+      let card = card.test_support().into_any_element();
+      return self.resolved_sent_card(comment, Some(card), p, cx);
     }
     card.child(actions).test_support().into_any_element()
   }
 
-  /// A resolved sent comment, folded to one line that unfolds it.
-  fn folded_sent_card(
+  /// A resolved sent comment, folded like a review thread: a row with its
+  /// text's preview, or `card` under a separate toggle that folds it again.
+  fn resolved_sent_card(
     &self,
     comment: &AgentReviewComment,
+    card: Option<AnyElement>,
     p: &Palette,
     cx: &mut Context<Self>,
-  ) -> impl IntoElement {
-    let muted = p.muted_foreground;
+  ) -> AnyElement {
+    let collapsed = card.is_none();
     let id = comment.id.clone();
-    let first_line = comment
-      .comment_text
-      .lines()
-      .next()
-      .unwrap_or("")
-      .to_string();
-    div()
-      .id(SharedString::from(format!("sent-review-collapsed-{id}")))
-      .role(gpui::Role::Button)
-      .aria_label("Show resolved comment")
-      .aria_expanded(false)
-      .max_w(zpx(CARD_MAX_W))
-      .min_w_0()
-      .flex()
-      .items_center()
-      .gap_2()
-      .px_3()
-      .py_1p5()
-      .rounded(radius::MD)
-      .border_1()
-      .border_color(p.border)
-      .cursor_pointer()
-      .hover(move |s| s.bg(p.hover()))
-      .on_click(cx.listener(move |view, _, _, cx| view.toggle_sent(&id, cx)))
-      .child(ui::icon(theme::ICON_CHEVRON_RIGHT, 12., muted))
-      .child(ui::icon(theme::ICON_BOT, 14., muted))
-      .child(
-        ui::text(div(), TextSize::Sm)
-          .font_weight(FontWeight::MEDIUM)
-          .text_color(muted)
-          .child("Resolved"),
-      )
-      .child(
+    let mut toggle = fold_toggle(
+      format!("sent-review-toggle-{id}"),
+      "resolved comment",
+      collapsed,
+      Tone::GitMerged,
+      p,
+    )
+    .on_click(cx.listener(move |view, _, _, cx| view.toggle_sent(&id, cx)));
+    toggle = if collapsed {
+      toggle.child(sent_tag(p)).child(resolved_badge(p)).child(
         ui::text(div(), TextSize::Sm)
           .min_w_0()
           .truncate()
-          .text_color(muted)
-          .child(first_line),
+          .text_color(p.muted_foreground.opacity(0.7))
+          .child(preview(&comment.comment_text)),
       )
-      .test_support()
+    } else {
+      toggle.child(
+        // Short label (count). ast-grep-ignore: gpui-text-xs-short-label-only
+        ui::text(div(), TextSize::Xs)
+          .text_color(Tone::GitMerged.text(p))
+          .child("1 comment"),
+      )
+    };
+    fold_frame(collapsed, Tone::GitMerged, p)
+      .child(
+        div()
+          .flex()
+          .items_center()
+          .gap_2()
+          .child(toggle.test_support())
+          .when(!collapsed, |row| {
+            row.child(resolved_badge(p)).child(sent_tag(p))
+          }),
+      )
+      .children(card.map(|card| div().w_full().child(card)))
+      .into_any_element()
   }
 }
 
@@ -952,6 +871,102 @@ enum AgentAction {
   Resolve,
   Delete,
   Apply,
+}
+
+/// A comment card's fold toggle, named for what a click does ("Show
+/// {what}", "Hide {what}"). Folded, a full-width row inside the card's
+/// border; open, a `tone` pill above the card.
+fn fold_toggle(
+  selector: String,
+  what: &str,
+  collapsed: bool,
+  tone: Tone,
+  p: &Palette,
+) -> ObservedElement<gpui::Stateful<Div>> {
+  let verb = if collapsed { "Show" } else { "Hide" };
+  let toggle = div()
+    .selector(SharedString::from(selector))
+    .role(gpui::Role::Button)
+    .aria_label(format!("{verb} {what}"))
+    .aria_expanded(!collapsed)
+    .min_w_0()
+    .flex()
+    .items_center()
+    .gap_2()
+    .cursor_pointer()
+    .hover(move |s| s.bg(p.hover()));
+  if collapsed {
+    toggle.w_full().px_3().py_1p5().child(ui::icon(
+      theme::ICON_CHEVRON_RIGHT,
+      12.,
+      p.muted_foreground,
+    ))
+  } else {
+    toggle
+      .flex_none()
+      .gap_1()
+      .px_2()
+      .py_0p5()
+      .rounded(radius::SM)
+      .bg(tone.color(p).opacity(0.1))
+      .child(ui::icon(theme::ICON_CHEVRON_DOWN, 12., tone.text(p)))
+  }
+}
+
+/// A foldable comment card's frame. Folded, a `tone`-bordered box around
+/// the toggle's row; open, a column with the toggle above the card.
+fn fold_frame(collapsed: bool, tone: Tone, p: &Palette) -> Div {
+  let frame = div()
+    .min_w_0()
+    .max_w(zpx(CARD_MAX_W))
+    .font_family(theme::SANS_FONT);
+  if collapsed {
+    frame
+      .rounded(radius::MD)
+      .border_1()
+      .border_color(tone.color(p).opacity(0.3))
+      .bg(tone.color(p).opacity(0.05))
+      .overflow_hidden()
+  } else {
+    frame.flex().flex_col().items_start().gap_1p5()
+  }
+}
+
+/// A sent comment's tag: the robot icon and "Sent to agent".
+fn sent_tag(p: &Palette) -> impl IntoElement {
+  let sent = Tone::Primary.color(p);
+  div()
+    .flex_none()
+    .flex()
+    .items_center()
+    .gap_2()
+    .child(ui::icon(theme::ICON_BOT, 14., sent))
+    .child(
+      // Short label (tag). ast-grep-ignore: gpui-text-xs-short-label-only
+      ui::text(div(), TextSize::Xs)
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(sent)
+        .child("Sent to agent"),
+    )
+}
+
+/// A resolved comment's "Resolved" badge.
+fn resolved_badge(p: &Palette) -> impl IntoElement {
+  let grey = p.muted_foreground;
+  // Short label (status pill). ast-grep-ignore: gpui-text-xs-short-label-only
+  ui::text(div(), TextSize::Xs)
+    .flex_none()
+    .flex()
+    .items_center()
+    .gap_1()
+    .px_1p5()
+    .py_0p5()
+    .rounded(radius::SM)
+    .bg(p.muted)
+    .text_color(grey)
+    .font_weight(FontWeight::MEDIUM)
+    .child(ui::icon(theme::ICON_CIRCLE_CHECK, 12., grey))
+    .child("Resolved")
 }
 
 fn sky(p: &Palette, alpha: f32) -> Hsla {
