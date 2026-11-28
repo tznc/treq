@@ -486,8 +486,7 @@ impl ProjectHomeView {
               .px_3()
               .py_1()
               .child(
-                // Short label (status letter). ast-grep-ignore: gpui-text-xs-short-label-only
-                ui::text(div(), TextSize::Xs)
+                ui::text(div(), TextSize::Sm)
                   .w(zpx(14.))
                   .font_weight(FontWeight::SEMIBOLD)
                   .text_color(file_status_color(&file.status, p))

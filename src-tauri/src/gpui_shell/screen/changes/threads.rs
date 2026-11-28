@@ -485,7 +485,7 @@ impl ChangesView {
     if let (true, Some(first)) = (collapsed, first) {
       toggle = toggle
         .child(avatar(&first.author.login, 20., p))
-        .child(profile_link(&first.author.login, p, cx));
+        .child(profile_link(&first.author.login, TextSize::Sm, p, cx));
     }
     // Expanded threads show the badge beside the pill rather than inside it.
     let resolved = thread.is_resolved.then(|| resolved_badge(p));
@@ -622,10 +622,9 @@ impl ChangesView {
           .gap_2()
           .mb_1p5()
           .child(avatar(&comment.author.login, 32., p))
-          .child(profile_link(&comment.author.login, p, cx))
+          .child(profile_link(&comment.author.login, TextSize::Sm, p, cx))
           .child(
-            // Short label (timestamp). ast-grep-ignore: gpui-text-xs-short-label-only
-            ui::text(div(), TextSize::Xs)
+            ui::text(div(), TextSize::Sm)
               .text_color(p.muted_foreground)
               .child(comment_date(&comment.created_at, this_year)),
           )
@@ -722,8 +721,7 @@ impl ChangesView {
                 .gap_2()
                 .child(ui::icon(theme::ICON_BOT, 14., tone.color(p)))
                 .child(
-                  // Short label (tag). ast-grep-ignore: gpui-text-xs-short-label-only
-                  ui::text(div(), TextSize::Xs)
+                  ui::text(div(), TextSize::Sm)
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(tone.color(p))
                     .child(label),
@@ -1001,11 +999,16 @@ fn avatar(login: &str, size: f32, p: &Palette) -> impl IntoElement {
     )
 }
 
-/// `AuthorProfileLink`: "@login", opening the GitHub profile.
-fn profile_link(login: &str, p: &Palette, cx: &mut Context<ChangesView>) -> impl IntoElement {
+/// `AuthorProfileLink`: "@login", opening the GitHub profile, at the size
+/// of the text beside it.
+fn profile_link(
+  login: &str,
+  size: TextSize,
+  p: &Palette,
+  cx: &mut Context<ChangesView>,
+) -> impl IntoElement {
   let url = format!("https://github.com/{login}");
-  // Short label (username). ast-grep-ignore: gpui-text-xs-short-label-only
-  ui::text(div(), TextSize::Xs)
+  ui::text(div(), size)
     .id(SharedString::from(format!("profile-{login}")))
     .role(gpui::Role::Link)
     .aria_label(format!("@{login}"))

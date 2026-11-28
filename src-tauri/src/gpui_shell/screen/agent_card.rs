@@ -95,8 +95,7 @@ pub fn agent_comment_card(
         .gap_1p5()
         .child(ui::icon(theme::ICON_BOT, 12., ui::Tone::GitMerged.color(p)))
         .child(
-          // Short label (tag). ast-grep-ignore: gpui-text-xs-short-label-only
-          ui::text(div(), TextSize::Xs)
+          ui::text(div(), TextSize::Sm)
             .font_weight(FontWeight::MEDIUM)
             .text_color(ui::Tone::GitMerged.text(p))
             .child("Local"),
