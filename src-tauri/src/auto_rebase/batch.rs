@@ -114,12 +114,8 @@ pub fn check_and_rebase_all(
             "Workspace '{}': moved up to '{}'",
             workspace.workspace_name, target_branch
           ));
-          local_db::update_workspace_last_rebased_commit(
-            repo_path,
-            workspace.id,
-            &current_target_commit,
-          )
-          .warn_on_err("update workspace last rebased commit");
+          local_db::record_workspaces_rebased(repo_path, &[workspace.id], &current_target_commit)
+            .warn_on_err("update workspace last rebased commit");
           continue;
         }
         Err(e) => {
@@ -184,11 +180,9 @@ pub fn check_and_rebase_all(
             }
           }
 
-          if let Err(e) = local_db::update_workspace_last_rebased_commit(
-            repo_path,
-            workspace.id,
-            &current_target_commit,
-          ) {
+          if let Err(e) =
+            local_db::record_workspaces_rebased(repo_path, &[workspace.id], &current_target_commit)
+          {
             tracing::warn!(
               "Warning: Failed to update last rebased commit for workspace '{}': {}",
               workspace.workspace_name,

@@ -1,0 +1,54 @@
+id: no-map-err-discard-rust
+language: rust
+severity: error
+message: >
+  Do not discard the source error in `map_err(|_| …)`. It drops the reason
+  the call failed. Name the error and keep it in the new one, for example
+  `map_err(|e| format!("Invalid URL: {e}"))`, or convert it with a function
+  or `From` impl. If the error type is `()`, write `|()|` so the pattern says
+  there is nothing to keep.
+files:
+  - "src-tauri/**/*.rs"
+  - "crates/**/*.rs"
+ignores:
+  # Not fixed yet. The fix PRs stacked on this one remove these entries.
+  - "crates/treq-gateway/src/token.rs"
+  - "src-tauri/src/cli/agent_review_handlers.rs"
+  - "src-tauri/src/cli/mod.rs"
+  - "src-tauri/src/commit_timestamps.rs"
+  - "src-tauri/src/core/agent_msg/model.rs"
+  - "src-tauri/src/core/agent_review.rs"
+  - "src-tauri/src/core/agent_supervisor.rs"
+  - "src-tauri/src/core/checks.rs"
+  - "src-tauri/src/core/checks_logs.rs"
+  - "src-tauri/src/core/devcontainer.rs"
+  - "src-tauri/src/core/linear_review.rs"
+  - "src-tauri/src/core/remote/host.rs"
+  - "src-tauri/src/core/remote_local_keys.rs"
+  - "src-tauri/src/core/remote_records.rs"
+  - "src-tauri/src/core/remote_ssh_transport.rs"
+  - "src-tauri/src/core/remote_ssh_ws_stream.rs"
+  - "src-tauri/src/core/review_prompt.rs"
+  - "src-tauri/src/core/workspaces.rs"
+  - "src-tauri/src/github.rs"
+  - "src-tauri/src/gpui_shell/launch.rs"
+  - "src-tauri/src/gpui_shell/screen/open_workspaces_data.rs"
+  - "src-tauri/src/gpui_shell/screen/settings/account.rs"
+  - "src-tauri/src/integration.rs"
+  - "src-tauri/src/jj.rs"
+  - "src-tauri/src/jj/files.rs"
+  - "src-tauri/src/mobile/backend.rs"
+  - "src-tauri/src/send_dispatch.rs"
+rule:
+  kind: closure_expression
+  # One parameter, `_` or `_name`, with an optional type.
+  has:
+    field: parameters
+    regex: ^\|\s*_\w*\s*(:[^|]*)?\|$
+  inside:
+    kind: arguments
+    inside:
+      kind: call_expression
+      has:
+        field: function
+        regex: (^|[.:\s])map_err$

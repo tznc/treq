@@ -502,6 +502,40 @@ fn the_header_shows_the_title_in_place_of_the_branch(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn the_header_title_copies_the_part_dragged_over(cx: &mut TestAppContext) {
+  use gpui::{Modifiers, MouseButton};
+  let (mut h, _) = workspace_harness(cx, code_host(), code_route());
+  h.cx.run_until_parked();
+  let text = h
+    .cx
+    .debug_bounds("workspace-title-text")
+    .expect("title text");
+  let y = text.center().y;
+  let (start, end) = (
+    gpui::point(text.left() + gpui::px(1.), y),
+    gpui::point(text.center().x, y),
+  );
+  h.cx
+    .simulate_mouse_down(start, MouseButton::Left, Modifiers::none());
+  h.cx
+    .simulate_mouse_move(end, Some(MouseButton::Left), Modifiers::none());
+  h.cx
+    .simulate_mouse_up(end, MouseButton::Left, Modifiers::none());
+  h.cx.simulate_keystrokes(if cfg!(target_os = "macos") {
+    "cmd-c"
+  } else {
+    "ctrl-c"
+  });
+  h.cx.run_until_parked();
+  let copied = h.cx.read_from_clipboard().and_then(|c| c.text());
+  let copied = copied.as_deref().unwrap_or_default();
+  assert!(
+    !copied.is_empty() && copied.len() < "Add login".len() && "Add login".starts_with(copied),
+    "copied {copied:?}"
+  );
+}
+
+#[gpui::test]
 fn code_tab_saves_the_title(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, code_host(), code_route());
   h.click("workspace-title-edit");

@@ -7,8 +7,9 @@ use crate::db::Database;
 use crate::local_db;
 
 use super::status_output::{
-  filter_statuses_for_workspace, format_focused_workspace_status, format_workspace_diff_lines,
-  format_workspace_stack_lines, print_workspace_partial_status, WorkspacePrStatus,
+  filter_statuses_for_workspace, format_focused_workspace_status, format_patch_conflict_note,
+  format_workspace_diff_lines, format_workspace_patch, format_workspace_stack_lines,
+  format_workspace_stat_lines, print_workspace_partial_status, WorkspacePrStatus,
 };
 use super::{
   detect_repo_path, dispatch_agent_request, dispatch_notify_request, dispatch_send_request,
@@ -404,7 +405,13 @@ pub(super) fn handle_workspace_diff(matches: &Matches) -> bool {
     }
   };
 
-  let diff = match core::workspace_cli_diff(&repo_path, workspace.id) {
+  let conflicts_only = get_arg_flag(matches, "conflicts");
+  let diff = if conflicts_only {
+    core::workspace_cli_diff(&repo_path, workspace.id)
+  } else {
+    core::workspace_cli_patch(&repo_path, workspace.id)
+  };
+  let diff = match diff {
     Ok(diff) => diff,
     Err(e) => {
       super::log_cli_error(&format!("Error getting workspace diff: {}", e));
@@ -423,8 +430,26 @@ pub(super) fn handle_workspace_diff(matches: &Matches) -> bool {
       Err(_) => Vec::new(),
     };
 
-  for line in format_workspace_diff_lines(&diff, &conflicted_commits) {
-    println!("{line}");
+  if conflicts_only {
+    for line in format_workspace_diff_lines(&diff, &conflicted_commits) {
+      println!("{line}");
+    }
+    return true;
+  }
+  // Notes go to stderr so stdout stays a patch `git apply` accepts.
+  if let Some(note) =
+    format_patch_conflict_note(diff.conflicted_files.len(), conflicted_commits.len())
+  {
+    eprintln!("{note}");
+  }
+  if diff.hunks_by_file.is_empty() {
+    eprintln!("No changes.");
+  } else if get_arg_flag(matches, "stat") {
+    for line in format_workspace_stat_lines(&diff) {
+      println!("{line}");
+    }
+  } else {
+    print!("{}", format_workspace_patch(&diff));
   }
   true
 }
