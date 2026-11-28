@@ -151,8 +151,7 @@ mod tests {
     assert!(supports_profiles("claude"));
     assert!(supports_profiles("codex"));
     assert!(supports_profiles("gemini"));
-    // Their sign-in can't be moved per profile (a shared keychain entry or
-    // no variable of their own).
+    // Their sign-in can't be moved per profile.
     for agent in ["cursor", "copilot", "devin"] {
       assert!(!supports_profiles(agent), "{agent}");
     }
