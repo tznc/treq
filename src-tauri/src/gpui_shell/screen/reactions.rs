@@ -210,6 +210,7 @@ fn picker<V: Reacts>(
         .size(Size::IconXs)
         .when(mine, |b| b.bg(sky.opacity(0.15)))
         .aria_label(name)
+        .tooltip(name)
         .child(emoji_img(emoji, 18.))
         .on_click(cx.listener(move |view: &mut V, _, _, cx| {
           view.set_reaction_picker(None, cx);

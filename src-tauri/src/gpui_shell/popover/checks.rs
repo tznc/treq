@@ -231,13 +231,11 @@ impl Popover {
                 .text_color(p.muted_foreground)
                 .child(detail),
             )
-            .child(
+            .child({
+              let label = format!("{} {}", if rerun { "Re-run" } else { "Run" }, wf.name);
               Button::new(id, &p)
-                .aria_label(format!(
-                  "{} {}",
-                  if rerun { "Re-run" } else { "Run" },
-                  wf.name
-                ))
+                .aria_label(label.clone())
+                .tooltip(label)
                 .variant(Variant::Ghost)
                 .size(Size::Sm)
                 .size_6()
@@ -253,8 +251,8 @@ impl Popover {
                 )
                 .on_click(
                   cx.listener(move |this, _, _, cx| this.run_workflow(filename.clone(), cx)),
-                ),
-            )
+                )
+            })
         }));
 
       let amber = Tone::Warning.text(&p);

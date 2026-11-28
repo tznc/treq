@@ -19,25 +19,6 @@ ignores:
   - "crates/treq-ui/src/**/*_tests.rs"
   # Builds the `Button` every `IconButton` is made of.
   - "crates/treq-ui/src/icon_button.rs"
-  # Baseline: files that already have icon buttons without tooltips. Do not
-  # add to it; fix a file and drop it from this list instead.
-  - "crates/treq-ui/src/split_button.rs"
-  - "src-tauri/src/gpui_shell/popover/checks.rs"
-  - "src-tauri/src/gpui_shell/screen/changes.rs"
-  - "src-tauri/src/gpui_shell/screen/changes/review.rs"
-  - "src-tauri/src/gpui_shell/screen/code.rs"
-  - "src-tauri/src/gpui_shell/screen/file_browser/review.rs"
-  - "src-tauri/src/gpui_shell/screen/github.rs"
-  - "src-tauri/src/gpui_shell/screen/github/detail.rs"
-  - "src-tauri/src/gpui_shell/screen/github/new_pr.rs"
-  - "src-tauri/src/gpui_shell/screen/linear.rs"
-  - "src-tauri/src/gpui_shell/screen/merge.rs"
-  - "src-tauri/src/gpui_shell/screen/modal/prompt_history.rs"
-  - "src-tauri/src/gpui_shell/screen/pr_review.rs"
-  - "src-tauri/src/gpui_shell/screen/reactions.rs"
-  - "src-tauri/src/gpui_shell/screen/settings.rs"
-  - "src-tauri/src/gpui_shell/screen/settings/account/team.rs"
-  - "src-tauri/src/gpui_shell/screen/workspace.rs"
 utils:
   # A step of the builder chain the button is built in: a method call on
   # it, or a `.when(..)`/`.map(..)`-style closure that continues it.

@@ -1435,6 +1435,7 @@ impl GithubView {
       .child(
         Button::new("github-refresh", p)
           .aria_label("Refresh")
+          .tooltip("Refresh")
           .variant(Variant::Ghost)
           .size(Size::Icon)
           .w(zpx(28.))

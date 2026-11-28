@@ -1456,7 +1456,7 @@ impl WorkspaceView {
       );
     }
     if let Some(pr) = &h.view_pr {
-      right = right.child(self.view_pr(pr, p, cx));
+      right = right.child(self.view_pr(pr, p));
     }
     if let Some(create) = &h.create_pr {
       right = right.child(self.create_pr(create, p, cx));
@@ -1521,6 +1521,7 @@ impl WorkspaceView {
               .disabled(more.disabled)
               .icon(theme::ICON_MORE, 16.)
               .aria_label("More workspace actions")
+              .tooltip("More workspace actions")
               .on_click(self.press("workspace.more")),
           )
           .child(self.record_bounds("workspace-more")),
@@ -1550,7 +1551,7 @@ impl WorkspaceView {
       )
   }
 
-  fn view_pr(&self, pr: &ViewPr, p: &Palette, cx: &mut Context<Self>) -> Stateful<Div> {
+  fn view_pr(&self, pr: &ViewPr, p: &Palette) -> Stateful<Div> {
     // The PR's state as GitHub labels it, as a pill that is also the button:
     // the label opens the PR in Treq, the trailing half on GitHub.
     let draft = pr.draft && pr.state == PrState::Open;
@@ -1567,21 +1568,18 @@ impl WorkspaceView {
       .aria_label(view_pr_name(pr))
       .menu_label("Open PR on web")
       .menu_icon(theme::ICON_EXTERNAL_LINK)
+      .tooltip(format!(
+        "Pull request #{}: view in Treq, or open on GitHub",
+        pr.number
+      ))
       .on_click(self.press("workspace.viewPr"))
       .on_menu(self.press("workspace.viewPrWeb"))
       .on_right_click(move |e, w, cx| copy(e, w, cx));
-    self.with_tooltip(
-      "workspace-view-pr",
-      Some(TooltipContent::Text(
-        format!(
-          "Pull request #{}: view in Treq, or open on GitHub",
-          pr.number
-        )
-        .into(),
-      )),
-      pill,
-      cx,
-    )
+    div()
+      .id("workspace-view-pr-tooltip")
+      .flex()
+      .flex_none()
+      .child(pill)
   }
 
   fn create_pr(&self, create: &CreatePr, p: &Palette, cx: &mut Context<Self>) -> Div {

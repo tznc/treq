@@ -123,6 +123,41 @@ fn workspace_header_sends_what_it_does_not_do_itself(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn each_half_of_the_view_pr_pill_has_one_tooltip(cx: &mut TestAppContext) {
+  use crate::gpui_shell::popup::{PopupRequest, TooltipContent};
+  let (mut h, _) = workspace_harness(cx, feature_host(), workspace_route());
+  h.cx.run_until_parked();
+  for (selector, tip) in [
+    ("workspace-view-pr-menu", "Open PR on web"),
+    (
+      "workspace-view-pr",
+      "Pull request #42: view in Treq, or open on GitHub",
+    ),
+  ] {
+    h.popups.borrow_mut().clear();
+    let at = h.cx.debug_bounds(selector).expect(selector).center();
+    h.cx.simulate_mouse_move(at, None, gpui::Modifiers::none());
+    h.cx
+      .executor()
+      .advance_clock(std::time::Duration::from_millis(300));
+    h.cx.run_until_parked();
+    let shown: Vec<String> = h
+      .popups
+      .borrow()
+      .iter()
+      .filter_map(|p| match p {
+        PopupRequest::ShowTooltip {
+          content: TooltipContent::Text(text),
+          ..
+        } => Some(text.to_string()),
+        _ => None,
+      })
+      .collect();
+    assert_eq!(shown, [tip], "{selector}");
+  }
+}
+
+#[gpui::test]
 fn workspace_header_github_buttons_copy_their_link(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, feature_host(), workspace_route());
   let pr = "https://github.com/tznc/treq/pull/42";

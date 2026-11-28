@@ -1225,6 +1225,7 @@ impl LinearView {
     let icon = ui::icon(theme::ICON_REFRESH, 14., p.foreground);
     Button::new(id, p)
       .aria_label("Refresh")
+      .tooltip("Refresh")
       .variant(Variant::Ghost)
       .size(Size::Icon)
       .w(zpx(28.))
