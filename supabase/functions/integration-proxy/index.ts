@@ -108,9 +108,9 @@ app.use(async (req, res, next) => {
     });
     if (!caller) return res.status(401).json({ error: "Unauthorized" });
     res.locals.caller = caller;
-    next();
+    return next();
   } catch (err) {
-    next(err);
+    return next(err);
   }
 });
 
@@ -134,7 +134,7 @@ router.post("/linear/graphql", async (req, res) => {
       store: linearTokenStore(service, caller.userId),
     },
   );
-  res.status(result.status).type("application/json").send(result.body);
+  return res.status(result.status).type("application/json").send(result.body);
 });
 
 router.post("/github/user-token", async (_req, res) => {
@@ -142,7 +142,7 @@ router.post("/github/user-token", async (_req, res) => {
   const refused = appOnly(caller);
   if (refused) return res.status(refused.status).json(refused.body);
   const result = await githubUserToken(userTokenDeps(caller.userId));
-  res.status(result.status).json(result.body);
+  return res.status(result.status).json(result.body);
 });
 
 router.post("/github/token", async (req, res) => {
@@ -172,7 +172,7 @@ router.post("/github/token", async (req, res) => {
       return (data?.installation_id as number | undefined) ?? null;
     },
   });
-  res.status(result.status).json(result.body);
+  return res.status(result.status).json(result.body);
 });
 
 app.use("/integration-proxy", router);

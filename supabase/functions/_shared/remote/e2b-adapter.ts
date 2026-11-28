@@ -84,6 +84,7 @@ function e2bError(response: Response): Promise<ProviderError> {
     // Create's 409 with `idempotency_in_progress` is a retry-later.
     if (status === 409 && text.includes("idempotency_in_progress")) return new ProviderError("unavailable", detail);
     if (status === 504) return new ProviderError("timeout", detail);
+    return undefined;
   });
 }
 

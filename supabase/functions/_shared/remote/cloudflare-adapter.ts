@@ -72,6 +72,7 @@ interface BridgeSandbox {
 function cloudflareError(response: Response): Promise<ProviderError> {
   return providerErrorFrom(response, (status, _text, detail) => {
     if (status === 504) return new ProviderError("timeout", detail);
+    return undefined;
   });
 }
 
