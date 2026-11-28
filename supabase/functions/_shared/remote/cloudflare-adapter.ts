@@ -113,9 +113,11 @@ export function parseCloudflareCredential(key: string): ParsedCredential {
   if (key.startsWith("https://")) return parseBridge(key);
   const bar = key.indexOf("|");
   const account = bar >= 0 ? key.slice(0, bar) : key;
-  const m = account.match(/^([0-9A-Za-z]{1,64}):([A-Za-z0-9_-]{1,512})$/);
-  if (!m) throw new ProviderError("invalid_request", "Cloudflare key must be <account id>:<api token>");
-  const base = { accountId: m[1], apiToken: m[2] };
+  const [, accountId, apiToken] = account.match(/^([0-9A-Za-z]{1,64}):([A-Za-z0-9_-]{1,512})$/) ?? [];
+  if (!accountId || !apiToken) {
+    throw new ProviderError("invalid_request", "Cloudflare key must be <account id>:<api token>");
+  }
+  const base = { accountId, apiToken };
   return bar >= 0 ? { ...base, ...parseBridge(key.slice(bar + 1)) } : base;
 }
 

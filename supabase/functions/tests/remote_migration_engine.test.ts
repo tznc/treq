@@ -376,7 +376,7 @@ Deno.test("a failed bootstrap destroys the target and rolls back", async () => {
   assertEquals(w.liveMachines(), ["m-src"]);
   const dead = [...w.placements.values()].filter((p) => p.role === "dead");
   assertEquals(dead.length, 1);
-  assertEquals(dead[0].state, "deleted");
+  assertEquals(dead[0]?.state, "deleted");
 });
 
 Deno.test("transient provider errors are retried, not rolled back", async () => {

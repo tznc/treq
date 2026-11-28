@@ -71,16 +71,16 @@ Deno.test("validateCredentials makes one read-only call with the key", async () 
   });
   await defined(boat.validateCredentials).call(boat);
   assertEquals(seen.length, 1);
-  assertEquals(seen[0].method, "GET");
-  assertEquals(seen[0].headers.get("authorization"), "Bearer user-key");
+  assertEquals(seen[0]?.method, "GET");
+  assertEquals(seen[0]?.headers.get("authorization"), "Bearer user-key");
 
   const dseen: Request[] = [];
   const daytona = new DaytonaProvider({ baseUrl: "https://daytona.invalid", apiKey: "dk" }, {
     fetch: fetchAnswering(200, "[]", dseen),
   });
   await defined(daytona.validateCredentials).call(daytona);
-  assertEquals(dseen[0].method, "GET");
-  assertEquals(dseen[0].headers.get("authorization"), "Bearer dk");
+  assertEquals(dseen[0]?.method, "GET");
+  assertEquals(dseen[0]?.headers.get("authorization"), "Bearer dk");
 });
 
 Deno.test("validateCredentials rejects a revoked key as unauthorized", async () => {
@@ -390,7 +390,7 @@ function planDeps(over: Partial<Parameters<typeof planByosPlacement>[0]> = {}) {
 Deno.test("ensure in BYOS mode picks the user's provider for the tier, ignoring the cheapest default", async () => {
   const plan = await planByosPlacement(planDeps(), { mode: "byos", kind: "daytona" }, "m", "us_east");
   // daytona:m is hidden from the managed catalog, but a BYOS user may still run it.
-  assertEquals(plan, { ok: true, machineType: TYPES[1], credentialId: "c-dt" });
+  assertEquals(plan, { ok: true, machineType: defined(TYPES[1]), credentialId: "c-dt" });
 });
 
 Deno.test("BYOS needs a saved key for that provider", async () => {
@@ -475,5 +475,5 @@ Deno.test("organization key actions need an org_id and map owner and in-use refu
   assertEquals(ok?.status, 200);
   assertEquals(deleted, ["org-1/boat"]);
   const listed = await handleByosAction("list_org_provider_credentials", { org_id: "org-1" }, deps);
-  assertEquals((listed?.body as { credentials: Array<{ provider_kind: string }> }).credentials[0].provider_kind, "org-1/boat");
+  assertEquals((listed?.body as { credentials: Array<{ provider_kind: string }> }).credentials[0]?.provider_kind, "org-1/boat");
 });

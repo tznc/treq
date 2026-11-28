@@ -303,7 +303,7 @@ fn pr_review_edits_and_deletes_a_draft(cx: &mut TestAppContext) {
   assert!(host
     .writes()
     .contains(&"update draft d1 Some(\"Rename this!\") false".to_string()));
-  h.click("delete-comment");
+  click_named(&mut h, gpui::Role::Button, "Delete comment");
   h.cx.run_until_parked();
   assert!(host
     .writes()
@@ -465,10 +465,10 @@ fn pr_review_replies_to_a_thread(cx: &mut TestAppContext) {
   let mut host = pr_host();
   host.threads = vec![gh_thread("t1", 2, false)];
   let (mut h, host) = workspace_harness(cx, host, pr_route());
-  h.click("github-thread-reply");
+  click_named(&mut h, gpui::Role::Button, "Reply");
   assert!(h.shows(gpui::Role::MultilineTextInput, "Reply on GitHub…"));
   h.cx.simulate_input("Done");
-  h.click("github-thread-reply-send");
+  click_named(&mut h, gpui::Role::Button, "Send reply");
   h.cx.run_until_parked();
   assert!(host.writes().contains(&"reply t1 Done".to_string()));
   assert!(!h.shows(gpui::Role::MultilineTextInput, "Reply on GitHub…"));
@@ -489,6 +489,16 @@ fn pr_review_file_list_scrolls_to_the_file(cx: &mut TestAppContext) {
   h.click("pr-file-b.rs");
   h.cx.run_until_parked();
   assert!(h.shows(gpui::Role::Heading, "b.rs"));
+}
+
+/// Zoomed in, the finish popover still opens under its button, right edges
+/// aligned, rather than flipping left of it.
+#[gpui::test]
+fn the_finish_popover_stays_under_its_button_when_zoomed(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, pr_host(), pr_route());
+  zoom(&mut h, 125);
+  h.click("pr-review-finish");
+  assert_right_aligned_under(&mut h, "pr-review-finish", "pr-review-popover");
 }
 
 /// The finish popover's verdicts are radio buttons named by their label,

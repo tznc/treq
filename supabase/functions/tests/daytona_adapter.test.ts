@@ -9,6 +9,7 @@ import {
   assert,
   assertEquals,
   assertRejects,
+  assertThrows,
 } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   DAYTONA_CAPABILITIES,
@@ -85,7 +86,8 @@ Deno.test("states normalize to the provider-neutral set", () => {
 Deno.test("create looks up by labels, then POSTs the tier's resources with the auto-stop backstop", async () => {
   const { fake, provider } = setup();
   const instance = await provider.createInstance(PARAMS);
-  const [lookup, create] = fake.requests;
+  const lookup = defined(fake.requests[0]);
+  const create = defined(fake.requests[1]);
   assertEquals(lookup.method, "GET");
   assertEquals(lookup.path, "/api/sandbox");
   assertEquals(JSON.parse(defined(lookup.search.get("labels"))), { treq_owner: "owner_1", treq_placement: "idem-1" });

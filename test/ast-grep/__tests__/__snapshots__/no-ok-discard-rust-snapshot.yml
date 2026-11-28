@@ -1,0 +1,167 @@
+id: no-ok-discard-rust
+snapshots:
+  ? |
+    async fn discards_an_await(ws: Ws) {
+      ws.close(None).await.ok();
+    }
+  : labels:
+    - source: ws.close(None).await.ok();
+      style: primary
+      start: 39
+      end: 65
+    - source: ws.close(None).await.ok()
+      style: secondary
+      start: 39
+      end: 64
+  ? |
+    fn binds_to_a_renamed_underscore(tx: Sender<u32>, r: u32) {
+      let _ignored = tx.send(r).ok();
+    }
+  : labels:
+    - source: let _ignored = tx.send(r).ok();
+      style: primary
+      start: 62
+      end: 93
+    - source: _ignored
+      style: secondary
+      start: 66
+      end: 74
+    - source: tx.send(r).ok()
+      style: secondary
+      start: 77
+      end: 92
+  ? |
+    fn binds_to_a_typed_underscore(tx: Sender<u32>, r: u32) {
+      let _: Option<()> = tx.send(r).ok();
+    }
+  : labels:
+    - source: 'let _: Option<()> = tx.send(r).ok();'
+      style: primary
+      start: 60
+      end: 96
+    - source: _
+      style: secondary
+      start: 64
+      end: 65
+    - source: tx.send(r).ok()
+      style: secondary
+      start: 80
+      end: 95
+  ? |
+    fn binds_to_underscore(tx: Sender<u32>, r: u32) {
+      let _ = tx.send(r).ok();
+    }
+  : labels:
+    - source: let _ = tx.send(r).ok();
+      style: primary
+      start: 52
+      end: 76
+    - source: _
+      style: secondary
+      start: 56
+      end: 57
+    - source: tx.send(r).ok()
+      style: secondary
+      start: 60
+      end: 75
+  ? |
+    fn checks_and_drops_the_option(tx: Sender<u32>, r: u32) {
+      tx.send(r).ok().is_some();
+    }
+  : labels:
+    - source: tx.send(r).ok().is_some();
+      style: primary
+      start: 60
+      end: 86
+    - source: tx.send(r).ok().is_some()
+      style: secondary
+      start: 60
+      end: 85
+  ? |
+    fn checks_none_and_drops_the_option(tx: Sender<u32>, r: u32) {
+      tx.send(r).ok().is_none();
+    }
+  : labels:
+    - source: tx.send(r).ok().is_none();
+      style: primary
+      start: 65
+      end: 91
+    - source: tx.send(r).ok().is_none()
+      style: secondary
+      start: 65
+      end: 90
+  ? |
+    fn discards_a_cleanup(tmp: &Path) {
+      std::fs::remove_file(&tmp).ok();
+    }
+  : labels:
+    - source: std::fs::remove_file(&tmp).ok();
+      style: primary
+      start: 38
+      end: 70
+    - source: std::fs::remove_file(&tmp).ok()
+      style: secondary
+      start: 38
+      end: 69
+  ? |
+    fn discards_a_send(tx: Sender<u32>, r: u32) {
+      tx.send(r).ok();
+    }
+  : labels:
+    - source: tx.send(r).ok();
+      style: primary
+      start: 48
+      end: 64
+    - source: tx.send(r).ok()
+      style: secondary
+      start: 48
+      end: 63
+  ? |
+    fn discards_an_entity_update(this: WeakEntity<Screen>, cx: &mut App) {
+      this
+        .update(cx, |screen, cx| screen.reload(cx))
+        .ok();
+    }
+  : labels:
+    - source: |-
+        this
+            .update(cx, |screen, cx| screen.reload(cx))
+            .ok();
+      style: primary
+      start: 73
+      end: 136
+    - source: |-
+        this
+            .update(cx, |screen, cx| screen.reload(cx))
+            .ok()
+      style: secondary
+      start: 73
+      end: 135
+  ? |
+    fn discards_in_a_closure(this: WeakEntity<Screen>) {
+      button.on_click(move |_, _, cx| {
+        this.update(cx, |screen, cx| screen.stop(cx)).ok();
+      });
+    }
+  : labels:
+    - source: this.update(cx, |screen, cx| screen.stop(cx)).ok();
+      style: primary
+      start: 93
+      end: 144
+    - source: this.update(cx, |screen, cx| screen.stop(cx)).ok()
+      style: secondary
+      start: 93
+      end: 143
+  ? |
+    fn drops_the_option(tx: Sender<u32>, r: u32) {
+      drop(tx.send(r).ok());
+    }
+  : labels:
+    - source: drop(tx.send(r).ok());
+      style: primary
+      start: 49
+      end: 71
+    - source: drop(tx.send(r).ok())
+      style: secondary
+      start: 49
+      end: 70

@@ -1,0 +1,179 @@
+id: no-stringified-error-ts
+snapshots:
+  ? |
+    p.catch((e) => note(`continue: ${e}`));
+  : labels:
+    - source: ${e}
+      style: primary
+      start: 31
+      end: 35
+    - source: e
+      style: secondary
+      start: 33
+      end: 34
+    - source: 'p.catch((e) => note(`continue: ${e}`))'
+      style: secondary
+      start: 0
+      end: 38
+  ? |
+    p.catch(e => String(e));
+  : labels:
+    - source: String(e)
+      style: primary
+      start: 13
+      end: 22
+    - source: p.catch(e => String(e))
+      style: secondary
+      start: 0
+      end: 23
+  ? |
+    p.catch(function (err: unknown) { log((err as Error).message); });
+  : labels:
+    - source: err as Error
+      style: primary
+      start: 39
+      end: 51
+    - source: 'p.catch(function (err: unknown) { log((err as Error).message); })'
+      style: secondary
+      start: 0
+      end: 65
+  ? |
+    try { run(); } catch (e) { log((e as NodeJS.ErrnoException).code); }
+  : labels:
+    - source: e as NodeJS.ErrnoException
+      style: primary
+      start: 32
+      end: 58
+    - source: e
+      style: secondary
+      start: 22
+      end: 23
+    - source: catch (e) { log((e as NodeJS.ErrnoException).code); }
+      style: secondary
+      start: 15
+      end: 68
+  ? |
+    try { run(); } catch (e) { log(`run failed: ${e}`); }
+  : labels:
+    - source: ${e}
+      style: primary
+      start: 44
+      end: 48
+    - source: e
+      style: secondary
+      start: 46
+      end: 47
+    - source: e
+      style: secondary
+      start: 22
+      end: 23
+    - source: 'catch (e) { log(`run failed: ${e}`); }'
+      style: secondary
+      start: 15
+      end: 53
+  ? |
+    try { run(); } catch (err) { log("run failed: " + err); }
+  : labels:
+    - source: '"run failed: " + err'
+      style: primary
+      start: 33
+      end: 53
+    - source: +
+      style: secondary
+      start: 48
+      end: 49
+    - source: err
+      style: secondary
+      start: 50
+      end: 53
+    - source: '"run failed: "'
+      style: secondary
+      start: 33
+      end: 47
+    - source: err
+      style: secondary
+      start: 22
+      end: 25
+    - source: 'catch (err) { log("run failed: " + err); }'
+      style: secondary
+      start: 15
+      end: 57
+  ? |
+    try { run(); } catch (err) { log((<Error>err).message); }
+  : labels:
+    - source: <Error>err
+      style: primary
+      start: 34
+      end: 44
+    - source: err
+      style: secondary
+      start: 22
+      end: 25
+    - source: catch (err) { log((<Error>err).message); }
+      style: secondary
+      start: 15
+      end: 57
+  ? |
+    try { run(); } catch (err) { log(err instanceof Error ? err.message : String(err)); }
+  : labels:
+    - source: String(err)
+      style: primary
+      start: 70
+      end: 81
+    - source: err
+      style: secondary
+      start: 22
+      end: 25
+    - source: 'catch (err) { log(err instanceof Error ? err.message : String(err)); }'
+      style: secondary
+      start: 15
+      end: 85
+  ? |
+    try { run(); } catch (err) { log(err.toString()); }
+  : labels:
+    - source: err.toString()
+      style: primary
+      start: 33
+      end: 47
+    - source: err
+      style: secondary
+      start: 22
+      end: 25
+    - source: catch (err) { log(err.toString()); }
+      style: secondary
+      start: 15
+      end: 51
+  ? |
+    try { run(); } catch (err) { setTimeout(() => log(`late: ${err}`)); }
+  : labels:
+    - source: ${err}
+      style: primary
+      start: 57
+      end: 63
+    - source: err
+      style: secondary
+      start: 59
+      end: 62
+    - source: err
+      style: secondary
+      start: 22
+      end: 25
+    - source: 'catch (err) { setTimeout(() => log(`late: ${err}`)); }'
+      style: secondary
+      start: 15
+      end: 69
+  ? |
+    try { run(); } catch (err: unknown) { log((err as Error).message); }
+  : labels:
+    - source: err as Error
+      style: primary
+      start: 43
+      end: 55
+    - source: err
+      style: secondary
+      start: 22
+      end: 25
+    - source: 'catch (err: unknown) { log((err as Error).message); }'
+      style: secondary
+      start: 15
+      end: 68

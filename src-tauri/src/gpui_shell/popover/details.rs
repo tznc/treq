@@ -156,8 +156,7 @@ impl Popover {
             .gap_1()
             .copy_icon(copied, 12.)
             .label("Copy"),
-          // Short label (['button label']): 11px is fine.
-          // ast-grep-ignore: gpui-text-xs-short-label-only
+          // Short label (button label). ast-grep-ignore: gpui-text-xs-short-label-only
           TextSize::Xs,
         )
         .on_click(copy)
@@ -178,8 +177,7 @@ impl Popover {
             .child(SharedString::from(prompt.text.clone())),
         )
         .child(
-          // Short label (['link label']): 11px is fine.
-          // ast-grep-ignore: gpui-text-xs-short-label-only
+          // Short label (link label). ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .selector("details-view-full")
             .role(gpui::Role::Button)

@@ -314,6 +314,7 @@ mod tests {
       start_line: None,
       diff_side: "RIGHT".to_string(),
       comments: vec![GhReviewComment {
+        author_id: None,
         id: "C1".to_string(),
         body: "same unwrap problem".to_string(),
         author: GhAuthor {

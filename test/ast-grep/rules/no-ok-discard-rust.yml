@@ -1,0 +1,86 @@
+id: no-ok-discard-rust
+language: rust
+severity: error
+message: >
+  `.ok();` throws the error away without a trace. Propagate it with `?` when
+  the function returns a compatible Result. Otherwise log it with context
+  (`log::`/`tracing::`, at a level that fits the consequence; `debug` for
+  best-effort cleanup), or match on `Err(e)` and say why ignoring it is
+  correct. In tests, use `.unwrap()` or `.expect(..)`. `let _ = x.ok();`,
+  `drop(x.ok())` and `x.ok().is_some();` hide the same error.
+note: >
+  Matches `.ok()` used as a statement, and the same value thrown away by
+  `drop(..)`, `.is_some()`/`.is_none()` or a `_`-prefixed binding. Code inside
+  macro bodies (`vec![..]`) is not parsed, so it is not checked.
+files:
+  - "src-tauri/**/*.rs"
+  - "crates/**/*.rs"
+ignores:
+  # Not fixed yet. The fix PRs stacked on this one remove these entries.
+  - "crates/treq-gateway/src/lib.rs"
+  - "crates/treq-ui/src/dialog.rs"
+  - "crates/treq-ui/src/path_field.rs"
+  - "crates/treq-ui/src/press.rs"
+  - "src-tauri/src/core/agent_command.rs"
+  - "src-tauri/src/core/checks.rs"
+  - "src-tauri/src/core/config_sync.rs"
+  - "src-tauri/src/core/pty_daemon.rs"
+  - "src-tauri/src/core/pty_remote_supervisor.rs"
+  - "src-tauri/src/core/submodules.rs"
+  - "src-tauri/src/gpui_shell/overlay/mod.rs"
+  - "src-tauri/src/gpui_shell/screen/file_browser.rs"
+  - "src-tauri/src/gpui_shell/screen/github.rs"
+  - "src-tauri/src/gpui_shell/screen/github/new_pr.rs"
+  - "src-tauri/src/gpui_shell/screen/machines.rs"
+  - "src-tauri/src/gpui_shell/screen/onboarding.rs"
+  - "src-tauri/src/gpui_shell/screen/open_workspaces.rs"
+  - "src-tauri/src/gpui_shell/screen/workspace_dialog.rs"
+  - "src-tauri/src/gpui_shell/screen/workspace_dialog_data.rs"
+  - "src-tauri/src/gpui_shell/screen/workspace_title.rs"
+  - "src-tauri/src/mobile/ui/hold.rs"
+  - "src-tauri/src/mobile/ui/home.rs"
+  - "src-tauri/src/mobile/ui/load.rs"
+  - "src-tauri/src/mobile/ui/mod.rs"
+  - "src-tauri/src/mobile/ui/review.rs"
+  - "src-tauri/src/mobile/ui/screens/add_host.rs"
+  - "src-tauri/src/mobile/ui/screens/code.rs"
+  - "src-tauri/src/mobile/ui/screens/commits.rs"
+  - "src-tauri/src/mobile/ui/screens/file.rs"
+  - "src-tauri/src/mobile/ui/screens/github.rs"
+  - "src-tauri/src/mobile/ui/screens/issue.rs"
+  - "src-tauri/src/mobile/ui/screens/issues.rs"
+  - "src-tauri/src/mobile/ui/screens/mod.rs"
+  - "src-tauri/src/mobile/ui/screens/new_workspaces.rs"
+  - "src-tauri/src/mobile/ui/screens/pr_detail.rs"
+  - "src-tauri/src/mobile/ui/screens/pr_review.rs"
+  - "src-tauri/src/mobile/ui/screens/pull_requests.rs"
+  - "src-tauri/src/mobile/ui/screens/repos.rs"
+  - "src-tauri/src/mobile/ui/screens/terminal.rs"
+  - "src-tauri/src/mobile/ui/screens/workspace.rs"
+  - "src-tauri/src/mobile/ui/screens/workspace/changes.rs"
+  - "src-tauri/src/mobile/ui/screens/workspaces.rs"
+  - "src-tauri/src/mobile/ui/sheet.rs"
+  - "src-tauri/src/mobile/ui/terminal_view.rs"
+  - "src-tauri/src/send_dispatch.rs"
+  - "src-tauri/tests/it/core_app_test.rs"
+utils:
+  ok-call:
+    kind: call_expression
+    pattern: $X.ok()
+rule:
+  any:
+    - kind: expression_statement
+      has:
+        any:
+          - matches: ok-call
+          - pattern: $X.ok().is_some()
+          - pattern: $X.ok().is_none()
+          - pattern: drop($X.ok())
+    - kind: let_declaration
+      all:
+        - has:
+            field: pattern
+            regex: ^_
+        - has:
+            field: value
+            matches: ok-call

@@ -240,8 +240,7 @@ impl WorkspaceScreen {
             &picked,
             &self.review,
             Rc::new(move |at, _, cx| {
-              // The hunks are read when a line is tapped, not copied into
-              // every file's handler on every render.
+              // Hunks are read on tap, not copied into every file's handler each render.
               this
                 .update(cx, |this, cx| {
                   if let Some(hunks) = this.picked_hunks(&tap_place.0, tap_place.1) {

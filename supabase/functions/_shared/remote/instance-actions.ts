@@ -15,7 +15,7 @@ import {
 } from "./byos.ts";
 import type { MachineTypeRow } from "./migration-engine.ts";
 import { establishSshTrust, reensureServicesAfterWake, runBootManifest } from "./machine-setup.ts";
-import { manifestTreqRelease, resolveTreqRelease } from "./treq-release.ts";
+import { resolveTreqRelease, stubTreqRelease } from "./treq-release.ts";
 import {
   cancelOpenMigration,
   createActivePlacement,
@@ -55,6 +55,7 @@ import {
 import { logWithCorrelation } from "./correlation.ts";
 import { storedError } from "./error-scrub.ts";
 import { MANAGED_SSHD_HOST, MANAGED_SSHD_PORT } from "./ssh-vm-config.ts";
+import { caKeyMaterialFromEnv } from "./ssh-cert.ts";
 import { errorMessage } from "../error-message.ts";
 
 const MANAGED_SSH_USERNAME = "treq";
@@ -139,7 +140,7 @@ const providerOf = (deps: RemoteInstanceDeps, instance: InstanceRow) =>
   deps.provider(kindOf(instance), instance.active_placement_id);
 
 // The stub runs no bootstrap script, so it never fetches treq.dev/releases.json.
-const treqReleaseFor = (deps: RemoteInstanceDeps) => deps.stub ? manifestTreqRelease : resolveTreqRelease;
+const treqReleaseFor = (deps: RemoteInstanceDeps) => deps.stub ? stubTreqRelease : resolveTreqRelease;
 
 // `size_preset` predates tiers; it stays filled for existing readers.
 function sizePresetForTier(tierId: string): SizePreset {
@@ -208,6 +209,22 @@ const ENSURE_FAILABLE = ["provisioning", "bootstrapping", "ready", "suspended", 
 
 const replay = (op: OperationRow): Reply => ok({ operation_id: op.id, status: op.status });
 
+// Without the CA a new machine gets no sshd and no certificate can be signed
+// for it, so it would be billed and never usable.
+const SSH_CA_NOT_CONFIGURED: Reply = {
+  status: 503,
+  body: { error: "Treq Cloud is not set up to sign SSH certificates yet", code: "ssh_ca_not_configured" },
+};
+
+function sshCaConfigured(): boolean {
+  try {
+    caKeyMaterialFromEnv();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function tierUnavailable(tierId: string, region: string): Reply {
   return {
     status: 400,
@@ -261,8 +278,8 @@ async function tracked(
     const done = await work(row.id);
     await completeOperation(supabase, row.id, { status: "succeeded", providerRequestId: done.providerRequestId });
     await audit(event("succeeded"), {
-      detail: done.detail,
-      providerRequestId: done.providerRequestId,
+      detail: done.detail ?? {},
+      providerRequestId: done.providerRequestId ?? null,
       durationMs: elapsed(),
     });
     return row.id;
@@ -328,6 +345,7 @@ export async function handleEnsure(body: Record<string, unknown>, deps: RemoteIn
 
 async function ensureOnce(body: Record<string, unknown>, deps: RemoteInstanceDeps): Promise<Reply> {
   const { supabase, ownerUserId, correlationId } = deps;
+  if (!deps.stub && !sshCaConfigured()) return SSH_CA_NOT_CONFIGURED;
   const idempotencyKey = requireIdempotencyKey(body);
   const region: RegionCode = isRegionCode(body.region) ? body.region : "us_east";
   if (body.tier_id !== undefined && (typeof body.tier_id !== "string" || body.tier_id.length === 0)) {
@@ -511,7 +529,14 @@ export async function handleWake(body: Record<string, unknown>, deps: RemoteInst
     await setInstanceStatus(supabase, instance, "waking");
     const provider = providerOf(deps, instance);
     await provider.wakeInstance(resourceId);
-    if (!deps.stub) await reensureServicesAfterWake(provider, resourceId, instance.active_placement_id ?? null);
+    if (!deps.stub) {
+      await reensureServicesAfterWake(
+        provider,
+        resourceId,
+        instance.active_placement_id ?? null,
+        () => finishMachineSetup(deps, instance, provider, resourceId),
+      );
+    }
     const observed = await provider.getInstance(resourceId);
     await setInstanceStatus(supabase, instance, observed.state, {
       ready_at: observed.state === "ready" ? new Date().toISOString() : instance.ready_at,
@@ -519,6 +544,37 @@ export async function handleWake(body: Record<string, unknown>, deps: RemoteInst
     return { detail: { observed_state: observed.state } };
   });
   return ok({ operation_id: opId, status: "succeeded" });
+}
+
+// Finishes a setup that create or repair left undone, as repair does: the
+// boot manifest, then sshd, CA trust, the host key and the placement's services.
+async function finishMachineSetup(
+  deps: RemoteInstanceDeps,
+  instance: InstanceRow,
+  provider: SandboxProvider,
+  resourceId: string,
+): Promise<void> {
+  const { supabase, ownerUserId, correlationId } = deps;
+  await runBootManifest(provider, resourceId, "repair", treqReleaseFor(deps));
+  const endpointId = await recordManagedEndpoint(supabase, {
+    ownerUserId,
+    instanceId: instance.id,
+    hostname: MANAGED_SSHD_HOST,
+    port: MANAGED_SSHD_PORT,
+    username: MANAGED_SSH_USERNAME,
+    existingEndpointId: instance.endpoint_id,
+  });
+  if (!instance.endpoint_id) await updateInstance(supabase, instance.id, { endpoint_id: endpointId });
+  await establishSshTrust(supabase, provider, {
+    ownerUserId,
+    instanceId: instance.id,
+    endpointId,
+    providerResourceId: resourceId,
+    generation: instance.generation,
+    correlationId,
+    stub: false,
+    placementId: instance.active_placement_id,
+  });
 }
 
 export async function handleReprovision(body: Record<string, unknown>, deps: RemoteInstanceDeps): Promise<Reply> {

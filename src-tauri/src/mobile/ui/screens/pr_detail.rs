@@ -922,8 +922,7 @@ impl Render for PrDetailScreen {
           ),
       )
       .child(
-        // The review is this page's main job, so it stays in thumb reach,
-        // under the bar that opens the comment composer.
+        // The review is the page's main job, so it stays in thumb reach under the composer bar.
         v_flex()
           .gap_2()
           .p_4()

@@ -5,7 +5,7 @@ import Head from '@docusaurus/Head';
 import Layout from '@theme/Layout';
 import Heading from '@theme/Heading';
 import useBaseUrl from '@docusaurus/useBaseUrl';
-import {DownloadButton, OtherDownloads} from '@site/src/components/DownloadLinks';
+import {DownloadButton} from '@site/src/components/DownloadLinks';
 import {DOWNLOAD_HREF} from '@site/src/lib/downloads';
 import {CloseRail, HeroLines, RebaseDiagram} from '@site/src/components/landing/BranchLines';
 
@@ -70,7 +70,6 @@ function Hero(): ReactNode {
                 Read the docs
               </Link>
             </div>
-            <OtherDownloads location="hero" className={styles.heroOther} />
             <div className={styles.platforms}>
               <span>Available for</span>
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16" aria-label="macOS">
@@ -442,7 +441,6 @@ function ClosingCTA(): ReactNode {
             <Link className={styles.textLink ?? ''} to="/pricing">
               See pricing
             </Link>
-            <OtherDownloads location="closing" />
           </div>
         </div>
       </div>
@@ -476,7 +474,7 @@ export default function Home(): ReactNode {
       description="Stacking Agent Development Environment that isolates each agent and rebases stacked PRs when the base moves.">
       <Head>
         {/* Brand first: "treq" also names a Python library, and "treq ai" is the query that gets clicks. */}
-        <title>Treq: isolated workspaces and stacked PRs for AI coding agents</title>
+        <title>Treq: run AI agents in isolated workspaces, with stacked PRs</title>
         <script type="application/ld+json">{JSON.stringify(SOFTWARE_APP_SCHEMA)}</script>
       </Head>
       <Hero />

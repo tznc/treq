@@ -15,6 +15,7 @@ use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use std::sync::Arc;
+use treq_ui::SelectorExt as _;
 
 use gpui_kit::base::TestSupportExt as _;
 use serde::Deserialize;
@@ -2122,7 +2123,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
 
   let sizes = (!c.sizes.is_empty()).then(|| {
     div()
-      .debug_selector(|| "cloud-size-picker".into())
+      .selector("cloud-size-picker")
       .flex()
       .flex_col()
       .gap_1()
@@ -2160,8 +2161,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
   });
   let processes = (!c.processes.is_empty() || c.idle_stop.is_some()).then(|| {
     div()
-      .id("cloud-processes")
-      .debug_selector(|| "cloud-processes".into())
+      .selector("cloud-processes")
       .role(tauri_plugin_gpui::gpui::Role::Group)
       .aria_label("Processes")
       .test_support()
@@ -2173,7 +2173,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
           // Short label (['countdown']): 11px is fine.
           // ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
-            .debug_selector(|| "cloud-idle-stop".into())
+            .selector("cloud-idle-stop")
             .text_color(p.muted_foreground)
             .child(eta),
         )
@@ -2232,8 +2232,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
       _ => p.muted_foreground,
     };
     ui::text(div(), TextSize::Sm)
-      .id("cloud-billing")
-      .debug_selector(|| "cloud-billing".into())
+      .selector("cloud-billing")
       .role(tauri_plugin_gpui::gpui::Role::Status)
       .aria_label(billing.clone())
       .test_support()
@@ -2256,21 +2255,18 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
         .clone()
         .or_else(|| c.spend_note.clone())
         .unwrap_or_default();
-      div()
-        .debug_selector(|| "cloud-spend-capped".into())
-        .mt_3()
-        .child(
-          ui::Alert::new("cloud-spend-capped-alert", "Monthly spend cap reached", p)
-            .severity(ui::Severity::Danger)
-            .message(message)
-            .action(
-              Button::new("cloud-spend-cap-raise", p)
-                .variant(Variant::Outline)
-                .size(Size::Sm)
-                .label("Raise cap")
-                .on_click(press("cloud.spendCap.edit")),
-            ),
-        )
+      div().selector("cloud-spend-capped").mt_3().child(
+        ui::Alert::new("cloud-spend-capped-alert", "Monthly spend cap reached", p)
+          .severity(ui::Severity::Danger)
+          .message(message)
+          .action(
+            Button::new("cloud-spend-cap-raise", p)
+              .variant(Variant::Outline)
+              .size(Size::Sm)
+              .label("Raise cap")
+              .on_click(press("cloud.spendCap.edit")),
+          ),
+      )
     });
   let notices = c.notifications.iter().map(|n| {
     let dismiss = format!("cloud.notification.dismiss.{}", n.id);
@@ -2303,21 +2299,18 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
       .on_click(press("cloud.resize"))
   });
   let migration = c.migration.clone().map(|m| {
-    div()
-      .mt_3()
-      .debug_selector(|| "cloud-migration-alert".into())
-      .child(
-        ui::Alert::new("cloud-migration", m.title, p)
-          .severity(if m.stuck {
-            ui::Severity::Warning
-          } else {
-            ui::Severity::Info
-          })
-          .message(m.detail.unwrap_or_default()),
-      )
+    div().mt_3().selector("cloud-migration-alert").child(
+      ui::Alert::new("cloud-migration", m.title, p)
+        .severity(if m.stuck {
+          ui::Severity::Warning
+        } else {
+          ui::Severity::Info
+        })
+        .message(m.detail.unwrap_or_default()),
+    )
   });
   let resize_confirm = c.resize_confirm.clone().map(|lines| {
-    div().debug_selector(|| "cloud-resize-confirm-alert".into()).child(
+    div().selector("cloud-resize-confirm-alert").child(
       ui::Alert::new("cloud-resize-unpushed", "Resizing loses unpushed work", p)
         .severity(ui::Severity::Warning)
         .message(format!(
@@ -2368,7 +2361,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
           )
           .child(
             div()
-              .debug_selector(|| "cloud-disk-usage".into())
+              .selector("cloud-disk-usage")
               .h(zpx(6.))
               .rounded_full()
               .overflow_hidden()
@@ -2401,8 +2394,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
       });
       let deletion = instance.deletion.clone().map(|notice| {
         div()
-          .id("cloud-deletion-warning")
-          .debug_selector(|| "cloud-deletion-warning".into())
+          .selector("cloud-deletion-warning")
           .role(tauri_plugin_gpui::gpui::Role::Alert)
           .aria_label(notice.clone())
           .test_support()
@@ -2477,8 +2469,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
   };
 
   div()
-    .id("cloud-workspace-card")
-    .debug_selector(|| "cloud-workspace-card".into())
+    .selector("cloud-workspace-card")
     .role(gpui::Role::Group)
     .aria_label("Cloud workspace")
     .rounded(radius::MD)
@@ -2531,7 +2522,7 @@ pub(in crate::gpui_shell::screen) fn cloud_card_element<V: HasTooltips>(
     .when_some(c.credential_invalid.clone(), |this, message| {
       this.child(
         ui::text(div().mt_3(), TextSize::Sm)
-          .debug_selector(|| "cloud-credential-invalid".into())
+          .selector("cloud-credential-invalid")
           .text_color(red)
           .child(message),
       )
@@ -2850,8 +2841,7 @@ impl SettingsView {
           .on_click(self.press(&format!("byos.key.add.{kind}")))
       }));
     div()
-      .id("byos-provider-keys")
-      .debug_selector(|| "byos-provider-keys".into())
+      .selector("byos-provider-keys")
       .flex()
       .flex_col()
       .gap_2()
@@ -2875,8 +2865,7 @@ impl SettingsView {
   /// workspace.
   fn team_profile(&mut self, section: &CloudProfileSection, p: &Palette) -> AnyElement {
     div()
-      .id("team-profile")
-      .debug_selector(|| "team-profile".into())
+      .selector("team-profile")
       .flex()
       .flex_col()
       .gap_2()
@@ -3004,11 +2993,7 @@ impl SettingsView {
         )
     });
     div()
-      .id(SharedString::from(format!("team-{id}")))
-      .debug_selector({
-        let id = id.clone();
-        move || format!("team-{id}")
-      })
+      .selector(SharedString::from(format!("team-{id}")))
       .role(tauri_plugin_gpui::gpui::Role::Group)
       .aria_label(format!("{} cloud", org.name))
       .test_support()
@@ -3107,7 +3092,7 @@ impl SettingsView {
         .into_any_element()
     };
     div()
-      .debug_selector(|| "cloud-spend-cap".into())
+      .selector("cloud-spend-cap")
       .flex()
       .flex_col()
       .gap_1()
@@ -3512,10 +3497,7 @@ impl SettingsView {
     p: &Palette,
   ) -> gpui::Div {
     let status = div()
-      .debug_selector({
-        let id = format!("integration-status-{}", card.id);
-        move || id
-      })
+      .selector(format!("integration-status-{}", card.id))
       .flex()
       .items_center()
       .gap_1p5()
@@ -3550,14 +3532,10 @@ impl SettingsView {
       .meta(card.purpose)
       .trailing(if card.pro_required {
         div()
-          .id(SharedString::from(format!(
+          .selector(SharedString::from(format!(
             "integration-requires-pro-{}",
             card.id
           )))
-          .debug_selector({
-            let id = format!("integration-requires-pro-{}", card.id);
-            move || id
-          })
           .role(tauri_plugin_gpui::gpui::Role::Label)
           .aria_label("Requires Pro")
           .test_support()
@@ -3639,7 +3617,7 @@ impl SettingsView {
           .when(!repositories.is_empty(), |this| {
             this.child(
               ui::text(div(), TextSize::Sm)
-                .debug_selector(|| "github-repositories".into())
+                .selector("github-repositories")
                 .border_t_1()
                 .border_color(p.border)
                 .py_2()
@@ -3785,8 +3763,7 @@ fn linear_paywall(p: &Palette, upgrade: Button) -> AnyElement {
     "Keep each workspace linked to its issue",
   ];
   div()
-    .id("linear-paywall")
-    .debug_selector(|| "linear-paywall".into())
+    .selector("linear-paywall")
     .role(tauri_plugin_gpui::gpui::Role::Group)
     .aria_label("Linear is a Pro feature")
     .test_support()

@@ -158,8 +158,7 @@ impl EchoFilter {
         false
       }
       EchoState::Echoing { next_line } => {
-        // The echo of a continuation line may carry a PS2 prompt ("> ",
-        // "quote> ") in front of the command text.
+        // A continuation line's echo may carry a PS2 prompt ("> ", "quote> ") before the command.
         if text.ends_with(self.lines[next_line].as_str())
           || line_matches_auto_command(text, &self.command)
         {
@@ -239,8 +238,7 @@ fn terminate_process_tree(root: u32, child: &mut Box<dyn Child + Send>) {
 
   fn signal_all(pids: &[u32], root: u32, signal: libc::c_int) {
     for &pid in pids {
-      // SAFETY: `kill` takes plain integers and touches no Rust memory; a
-      // pid that already exited only makes it return an error, which is ignored.
+      // SAFETY: `kill` takes plain ints and touches no Rust memory. An exited pid only errors.
       unsafe {
         libc::kill(pid as libc::pid_t, signal);
       }
@@ -331,12 +329,7 @@ impl PtySession {
   }
 
   fn shutdown(&mut self) -> Result<(), String> {
-    // `self.child.kill()` below only signals the shell itself: anything it
-    // forked (an agent, a subshell, a backgrounded job) is left running,
-    // and once the pty and its reader thread are gone it's an orphan with
-    // nothing left to reap it. Walk and signal its whole descendant tree
-    // first, on Unix, giving it a brief grace period to exit cleanly
-    // before force-killing what's left.
+    // `child.kill()` alone orphans the shell's forks, so signal its whole process tree first.
     #[cfg(unix)]
     if let Some(pid) = self.process_id() {
       terminate_process_tree(pid, &mut self.child);
@@ -558,8 +551,7 @@ impl PtyManager {
             break;
           }
           Ok(n) => {
-            // Output nothing reads or rewrites goes on as the bytes read; the
-            // emulator takes a character split between reads in stride.
+            // Unfiltered output passes through raw. The emulator handles a char split across reads.
             if !cfg!(windows)
               && !utf8_decoder.has_pending()
               && auto_command_reader.lock_or_recover().is_none()
@@ -572,11 +564,7 @@ impl PtyManager {
               continue;
             }
 
-            // Windows console apps running under ConPTY (e.g. PowerShell/PSReadLine
-            // at startup) query the cursor position via a VT100 Device Status Report
-            // and block on the pty until something answers. The app's real terminal
-            // (xterm.js) answers this itself; this raw reader has no such emulator
-            // attached, so answer it here with a fixed position to unblock the child.
+            // ConPTY apps like PSReadLine block until a cursor-position query is answered.
             const CURSOR_POS_QUERY: &str = "\x1b[6n";
             if cfg!(windows) && data.contains(CURSOR_POS_QUERY) {
               let mut sessions = reader_sessions.lock_or_recover();
@@ -991,8 +979,7 @@ mod tests {
       )
       .unwrap();
 
-    // PowerShell's cold-start time on CI Windows runners can exceed 2s on its own,
-    // before it even processes the queued "exit" — give it more headroom there.
+    // PowerShell's cold start on CI Windows runners can exceed 2s before it handles "exit".
     let timeout = if cfg!(windows) {
       Duration::from_secs(30)
     } else {
@@ -1093,8 +1080,7 @@ mod tests {
         None,
         shell(),
         Vec::new(),
-        // Backgrounds a long-lived grandchild and prints its pid, so the
-        // test can confirm it (not just the shell) is gone after close.
+        // Background a grandchild and print its pid so the test can confirm close kills it too.
         Some("sleep 30 & echo GRANDCHILD_PID:$!".into()),
         None,
         Box::new(move |chunk| {
@@ -1103,12 +1089,7 @@ mod tests {
       )
       .unwrap();
 
-    // The marker can land split across separate reads (e.g. "GRAND" then
-    // "CHILD_PID:123\n"), so accumulate before searching rather than
-    // matching against each chunk in isolation. It can also appear twice
-    // (the pty's line-echo of the typed command, unexpanded, ahead of the
-    // shell's real output), so take the first occurrence that parses as a
-    // pid rather than assuming the first occurrence is the real one.
+    // Accumulate output: the marker can split across reads, and its unexpanded echo comes first.
     let deadline = Instant::now() + Duration::from_secs(2);
     let mut output = String::new();
     let mut grandchild_pid: Option<i32> = None;
@@ -1123,7 +1104,6 @@ mod tests {
     }
     let grandchild_pid = grandchild_pid.expect("shell printed its background pid");
 
-    // Alive prior to close: kill(pid, 0) checks existence without signaling.
     // SAFETY: signal 0 only checks existence; `kill` touches no Rust memory.
     assert_eq!(unsafe { libc::kill(grandchild_pid, 0) }, 0);
 
@@ -1171,12 +1151,9 @@ mod tests {
   fn echo_suppression_releases_output_after_bounded_buffer() {
     let manager = PtyManager::new();
     let (tx, rx) = mpsc::channel();
-    // `yes`/`head` aren't available under PowerShell; emit the same >32KB of
-    // filler in one shot so the filter's MAX_FILTER_BUFFER release path is
-    // exercised the same way on both platforms.
+    // >32KB of filler hits the MAX_FILTER_BUFFER release path. PowerShell has no `yes` or `head`.
     let command = if cfg!(windows) {
-      // Many small writes flush through ConPTY more reliably than one very long
-      // line, which can sit behind console line-wrap handling before it's sent.
+      // Many small writes flush through ConPTY more reliably than one long line held by line-wrap.
       "for($i=0;$i -lt 1000;$i++){Write-Output ('x' * 50)}".to_string()
     } else {
       "yes x | head -c 40000".to_string()
@@ -1196,8 +1173,7 @@ mod tests {
       )
       .unwrap();
 
-    // Windows CI runs this alongside ~300 other tests contending for CPU/IO, on
-    // top of PowerShell's own slower cold-start; give it much more headroom.
+    // Windows CI runs ~300 contending tests plus PowerShell's slow cold start, so allow more time.
     let timeout = if cfg!(windows) {
       Duration::from_secs(30)
     } else {

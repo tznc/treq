@@ -1,0 +1,13 @@
+id: no-stringified-error-js
+valid:
+  - |
+    try { run(); } catch (err) { console.error("run failed", err); }
+  - |
+    const label = String(count);
+invalid:
+  - |
+    try { run(); } catch (err) { log(err instanceof Error ? err.message : String(err)); }
+  - |
+    main().catch((e) => log(`failed: ${e}`));
+  - |
+    try { run(); } catch (err) { log("failed: " + err); }

@@ -5,8 +5,7 @@
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
 use std::sync::Arc;
-
-use gpui_kit::base::TestSupportExt as _;
+use treq_ui::SelectorExt as _;
 
 use gpui_kit::component::input::{InputEvent, InputState};
 use serde::Deserialize;
@@ -321,13 +320,11 @@ impl Render for SaveProjectDialog {
               .w_full()
               .child(
                 div()
-                  .id("save-project-owner")
-                  .debug_selector(|| "save-project-owner".into())
+                  .selector("save-project-owner")
                   .role(tauri_plugin_gpui::gpui::Role::ComboBox)
                   .aria_label("Owner")
                   .aria_value(current.clone())
                   .aria_expanded(self.owner_open)
-                  .test_support()
                   .w_full()
                   .cursor_pointer()
                   .child(
@@ -352,8 +349,7 @@ impl Render for SaveProjectDialog {
             .gap_2()
             .child(
               div()
-                .id("save-project-name")
-                .debug_selector(|| "save-project-name".into())
+                .selector("save-project-name")
                 .w_full()
                 .child(Styled::h(ui::input(&input).disabled(pending), zpx(32.))),
             )
@@ -374,7 +370,7 @@ impl Render for SaveProjectDialog {
           .when(!self.error.is_empty(), |this| {
             this.child(
               ui::text(div(), TextSize::Sm)
-                .debug_selector(|| "save-project-error".into())
+                .selector("save-project-error")
                 .text_color(p.destructive)
                 .child(self.error.clone()),
             )

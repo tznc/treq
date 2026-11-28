@@ -398,8 +398,7 @@ impl EntityInputHandler for TerminalView {
     _: &mut Window,
     _: &mut Context<Self>,
   ) {
-    // Composition is not shown; the committed text arrives through
-    // `replace_text_in_range`.
+    // Composition is not shown. Committed text arrives via `replace_text_in_range`.
   }
 
   fn bounds_for_range(

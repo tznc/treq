@@ -64,7 +64,7 @@ export function parseFlyMachineType(
   if (!m) return null;
   return m[1]
     ? { cpu_kind: m[1], cpus: Number(m[2]), memory_mb: Number(m[3]) }
-    : { cpu_kind: m[4], cpus: Number(m[5]), memory_mb: Number(m[6]) };
+    : { cpu_kind: "performance", cpus: Number(m[5]), memory_mb: Number(m[6]) };
 }
 
 export function normalizeFlyState(vendorState: string): ManagedInstanceState {
@@ -318,10 +318,11 @@ export class FlyMachinesProvider implements SandboxProvider {
   private async deleteVolume(id: string): Promise<void> {
     for (let attempt = 0;; attempt++) {
       const response = await this.request(this.url(`/volumes/${encodeURIComponent(id)}`), { method: "DELETE" });
-      const retry = attempt < VOLUME_DELETE_BACKOFF_MS.length && [409, 412].includes(response.status);
+      const backoff = VOLUME_DELETE_BACKOFF_MS[attempt];
+      const retry = backoff !== undefined && [409, 412].includes(response.status);
       if (!retry) return await expectOk(response, flyError, [404]);
       await response.body?.cancel();
-      await this.sleep(VOLUME_DELETE_BACKOFF_MS[attempt]);
+      await this.sleep(backoff);
     }
   }
 

@@ -139,8 +139,7 @@ impl Shell {
       let keystroke = &event.keystroke;
       let m = keys::held(keystroke.modifiers);
       let within = |name: &str| event.context_stack.iter().any(|c| c.contains(name));
-      // An open dialog (the palette, the shortcuts sheet, a picker) takes
-      // every key, its own Escape included.
+      // An open dialog (palette, shortcuts sheet, picker) takes every key, its own Escape included.
       if within(overlay::KEY_CONTEXT) {
         return;
       }
@@ -196,9 +195,7 @@ impl Render for Shell {
     static FIRST: std::sync::Once = std::sync::Once::new();
     FIRST.call_once(|| {
       crate::startup::mark("first render");
-      // The syntax set takes a while to load; load it before the first
-      // diff, but after the first frame, which it would compete with for a
-      // core.
+      // The syntax set loads slowly: after the first frame, which it would slow, before any diff.
       window.on_next_frame(|_, _| {
         std::thread::Builder::new()
           .name("warm-highlighting".into())
@@ -234,8 +231,7 @@ impl Render for Shell {
       .size_full()
       .flex()
       .font_family(theme::SANS_FONT)
-      // A click anywhere in the window closes an open menu, as one outside
-      // a native menu does.
+      // A click anywhere closes an open menu, as a click outside a native menu does.
       .capture_any_mouse_down(move |_, window, cx| {
         // Blurs the focused input too, as a browser does.
         window.blur(cx);
@@ -244,8 +240,7 @@ impl Render for Shell {
       .bg(theme::palette(dark).background)
       .when_some(self.sidebar.clone(), |this, sidebar| {
         let sidebar = Sidebar::element(&sidebar, cx);
-        // The cut-off overlay spans the sidebar too; the workspace view
-        // dims its own part below the remote strip.
+        // The cut-off overlay covers the sidebar. The workspace view dims below the remote strip.
         let cut_off = self
           .screen
           .as_ref()
@@ -274,8 +269,7 @@ impl Render for Shell {
           .h_full()
           .flex()
           .flex_col()
-          // The screen runs to the window's top edge beside the sidebar,
-          // which holds the title bar; without it, the screen moves down.
+          // The sidebar holds the title bar. Without a sidebar, the screen sits below one.
           .when(title_bar::SHOWN && self.sidebar.is_none(), |this| {
             this.child(title_bar::drag_area("screen-title-bar"))
           })
@@ -358,9 +352,7 @@ pub fn open_window(
     .title(title)
     .inner_size(1400.0, 900.0)
     .min_inner_size(MIN_WIDTH, MIN_HEIGHT);
-  // The default style already extends the content under an opaque bar,
-  // hiding GPUI's top rows. An overlay leaves only the traffic lights, over
-  // the title bar GPUI draws (`title_bar`).
+  // An overlay bar leaves only the traffic lights, over GPUI's own `title_bar`, hiding no rows.
   #[cfg(target_os = "macos")]
   let window = window
     .title_bar_style(tauri::TitleBarStyle::Overlay)
@@ -618,8 +610,15 @@ fn action_sink(app: AppHandle, label: String) -> sidebar::ActionSink {
         .and_then(WeakEntity::upgrade)
         .and_then(|shell| shell.read(cx).sidebar.clone())
         .map(|sidebar| sidebar.read(cx).snapshot().clone());
-      if let Some(snapshot) = snapshot {
-        sidebar_actions::handle(&app, &label, &snapshot, &action, cx);
+      let shown = snapshot
+        .is_some_and(|snapshot| sidebar_actions::handle(&app, &label, &snapshot, &action, cx));
+      // No menu opened (an empty project has none): close the project button.
+      if !shown {
+        if let Some(sidebar) = window_sidebar(cx, &label) {
+          sidebar.update(cx, |sidebar, cx| {
+            sidebar.menu_closed(sidebar.menu_generation(), cx)
+          });
+        }
       }
     });
   })
@@ -740,19 +739,39 @@ pub fn show_menu(app: &AppHandle, label: &str, entries: Vec<MenuEntry>) {
     let anchor = tauri_plugin_gpui::with_app({
       let label = label.clone();
       move |cx| {
-        let sidebar = cx
-          .try_global::<Shells>()
-          .and_then(|shells| shells.0.get(&label))
-          .and_then(WeakEntity::upgrade)
-          .and_then(|shell| shell.read(cx).sidebar.clone())?;
+        let sidebar = window_sidebar(cx, &label)?;
         let sidebar = sidebar.read(cx);
-        Some((sidebar.menu_anchor(), sidebar.snapshot().dark))
+        Some((
+          sidebar.menu_anchor(),
+          sidebar.snapshot().dark,
+          sidebar.menu_generation(),
+        ))
       }
     });
-    if let Ok(Some((at, dark))) = anchor {
+    if let Ok(Some((at, dark, generation))) = anchor {
       popup::show_menu(app, &label, entries, at, dark);
+      // Tell the sidebar when the menu closes, to turn its chevron back.
+      let app = app.clone();
+      popup::on_menu_closed(move || {
+        defer_main(&app, move |_| {
+          tauri_plugin_gpui::with_app(move |cx| {
+            if let Some(sidebar) = window_sidebar(cx, &label) {
+              sidebar.update(cx, |sidebar, cx| sidebar.menu_closed(generation, cx));
+            }
+          })
+          .ignore_closed();
+        });
+      });
     }
   });
+}
+
+/// The sidebar of shell window `label`.
+fn window_sidebar(cx: &gpui::App, label: &str) -> Option<gpui::Entity<Sidebar>> {
+  cx.try_global::<Shells>()
+    .and_then(|shells| shells.0.get(label))
+    .and_then(WeakEntity::upgrade)
+    .and_then(|shell| shell.read(cx).sidebar.clone())
 }
 
 /// Closes every popup, as when a shell window loses focus.

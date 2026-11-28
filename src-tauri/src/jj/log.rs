@@ -123,10 +123,7 @@ pub(super) fn resolve_local_target_branch_revision(
     return Ok(format_revset_symbol(target_branch));
   }
 
-  // GitHub squash-and-merge replaces the remote tip with a commit that has
-  // the same tree as the old branch tip. Resolve that imported bookmark
-  // conflict to the squash commit before considering the (stale) git-local
-  // branch or timestamp heuristics.
+  // A GitHub squash commit has the old tip's tree, so it wins over the git-branch and time checks.
   let remote_symbol = RemoteRefSymbol {
     name: RefName::new(target_branch),
     remote: RemoteName::new("origin"),
