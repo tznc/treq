@@ -132,7 +132,7 @@ pub fn parse_timeout(value: &str) -> Result<Duration, String> {
   let seconds = number
     .trim()
     .parse::<u64>()
-    .map_err(|_| format!("invalid timeout '{value}'. Use seconds like 30s, or 1m"))?
+    .map_err(|e| format!("invalid timeout '{value}': {e}. Use seconds like 30s, or 1m"))?
     * unit;
   if seconds == 0 {
     return Err("timeout must be at least 1s".into());

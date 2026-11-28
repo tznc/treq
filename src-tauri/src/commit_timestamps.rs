@@ -114,13 +114,13 @@ pub fn parse_day(value: &str) -> Result<(i32, u32, u32), String> {
   }
   let year: i32 = parts[0]
     .parse()
-    .map_err(|_| "Date must be YYYY-MM-DD".to_string())?;
+    .map_err(|e| format!("Date must be YYYY-MM-DD: {e}"))?;
   let month: u32 = parts[1]
     .parse()
-    .map_err(|_| "Date must be YYYY-MM-DD".to_string())?;
+    .map_err(|e| format!("Date must be YYYY-MM-DD: {e}"))?;
   let day: u32 = parts[2]
     .parse()
-    .map_err(|_| "Date must be YYYY-MM-DD".to_string())?;
+    .map_err(|e| format!("Date must be YYYY-MM-DD: {e}"))?;
   NaiveDate::from_ymd_opt(year, month, day).ok_or_else(|| format!("Invalid date {trimmed}"))?;
   Ok((year, month, day))
 }

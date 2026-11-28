@@ -688,7 +688,7 @@ const DEV_CALLBACK: bool = cfg!(all(debug_assertions, not(feature = "e2e")));
 fn callback_token(pasted: &str) -> Result<String, String> {
   let pasted = pasted.trim();
   let token = if pasted.contains("token=") {
-    let url = url::Url::parse(pasted).map_err(|_| "Invalid URL".to_string())?;
+    let url = url::Url::parse(pasted).map_err(|e| format!("Invalid URL: {e}"))?;
     url
       .query_pairs()
       .find(|(key, _)| key == "token")
@@ -3800,7 +3800,7 @@ mod tests {
     assert_eq!(callback_token("  plain  "), Ok("plain".into()));
     assert_eq!(
       callback_token("not a url token=1"),
-      Err("Invalid URL".into())
+      Err("Invalid URL: relative URL without a base".into())
     );
     assert_eq!(
       callback_token("treq://auth/callback?token="),

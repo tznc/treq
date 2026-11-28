@@ -284,7 +284,7 @@ fn setup_agent_stdin(fifo_path: &Path) -> Result<(fs::File, Option<KeeperPid>), 
     fs::remove_file(fifo_path).best_effort();
   }
   let c_path = std::ffi::CString::new(fifo_path.as_os_str().as_bytes())
-    .map_err(|_| "filesystem_error: Invalid agent stdin path".to_string())?;
+    .map_err(|e| format!("filesystem_error: Invalid agent stdin path: {e}"))?;
   // SAFETY: `c_path` is a valid C string pointing at a path we own; mkfifo
   // only creates a filesystem node.
   let rc = unsafe { libc_mkfifo(c_path.as_ptr(), 0o600) };

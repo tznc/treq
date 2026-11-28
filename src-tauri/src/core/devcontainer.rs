@@ -412,7 +412,7 @@ fn download_cli(version: &str, arch: &str) -> Result<PathBuf, String> {
   let checksum_url = format!("{url}.sha256");
   let (bytes, expected) = fetch_all(&[&url, &checksum_url]).and_then(|mut bodies| {
     let expected = String::from_utf8(bodies.pop().unwrap_or_default())
-      .map_err(|_| format!("{checksum_url} is not text"))?;
+      .map_err(|e| format!("{checksum_url} is not text: {e}"))?;
     Ok((bodies.pop().unwrap_or_default(), expected))
   })?;
   verify_sha256(&bytes, &expected).map_err(|e| format!("download {url}: {e}"))?;
@@ -495,7 +495,12 @@ fn fetch_all(urls: &[&str]) -> Result<Vec<Vec<u8>>, String> {
         })
       })
       .join()
-      .map_err(|_| "download thread panicked".to_string())?
+      .map_err(|payload| {
+        format!(
+          "download thread panicked: {}",
+          crate::telemetry::panic_message(payload.as_ref())
+        )
+      })?
   })
 }
 

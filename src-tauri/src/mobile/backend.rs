@@ -169,9 +169,9 @@ pub fn init(
     connections: Mutex::new(Connections::default()),
     events,
   });
-  BACKEND
-    .set(backend)
-    .map_err(|_| anyhow::anyhow!("backend initialized twice"))?;
+  if BACKEND.set(backend).is_err() {
+    anyhow::bail!("backend initialized twice");
+  }
   Ok(receiver)
 }
 

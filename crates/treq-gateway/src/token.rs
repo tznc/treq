@@ -18,6 +18,7 @@ pub const MAX_TTL_SECS: u64 = 120;
 #[derive(Debug, PartialEq, Eq)]
 pub enum TokenError {
   Malformed,
+  BadExpiry(std::num::ParseIntError),
   WrongPlacement,
   Expired,
   TooFarInFuture,
@@ -53,7 +54,7 @@ pub fn verify(
   if version != "v1" || mac.len() != 64 {
     return Err(TokenError::Malformed);
   }
-  let expiry: u64 = expiry.parse().map_err(|_| TokenError::Malformed)?;
+  let expiry: u64 = expiry.parse().map_err(TokenError::BadExpiry)?;
   let expected = mac_hex(secret, placement, expiry);
   if !bool::from(expected.as_bytes().ct_eq(mac.as_bytes())) {
     return Err(TokenError::BadSignature);
@@ -123,6 +124,15 @@ mod tests {
     assert_eq!(
       verify(SECRET, PLACEMENT, &forged, 1_700_000_000, MAX_TTL_SECS),
       Err(TokenError::BadSignature)
+    );
+  }
+
+  #[test]
+  fn rejects_non_numeric_expiry_with_its_parse_error() {
+    let token = format!("v1.{PLACEMENT}.soon.{}", "0".repeat(64));
+    assert_eq!(
+      verify(SECRET, PLACEMENT, &token, 0, MAX_TTL_SECS),
+      Err(TokenError::BadExpiry("soon".parse::<u64>().unwrap_err()))
     );
   }
 

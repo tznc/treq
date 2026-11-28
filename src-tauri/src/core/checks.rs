@@ -232,7 +232,7 @@ fn run_job_in_run(
     .map_err(|e| format!("Failed to access workflows directory: {}", e))?;
   let canonical_file = file_path
     .canonicalize()
-    .map_err(|_| format!("Workflow file not found: '{}'", filename))?;
+    .map_err(|e| format!("Workflow file not found: '{}': {e}", filename))?;
   if !canonical_file.starts_with(&canonical_dir) {
     return Err(format!(
       "Workflow file '{}' is outside the workflows directory",

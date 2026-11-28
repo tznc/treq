@@ -454,12 +454,15 @@ pub fn parse_hunk_spec(raw: &str) -> Result<HunkSpec, String> {
   let (start, end) = range
     .split_once('-')
     .ok_or_else(|| format!("Invalid hunk spec '{}': expected start-end", raw))?;
-  let start_line = start
-    .parse::<usize>()
-    .map_err(|_| format!("Invalid hunk spec '{}': start line is not a number", raw))?;
+  let start_line = start.parse::<usize>().map_err(|e| {
+    format!(
+      "Invalid hunk spec '{}': start line is not a number: {e}",
+      raw
+    )
+  })?;
   let end_line = end
     .parse::<usize>()
-    .map_err(|_| format!("Invalid hunk spec '{}': end line is not a number", raw))?;
+    .map_err(|e| format!("Invalid hunk spec '{}': end line is not a number: {e}", raw))?;
   if start_line == 0 || end_line == 0 {
     return Err(format!(
       "Invalid hunk spec '{}': line numbers must be >= 1",

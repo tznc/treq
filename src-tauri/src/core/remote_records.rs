@@ -419,7 +419,13 @@ pub fn restore_saved_repository<D: std::ops::Deref<Target = Database>>(
   }
   let inspection = steps
     .inspect(&descriptor.canonical_remote_path)
-    .map_err(|_| RestoreFailure::InspectFailed)?;
+    .map_err(|error| {
+      log::warn!(
+        "inspecting remote repository {}: {error}",
+        descriptor.canonical_remote_path
+      );
+      RestoreFailure::InspectFailed
+    })?;
   let generation = if transition {
     current_generation
   } else {
@@ -434,7 +440,13 @@ pub fn restore_saved_repository<D: std::ops::Deref<Target = Database>>(
     Some(&descriptor.display_name),
     Some(Some(now_iso.to_string())),
   )
-  .map_err(|_| RestoreFailure::InspectFailed)?;
+  .map_err(|error| {
+    log::warn!(
+      "saving remote repository {}: {error}",
+      descriptor.canonical_remote_path
+    );
+    RestoreFailure::InspectFailed
+  })?;
   remember_last_opened(&db, &record.id);
   Ok((record, inspection))
 }

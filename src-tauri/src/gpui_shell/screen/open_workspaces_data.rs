@@ -79,7 +79,7 @@ pub fn preview(targets: &[Target]) -> String {
 pub fn stack_on_line(checked: &Checked, parent: &Checked) -> Checked {
   let parent = parent
     .as_ref()
-    .map_err(|_| "Stacks on a line that can't be opened".to_string())?;
+    .map_err(|e| format!("Stacks on a line that can't be opened: {e}"))?;
   let mut target = checked.clone()?;
   if target.repo_path != parent.repo_path {
     return Err(format!(
@@ -715,7 +715,7 @@ mod tests {
     assert_eq!(stacked.base.as_deref(), Some("feat/a"));
     assert_eq!(
       stack_on_line(&child, &Err("bad".into())).unwrap_err(),
-      "Stacks on a line that can't be opened"
+      "Stacks on a line that can't be opened: bad"
     );
     assert!(stack_on_line(&child, &Ok(target("/other", "feat/a"))).is_err());
     assert_eq!(

@@ -265,7 +265,7 @@ fn validate_add_target(
         format!("invalid_arguments: --target-id must be a workspace id, got '{target_id}'")
       })?;
       let workspace_dir = core::changes::resolve_workspace_dir(repo_path, Some(id))
-        .map_err(|_| format!("workspace_not_found: workspace {id} not found"))?;
+        .map_err(|e| format!("workspace_not_found: workspace {id} not found: {e}"))?;
       PathBuf::from(workspace_dir)
     }
     "file_browser_file" => PathBuf::from(repo_path),

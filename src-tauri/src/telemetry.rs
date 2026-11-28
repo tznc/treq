@@ -45,6 +45,17 @@ pub fn install_panic_hook() {
   }));
 }
 
+/// The text a panic carried, read from the payload that a `JoinHandle::join`
+/// or `catch_unwind` error holds. `panic!` with a literal gives a `&str`, with
+/// format arguments a `String`.
+pub fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
+  payload
+    .downcast_ref::<&str>()
+    .copied()
+    .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+    .unwrap_or("non-string panic payload")
+}
+
 pub fn init(log_dir: &Path) -> Result<TelemetryGuards, Box<dyn std::error::Error>> {
   std::fs::create_dir_all(log_dir)?;
   // Walks the whole log directory; nothing waits on it.
@@ -186,5 +197,21 @@ impl Visit for MessageVisitor {
         .fields
         .push((field.name().to_string(), Value::String(rendered)));
     }
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::panic_message;
+  use std::any::Any;
+
+  #[test]
+  fn reads_the_text_of_a_panic_payload() {
+    let literal: Box<dyn Any + Send> = Box::new("boom");
+    let formatted: Box<dyn Any + Send> = Box::new(format!("boom {}", 2));
+    let other: Box<dyn Any + Send> = Box::new(7);
+    assert_eq!(panic_message(literal.as_ref()), "boom");
+    assert_eq!(panic_message(formatted.as_ref()), "boom 2");
+    assert_eq!(panic_message(other.as_ref()), "non-string panic payload");
   }
 }

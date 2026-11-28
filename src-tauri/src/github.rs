@@ -470,9 +470,12 @@ fn run_gh_with_stdin(
   // Separate thread: a large body must not deadlock against gh's output pipes.
   let writer = std::thread::spawn(move || pipe.write_all(&data));
   let output = wait_with_deadline(child, GH_TIMEOUT)?;
-  let written = writer
-    .join()
-    .map_err(|_| "gh stdin writer panicked".to_string())?;
+  let written = writer.join().map_err(|payload| {
+    format!(
+      "gh stdin writer panicked: {}",
+      crate::telemetry::panic_message(payload.as_ref())
+    )
+  })?;
   // Broken pipe: gh exited unread; on failure check_gh_output reports gh's error.
   match written {
     Err(e) if output.status.success() && e.kind() != std::io::ErrorKind::BrokenPipe => {

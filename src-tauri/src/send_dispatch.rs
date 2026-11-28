@@ -198,7 +198,7 @@ pub fn resolve_browser_send_target(path_arg: &str) -> Result<String, String> {
       .map_err(|e| format!("failed to resolve path '{}': {}", trimmed, e))?;
     url::Url::from_file_path(&abs)
       .map(|u| u.to_string())
-      .map_err(|_| format!("failed to build a file:// URL for '{}'", trimmed))?
+      .map_err(|()| format!("failed to build a file:// URL for '{}'", trimmed))?
   };
 
   if !crate::core::is_allowed_browser_url(&url) {

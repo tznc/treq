@@ -366,7 +366,7 @@ pub(super) fn apply_remote_patch(
   let decoded = decode_base64(patch_base64.trim())
     .map_err(|e| format!("invalid_arguments: patch is not valid base64: {e}"))?;
   let patch = String::from_utf8(decoded)
-    .map_err(|_| "invalid_arguments: patch is not UTF-8 text".to_string())?;
+    .map_err(|e| format!("invalid_arguments: patch is not UTF-8 text: {e}"))?;
   jj::jj_apply_file_patch(&workspace_path, path, &patch).map_err(|e| match e {
     jj::JjError::IoError(message) if message.starts_with("Invalid patch:") => {
       format!("invalid_arguments: {message}")

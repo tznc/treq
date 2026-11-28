@@ -1050,9 +1050,9 @@ impl SshConnectionPool {
     };
     let mut handle = tokio::time::timeout(self.connect_timeout, dial)
       .await
-      .map_err(|_| {
+      .map_err(|elapsed| {
         SshTransportError::ConnectionFailed(format!(
-          "timed out after {}s connecting",
+          "timed out after {}s connecting: {elapsed}",
           self.connect_timeout.as_secs()
         ))
       })??;
@@ -1073,9 +1073,9 @@ impl SshConnectionPool {
       ),
     )
     .await
-    .map_err(|_| {
+    .map_err(|elapsed| {
       SshTransportError::AuthenticationFailed(format!(
-        "timed out after {}s authenticating",
+        "timed out after {}s authenticating: {elapsed}",
         self.connect_timeout.as_secs()
       ))
     })??;

@@ -65,9 +65,10 @@ pub fn quote_lines(
       "invalid_arguments: --file must be {BODY_FILE} for a review prompt, got '{file}'"
     ));
   }
-  let content = std::fs::read_to_string(snapshot_dir(repo_path).join(BODY_FILE)).map_err(|_| {
-    "invalid_arguments: no review prompt snapshot. Start tuning from Settings so treq writes it"
-      .to_string()
+  let content = std::fs::read_to_string(snapshot_dir(repo_path).join(BODY_FILE)).map_err(|e| {
+    format!(
+      "invalid_arguments: no review prompt snapshot ({e}). Start tuning from Settings so treq writes it"
+    )
   })?;
   let lines: Vec<&str> = content.lines().collect();
   if start_line < 1 || end_line < start_line || end_line as usize > lines.len() {
