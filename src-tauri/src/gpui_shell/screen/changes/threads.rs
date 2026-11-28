@@ -796,7 +796,13 @@ impl ChangesView {
       card = card.child(suggestion_box(original.as_deref(), suggested, p));
     }
     let id = comment.id.clone();
-    let mut actions = div().flex().flex_wrap().items_center().gap_2();
+    // Buttons read in the UI font, not the card's mono.
+    let mut actions = div()
+      .flex()
+      .flex_wrap()
+      .items_center()
+      .gap_2()
+      .font_family(theme::SANS_FONT);
     if comment.suggested_replacement.is_some() {
       let id = id.clone();
       actions = actions.child(
@@ -846,7 +852,6 @@ impl ChangesView {
             .variant(Variant::Ghost)
             .size(Size::Sm)
             .gap_1p5()
-            .text_color(muted)
             .disabled(busy)
             .icon(theme::ICON_TRASH, 12.)
             .label("Delete")
@@ -860,7 +865,7 @@ impl ChangesView {
       let id = comment.id.clone();
       return card
         .child(
-          div().flex().child(
+          div().flex().font_family(theme::SANS_FONT).child(
             Button::new(SharedString::from(format!("sent-review-expanded-{id}")), p)
               .variant(Variant::Ghost)
               .size(Size::Sm)
