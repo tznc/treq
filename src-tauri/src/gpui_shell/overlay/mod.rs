@@ -1021,7 +1021,9 @@ impl Render for Overlay {
     let dialog = if shortcuts {
       let this = cx.weak_entity();
       shortcuts::render(&p, viewport, move |_, cx| {
-        this.update(cx, |this, cx| this.close(cx)).ok();
+        if let Err(e) = this.update(cx, |this, cx| this.close(cx)) {
+          log::debug!("Shortcuts overlay already gone when asked to close: {e}");
+        }
       })
       .into_any_element()
     } else {

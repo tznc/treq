@@ -128,14 +128,14 @@ async fn handle(stream: TcpStream, config: &Config) -> Result<(), Box<dyn std::e
   };
   if !config.allows(&req.host, req.port) {
     ws.send(error_reply("target not allowed")).await?;
-    ws.close(None).await.ok();
+    ws.close(None).await?;
     return Ok(());
   }
   let tcp = match TcpStream::connect((req.host.as_str(), req.port)).await {
     Ok(tcp) => tcp,
     Err(_) => {
       ws.send(error_reply("could not reach target")).await?;
-      ws.close(None).await.ok();
+      ws.close(None).await?;
       return Ok(());
     }
   };

@@ -270,7 +270,9 @@ fn release(state: &Shared, window: &mut Window, cx: &mut App) {
       shared.2.clone()
     };
     notify(&on_change, false);
-    cx.update(|window, _| window.refresh()).ok();
+    if let Err(e) = cx.update(|window, _| window.refresh()) {
+      log::debug!("Skipped the redraw after a press release: the window closed: {e}");
+    }
   });
   state.borrow_mut().1 = Some(task);
 }

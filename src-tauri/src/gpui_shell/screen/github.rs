@@ -1350,7 +1350,9 @@ impl GithubView {
         .selected(selected)
         .on_select(move |ix, _, cx| {
           let press = ["github.tab:issues", "github.tab:prs"][ix];
-          view.update(cx, |view, cx| view.press(press, cx)).ok();
+          if let Err(e) = view.update(cx, |view, cx| view.press(press, cx)) {
+            log::debug!("Ignored {press}: the GitHub screen closed: {e}");
+          }
         }),
     )
   }

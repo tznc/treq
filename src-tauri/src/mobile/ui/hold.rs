@@ -158,11 +158,12 @@ impl Element for Hold {
             fire
           };
           if fire {
-            cx.update(|window, cx| {
+            if let Err(e) = cx.update(|window, cx| {
               on_hold(window, cx);
               window.refresh();
-            })
-            .ok();
+            }) {
+              log::debug!("Skipped a hold action: the window closed: {e}");
+            }
           }
         }));
       }

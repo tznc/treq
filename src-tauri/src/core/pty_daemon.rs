@@ -290,15 +290,15 @@ impl Session {
     if cur_rows.get() == rows && cur_cols.get() == cols {
       return;
     }
-    self
-      .master
-      .resize(portable_pty::PtySize {
-        rows,
-        cols,
-        pixel_width: 0,
-        pixel_height: 0,
-      })
-      .ok();
+    let size = portable_pty::PtySize {
+      rows,
+      cols,
+      pixel_width: 0,
+      pixel_height: 0,
+    };
+    if let Err(e) = self.master.resize(size) {
+      tracing::warn!("Failed to resize the session's PTY to {cols}x{rows}: {e}");
+    }
     self.parser.set_size(nonzero(rows), nonzero(cols));
   }
 
@@ -315,9 +315,13 @@ impl Session {
       // SAFETY: as above.
       unsafe { libc::killpg(pgid, libc::SIGKILL) };
     }
-    self.child.kill().ok();
+    if let Err(e) = self.child.kill() {
+      tracing::debug!("Failed to kill the session's process (it may have exited): {e}");
+    }
     for (_, client) in self.clients.drain(..) {
-      client.shutdown(std::net::Shutdown::Both).ok();
+      if let Err(e) = client.shutdown(std::net::Shutdown::Both) {
+        tracing::debug!("Failed to close a client stream (it may be closed already): {e}");
+      }
     }
   }
 }
@@ -373,8 +377,10 @@ pub fn serve_with_idle(paths: &DaemonPaths, idle_exit: Duration) -> Result<bool,
   }
   let socket = paths.socket();
   // Holding the lock means any socket file left here is from a daemon that
-  // has gone.
-  std::fs::remove_file(&socket).ok();
+  // has gone. Usually there is none; a real problem fails the bind below.
+  if let Err(e) = std::fs::remove_file(&socket) {
+    tracing::debug!("Did not remove a stale socket at {}: {e}", socket.display());
+  }
   let listener =
     UnixListener::bind(&socket).map_err(|e| format!("Failed to bind {}: {e}", socket.display()))?;
   listener
@@ -393,7 +399,9 @@ pub fn serve_with_idle(paths: &DaemonPaths, idle_exit: Duration) -> Result<bool,
   while !daemon.shutdown.load(Ordering::SeqCst) {
     match listener.accept() {
       Ok((stream, _)) => {
-        stream.set_nonblocking(false).ok();
+        if let Err(e) = stream.set_nonblocking(false) {
+          tracing::warn!("Failed to make a client stream blocking: {e}");
+        }
         let daemon = daemon.clone();
         std::thread::spawn(move || handle_connection(&daemon, stream));
       }
@@ -416,7 +424,12 @@ pub fn serve_with_idle(paths: &DaemonPaths, idle_exit: Duration) -> Result<bool,
     session.kill();
   }
   drop(state);
-  std::fs::remove_file(&socket).ok();
+  if let Err(e) = std::fs::remove_file(&socket) {
+    tracing::debug!(
+      "Failed to remove the socket {} on exit: {e}",
+      socket.display()
+    );
+  }
   drop(lock);
   Ok(true)
 }
@@ -443,7 +456,9 @@ fn handle_connection(daemon: &Arc<Daemon>, stream: UnixStream) {
   let request = match serde_json::from_str::<Request>(&line) {
     Ok(request) => request,
     Err(e) => {
-      write_reply(&mut writer, &Reply::Error(format!("invalid_request: {e}"))).ok();
+      if let Err(e) = write_reply(&mut writer, &Reply::Error(format!("invalid_request: {e}"))) {
+        tracing::debug!("Failed to reply to an invalid request (client gone): {e}");
+      }
       return;
     }
   };
@@ -519,7 +534,9 @@ fn handle_connection(daemon: &Arc<Daemon>, stream: UnixStream) {
       ok(())
     }
   };
-  write_reply(&mut writer, &reply).ok();
+  if let Err(e) = write_reply(&mut writer, &reply) {
+    tracing::debug!("Failed to send a reply (client gone): {e}");
+  }
 }
 
 fn not_found(name: &str) -> String {
@@ -605,9 +622,13 @@ fn ensure_session(daemon: &Arc<Daemon>, name: &str, spec: &StartSpec) -> Result<
     // streams, which is how an attached terminal learns it is over.
     let ended = daemon.lock().sessions.remove(&name);
     if let Some(mut session) = ended {
-      session.child.try_wait().ok();
+      if let Err(e) = session.child.try_wait() {
+        tracing::debug!("Failed to reap session {name}'s process: {e}");
+      }
       for (_, client) in session.clients.drain(..) {
-        client.shutdown(std::net::Shutdown::Both).ok();
+        if let Err(e) = client.shutdown(std::net::Shutdown::Both) {
+          tracing::debug!("Failed to end a client stream of session {name}: {e}");
+        }
       }
     }
     mark_idle_if_empty(&daemon);
@@ -664,7 +685,9 @@ fn attach(
 ) {
   if let Some(spec) = start {
     if let Err(e) = ensure_session(daemon, name, spec) {
-      write_reply(&mut writer, &Reply::Error(e)).ok();
+      if let Err(e) = write_reply(&mut writer, &Reply::Error(e)) {
+        tracing::debug!("Failed to report a session start error (client gone): {e}");
+      }
       return;
     }
   }
@@ -673,7 +696,9 @@ fn attach(
     let mut state = daemon.lock();
     let Some(session) = state.sessions.get_mut(name) else {
       drop(state);
-      write_reply(&mut writer, &Reply::Error(not_found(name))).ok();
+      if let Err(e) = write_reply(&mut writer, &Reply::Error(not_found(name))) {
+        tracing::debug!("Failed to report missing session {name} (client gone): {e}");
+      }
       return;
     };
     session.resize(cols, rows);
@@ -686,7 +711,9 @@ fn attach(
     let Ok(client) = writer.try_clone() else {
       return;
     };
-    client.set_write_timeout(Some(CLIENT_WRITE_TIMEOUT)).ok();
+    if let Err(e) = client.set_write_timeout(Some(CLIENT_WRITE_TIMEOUT)) {
+      tracing::warn!("Failed to set a write timeout on a client of session {name}: {e}");
+    }
     session.clients.push((id, client));
   }
 
@@ -924,7 +951,9 @@ pub fn run_attach(paths: &DaemonPaths, name: &str, start: StartSpec) -> Result<(
         break;
       }
     }
-    input.shutdown(std::net::Shutdown::Write).ok();
+    if let Err(e) = input.shutdown(std::net::Shutdown::Write) {
+      tracing::debug!("Failed to close the input stream (daemon gone): {e}");
+    }
   });
 
   let mut stdout = std::io::stdout().lock();
@@ -1065,8 +1094,15 @@ mod tests {
   impl Drop for TestDaemon {
     fn drop(&mut self) {
       if let Some(handle) = self.handle.take() {
-        request_if_running(&self.paths, &Request::Shutdown).ok();
-        handle.join().ok();
+        // Drop also runs while a failed test unwinds, so report instead of panicking.
+        if let Err(e) = request_if_running(&self.paths, &Request::Shutdown) {
+          tracing::warn!("Failed to stop the test daemon: {e}");
+        }
+        match handle.join() {
+          Ok(Ok(_)) => {}
+          Ok(Err(e)) => tracing::warn!("The test daemon failed: {e}"),
+          Err(_) => tracing::warn!("The test daemon thread panicked"),
+        }
       }
     }
   }
@@ -1325,7 +1361,9 @@ mod tests {
     send(&client, &Frame::Input(b"\r".to_vec()));
     read_until(&mut client, "bye");
     let mut rest = Vec::new();
-    client.read_to_end(&mut rest).ok();
+    client
+      .read_to_end(&mut rest)
+      .expect("read to the end of the stream");
     assert!(
       crate::test_repo::wait_until(Duration::from_secs(5), || daemon.names().is_empty()),
       "session outlived its program"

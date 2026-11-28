@@ -410,7 +410,11 @@ pub fn run_workflow_sync(
               run_id,
               position as i64,
             );
-            tx.send(r).ok();
+            if let Err(e) = tx.send(r) {
+              tracing::debug!(
+                "Dropped check job {job_id}'s result: the run stopped listening: {e}"
+              );
+            }
           });
           in_flight += 1;
         }
