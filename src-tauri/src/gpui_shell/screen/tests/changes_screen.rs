@@ -1502,9 +1502,12 @@ fn changes_tab_starts_an_ai_review_in_a_new_terminal(cx: &mut TestAppContext) {
   assert_eq!(request.mode.as_deref(), Some("acceptEdits"));
   assert_eq!(request.workspace_id, Some(7));
   assert!(!select);
+  assert!(request.review);
   let prompt = request.prompt.clone().unwrap_or_default();
-  assert!(prompt.contains("--target-type workspace_diff"), "{prompt}");
-  assert!(prompt.contains("--target-id 7"), "{prompt}");
+  assert!(
+    prompt.ends_with("Its target is --target-type workspace_diff --target-id 7."),
+    "{prompt}"
+  );
 }
 
 #[gpui::test]

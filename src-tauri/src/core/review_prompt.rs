@@ -1,6 +1,7 @@
-//! Tuning the review prompt with an agent, reviewed like code.
+//! Tuning the review instructions with an agent, reviewed like code.
 //!
-//! "Tune with agent" writes the prompt in use into a snapshot directory,
+//! "Tune with agent" writes the repository's review instructions, which the
+//! treq-review skill ends with, into a snapshot directory,
 //! `.treq/review-prompt/`, next to the last 30 days of review history. The
 //! agent records each edit it proposes as a local review comment on
 //! `body.md` with a suggestion, through the same `treq agent-review add` it
@@ -11,7 +12,7 @@
 use std::path::{Component, Path, PathBuf};
 
 use crate::{
-  core::{agent_launch, linear_review::splice_quoted_in, review_history},
+  core::{agent_cli::review_skill_md, linear_review::splice_quoted_in, review_history},
   local_db::{self, AgentReviewComment},
 };
 
@@ -19,8 +20,13 @@ use crate::{
 pub const TARGET_TYPE: &str = "review_prompt";
 /// A repository has one review prompt, so one target id.
 pub const TARGET_ID: &str = "repo";
-/// Snapshot file holding the prompt being tuned.
+/// Snapshot file holding the instructions being tuned.
 pub const BODY_FILE: &str = "body.md";
+/// Snapshot file holding the treq-review skill, for reference.
+pub const SKILL_FILE: &str = "treq-review-skill.md";
+/// The body while a repository has no instructions, so the first edit has
+/// a line to replace.
+const NO_INSTRUCTIONS: &str = "Review instructions for this repository:";
 /// Snapshot file holding the review history.
 pub const HISTORY_FILE: &str = "review-history.json";
 
@@ -33,8 +39,15 @@ pub fn snapshot_dir(repo_path: &str) -> PathBuf {
   Path::new(repo_path).join(".treq").join("review-prompt")
 }
 
-/// Writes the prompt in use (`custom`, else the built-in one) and the
-/// review history into the snapshot directory, and returns it.
+/// The instructions `custom`, else [`NO_INSTRUCTIONS`].
+fn instructions(custom: Option<&str>) -> &str {
+  custom
+    .filter(|c| !c.trim().is_empty())
+    .unwrap_or(NO_INSTRUCTIONS)
+}
+
+/// Writes the instructions in use, the treq-review skill and the review
+/// history into the snapshot directory, and returns it.
 pub fn write_snapshot(repo_path: &str, custom: Option<&str>) -> Result<PathBuf, String> {
   let dir = snapshot_dir(repo_path);
   std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create {}: {e}", dir.display()))?;
@@ -42,7 +55,8 @@ pub fn write_snapshot(repo_path: &str, custom: Option<&str>) -> Result<PathBuf, 
     let path = dir.join(name);
     std::fs::write(&path, text).map_err(|e| format!("Failed to write {}: {e}", path.display()))
   };
-  write(BODY_FILE, agent_launch::review_template(custom))?;
+  write(BODY_FILE, instructions(custom))?;
+  write(SKILL_FILE, &review_skill_md(None))?;
   write(HISTORY_FILE, &review_history::export_json(repo_path)?)?;
   Ok(dir)
 }
@@ -89,8 +103,8 @@ pub fn suggestions(repo_path: &str) -> Result<Vec<AgentReviewComment>, String> {
   )
 }
 
-/// Applies proposed edit `id` to the prompt in use (`custom`, else the
-/// built-in one), resolves it, and returns the new prompt to save.
+/// Applies proposed edit `id` to the instructions in use, resolves it, and
+/// returns the new instructions to save.
 pub fn apply(repo_path: &str, id: &str, custom: Option<&str>) -> Result<String, String> {
   let comment = local_db::get_agent_review_comment(repo_path, id)?
     .filter(|c| is_target(&c.target_type))
@@ -102,7 +116,7 @@ pub fn apply(repo_path: &str, id: &str, custom: Option<&str>) -> Result<String, 
   let quoted = comment.quoted_text.as_deref().unwrap_or_default();
   let replacement = replacement.strip_suffix('\n').unwrap_or(replacement);
   let prompt = splice_quoted_in(
-    agent_launch::review_template(custom),
+    instructions(custom),
     quoted,
     replacement,
     "the review prompt",
@@ -115,10 +129,12 @@ pub fn apply(repo_path: &str, id: &str, custom: Option<&str>) -> Result<String, 
 /// each proposed edit as a review comment with a suggestion.
 pub fn tune_prompt(snapshot_dir: &str) -> String {
   format!(
-    "Help me tune my code review agent's prompt from how I reacted to its reviews.\n\n\
-     treq wrote two files into {snapshot_dir}:\n\
-     - {BODY_FILE}: the review prompt in use. Line numbers in it are what --start-line and \
-     --end-line refer to.\n\
+    "Help me tune my code review agent's instructions from how I reacted to its reviews.\n\n\
+     treq wrote three files into {snapshot_dir}:\n\
+     - {BODY_FILE}: my repository's review instructions, added to the end of the review \
+     agent's skill. Line numbers in it are what --start-line and --end-line refer to.\n\
+     - {SKILL_FILE}: the review agent's skill, for reference. It is built in, so propose \
+     edits to {BODY_FILE} only.\n\
      - {HISTORY_FILE}: the last 30 days of code review history. Rows with kind \
      \"agent_comment\" are the review agent's comments, and their outcome is what I did: \
      \"applied\" (I applied its suggestion), \"resolved\" (I agreed), \"dismissed\" (I deleted \
@@ -138,8 +154,7 @@ pub fn tune_prompt(snapshot_dir: &str) -> String {
      \x20   --start-line <first line> --end-line <last line> \\\n\
      \x20   --comment \"<the pattern and why this edit answers it>\" \\\n\
      \x20   --suggestion \"<the replacement text for those lines>\"\n\n\
-     To add text, replace the line it should follow with that line plus the new text. Keep \
-     the {{target_type}}, {{target_id}} and {{diff_summary}} placeholders.\n\n\
+     To add text, replace the line it should follow with that line plus the new text.\n\n\
      Do not edit {BODY_FILE}, settings or any other file. I review each edit in Settings → \
      Code Review and apply the ones I want."
   )
@@ -170,7 +185,7 @@ mod tests {
   }
 
   #[test]
-  fn the_snapshot_holds_the_prompt_in_use_and_the_history() {
+  fn the_snapshot_holds_the_instructions_the_skill_and_the_history() {
     let dir = TempDir::new().unwrap();
     let repo = dir.path().to_str().unwrap();
     review_history::record_sent_review(repo, None, "changes", "Nit", "plan").unwrap();
@@ -179,12 +194,27 @@ mod tests {
       std::fs::read_to_string(snapshot.join(BODY_FILE)).unwrap(),
       "Be strict\nFlag bugs"
     );
+    let skill = std::fs::read_to_string(snapshot.join(SKILL_FILE)).unwrap();
+    assert!(skill.contains("name: treq-review"), "{skill}");
     let history = std::fs::read_to_string(snapshot.join(HISTORY_FILE)).unwrap();
     assert!(history.contains("\"Nit\""), "{history}");
 
+    // No instructions yet: a line the agent can anchor its first edit on.
     write_snapshot(repo, Some("  ")).unwrap();
-    let built_in = std::fs::read_to_string(snapshot.join(BODY_FILE)).unwrap();
-    assert!(built_in.starts_with("You are reviewing"), "{built_in}");
+    let body = std::fs::read_to_string(snapshot.join(BODY_FILE)).unwrap();
+    assert_eq!(body, NO_INSTRUCTIONS);
+  }
+
+  #[test]
+  fn applying_a_suggestion_starts_the_first_instructions() {
+    let dir = TempDir::new().unwrap();
+    let repo = dir.path().to_str().unwrap();
+    write_snapshot(repo, None).unwrap();
+    let edit = propose(repo, 1, 1, &format!("{NO_INSTRUCTIONS}\n- Skip style nits"));
+    assert_eq!(
+      apply(repo, &edit.id, None).unwrap(),
+      format!("{NO_INSTRUCTIONS}\n- Skip style nits")
+    );
   }
 
   #[test]
@@ -239,6 +269,6 @@ mod tests {
     assert!(prompt.contains("--target-type review_prompt"));
     assert!(prompt.contains("--target-id repo"));
     assert!(prompt.contains("--file body.md"));
-    assert!(prompt.contains("{target_type}"));
+    assert!(prompt.contains(SKILL_FILE));
   }
 }

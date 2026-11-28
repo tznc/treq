@@ -26,6 +26,7 @@ fn terminal_pane_opens_the_active_agent_session(cx: &mut TestAppContext) {
       permission_mode: Some("plan".into()),
       agent: Some("codex".into()),
       workspace_path: None,
+      review: false,
       profile: None,
     },
   );
@@ -63,6 +64,25 @@ fn terminal_pane_opens_the_active_agent_session(cx: &mut TestAppContext) {
       "agent": "codex",
       "isStreaming": false,
     }]))
+  );
+}
+
+#[gpui::test]
+fn terminal_pane_starts_a_review_session_as_one(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  host.pending.lock().unwrap().insert(
+    3,
+    launch_data::PendingSession {
+      pending_prompt: Some("Review it".into()),
+      review: true,
+      ..Default::default()
+    },
+  );
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  let calls = host.calls();
+  assert!(
+    calls.contains(&"prepare claude Some(\"Review it\") review".to_string()),
+    "{calls:?}"
   );
 }
 
@@ -2041,6 +2061,7 @@ fn terminal_workspace_label_click_navigates_by_path(cx: &mut TestAppContext) {
       permission_mode: None,
       agent: None,
       workspace_path: Some("/repo/.treq/workspaces/b".into()),
+      review: false,
       profile: None,
     },
   );

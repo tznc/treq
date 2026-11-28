@@ -1779,29 +1779,21 @@ mod tests {
   }
 
   /// A jj workspace has no `.git` of its own, so `git diff` there reads
-  /// the home repository's working copy. The prompt must not suggest it.
+  /// the home repository's working copy. The review skill must not suggest it.
   #[test]
-  fn built_in_review_prompt_does_not_send_the_agent_to_git_diff() {
-    let prompt = review_prompt(None, "7", "");
-    assert!(!prompt.contains("git diff"), "prompt suggests `git diff`");
-    assert!(prompt.contains("treq changes workspace-diff"));
+  fn review_skill_does_not_send_the_agent_to_git_diff() {
+    let skill = crate::core::agent_cli::review_skill_md(None);
+    assert!(!skill.contains("git diff"), "skill suggests `git diff`");
+    assert!(skill.contains("treq changes workspace-diff"));
   }
 
   #[test]
-  fn review_prompt_fills_the_built_in_template() {
+  fn review_prompt_names_what_is_under_review_and_its_target() {
     let summary = diff_summary(Some("feat/a"), 2);
     assert_eq!(summary, "the feat/a workspace diff (2 changed files)");
-    let prompt = review_prompt(None, "7", &summary);
-    assert!(prompt.starts_with("You are reviewing the current changes in this repository."));
-    assert!(prompt.contains("--target-type workspace_diff --target-id 7"));
-    assert!(prompt.contains("What is under review: the feat/a workspace diff"));
-    // In a Treq workspace git reads the home repo, so never point at it.
-    assert!(!prompt.contains("git diff"));
-    assert!(prompt.contains("treq changes workspace-diff"));
     assert_eq!(
-      review_prompt(Some("Look at {workspace_id}"), "7", ""),
-      "Look at 7"
+      review_prompt("7", &summary),
+      "Review the feat/a workspace diff (2 changed files). Its target is --target-type workspace_diff --target-id 7."
     );
-    assert!(review_prompt(Some("  "), "7", "").starts_with("You are reviewing"));
   }
 }

@@ -1380,8 +1380,10 @@ impl terminal_data::TerminalHost for FakeHost {
     start: &terminal_data::AgentStart,
   ) -> Result<terminal_data::Prepared, String> {
     self.record(format!(
-      "prepare {} {:?}",
-      start.agent, start.pending_prompt
+      "prepare {} {:?}{}",
+      start.agent,
+      start.pending_prompt,
+      if start.review { " review" } else { "" }
     ));
     if let Some(p) = &start.profile {
       self.record(format!("prepare profile {} {}", p.agent, p.name));

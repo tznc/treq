@@ -114,6 +114,7 @@ impl Pending {
       permission_mode: self.permission_mode.clone(),
       agent: self.agent.clone(),
       workspace_path: self.workspace_path.clone(),
+      review: false,
       profile: self.profile.clone(),
     }
   }
@@ -4609,6 +4610,7 @@ fn agent_session(
       session_id: session.id,
       pending_prompt: pending.and_then(|p| p.pending_prompt.clone()),
       permission_mode: pending.and_then(|p| p.permission_mode.clone()),
+      review: pending.is_some_and(|p| p.review),
       profile: agent_profile(
         host,
         &repo,

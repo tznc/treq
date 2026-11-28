@@ -3242,6 +3242,7 @@ pub(super) fn review_launch(
     agent: crate::core::agent_launch::agent_kind(agent.as_deref()),
     session_name: Some("AI Review".into()),
     link,
+    review: false,
     profile: None,
   }
 }

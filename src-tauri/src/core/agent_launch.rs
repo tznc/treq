@@ -116,6 +116,8 @@ pub struct SessionStart {
   /// `plan` or `acceptEdits`.
   pub permission_mode: Option<String>,
   pub agent: Option<String>,
+  /// An AI review, whose agent loads the treq-review skill.
+  pub review: bool,
   /// The agent's account profile; `None` uses the default.
   pub profile: Option<String>,
 }
@@ -127,6 +129,7 @@ impl SessionStart {
       permission_mode: self.permission_mode.clone(),
       agent: self.agent.clone(),
       workspace_path: self.workspace_path.clone(),
+      review: self.review,
       profile: self.profile.clone(),
     }
   }
@@ -140,6 +143,8 @@ pub struct PendingSession {
   pub permission_mode: Option<String>,
   pub agent: Option<String>,
   pub workspace_path: Option<String>,
+  /// An AI review, whose agent loads the treq-review skill.
+  pub review: bool,
   pub profile: Option<String>,
 }
 
@@ -330,6 +335,7 @@ pub fn start_agent_task(
       permission_mode: Some(task.mode.clone()),
       agent: Some(agent),
       profile,
+      review: false,
     },
     toasts,
   )))
@@ -349,6 +355,8 @@ pub struct LaunchRequest {
   pub session_name: Option<String>,
   /// What the session works on (a reviewed PR's URL), linked from its header.
   pub link: Option<String>,
+  /// An AI review, whose agent loads the treq-review skill.
+  pub review: bool,
   pub profile: Option<String>,
 }
 
@@ -383,6 +391,7 @@ pub fn launch_session(
     pending_prompt: request.prompt.clone(),
     permission_mode: request.mode.clone(),
     agent: request.agent.clone(),
+    review: request.review,
     profile: request.profile.clone(),
   })
 }
@@ -494,8 +503,6 @@ pub fn pane_session_id(repo_path: &str, main_repo_path: &str, session_id: i64) -
 
 /// `AGENT_REVIEW_TARGET_WORKSPACE_DIFF`.
 pub const REVIEW_TARGET: &str = "workspace_diff";
-/// `DEFAULT_REVIEW_PROMPT`, as `lib/agent-review-prompt.ts` writes it.
-const DEFAULT_REVIEW_PROMPT: &str = include_str!("review_prompt.txt");
 
 /// `workspaceDiffSummary`.
 pub fn diff_summary(branch: Option<&str>, files: usize) -> String {
@@ -506,31 +513,15 @@ pub fn diff_summary(branch: Option<&str>, files: usize) -> String {
   }
 }
 
-/// The repository's prompt when set, else the built-in one, unfilled.
-pub fn review_template(custom: Option<&str>) -> &str {
-  custom
-    .filter(|c| !c.trim().is_empty())
-    .unwrap_or(DEFAULT_REVIEW_PROMPT)
-}
-
-/// `buildReviewPrompt`: the repository's prompt when set, else the
-/// built-in one, with its placeholders filled.
-pub fn review_prompt(custom: Option<&str>, target_id: &str, summary: &str) -> String {
-  review_prompt_for(custom, REVIEW_TARGET, target_id, summary)
+/// A review's task: what is under review and its comment target. The steps
+/// live in the treq-review skill its session loads.
+pub fn review_prompt(target_id: &str, summary: &str) -> String {
+  review_prompt_for(REVIEW_TARGET, target_id, summary)
 }
 
 /// [`review_prompt`] for another target type, as a PR review's `github_pr`.
-pub fn review_prompt_for(
-  custom: Option<&str>,
-  target_type: &str,
-  target_id: &str,
-  summary: &str,
-) -> String {
-  review_template(custom)
-    .replace("{target_type}", target_type)
-    .replace("{target_id}", target_id)
-    .replace("{workspace_id}", target_id)
-    .replace("{diff_summary}", summary)
+pub fn review_prompt_for(target_type: &str, target_id: &str, summary: &str) -> String {
+  format!("Review {summary}. Its target is --target-type {target_type} --target-id {target_id}.")
 }
 
 /// `autoReviewSummary`: names the operation that started an automatic
@@ -547,22 +538,18 @@ pub fn auto_review_summary(trigger: &str, branch: Option<&str>) -> String {
   }
 }
 
-/// `prepareWorkspaceReview`: the review prompt and agent, from the
-/// repository's `review_prompt` and `review_agent`.
+/// `prepareWorkspaceReview`: the review prompt, and the agent from the
+/// repository's `review_agent`.
 pub fn prepare_workspace_review(
   store: &dyn LaunchStore,
   repo_path: &str,
   workspace_id: i64,
   summary: &str,
 ) -> (String, Option<String>) {
-  let custom = store.repo_setting(repo_path, "review_prompt");
   let agent = store
     .repo_setting(repo_path, "review_agent")
     .filter(|a| !a.is_empty());
-  (
-    review_prompt(custom.as_deref(), &workspace_id.to_string(), summary),
-    agent,
-  )
+  (review_prompt(&workspace_id.to_string(), summary), agent)
 }
 
 /// `handleSendAgentReviewCommentToAgent`'s message for one review comment.
@@ -1379,22 +1366,42 @@ mod tests {
   }
 
   #[test]
-  fn workspace_review_uses_the_repository_prompt_and_agent() {
+  fn workspace_review_starts_from_a_short_prompt_with_the_repository_agent() {
     let mut store = FakeStore::default();
-    let (prompt, agent) = prepare_workspace_review(&store, "/r", 9, "the diff");
-    assert!(prompt.contains("--target-type workspace_diff"));
-    assert!(prompt.contains("--target-id 9"));
+    let (_, agent) = prepare_workspace_review(&store, "/r", 9, "the diff");
     assert_eq!(agent, None);
-    store.settings.insert(
-      "repo.review_prompt".into(),
-      "Review {workspace_id}: {diff_summary}".into(),
-    );
+    // The repository's instructions ride in the review skill, not the prompt.
+    store
+      .settings
+      .insert("repo.review_prompt".into(), "Flag N+1 queries".into());
     store
       .settings
       .insert("repo.review_agent".into(), "codex".into());
     let (prompt, agent) = prepare_workspace_review(&store, "/r", 9, "the diff");
-    assert_eq!(prompt, "Review 9: the diff");
+    assert_eq!(
+      prompt,
+      "Review the diff. Its target is --target-type workspace_diff --target-id 9."
+    );
     assert_eq!(agent.as_deref(), Some("codex"));
+  }
+
+  #[test]
+  fn launching_a_review_marks_its_session_as_one() {
+    let store = FakeStore::default();
+    let launch = |review| {
+      launch_session(
+        &store,
+        &LaunchRequest {
+          repo_path: "/repo".into(),
+          review,
+          ..Default::default()
+        },
+      )
+      .unwrap()
+    };
+    let start = launch(true);
+    assert!(start.review && start.pending().review);
+    assert!(!launch(false).pending().review);
   }
 
   #[test]
