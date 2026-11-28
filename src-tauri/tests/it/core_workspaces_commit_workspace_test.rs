@@ -427,7 +427,7 @@ fn test_create_commit_excludes_bundled_codex_skill() {
   let ws_dir = repo.workspaces_dir().join(&workspace.workspace_path);
   let ws_dir_str = ws_dir.to_str().expect("utf-8");
   TestRepo::write_workspace_file(ws_dir_str, "app.txt", "real work\n").expect("write app file");
-  let installed = treq_lib::core::write_agent_cli_files("prompt", None, Some(ws_dir_str))
+  let installed = treq_lib::core::write_agent_cli_files("prompt", None, Some(ws_dir_str), None)
     .expect("install bundled skill");
   let skill_path = installed
     .agents_skill_path
