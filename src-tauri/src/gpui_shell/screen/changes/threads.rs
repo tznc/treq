@@ -101,6 +101,11 @@ impl ChangesView {
   pub(super) fn end_pointer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     self.end_drag(cx);
     self.threads.selected = gpui_kit::base::TextSelection::selected_text(window, cx);
+    // Selected text without a copy of its own (a local comment's) copies
+    // through the diff's keys.
+    if !self.threads.selected.trim().is_empty() {
+      window.focus(&self.focus, cx);
+    }
   }
 
   fn read_threads(&mut self, github: bool, cx: &mut Context<Self>) {
@@ -803,11 +808,18 @@ impl ChangesView {
               .child(format!("{}:{range}", comment.file_path)),
           ),
       )
-      .child(
+      .child({
+        let id = SharedString::from(format!("agent-review-comment-text-{}", comment.id));
         ui::text(div(), TextSize::Sm)
+          .selector(id.clone())
+          .role(gpui::Role::Paragraph)
+          .aria_label(comment.comment_text.clone())
           .whitespace_normal()
-          .child(comment.comment_text.clone()),
-      );
+          .child(gpui_kit::base::SelectableText::new(
+            id,
+            comment.comment_text.clone(),
+          ))
+      });
     if let Some(suggested) = &comment.suggested_replacement {
       card = card.child(suggestion_box(original.as_deref(), suggested, p));
     }

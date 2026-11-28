@@ -1970,6 +1970,14 @@ impl Render for ChangesView {
             cx.write_to_clipboard(ClipboardItem::new_string(text));
           }
           cx.stop_propagation();
+        } else if k.key == "c"
+          && (held.platform || held.control)
+          && !held.shift
+          && !view.threads.selected.trim().is_empty()
+        {
+          let text = view.threads.selected.trim().to_string();
+          cx.write_to_clipboard(ClipboardItem::new_string(text));
+          cx.stop_propagation();
         } else if k.key == "a"
           && (crate::gpui_shell::keys::held(k.modifiers).platform
             || crate::gpui_shell::keys::held(k.modifiers).control)

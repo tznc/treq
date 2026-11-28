@@ -1797,6 +1797,22 @@ fn changes_tab_resolves_an_agent_comment(cx: &mut TestAppContext) {
   assert!(!h.shows(gpui::Role::Group, "Agent comment on a.rs line 2"));
 }
 
+/// A local review comment's text selects like any other text.
+#[gpui::test]
+fn changes_tab_selects_the_text_of_a_local_review_comment(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  const TEXT: &str = "Use one line here, since the second only repeats the check above.";
+  let host = changes_host();
+  let mut comment = agent_comment(None);
+  comment.comment_text = TEXT.into();
+  *host.agent.lock().unwrap() = vec![comment];
+  let (mut h, _) = workspace_harness(cx, host, changes_route());
+  let screen = a11y_screen(&mut h);
+  let user = screen.user();
+  user.triple_click(&screen.get_by_role(by::role(gpui::Role::Paragraph).name(TEXT)));
+  assert_eq!(user.copy().as_deref(), Some(TEXT));
+}
+
 #[gpui::test]
 fn changes_tab_marks_a_sent_review_comment_and_folds_it_once_resolved(cx: &mut TestAppContext) {
   use gpui::Role;
