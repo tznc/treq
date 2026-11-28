@@ -141,6 +141,48 @@ pub struct TaskSettings {
   /// for [`CodeHost::devcontainer_status`] to fill, a `docker ps` the
   /// settings should not wait for.
   pub environment: Option<Environment>,
+  /// Each profile and profile mode the agent list offers.
+  pub targets: Vec<AgentTarget>,
+}
+
+/// An account profile, or one of its modes, in the agent list.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgentTarget {
+  pub agent: Agent,
+  /// `profile` or `profile/mode`, as a session's profile takes it.
+  pub target: String,
+  /// `Claude · work · deep`.
+  pub label: String,
+}
+
+/// The profiles and their modes, in the order Settings lists them.
+fn agent_targets(profiles: Option<&str>, modes: Option<&str>) -> Vec<AgentTarget> {
+  use crate::core::{agent_modes, agent_profiles};
+  let modes = agent_modes::parse(modes);
+  agent_profiles::parse(profiles)
+    .into_iter()
+    .filter_map(|profile| {
+      let agent = Agent::parse(Some(&profile.agent))?;
+      let base = format!("{} · {}", agent.label(), profile.name);
+      let mode_targets = agent_modes::modes_for(&modes, &profile.agent, &profile.name)
+        .iter()
+        .map(|mode| AgentTarget {
+          agent,
+          target: format!("{}/{}", profile.name, mode.name),
+          label: format!("{base} · {}", mode.name),
+        })
+        .collect::<Vec<_>>();
+      Some(
+        std::iter::once(AgentTarget {
+          agent,
+          target: profile.name,
+          label: base,
+        })
+        .chain(mode_targets),
+      )
+    })
+    .flatten()
+    .collect()
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -473,7 +515,12 @@ pub fn task_settings(host: &dyn CodeHost, repo_path: &str) -> TaskSettings {
     )
     .unwrap_or_default();
   let app = host
-    .settings(&keys(&["default_agent", "terminal_font_size"]))
+    .settings(&keys(&[
+      "default_agent",
+      "terminal_font_size",
+      crate::core::agent_profiles::PROFILES_SETTING,
+      crate::core::agent_modes::MODES_SETTING,
+    ]))
     .unwrap_or_default();
   let get =
     |values: &HashMap<String, Option<String>>, key: &str| values.get(key).cloned().flatten();
@@ -492,6 +539,10 @@ pub fn task_settings(host: &dyn CodeHost, repo_path: &str) -> TaskSettings {
       .and_then(|v| v.parse().ok())
       .unwrap_or(14.),
     environment,
+    targets: agent_targets(
+      get(&app, crate::core::agent_profiles::PROFILES_SETTING).as_deref(),
+      get(&app, crate::core::agent_modes::MODES_SETTING).as_deref(),
+    ),
   }
 }
 

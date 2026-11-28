@@ -164,6 +164,8 @@ pub struct AgentPromptView {
   focused: bool,
   pub(in crate::gpui_shell::screen) settings: Option<TaskSettings>,
   pub(in crate::gpui_shell::screen) agent_override: Option<Agent>,
+  /// The chosen `profile` or `profile/mode`; `None` uses the agent's defaults.
+  target: Option<String>,
   /// Agents whose command-line tool isn't installed, left out of the menu.
   missing: Vec<Agent>,
   save_default: bool,
@@ -231,6 +233,7 @@ impl AgentPromptView {
       focused: false,
       settings: None,
       agent_override: None,
+      target: None,
       missing: Vec::new(),
       save_default: false,
       show_save_default: false,
@@ -327,6 +330,15 @@ impl AgentPromptView {
           .collect()
       }
     );
+  }
+
+  /// What the agent picker shows: the agent, with its profile and mode.
+  pub(in crate::gpui_shell::screen) fn target_label(&self) -> String {
+    let (_, agent) = self.agents();
+    match &self.target {
+      Some(target) => format!("{} · {}", agent.label(), target.replace('/', " · ")),
+      None => agent.label().to_string(),
+    }
   }
 
   /// `selectedAgent` and `configuredDefaultAgent`.
@@ -672,7 +684,13 @@ impl AgentPromptView {
   // The toolbar.
 
   fn choose_agent(&mut self, agent: Agent, cx: &mut Context<Self>) {
+    self.choose_target(agent, None, cx);
+  }
+
+  /// Picks `agent` on a profile or profile mode, or on its defaults.
+  fn choose_target(&mut self, agent: Agent, target: Option<String>, cx: &mut Context<Self>) {
     let (configured, _) = self.agents();
+    self.target = target;
     self.agent_override = Some(agent);
     self.save_default = false;
     self.show_save_default = agent != configured;
@@ -771,7 +789,7 @@ impl AgentPromptView {
       agent: agent.id().into(),
       mode: "acceptEdits".into(),
       save_as_repo_default: self.save_default && agent != configured,
-      profile: None,
+      profile: self.target.clone(),
     };
     read!(
       self,
@@ -1215,7 +1233,7 @@ impl AgentPromptView {
             .selector("task-agent")
             .role(gpui::Role::ComboBox)
             .aria_label("Agent")
-            .aria_value(agent.label())
+            .aria_value(self.target_label())
             .aria_expanded(self.menu == Some(Menu::Agent))
             .test_support()
             .cursor_pointer()
@@ -1223,7 +1241,7 @@ impl AgentPromptView {
               ui::Picker::new("task-agent-picker", p)
                 .placement(ui::PickerPlacement::Toolbar)
                 .icon(agent_icon(agent))
-                .value(agent.label())
+                .value(self.target_label())
                 .open(self.menu == Some(Menu::Agent)),
             )
             .on_click(cx.listener(|view, _, _, cx| view.toggle_menu(Menu::Agent, cx))),
@@ -1304,12 +1322,36 @@ impl AgentPromptView {
         Agent::ALL
           .into_iter()
           .filter(|agent| *agent == selected || !self.missing.contains(agent))
-          .map(|agent| {
-            ui::MenuItem::new(format!("task-agent-{}", agent.id()), agent.label(), p)
+          .flat_map(|agent| {
+            let picked =
+              |target: Option<&str>| agent == selected && self.target.as_deref() == target;
+            let item = ui::MenuItem::new(format!("task-agent-{}", agent.id()), agent.label(), p)
               .icon(agent_icon(agent))
-              .checked(agent == selected)
-              .aria_selected(agent == selected)
-              .on_click(cx.listener(move |view, _, _, cx| view.choose_agent(agent, cx)))
+              .checked(picked(None))
+              .aria_selected(picked(None))
+              .on_click(cx.listener(move |view, _, _, cx| view.choose_agent(agent, cx)));
+            // The agent's profiles and their modes, after it.
+            let targets = self
+              .settings
+              .iter()
+              .flat_map(|s| s.targets.iter())
+              .filter(move |t| t.agent == agent)
+              .map(|t| {
+                let target = t.target.clone();
+                ui::MenuItem::new(
+                  format!("task-agent-{}/{}", agent.id(), t.target),
+                  t.label.clone(),
+                  p,
+                )
+                .icon(agent_icon(agent))
+                .checked(picked(Some(&t.target)))
+                .aria_selected(picked(Some(&t.target)))
+                .on_click(cx.listener(move |view, _, _, cx| {
+                  view.choose_target(agent, Some(target.clone()), cx)
+                }))
+              })
+              .collect::<Vec<_>>();
+            std::iter::once(item).chain(targets)
           }),
       );
     deferred(self.close_menu_on_outside(panel, cx)).with_priority(3)
