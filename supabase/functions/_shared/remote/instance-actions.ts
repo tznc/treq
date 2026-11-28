@@ -273,10 +273,10 @@ async function tracked(
   }
   const audit = auditFor(supabase, { ownerUserId, instanceId: instance.id, correlationId });
   const event = (suffix: string) => `${op.event}_${suffix}` as RemoteAuditEventType;
-  await audit(event("requested"), { detail: op.detail, idempotencyKey });
+  await audit(event("requested"), { detail: op.detail ?? {}, idempotencyKey });
   try {
     const done = await work(row.id);
-    await completeOperation(supabase, row.id, { status: "succeeded", providerRequestId: done.providerRequestId });
+    await completeOperation(supabase, row.id, { status: "succeeded", providerRequestId: done.providerRequestId ?? null });
     await audit(event("succeeded"), {
       detail: done.detail ?? {},
       providerRequestId: done.providerRequestId ?? null,
@@ -464,7 +464,7 @@ async function ensureOnce(body: Record<string, unknown>, deps: RemoteInstanceDep
         manifestVersion: CURRENT_MANIFEST_VERSION,
         idempotencyKey,
         machineType: mt.vendor_type,
-        placementId: target.active_placement_id ?? undefined,
+        placementId: target.active_placement_id,
       });
       const resourceId = created.providerResourceId;
       createdId = resourceId;

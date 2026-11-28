@@ -108,7 +108,8 @@ Deno.test("create is idempotent by placement; another placement gets another san
 
 Deno.test("create without a placement id names the sandbox after the idempotency key", async () => {
   const { provider } = setup();
-  assertEquals((await provider.createInstance({ ...PARAMS, placementId: undefined })).providerResourceId, "treq-idem_1");
+  const { placementId: _, ...withoutPlacement } = PARAMS;
+  assertEquals((await provider.createInstance(withoutPlacement)).providerResourceId, "treq-idem_1");
 });
 
 Deno.test("create rejects l/xl: Cloudflare instances top out at 4 vCPU", async () => {

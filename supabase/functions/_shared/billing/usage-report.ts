@@ -64,7 +64,7 @@ export interface UsageReportDeps {
   now: () => Date;
   enabled: boolean;
   log: (fields: Record<string, unknown>) => void;
-  eventName?: string;
+  eventName?: string | undefined;
 }
 
 export interface UsageReportResult {

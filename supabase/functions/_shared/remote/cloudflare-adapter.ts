@@ -183,7 +183,7 @@ export async function provisionBridge(
         Authorization: `Bearer ${account.apiToken}`,
         ...(isForm || body === undefined ? {} : { "Content-Type": "application/json" }),
       },
-      body: isForm ? body : body === undefined ? undefined : JSON.stringify(body),
+      body: isForm ? body : body === undefined ? null : JSON.stringify(body),
     }, 60_000);
     if (okStatuses.includes(response.status)) {
       await response.body?.cancel();
@@ -288,7 +288,7 @@ export class CloudflareProvider implements SandboxProvider {
     return providerFetch(this.fetchImpl, "Cloudflare bridge", this.url(path), {
       method,
       headers: { Authorization: `Bearer ${this.config.token}`, "Content-Type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined ? null : JSON.stringify(body),
     }, timeoutMs);
   }
 

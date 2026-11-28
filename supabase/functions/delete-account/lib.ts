@@ -89,7 +89,7 @@ export type DeleteAccountDeps = {
   provider(kind: ProviderKind, placementId?: string | null): ManagedComputeProvider;
   revokeLinearToken(accessToken: string): Promise<void>;
   /** As remote-admin's report_usage: off (shadow mode) unless TREQ_USAGE_BILLING_ENABLED=1. */
-  usageReporting?: { enabled: boolean; eventName?: string };
+  usageReporting?: { enabled: boolean; eventName?: string | undefined };
 };
 
 // Used only when STRIPE_SECRET_KEY is unset: a row with a customer then fails
@@ -264,7 +264,7 @@ export interface DeleteAccountClient {
     admin: {
       deleteUser(
         id: string,
-      ): PromiseLike<{ error: { message: string; status?: number } | null }>;
+      ): PromiseLike<{ error: { message: string; status?: number | undefined } | null }>;
     };
   };
 }
