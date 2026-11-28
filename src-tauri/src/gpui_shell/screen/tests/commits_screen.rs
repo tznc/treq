@@ -508,8 +508,7 @@ fn commits_tab_finds_text_in_messages_and_open_diffs(cx: &mut TestAppContext) {
   assert_eq!(count(&mut h), (1, 2));
   h.click("commits-search-next");
   assert_eq!(count(&mut h), (0, 2));
-  // a's diff (" a", "+b", "+c") is searched once open.
-  // Cmd+F again focuses the input and selects its text.
+  // Cmd+F refocuses and selects the query. a's diff (" a", "+b", "+c") is searched once open.
   h.cx.simulate_keystrokes("cmd-f");
   h.cx.simulate_input("b");
   assert_eq!(count(&mut h), (0, 0));

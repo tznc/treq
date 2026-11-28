@@ -205,8 +205,7 @@ fn onboarding_runs_its_own_actions(cx: &mut TestAppContext) {
     ..FakeHost::default()
   });
   let mut h = Harness::with_host(cx, onboarding(), host.clone());
-  // This computer's tools are checked as the screen opens, shown in its
-  // popover.
+  // This computer's tools are checked as the screen opens, shown in its popover.
   assert!(!h.shows(gpui::Role::Button, "Install Git"));
   h.click("machine-tools-local");
   assert!(h.shows(gpui::Role::Button, "Install Git"));
@@ -242,8 +241,7 @@ fn onboarding_groups_recent_repositories_by_machine(cx: &mut TestAppContext) {
   // One recent "app" under this computer, one under the SSH host.
   assert_eq!(recents(&mut h, "app"), 2);
   assert!(!h.shows(gpui::Role::Status, "No recent repositories"));
-  // A remote repository opens through the window, by its saved record; a
-  // machine's row connects to it.
+  // A remote recent opens through the window by its saved record. A machine row connects to it.
   h.click("recent-ssh:ep-1-0");
   h.click("machine-ssh:ep-1");
   // A dev container opens its repository here.

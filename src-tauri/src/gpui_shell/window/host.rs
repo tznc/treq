@@ -459,8 +459,7 @@ impl WindowHost for Backend {
   }
 
   fn prepare_repo(&self, main_repo: &str) {
-    // Another window prepared this repo moments ago: the init and the
-    // rebase pass would repeat its work, and the poll keeps the state fresh.
+    // A repo another window just prepared skips init and rebase: the poll keeps the state fresh.
     let skip = take_just_initialized(main_repo) | prepared_recently(main_repo);
     if !skip {
       match core::init_deferring_rebase(main_repo) {
@@ -610,8 +609,7 @@ impl WindowHost for Backend {
     }
     let dir = Path::new(repo).join(".treq");
     let (tx, changes) = unbounded();
-    // The app's own reads and polls write the database too: send only when
-    // what the window shows from it (titles, descriptions) changed.
+    // Treq's own reads write the database too: send only when shown titles or descriptions change.
     let repo_path = repo.to_string();
     let shown = move || crate::core::workspaces::workspace_texts(&repo_path);
     let mut last = shown();
@@ -666,9 +664,7 @@ impl WindowHost for Backend {
     let ops_dir = ops.clone();
     let watcher: Arc<Mutex<Option<CheckoutWatcher>>> = Arc::default();
     let weak = Arc::downgrade(&watcher);
-    // `NoCache` on every platform: the default `FileIdMap` (macOS, Windows)
-    // walks and stats every file under the root up front and holds an entry
-    // per file, while the handler below only asks whether any path matters.
+    // `NoCache`: `FileIdMap` would stat every file up front, and the handler needs no file ids.
     let debouncer = notify_debouncer_full::new_debouncer_opt::<
       _,
       notify::RecommendedWatcher,
@@ -686,8 +682,7 @@ impl WindowHost for Backend {
               continue;
             }
             changed = true;
-            // inotify watches one directory each: a directory created or
-            // moved in needs its own.
+            // inotify watches one directory each: a directory created or moved in needs its own.
             #[cfg(target_os = "linux")]
             if path.is_dir() {
               if let Some(watcher) = weak.upgrade() {
@@ -850,8 +845,7 @@ impl RemoteHost for Backend {
       auth_identity_reference: values.auth_identity_reference.clone(),
       alias: values.alias.clone(),
       created_at: now_iso(),
-      // New hosts keep terminals in the Treq daemon; the machine's popover
-      // switches to tmux.
+      // New hosts keep terminals in the Treq daemon, and the machine's popover can switch to tmux.
       terminal_backend: Default::default(),
     };
     let endpoint = record.to_endpoint();
@@ -951,8 +945,7 @@ impl RemoteHost for Backend {
       let remote_ssh = feature_preview::is_enabled(db, PreviewFeature::RemoteSsh);
       (user_managed, remote_ssh)
     });
-    // User-managed endpoints connect only while the preview is on; the
-    // cloud workspace regardless.
+    // User-managed endpoints need the preview on, but the cloud workspace always connects.
     if let Some(record) = user_managed.filter(|_| remote_ssh) {
       return Some((record.to_endpoint(), 0));
     }

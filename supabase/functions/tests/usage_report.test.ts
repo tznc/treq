@@ -62,7 +62,7 @@ function fakeStore(initial: PendingUsageReport[]) {
   return { store, rows, built };
 }
 
-type Call = { method: string; path: string; params?: StripeParams; idempotencyKey?: string };
+type Call = { method: string; path: string; params: StripeParams | undefined; idempotencyKey: string | undefined };
 
 function fakeStripe(failTimes = 0, failWith: () => Error = () => new Error("stripe down")) {
   const calls: Call[] = [];

@@ -280,8 +280,7 @@ impl WorkspaceDialogHost for Backend {
     metadata: Option<&str>,
   ) -> Result<i64, String> {
     if let Some(remote) = self.remote(repo_path) {
-      // Copy files and the setup script are local repository settings,
-      // which a remote repository has none of.
+      // Copy files and the setup script are local repository settings a remote repository lacks.
       return remote.create_workspace(branch, source_branch, metadata.map(str::to_string));
     }
     let copy_files = self.with_db(|db| {
@@ -597,8 +596,7 @@ pub enum Submitted {
 /// `useWorkspaceDialogSubmit`'s `handleSubmit`: creates, splits or moves,
 /// and reports it in a toast.
 pub fn submit(host: &dyn WorkspaceDialogHost, form: &Submit) -> Submitted {
-  // Once the requested workspace exists, a later failure must not leave the
-  // dialog open: a retry would fail on the name that is now taken.
+  // Once the workspace exists, a failure must close the dialog: a retry would hit the taken name.
   let mut created = None;
   match run_submit(host, form, &mut created) {
     Ok(Ok(id)) => Submitted::Done(id),
@@ -887,8 +885,7 @@ pub fn create_on_target(
     {
       has_target_workspace = true;
     } else if host.current_branch(repo)?.as_deref() == Some(target) {
-      // The home repo's own branch is checked out in the home working copy,
-      // so it needs no workspace of its own.
+      // The home repo's branch is checked out in the home working copy and needs no workspace.
       has_target_workspace = true;
     } else {
       let metadata = serde_json::json!({ "description": format!("Workspace for {target}") });
@@ -932,8 +929,7 @@ fn create_stacked(
       .unwrap_or_else(|| default_branch.clone()),
     Position::After => parent_branch.to_string(),
   };
-  // No source for the default branch: naming it bases the workspace on the
-  // home working copy.
+  // No source for the default branch: naming it bases the workspace on the home working copy.
   let source = (effective_parent != default_branch).then_some(effective_parent.as_str());
   let id = host.new_workspace(repo, branch, source, metadata.as_deref())?;
   *created = Some(id);

@@ -70,7 +70,7 @@ Deno.serve(async (req) => {
       console.error("[billing-checkout] test_coupon read failed:", configError.message);
     }
     const result = await createCheckout(body, {
-      user: { id: user.id, email: user.email },
+      user: { id: user.id, email: user.email ?? null },
       store: billingStoreFor(service, user.id),
       organizations: organizationBillingFor(service, user.id),
       stripe: createStripeClient(stripeKey),

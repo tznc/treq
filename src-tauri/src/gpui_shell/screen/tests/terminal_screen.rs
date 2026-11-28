@@ -430,8 +430,7 @@ fn terminal_pane_opens_and_closes_shells_by_shortcut(cx: &mut TestAppContext) {
       && c.contains("Some(\"/repo/.treq/workspaces/login\") running Some(\"export\")")
   });
   assert!(spawned_shell, "{:?}", host.calls());
-  // The new shell has focus: Cmd+W closes it, and the agent next to it
-  // takes focus.
+  // The new shell has focus: Cmd+W closes it, and the agent next to it takes focus.
   h.cx.simulate_keystrokes("cmd-w");
   h.cx.run_until_parked();
   assert!(!h.shows(gpui::Role::Group, "Shell terminal"));
@@ -1236,8 +1235,7 @@ fn double_clicking_a_remote_session_scrolls_it_fully_into_view(cx: &mut TestAppC
     .cx
     .debug_bounds("terminal-scroll-container")
     .expect("container");
-  // The newest session opened in view; drag the row's scrollbar back to
-  // the start so the last one overflows again.
+  // The newest session opened in view: drag the scrollbar back so the last one overflows again.
   let thumb = h
     .cx
     .debug_bounds("terminal-row-scrollbar")
@@ -1306,8 +1304,7 @@ fn double_clicking_a_session_clipped_on_the_left_scrolls_it_into_view(cx: &mut T
     .cx
     .debug_bounds("terminal-scroll-container")
     .expect("container");
-  // Drag the row's scrollbar to the end so the first session is clipped
-  // by the left edge.
+  // With the row's scrollbar dragged to the end, the left edge clips the first session.
   let thumb = h
     .cx
     .debug_bounds("terminal-row-scrollbar")

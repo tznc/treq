@@ -33,9 +33,7 @@ fn select_supported_git(
 /// jj-lib fetch needs Git >= 2.41. GUI launches may find Apple's older Git
 /// before Homebrew, and the persisted binary cache may also point at that Git.
 pub fn resolve_remote_git() -> Result<String, String> {
-  // The lookup spawns `which -a git` plus `git --version` per candidate, and
-  // every fetch and push asks. A failure is not cached so installing Git
-  // takes effect without a restart.
+  // Lookups spawn processes, so a hit is cached. A miss isn't, so installing Git needs no restart.
   static RESOLVED: OnceLock<String> = OnceLock::new();
   if let Some(path) = RESOLVED.get() {
     return Ok(path.clone());
@@ -69,8 +67,7 @@ fn find_remote_git() -> Result<String, String> {
 
 /// Use the configured shell's PATH on Unix, plus the running executable directory.
 pub fn get_extended_path() -> String {
-  // Once the login shell's PATH is known the result no longer depends on the
-  // environment, so build it once.
+  // Once the login shell's PATH is known the result is fixed, so build it once.
   #[cfg(unix)]
   {
     static EXTENDED: OnceLock<String> = OnceLock::new();
@@ -233,8 +230,7 @@ pub(crate) fn install_dirs(
 #[cfg(unix)]
 fn login_shell_command(shell: &OsStr) -> Command {
   let mut command = Command::new(shell);
-  // Interactive startup loads tools configured in .zshrc/.bashrc; login
-  // startup also loads profile files, matching a new terminal window.
+  // -i loads tools set up in .zshrc/.bashrc, and -l loads profiles, like a new terminal window.
   command.args(["-ilc", "printf '\\000%s\\000' \"$PATH\""]);
   command
 }
@@ -310,9 +306,7 @@ pub fn detect_binary(name: &str) -> Option<String> {
 /// Finds `name` on `search_path` (a PATH-style list) and nowhere else, with
 /// the same lookup as [`detect_binary`].
 pub fn detect_binary_in(name: &str, search_path: impl AsRef<OsStr>) -> Option<String> {
-  // The lookup `which` and `where` do, without a process: the first-run
-  // checklist asks for six tools at once, and a process each costs tens of
-  // milliseconds on Windows.
+  // Same lookup as `which`/`where` without a process, which costs tens of ms each on Windows.
   executable_in(name, search_path.as_ref())
 }
 

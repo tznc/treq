@@ -423,9 +423,7 @@ fn github_detail_markdown_links_open_in_the_browser(cx: &mut TestAppContext) {
     route("issues", Some(1), false),
   );
   assert!(h.shows(gpui::Role::Heading, "Add comment"));
-  // The body, a link across its width, sits just above the comments.
-  // Both share the centered content column, so aim from the heading's left
-  // edge, not the pane's: in a wide pane the column has margins on each side.
+  // The body sits above the comments in the centered column: aim from the heading, not the pane.
   let heading = h
     .cx
     .debug_bounds("github-comments-heading")

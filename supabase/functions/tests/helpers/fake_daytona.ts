@@ -10,7 +10,7 @@ export interface FakeDaytonaSandbox {
   name: string;
   state: string;
   labels: Record<string, string>;
-  target?: string;
+  target?: string | undefined;
   cpu: number;
   memory: number;
   disk: number;

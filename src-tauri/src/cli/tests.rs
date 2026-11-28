@@ -1314,9 +1314,7 @@ fn every_typed_remote_request_covers_every_kind() {
 
 #[test]
 fn every_remote_cli_flag_is_declared_in_tauri_config() {
-  // The remote VM parses argv with the CLI config in tauri.conf.json, which
-  // rejects undeclared flags. A flag emitted by `cli_args` but missing there
-  // would make the command fail only over SSH.
+  // The VM's argv parser rejects flags missing from tauri.conf.json, so they'd fail only over SSH.
   let config =
     fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tauri.conf.json")).unwrap();
   let json: Value = serde_json::from_str(&config).unwrap();
@@ -1342,8 +1340,7 @@ fn every_remote_cli_flag_is_declared_in_tauri_config() {
 
 #[test]
 fn every_typed_remote_request_round_trips_through_cli_args() {
-  // Fields dropped between `cli_args` and the VM-side parser silently change
-  // what a remote mutation does (for example a move losing its files).
+  // Fields lost between `cli_args` and the VM parser silently change a remote mutation.
   for request in every_typed_remote_request() {
     // `repo inspect` has its own handler with human-readable output.
     if request.kind_name() == "InspectRepository" {
@@ -1955,8 +1952,7 @@ fn agent_rejects_home_repo_branch() {
 
 #[test]
 fn the_round_trip_samples_cover_every_typed_remote_request() {
-  // A variant missing from `every_typed_remote_request` is never checked for
-  // round-tripping, so its `cli_args` and parser arms can drift apart.
+  // A variant missing from `every_typed_remote_request` could drift between `cli_args` and parser.
   let source = include_str!("../core/remote.rs");
   let start = source.find("pub enum TreqCommandRequest {").expect("enum");
   let body = &source[start..];
@@ -1984,8 +1980,7 @@ fn the_round_trip_samples_cover_every_typed_remote_request() {
 
 #[test]
 fn every_keyed_remote_request_is_claimed_in_the_idempotency_store() {
-  // A request carrying an idempotency key that `idempotency` misses would
-  // run again on every retry instead of replaying its first result.
+  // A keyed request `idempotency` misses would rerun on retry instead of replaying its result.
   for request in every_typed_remote_request() {
     let wire = serde_json::to_value(&request).unwrap();
     let key = wire.get("idempotency_key").and_then(|k| k.as_str());

@@ -33,9 +33,7 @@ pub fn query_system_logs(log_dir: &Path, query: &LogQuery) -> Result<Vec<LogReco
     .filter(|s| !s.is_empty())
     .map(str::to_lowercase);
 
-  // What a line must contain to be worth parsing. JSON escapes quotes,
-  // backslashes and control characters, so a search with any of them is
-  // only checked on the parsed body.
+  // Tokens a line must contain to be parsed. Searches with JSON-escaped chars match after parsing.
   let level_tokens: Vec<String> = if levels.is_empty() || levels.contains(&"INFO") {
     // DEBUG, TRACE and the rest show as INFO, so no token says "INFO".
     Vec::new()

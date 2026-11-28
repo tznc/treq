@@ -53,9 +53,7 @@ mod tests {
       })
     });
 
-    // The invoking path returns a join handle immediately; work happens on
-    // the blocking pool. We must observe the subprocess start without the
-    // caller thread being stuck inside `Command::output`.
+    // The subprocess must start on the blocking pool while the caller holds only a join handle.
     assert!(
       crate::test_repo::wait_until(Duration::from_secs(2), || started.load(Ordering::SeqCst)),
       "gh_create_pr blocking task never started"
@@ -75,8 +73,7 @@ mod tests {
 echo 'https://github.com/owner/repo/pull/42'"#,
     );
 
-    // Exercise the same spawn_blocking join path the Tauri command uses,
-    // without depending on the process-wide gh binary cache.
+    // Same spawn_blocking join path as the Tauri command, without the process-wide gh binary cache.
     let number = tauri::async_runtime::block_on(async move {
       tauri::async_runtime::spawn_blocking(move || {
         crate::github::gh_create_pr_impl(

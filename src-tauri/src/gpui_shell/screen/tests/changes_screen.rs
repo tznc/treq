@@ -1572,8 +1572,7 @@ fn changes_tab_finds_text_in_the_diff(cx: &mut TestAppContext) {
   h.click("file-card-a.rs");
   h.cx.simulate_keystrokes("cmd-f");
   assert!(h.shows(gpui::Role::Search, "Find"));
-  // a.rs: " a", "+b", "+c"; b.rs: "+d".
-  // A short diff is searched on every key: no pause is waited for.
+  // a.rs: " a", "+b", "+c", b.rs: "+d". A short diff is searched on every key, without a pause.
   h.cx.simulate_input("b");
   h.cx.run_until_parked();
   let count = |h: &mut Harness| {
@@ -1662,9 +1661,7 @@ fn review_thread_quote_button_sits_in_the_card_bottom_row(cx: &mut TestAppContex
   let button = within(&comment).get_by_role(by::role(gpui::Role::Button).name("Quote"));
   expect(&button).to_be_visible();
   expect(&button).to_have_text_content("Quote");
-  // The library reads a button's text from its accessible name, so an
-  // icon-only button with aria_label "Quote" would pass the above; its
-  // width shows the label is drawn.
+  // Text content is the accessible name here, so only the width proves the label is drawn.
   assert!(quote.size.width > gpui::px(40.), "{quote:?} draws no label");
 }
 
@@ -1691,6 +1688,40 @@ fn changes_tab_quotes_a_review_thread(cx: &mut TestAppContext) {
   assert_eq!(saved[0]["start_line"], 2);
 }
 
+/// Clicks the first comment's Quote, then says whether the comment box sits
+/// between the first and the second comment.
+fn quote_box_follows_the_first_thread(h: &mut Harness) -> bool {
+  use gpui_testing_library::prelude::*;
+  let screen = a11y_screen(h);
+  let quotes = screen.get_all_by_role(by::role(gpui::Role::Button).name("Quote"));
+  screen.user().click(&quotes[0]);
+  let comments =
+    screen.get_all_by_role(by::role(gpui::Role::Group).name(TextMatch::regex("^Comment by ")));
+  let input = screen.get_by_role(by::role(gpui::Role::MultilineTextInput).name("Add a comment…"));
+  let (first, second, input) = (comments[0].bounds(), comments[1].bounds(), input.bounds());
+  input.top() >= first.bottom() && input.bottom() <= second.top()
+}
+
+/// Quote opens the comment box under the thread it quotes, not under the
+/// last thread on its line, where it can be off screen.
+#[gpui::test]
+fn quote_opens_the_comment_box_under_the_quoted_thread(cx: &mut TestAppContext) {
+  let mut host = changes_host();
+  host.threads = vec![gh_thread("t1", 2, false), gh_thread("t2", 2, false)];
+  let (mut h, _) = workspace_harness(cx, host, changes_route());
+  assert!(quote_box_follows_the_first_thread(&mut h));
+}
+
+/// The same for threads above the file, whose line is not in the diff.
+#[gpui::test]
+fn quote_opens_the_comment_box_under_a_quoted_thread_above_the_file(cx: &mut TestAppContext) {
+  let mut host = changes_host();
+  host.threads = vec![gh_thread("t1", 40, false), gh_thread("t2", 50, false)];
+  let (mut h, _) = workspace_harness(cx, host, changes_route());
+  assert!(h.shows(gpui::Role::Group, "Outdated threads on a.rs"));
+  assert!(quote_box_follows_the_first_thread(&mut h));
+}
+
 #[gpui::test]
 fn changes_tab_draws_a_github_suggestion_as_a_diff(cx: &mut TestAppContext) {
   let mut host = changes_host();
@@ -1700,6 +1731,35 @@ fn changes_tab_draws_a_github_suggestion_as_a_diff(cx: &mut TestAppContext) {
   host.threads = vec![thread];
   let (mut h, _host) = workspace_harness(cx, host, changes_route());
   assert!(h.shows(gpui::Role::Heading, "Suggested change"));
+}
+
+/// Text in a review comment selects like any other text, and Quote then
+/// quotes only the selection.
+#[gpui::test]
+fn changes_tab_quotes_the_selected_text_of_a_review_comment(cx: &mut TestAppContext) {
+  use gpui_testing_library::prelude::*;
+  // One line, longer than half the card, so its middle is a word.
+  const BODY: &str =
+    "Why two lines here, when a single line reads the same and keeps the diff smaller?";
+  let mut host = changes_host();
+  let mut thread = gh_thread("t1", 2, false);
+  thread.comments[0].body = BODY.into();
+  host.threads = vec![thread];
+  let (mut h, host) = workspace_harness(cx, host, changes_route());
+  let screen = a11y_screen(&mut h);
+  let user = screen.user();
+  user.dbl_click(&screen.get_by_role(by::role(gpui::Role::Article).name(BODY)));
+  let word = user.copy().expect("a word is selected");
+  assert!(BODY.contains(&word) && word != BODY, "{word:?}");
+  user.click(&screen.get_by_role(by::role(gpui::Role::Button).name("Quote")));
+  let input = screen.get_by_role(by::role(gpui::Role::MultilineTextInput).name("Add a comment…"));
+  user.type_text(&input, "Agreed");
+  user.click(&screen.get_by_role(by::role(gpui::Role::Button).name("Add comment")));
+  settle_save(&mut h);
+  let saved: serde_json::Value =
+    serde_json::from_str(&host.review.lock().unwrap().clone().unwrap_or_default())
+      .expect("saved review");
+  assert_eq!(saved[0]["line_content"], serde_json::json!([word]));
 }
 
 #[gpui::test]

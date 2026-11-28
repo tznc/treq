@@ -201,7 +201,7 @@ export interface EngineDeps {
    * Extends this worker's lease to `seconds` from now. False when the lease
    * is held by another worker, and the step is not run.
    */
-  renewLease?: (migrationId: string, seconds: number) => Promise<boolean>;
+  renewLease?: ((migrationId: string, seconds: number) => Promise<boolean>) | undefined;
   /** True when the owner is at their spend cap: cutover is refused. */
   spendCapped?: (ownerUserId: string) => Promise<boolean>;
 }

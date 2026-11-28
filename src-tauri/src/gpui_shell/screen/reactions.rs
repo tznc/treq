@@ -156,8 +156,7 @@ fn chip<V: Reacts>(
   ))
   .child(emoji_img(emoji, 14.))
   .child(
-    // Short label (['count']): 11px is fine.
-    // ast-grep-ignore: gpui-text-xs-short-label-only
+    // Short label (count). ast-grep-ignore: gpui-text-xs-short-label-only
     ui::text(div(), TextSize::Xs)
       .text_color(if mine { sky } else { p.muted_foreground })
       .child(group.count.to_string()),

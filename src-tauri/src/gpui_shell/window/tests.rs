@@ -810,8 +810,7 @@ fn a_read_that_panics_does_not_stop_the_window_reading(cx: &mut TestAppContext) 
     .panic_once
     .store(true, std::sync::atomic::Ordering::SeqCst);
   let window = Window::open(cx, host.clone(), Some("/repo"));
-  // The first read failed; `prepare_repo` finishing after it reads again,
-  // and otherwise the poll does.
+  // The first read failed, so `prepare_repo` finishing reads again, or else the poll does.
   cx.executor().advance_clock(POLL);
   cx.run_until_parked();
   assert_eq!(window.sidebar_ids(), [1, 2]);

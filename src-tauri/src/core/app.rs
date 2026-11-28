@@ -295,16 +295,13 @@ fn rebase_workspaces(repo_path: &str, conflict_style: &str) {
   let Ok(all_workspaces) = local_db::get_workspaces(repo_path) else {
     return;
   };
-  // Nothing to rebase, and importing git state into a repo without workspaces
-  // would pre-empt the home repo's own reconcile of a git-only commit.
+  // No workspaces: a git import here would pre-empt the home repo's reconcile of a git-only commit.
   if all_workspaces.is_empty() {
     return;
   }
-  // Refs moved by git outside jj must be visible to the checks below, and to
-  // the op head the skip compares against.
+  // Refs git moved outside jj must be visible to the checks below and to the skip's op head.
   jj::import_git_refs(repo_path).warn_on_err("import git refs before the rebase pass");
-  // Cheap check first: while the op head is unchanged since the last clean
-  // pass nothing can be behind.
+  // Cheap check first: with the op head unchanged since the last clean pass, nothing is behind.
   if let (Some(last), Ok(current)) = (
     last_rebase_pass(repo_path),
     jj::current_operation_id(repo_path),

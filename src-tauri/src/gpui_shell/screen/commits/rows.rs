@@ -635,8 +635,7 @@ impl CommitsView {
       }
       _ => self.card_row(ix, row, &p, cx),
     };
-    // The timeline's rule, from 0.5rem into the first row to 0.5rem above
-    // the last one's end.
+    // The timeline's rule, from 0.5rem into the first row to 0.5rem above the last one's end.
     let first = ix == 1;
     let last = ix + 2 == n;
     let gap = gap as f32 * 0.25;

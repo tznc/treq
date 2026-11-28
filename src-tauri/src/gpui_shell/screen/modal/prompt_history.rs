@@ -406,8 +406,7 @@ impl PromptHistoryView {
               .px_2()
               .gap_1()
               .copy_icon(copied, 12.)
-              // Short label (['button label']): 11px is fine.
-              // ast-grep-ignore: gpui-text-xs-short-label-only
+              // Short label (button label). ast-grep-ignore: gpui-text-xs-short-label-only
               .child(ui::text(div(), TextSize::Xs).child("Copy"))
               .on_click(copy)
               .into_any_element()

@@ -51,9 +51,7 @@ fn managed(cx: &mut TestAppContext) -> (Harness, Arc<FakeHost>) {
 #[gpui::test]
 fn a_double_click_on_create_provisions_once(cx: &mut TestAppContext) {
   let (mut h, host) = managed(cx);
-  // Two clicks before the backend's first state update reaches the window,
-  // as a double click does: provisioning is spawned, so `submitting` /
-  // `provisioningStage` arrive a frame or more later.
+  // A double click lands before `submitting` reaches the window, since provisioning is spawned.
   h.click("cloud-create");
   h.click("cloud-create");
   h.cx.run_until_parked();

@@ -109,8 +109,7 @@ pub(super) fn probe_repo_path(repo_path: &str) -> Result<RemoteRepoProbe, String
   if trimmed.is_empty() {
     return Err("Remote path is required".to_string());
   }
-  // The returned `path` is the expanded one, so callers open the repository
-  // by a path every later command reads the same way.
+  // The returned `path` is expanded, so every later command reads it the same way.
   let expanded = expand_home(trimmed, std::env::var("HOME").ok().as_deref());
   let path = Path::new(&expanded);
   let exists = path.exists();
@@ -319,8 +318,7 @@ pub(super) fn clone_repo_local(
   let (mut checkout, _) = prepare
     .fetch_then_checkout(gix::progress::Discard, &interrupt)
     .map_err(|e| clone_err(&e))?;
-  // A remote HEAD naming a missing branch leaves nothing to check out. An
-  // empty remote (no branches at all) still clones, as `git clone` does.
+  // A remote HEAD naming a missing branch fails. An empty remote still clones, as `git clone` does.
   let repo = checkout.repo();
   let head = repo.head().map_err(|e| clone_err(&e))?;
   let has_branches = repo

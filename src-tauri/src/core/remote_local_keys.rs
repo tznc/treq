@@ -93,8 +93,7 @@ pub fn read_local_public_key(reference: &str) -> Result<String, String> {
   }
   let contents = std::fs::read_to_string(&canonical_path)
     .map_err(|e| format!("Failed to read local SSH identity: {e}"))?;
-  // Validate it really is a well-formed public key rather than returning
-  // arbitrary file contents.
+  // Only a well-formed public key is returned, never arbitrary file contents.
   PublicKey::from_openssh(contents.trim())
     .map_err(|e| format!("Not a valid OpenSSH public key: {e}"))?;
   Ok(contents.trim().to_string())
@@ -108,9 +107,7 @@ mod tests {
 
   #[test]
   fn returns_empty_when_ssh_dir_missing() {
-    // Smoke test only: exercising the real ~/.ssh in CI would be
-    // environment-dependent, so this just asserts the function does not
-    // panic and returns a list (possibly empty) rather than erroring.
+    // Smoke test: the real ~/.ssh varies by machine, so this only asserts an Ok result.
     let result = list_local_ssh_identities();
     assert!(result.is_ok());
   }

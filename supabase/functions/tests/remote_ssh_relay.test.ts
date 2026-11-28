@@ -270,7 +270,7 @@ class FakeSocket implements RelaySocket {
   bufferedAmount = 0;
   binaryType: BinaryType = "blob";
   sent: Array<string | Uint8Array> = [];
-  closed: { code?: number; reason?: string } | null = null;
+  closed: { code: number | undefined; reason: string | undefined } | null = null;
   private listeners = new Map<string, Array<(event: never) => void>>();
 
   addEventListener(type: string, listener: (event: never) => void): void {

@@ -143,8 +143,7 @@ impl GithubView {
           Vec::new()
         });
         let statuses = host.pr_statuses(&repo_path);
-        // When the default branch cannot be read, every workspace shows and
-        // the base is typed.
+        // With no readable default branch, every workspace shows and the base is typed.
         let default = host.default_branch(&repo_path).ok();
         let offered = data::workspaces_without_open_pr(workspaces, &statuses, default.as_deref());
         (offered, default)

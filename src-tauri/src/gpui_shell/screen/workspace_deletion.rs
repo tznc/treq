@@ -280,9 +280,7 @@ impl Render for WorkspaceDeletion {
                     .child(row.workspace.branch_name.clone())
                     .when(row.current, |this| {
                       this.child(
-                        // Short label (['tag']): 11px is fine.
-                        // ast-grep-ignore: gpui-text-xs-short-label-only
-                        ui::text(div(), TextSize::Xs)
+                        ui::text(div(), TextSize::Sm)
                           .ml_2()
                           .font_weight(FontWeight::NORMAL)
                           .text_color(p.muted_foreground)
@@ -423,8 +421,7 @@ impl Render for WorkspaceDeletion {
           .flex()
           .flex_col()
           .items_center()
-          // Pinned from the top, so the dialog stays put as the filter
-          // shortens its list.
+          // Pinned from the top, so the dialog stays put as the filter shortens its list.
           .pt(viewport.height * 0.2)
           .on_mouse_down(
             MouseButton::Left,

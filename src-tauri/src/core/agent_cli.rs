@@ -269,8 +269,7 @@ mod tests {
 
     let settings_path = files.settings_path.expect("settings path");
     let settings = fs::read_to_string(&settings_path).expect("read settings");
-    // skill_dir may contain backslashes (Windows), which JSON escapes as `\\`;
-    // compare against the JSON-encoded form rather than the raw path string.
+    // JSON escapes Windows backslashes in skill_dir, so compare against its JSON-encoded form.
     let skill_dir_json = serde_json::to_string(&files.skill_dir).expect("encode skill_dir");
     assert!(settings.contains(skill_dir_json.trim_matches('"')));
     assert!(settings.contains("/ws"));
@@ -337,10 +336,7 @@ mod tests {
 
   #[test]
   fn cleanup_refuses_paths_outside_temp_prefix() {
-    // Must exist on every platform: canonicalize() only rejects paths that don't
-    // resolve; /etc/passwd doesn't exist on Windows, so it would be silently
-    // skipped instead of exercising the temp-prefix check. The running test
-    // binary always exists and is never under the treq-agent temp prefix.
+    // The test binary exists on every OS, unlike /etc/passwd, so the temp-prefix check really runs.
     let outside_path = std::env::current_exe()
       .expect("current_exe")
       .to_string_lossy()
@@ -432,9 +428,7 @@ mod tests {
     cleanup_agent_cli_files(&[files.prompt_path, files.skill_dir]).expect("cleanup");
   }
 
-  // Windows' read-only directory attribute doesn't block creating files inside
-  // the directory (unlike Unix's write-permission bit), so this test's simulated
-  // permission denial is a no-op there and the skip path never triggers.
+  // Windows' read-only dir attribute doesn't block creating files, so this can't simulate denial.
   #[cfg(not(windows))]
   #[test]
   fn skips_project_skills_when_cwd_is_not_writable() {
@@ -447,8 +441,7 @@ mod tests {
     let result = write_agent_cli_files("prompt", None, cwd_path.to_str());
 
     let mut perms = fs::metadata(&cwd_path).expect("metadata").permissions();
-    // Restore write access so the tempdir can clean itself up; this is test
-    // teardown, not a security-relevant permission change.
+    // Restore write access so the tempdir can clean up. This is teardown, not a security change.
     #[expect(
       clippy::permissions_set_readonly_false,
       reason = "test teardown restores write access so the tempdir can clean up"

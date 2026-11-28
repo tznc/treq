@@ -300,8 +300,7 @@ impl TerminalHost for Backend {
       emit,
     )?;
     if let Some(command) = &spawn.auto_command {
-      // As React did: the shell is given a moment to start, then the
-      // command is typed with its echo hidden.
+      // As React did: the shell gets a moment to start, then the command is typed with echo hidden.
       let manager = state.pty_manager.clone();
       let (id, command) = (spawn.id.clone(), agent_command::normalize_command(command));
       std::thread::spawn(move || {
@@ -394,8 +393,7 @@ impl TerminalHost for Backend {
       RemoteAgentId::Gemini => "gemini",
     };
     self.connect_agent_msg();
-    // The repository is on the host; what its agent sends is recorded on
-    // this machine, where the window keeps the repository's state.
+    // The repo is on the host, but agent messages are recorded here, where the window keeps state.
     let ledger = crate::gpui_shell::remote_repo::for_window(self.label())
       .map(|repo| repo.scope(&repo.canonical_path))
       .or_else(|| {
@@ -1033,8 +1031,7 @@ mod tests {
     assert!(live.pending_echo.lock_or_recover().text.len() <= ECHO_MAX);
     live.typed("x");
     live.pending_echo.lock_or_recover().typed_at = Some(Instant::now() - ECHO_EXPIRES * 2);
-    // Output that does not start with the typing is the process writing, and
-    // the expired typing is forgotten rather than matched against later output.
+    // Output not starting with the typing is the process's own, and expired typing is forgotten.
     assert_eq!(live.pending_echo.lock_or_recover().pending().len(), 0);
   }
 

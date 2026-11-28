@@ -342,8 +342,7 @@ fn inverse33() -> u32 {
 /// [`hash_diff_lines`] gives them as a number, from one pass over the lines
 /// instead of joining each window.
 fn window_hashes<'a>(lines: impl Iterator<Item = &'a str>, size: usize) -> Vec<u32> {
-  // `prefix[k]` is the polynomial of the first `k` lines each followed by a
-  // newline, `end[k]` how many UTF-16 units that is.
+  // `prefix[k]` hashes the first `k` lines plus newlines, and `end[k]` is their UTF-16 length.
   let mut prefix = vec![0u32];
   let mut end = vec![0usize];
   for line in lines {

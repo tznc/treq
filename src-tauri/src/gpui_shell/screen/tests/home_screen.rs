@@ -161,10 +161,7 @@ fn workspace_header_syncs_itself(cx: &mut TestAppContext) {
       "notify workspaceChanged",
     ]
   );
-  // The window reads again on `workspaceChanged` and bumps the route's
-  // revision, which reads the header again
-  // (`workspace_header_reads_again_when_the_model_refreshes`): the header
-  // doesn't read it twice.
+  // The revision bump on `workspaceChanged` rereads the header, so the header adds no read itself.
   let reads = host
     .calls()
     .iter()

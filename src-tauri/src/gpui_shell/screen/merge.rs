@@ -1487,8 +1487,7 @@ fn commits(preview: &Preview, target: &str, p: &Palette) -> impl IntoElement {
           .items_start()
           .gap_3()
           .child(
-            // Short label (['short commit id']): 11px is fine.
-            // ast-grep-ignore: gpui-text-xs-short-label-only
+            // Short label (short commit id). ast-grep-ignore: gpui-text-xs-short-label-only
             ui::text(div(), TextSize::Xs)
               .flex_none()
               .bg(p.muted)

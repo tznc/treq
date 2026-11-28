@@ -24,7 +24,7 @@ export interface GatewayCredential {
 
 export interface OpenTcpOptions {
   /** The placement's gateway secret; required for every connect. */
-  credential?: GatewayCredential;
+  credential?: GatewayCredential | undefined;
   /**
    * Wakes the machine before the single retry. Gateway providers run sshd
    * and the gateway under a pidfile supervisor, so this should also re-run

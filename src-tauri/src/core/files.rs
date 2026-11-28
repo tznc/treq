@@ -177,9 +177,7 @@ pub fn list_directory(path: &str) -> Result<Vec<WorkspaceEntry>, String> {
       continue;
     }
     if let Some(name) = entry_path.file_name().and_then(|n| n.to_str()) {
-      // The type comes with the directory listing; only a symlink needs a
-      // stat to tell whether it leads to a directory. No caller reads the
-      // entries' times, and a stat per entry was most of a large listing.
+      // Only symlinks need a stat. A stat per entry was most of a large listing's cost.
       let is_directory = match entry.file_type() {
         Some(t) if !t.is_symlink() => t.is_dir(),
         _ => entry_path.is_dir(),

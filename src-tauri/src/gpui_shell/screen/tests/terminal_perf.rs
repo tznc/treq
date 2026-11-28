@@ -52,8 +52,7 @@ fn terminal_perf_streaming(cx: &mut TestAppContext) {
   host.output(pty, &lines(0, 3000));
   frame(&mut h);
 
-  // Each burst scrolls a full screen of new output in, as `cat` of a
-  // build log does, and draws it.
+  // Each burst scrolls in and draws a full screen of new output, as `cat` of a build log does.
   let mut samples: Vec<_> = (0..40)
     .map(|n| timed(&mut h, |_| host.output(pty, &lines(10_000 + n * 80, 80))))
     .collect();

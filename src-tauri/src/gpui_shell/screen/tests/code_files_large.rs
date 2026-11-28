@@ -188,8 +188,7 @@ fn the_code_tab_draws_the_root_entries_near_the_viewport(cx: &mut TestAppContext
   let second = h.cx.debug_bounds("code-entry-zz_00001.txt").expect("row");
   let third = h.cx.debug_bounds("code-entry-zz_00002.txt").expect("row");
   let at = first.center();
-  // Scrolled to the bottom: the last rows follow the rows not drawn, at the
-  // height they would take. A workspace's Code tab draws no README.
+  // Scrolled down, undrawn rows still take their height. A workspace's Code tab draws no README.
   scroll_by(&mut h, at, 150, -2000.);
   let screen = h.rendered();
   gpui_testing_library::expect(

@@ -141,7 +141,7 @@ Deno.test("a retried delete after the machine is gone still removes the placemen
   // The first delete destroyed the machine but its volume never detached in time.
   fake.machines.delete(id);
   for (const v of fake.volumes.values()) v.attached_machine_id = null;
-  await provider.deleteInstance(id, { placementId: PARAMS.placementId });
+  await provider.deleteInstance(id, { placementId: defined(PARAMS.placementId) });
   assertEquals(fake.volumes.size, 0);
 });
 
@@ -149,7 +149,7 @@ Deno.test("delete leaves other placements' volumes alone", async () => {
   const { fake, provider } = setup();
   const a = await provider.createInstance(PARAMS);
   await provider.createInstance({ ...PARAMS, placementId: "PL-2", idempotencyKey: "idem-2" });
-  await provider.deleteInstance(a.providerResourceId, { placementId: PARAMS.placementId });
+  await provider.deleteInstance(a.providerResourceId, { placementId: defined(PARAMS.placementId) });
   assertEquals(fake.machines.size, 1);
   assertEquals(fake.volumes.size, 1);
 });

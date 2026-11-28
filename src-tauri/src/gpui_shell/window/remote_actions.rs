@@ -60,8 +60,7 @@ impl Model {
         self.remote.ambiguous = None;
         Vec::new()
       }
-      // Pending idempotency keys stay: a retry after the refresh must
-      // still carry the original key.
+      // Pending idempotency keys stay: a retry after the refresh must still carry the original key.
       "remote.ambiguous.refresh" => {
         self.remote.ambiguous = None;
         self.refresh_remote()
@@ -99,9 +98,7 @@ impl Model {
         Vec::new()
       }
       id if id.starts_with("remoteRepo.") => remote(self.remote.form_press(id)),
-      // The Overview screen's machines and recent repositories.
-      // The cloud row before its workspace runs: the setup dialog, on the
-      // cloud workspace's screen.
+      // Overview rows: until its workspace runs, the cloud row opens setup on the cloud screen.
       "machines.cloud" => {
         self.remote.setup = true;
         self.remote.setup_screen = Some("managed");
@@ -147,8 +144,7 @@ impl Model {
         let label = value["label"]
           .as_str()
           .map(str::to_string)
-          // A new session is always fresh: a label already running would
-          // attach to it.
+          // A new session is always fresh: a label already running would attach to it.
           .unwrap_or_else(|| remote::session_label(None, remote::now_ms()));
         let reattach = value["reattach"].as_bool().unwrap_or(false);
         let workspace = self.selected_workspace(data).cloned();
@@ -260,8 +256,7 @@ impl Model {
   pub fn remote_mutation(&mut self, status: &str, reason: Option<&str>) -> Vec<Effect> {
     if status == "ambiguous" {
       self.remote.ambiguous = reason.map(str::to_string);
-      // The cached view may miss a change that did land, and the user
-      // decides from it whether to retry.
+      // The cached view may miss a change that landed, and the user retries based on it.
       return self.refresh_remote();
     }
     self.remote.ambiguous = None;

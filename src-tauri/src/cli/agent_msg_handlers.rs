@@ -241,8 +241,7 @@ pub(super) fn handle(matches: &Matches) -> i32 {
         endpoint: instance.endpoint,
         repo,
       }),
-      // A remote host runs no treq app: its terminals read the mailbox the
-      // attached instance keeps for them.
+      // A remote host runs no treq app, so its terminals read the attached instance's mailbox.
       Err(error) => match &pty {
         Some(session) => Box::new(MailboxClient {
           dir: crate::core::agent_msg::mailbox::default_dir()?,

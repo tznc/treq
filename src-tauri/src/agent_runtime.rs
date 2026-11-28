@@ -55,8 +55,7 @@ pub(crate) fn find_target_window_label_for_repo(app: &AppHandle, repo: &str) -> 
     return Some(label);
   }
 
-  // A window where the repository is a supporting repository handles it only
-  // when no window has it open as the main repository.
+  // A window handles a supporting repo only when no window has it open as the main repo.
   let supporting_labels: Vec<String> = state
     .window_supporting_repo_paths
     .lock()
@@ -341,8 +340,7 @@ pub(crate) fn start_instance_registry_heartbeat(app: AppHandle) {
           log::warn!("Skipping instance heartbeat for empty repo path");
           continue;
         }
-        // Liveness is judged against `HEARTBEAT_TIMEOUT_MS`, so an unchanged
-        // window set only needs a refresh well inside that window.
+        // An unchanged window set only needs a refresh well inside `HEARTBEAT_TIMEOUT_MS`.
         if last_written.get(&repo_path).is_some_and(|(written, at)| {
           *written == windows && now.saturating_sub(*at) < agent_dispatch::HEARTBEAT_TIMEOUT_MS / 3
         }) {

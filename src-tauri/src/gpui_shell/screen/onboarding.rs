@@ -519,8 +519,7 @@ impl OnboardingView {
         endpoint_id: Some(endpoint_id),
         status,
       } if status == "ready" => (self.react)(press(format!("machines.connect:{endpoint_id}")), cx),
-      // The setup dialog signs in, creates, wakes or repairs the cloud
-      // workspace.
+      // The setup dialog signs in, creates, wakes or repairs the cloud workspace.
       Place::Cloud { .. } => (self.react)(press("machines.cloud".into()), cx),
       Place::DevContainer { repo_path, .. } => self.host.open_local(repo_path),
     }
@@ -881,8 +880,7 @@ impl OnboardingView {
       running: false,
     }
     .section();
-    // Until there is an SSH host or a dev container, one Other machines
-    // group stands for both, with one +.
+    // Until an SSH host or dev container exists, one Other machines group with one + covers both.
     let offered = self.listing.ssh || self.listing.containers;
     let any_other =
       self.container.is_some() || sections.iter().any(|(s, _)| *s == ssh || *s == containers);
@@ -1153,8 +1151,7 @@ impl OnboardingView {
                 ))
                 // A name the user gave: kept as typed.
                 .child(
-                  // Short label (['machine name label']): 11px is fine.
-                  // ast-grep-ignore: gpui-text-xs-short-label-only
+                  // Short label (machine name). ast-grep-ignore: gpui-text-xs-short-label-only
                   ui::text(div(), TextSize::Xs)
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(p.muted_foreground)
@@ -1380,8 +1377,7 @@ where
     );
     return;
   }
-  // The rebase pass runs behind the window, which opens at once; its
-  // `prepare_repo` must not set the repository up a second time.
+  // The rebase pass runs behind the open window. Its `prepare_repo` must not set up the repo twice.
   if let Err(err) = core::init_deferring_rebase(path) {
     toast(
       ToastTone::Error,

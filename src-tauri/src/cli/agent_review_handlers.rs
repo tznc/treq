@@ -99,8 +99,7 @@ pub(super) fn handle_agent_review_command(
       let target_id = require_value(matches, "target-id")?;
       let file = require_value(matches, "file")?;
       let side = parse_side(get_arg_value(matches, "side").as_deref())?;
-      // Linear content is reviewed from a snapshot; keep the exact text the
-      // comment covers so a suggestion can be applied to the live content.
+      // Linear content is reviewed from a snapshot. The quoted text lets a suggestion apply live.
       let quoted_text = quoted_text_for(
         &repo_path,
         &target_type,

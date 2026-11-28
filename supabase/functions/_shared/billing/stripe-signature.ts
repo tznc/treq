@@ -71,7 +71,7 @@ export async function verifyStripeSignature(
   payload: string,
   header: string | null | undefined,
   secret: string,
-  options: { nowSeconds?: number; toleranceSeconds?: number } = {},
+  options: { nowSeconds?: number | undefined; toleranceSeconds?: number } = {},
 ): Promise<SignatureCheck> {
   if (!secret) {
     throw new Error("Stripe webhook secret is required");

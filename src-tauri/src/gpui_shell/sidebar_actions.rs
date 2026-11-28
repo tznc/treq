@@ -90,8 +90,7 @@ pub fn handle(
         repo_path: repo_path.clone(),
         missing: snapshot.repos[index].missing,
         supporting: index > 0,
-        // Any local repository can leave; the next takes over the window,
-        // or the project shows empty. A remote window's one repository stays.
+        // Any local repository can leave, but a remote window's one repository stays.
         removable: snapshot.repos.len() > 1 || !remote,
         remote,
       };
@@ -352,8 +351,7 @@ fn run(app: &AppHandle, backend: Arc<Backend>, action: MenuAction) {
         log::warn!("moving project: {e}");
       }
     }
-    // A pick runs inside a GPUI update, where `run_on_main_thread` runs at
-    // once and the new window could not attach GPUI: open it after.
+    // In a GPUI update `run_on_main_thread` runs at once and the window can't attach, so defer.
     MenuAction::SwitchProject(id) => {
       super::defer_main(app, move |app| super::projects::open_project(app, &id))
     }

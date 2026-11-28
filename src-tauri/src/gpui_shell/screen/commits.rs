@@ -300,8 +300,7 @@ impl CommitsView {
       return;
     }
     let moved = self.parent.key() != parent.key();
-    // The log depends on nothing else: the conflicted files or the
-    // workspace's record changing alone don't read it again.
+    // The log depends on nothing else, so conflicted files or the record alone don't reread it.
     let reread = moved
       || self.parent.revision != parent.revision
       || self.parent.default_branch != parent.default_branch;
@@ -344,8 +343,7 @@ impl CommitsView {
       }
       (true, Some(at)) => {
         self.hidden_at = None;
-        // Until its first read lands (a view made ahead), that read is
-        // still on the way.
+        // Before its first read lands (a view made ahead), that read is still in flight.
         if at == self.parent.revision && self.ready() {
           self.load(cx);
         }
@@ -409,8 +407,7 @@ impl CommitsView {
             if tentative(&view.history) != tentative(&Some(history.clone())) {
               view.hide_tentative = false;
             }
-            // A fresh read no longer lists what was removed, unless the
-            // removal is still on its way.
+            // A fresh read drops removed commits, unless the removal is still in flight.
             let unconfirmed = &view.unconfirmed;
             view.removed.retain(|id| unconfirmed.contains(id));
             view.history = Some(history);
@@ -1282,8 +1279,7 @@ impl CommitsView {
       return;
     }
     let (change, description) = (commit.change_id.clone(), text.clone());
-    // The row shows the new description at once; a failure puts the old one
-    // back.
+    // The row shows the new description at once, and a failure restores the old one.
     let before = self.set_description(&change, &description);
     self.dialog = None;
     self.layout_gen += 1;
@@ -2306,9 +2302,7 @@ impl CommitsView {
       ),
       NativeMenuItem::Separator,
     ];
-    // Immutable means on the workspace's target branch, or for the home repo
-    // pushed to origin: offer nothing that rewrites it. A workspace's commits
-    // pushed to its own branch stay mutable, so they stay editable.
+    // Immutable: on the target, or pushed from home. Pushed workspace commits stay editable.
     let rewritable = own && !commit.is_immutable;
     if rewritable {
       items.push(run("Edit description", Self::edit_description).icon(MenuIcon::Pencil));

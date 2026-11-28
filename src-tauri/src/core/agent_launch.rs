@@ -1237,8 +1237,7 @@ mod tests {
 
   #[test]
   fn numbers_sessions_across_the_repository() {
-    // Other workspaces' sessions and deleted ones (gaps at 2-6) must not
-    // lead to a reused number.
+    // Other workspaces' sessions and deleted ones (gaps at 2-6) must not lead to a reused number.
     let store = FakeStore {
       sessions: vec!["Claude 1".into(), "Claude 7".into(), "Codex 9".into()],
       ..Default::default()

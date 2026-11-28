@@ -12,6 +12,8 @@ use treq_ui::SelectorExt as _;
 
 use gpui::{AnyElement, StrikethroughStyle, StyledText, Task};
 
+use crate::gpui_shell::screen::changes_threads::quoted_text;
+
 use super::*;
 
 /// Comment cards cap their width so lines stay readable on wide screens.
@@ -22,7 +24,7 @@ use crate::{
     changes_review::{count_label, number_and_side, Pending, Quote, Side},
     changes_threads::{
       agent_by_line, comment_date, github_suggestion_original, original_text, place_threads,
-      preview, suggestion_diff, suggestion_span, Placed, RowKind,
+      preview, suggestion_diff, suggestion_span, LineKey, Placed, RowKind,
     },
     commits_data::LineRef,
     reactions::{self, Reacts},
@@ -56,6 +58,9 @@ pub(in crate::gpui_shell::screen) struct Threads {
   poll: Option<Task<()>>,
   /// The review comment whose reaction picker is open.
   reaction_picker: Option<String>,
+  /// The text selected when the pointer was last let go: a press clears
+  /// the selection before Quote's click reads it.
+  pub(super) selected: String,
 }
 
 impl ChangesView {
@@ -89,6 +94,13 @@ impl ChangesView {
 
   pub(super) fn stop_threads(&mut self) {
     self.threads.poll = None;
+  }
+
+  /// The pointer let go: ends a drag over the diff, and keeps what is
+  /// selected for Quote.
+  pub(super) fn end_pointer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    self.end_drag(cx);
+    self.threads.selected = gpui_kit::base::TextSelection::selected_text(window, cx);
   }
 
   fn read_threads(&mut self, github: bool, cx: &mut Context<Self>) {
@@ -273,7 +285,7 @@ impl ChangesView {
         at,
         start_line: line,
         end_line: line,
-        line_content: vec![comment.body.clone()],
+        line_content: vec![quoted_text(&comment.body, &self.threads.selected)],
         side,
         quote: Some(Quote {
           author: comment.author.login.clone(),
@@ -283,6 +295,21 @@ impl ChangesView {
       },
       cx,
     );
+  }
+
+  /// The thread on `key`'s line, or above `path` when `key` is `None`,
+  /// whose comment the open comment box quotes.
+  pub(super) fn quoted_thread(&self, path: &str, key: Option<&LineKey>) -> Option<&str> {
+    let url = &self.review.draft.as_ref()?.quote.as_ref()?.url;
+    let placed = &self.threads.placed;
+    let on = match key {
+      Some(key) => placed.by_line.get(key)?,
+      None => placed.unplaced.get(path)?,
+    };
+    on.iter()
+      .filter_map(|&i| self.threads.github.get(i))
+      .find(|t| t.comments.iter().any(|c| &c.url == url))
+      .map(|t| t.id.as_str())
   }
 
   // Drawing.
@@ -361,6 +388,12 @@ impl ChangesView {
       out.push(list.into_any_element());
     }
     let key = (path.to_string(), hunk.id.clone(), number, side);
+    let here = self
+      .review
+      .draft
+      .as_ref()
+      .is_some_and(|d| d.file_path == path && d.at == Some((h, l)) && d.hunk_id == hunk.id);
+    let quoted = self.quoted_thread(path, Some(&key)).filter(|_| here);
     if let Some(threads) = self.threads.placed.by_line.get(&key) {
       let mut list = div()
         .border_y_1()
@@ -373,6 +406,9 @@ impl ChangesView {
       for t in threads.iter().filter_map(|&i| self.threads.github.get(i)) {
         let anchor = Some((hunk.id.clone(), (h, l)));
         list = list.child(self.thread_card(t, path, anchor, number, side, p, cx));
+        if quoted == Some(t.id.as_str()) {
+          list = list.child(self.comment_input(p, cx));
+        }
       }
       out.push(list.into_any_element());
     }
@@ -401,16 +437,20 @@ impl ChangesView {
       .flex()
       .flex_col()
       .gap_3();
-    for t in threads.iter().filter_map(|&i| self.threads.github.get(i)) {
-      let line = t.line.and_then(|n| u32::try_from(n).ok()).unwrap_or(0);
-      section = section.child(self.thread_card(t, path, None, line, Side::New, p, cx));
-    }
     let drafting = self
       .review
       .draft
       .as_ref()
       .is_some_and(|d| d.file_path == path && d.hunk_id.is_empty());
-    if drafting {
+    let quoted = self.quoted_thread(path, None).filter(|_| drafting);
+    for t in threads.iter().filter_map(|&i| self.threads.github.get(i)) {
+      let line = t.line.and_then(|n| u32::try_from(n).ok()).unwrap_or(0);
+      section = section.child(self.thread_card(t, path, None, line, Side::New, p, cx));
+      if quoted == Some(t.id.as_str()) {
+        section = section.child(self.comment_input(p, cx));
+      }
+    }
+    if drafting && quoted.is_none() {
       section = section.child(self.comment_input(p, cx));
     }
     Some(section.test_support())
@@ -599,7 +639,10 @@ impl ChangesView {
         self.dark,
       )
     };
-    let body = div().selector("github-comment-body");
+    let body = div()
+      .selector("github-comment-body")
+      .role(gpui::Role::Article)
+      .aria_label(preview(&comment.body));
     let Some(s) = crate::core::review::parse_suggestion(&comment.body) else {
       return body.child(md("", &comment.body));
     };
@@ -799,7 +842,7 @@ impl ChangesView {
             .size(Size::Sm)
             .gap_1p5()
             .disabled(busy)
-            .icon(theme::ICON_TERMINAL, 12.)
+            .icon(theme::ICON_SEND, 12.)
             .label("Send to agent")
             .on_click(
               cx.listener(move |view, _, _, cx| view.send_agent_comment(&comment_sent, cx)),

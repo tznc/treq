@@ -157,8 +157,7 @@ pub fn snapshot(model: &Model, data: &Data) -> Option<SidebarSnapshot> {
   let on_screen = model.repo().to_string();
   let multi = !data.supporting().is_empty();
   let order = order(model, data);
-  // Every window shows the project layout: repositories grouped under
-  // WORKSPACES, a single one included.
+  // Every window groups its repositories under WORKSPACES, a single one included.
   let labels = display_labels(&order);
   let page_selects = !matches!(
     model.page,

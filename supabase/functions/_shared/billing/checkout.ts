@@ -83,9 +83,9 @@ export function buildCheckoutSessionParams(input: {
    * The metered cloud workspace usage price (see usage-report.ts). Metered
    * prices take no quantity: Stripe bills what the meter recorded.
    */
-  usagePriceId?: string;
+  usagePriceId?: string | undefined;
   /** A coupon applied at checkout. Only the internal test account gets one. */
-  couponId?: string;
+  couponId?: string | undefined;
 }): StripeParams {
   const ownerType = input.ownerType ?? "user";
   const params: StripeParams = {

@@ -1,0 +1,30 @@
+id: no-as-unknown-as-ts
+snapshots:
+  ? |
+    const client = (fake as unknown) as SupabaseClient;
+  : labels:
+    - source: (fake as unknown) as SupabaseClient
+      style: primary
+      start: 15
+      end: 50
+  ? |
+    const client = <SupabaseClient><unknown>fake;
+  : labels:
+    - source: <SupabaseClient><unknown>fake
+      style: primary
+      start: 15
+      end: 44
+  ? |
+    const client = fake as any as SupabaseClient;
+  : labels:
+    - source: fake as any as SupabaseClient
+      style: primary
+      start: 15
+      end: 44
+  ? |
+    const client = fake as unknown as SupabaseClient;
+  : labels:
+    - source: fake as unknown as SupabaseClient
+      style: primary
+      start: 15
+      end: 48

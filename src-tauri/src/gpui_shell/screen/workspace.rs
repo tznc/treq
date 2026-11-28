@@ -519,15 +519,13 @@ impl WorkspaceView {
     }
     let moved = self.route.key() != route.key();
     let changed = self.route.changes_revision != route.changes_revision;
-    // A changed checkout or a refocused window (`changes_revision`) may mean
-    // history was rewritten outside treq: the tab badges read again too.
+    // A new `changes_revision` can mean history changed outside treq: the tab badges read again.
     let stale = moved || changed || self.route.revision != route.revision;
     let left = std::mem::replace(&mut self.route, route);
     self.dark = dark;
     if moved {
       self.close_popover(cx);
-      // The header the workspace last read, or one read ahead, draws at
-      // once; the load below reads it again behind.
+      // The last or prefetched header draws at once, and the load below refreshes it behind.
       let now = cx.background_executor().now();
       if let Some(loaded) = self.loaded.take() {
         self
@@ -853,8 +851,7 @@ impl WorkspaceView {
 
   fn rebuild(&mut self, cx: &mut Context<Self>) {
     let route = self.drawn_route(cx);
-    // While another workspace loads, the last one stays drawn and swaps in
-    // one frame once it lands, rather than flashing an empty header.
+    // The last workspace stays drawn until the next one loads, so the header never flashes empty.
     let Some(loaded) = self.loaded.as_ref() else {
       self.sync_popover(cx);
       return;
@@ -927,8 +924,7 @@ impl WorkspaceView {
       return;
     };
     self.close_popover(cx);
-    // The button's tooltip would cover the popover and swallow the next
-    // click; `hover_tooltip` keeps it hidden while the popover shows.
+    // The tooltip would swallow the popover's next click, so `hover_tooltip` keeps it hidden.
     if self.tooltip.take().is_some() {
       self.sync_tooltip_popup(cx);
       cx.notify();
@@ -1041,8 +1037,7 @@ impl WorkspaceView {
             outcome.title,
             outcome.description,
           )));
-          // The window reads again on this and bumps the route's revision,
-          // which reloads the header (`set_route`).
+          // The window rereads and bumps the revision, which reloads the header (`set_route`).
           view
             .host
             .notify(NativeEvent::WorkspaceChanged { repo_path });
@@ -1288,8 +1283,7 @@ impl WorkspaceView {
       });
 
     if !h.home {
-      // The title in place of the branch: the branch, its target and Stack
-      // on this… live in the Code tab's stack card.
+      // The title stands in for the branch, which lives in the Code tab's stack card.
       if let Some(title) = &self.title {
         left = left.child(title.clone());
       }
@@ -1394,8 +1388,7 @@ impl WorkspaceView {
       ));
     }
 
-    // The row wraps it whole first; alone on its row and still too wide (at
-    // a large zoom), its buttons wrap too, right-aligned.
+    // The row wraps the group whole first. At a large zoom its buttons wrap too, right-aligned.
     let mut right = div()
       .flex()
       .flex_wrap()
@@ -1423,9 +1416,7 @@ impl WorkspaceView {
       let url = linear.url.clone();
       let sink = self.sink.clone();
       right = right.child(
-        // Short label (['issue key']): 11px is fine.
-        // ast-grep-ignore: gpui-text-xs-short-label-only
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
           .selector("workspace-linear")
           .role(gpui::Role::Link)
           .aria_label(linear.key.clone())
@@ -1542,8 +1533,7 @@ impl WorkspaceView {
           .flex()
           .flex_wrap()
           .items_center()
-          // React's `justify-between` too, which CSS ignores beside the
-          // right group's `ml-auto`; taffy would add the free space twice.
+          // Omits React's `justify-between`: beside `ml-auto` taffy would add the free space twice.
           .gap_x_2()
           .gap_y_1()
           .child(left)
@@ -1552,8 +1542,7 @@ impl WorkspaceView {
   }
 
   fn view_pr(&self, pr: &ViewPr, p: &Palette, cx: &mut Context<Self>) -> Stateful<Div> {
-    // The PR's state as GitHub labels it, as a pill that is also the button:
-    // the label opens the PR in Treq, the trailing half on GitHub.
+    // A pill of the PR's GitHub state: the label opens it in Treq, the trailing half on GitHub.
     let draft = pr.draft && pr.state == PrState::Open;
     let (label, icon, tone) = match pr.state {
       _ if draft => ("Draft", theme::ICON_PR_DRAFT, ui::Tone::Neutral),
@@ -1638,8 +1627,7 @@ impl WorkspaceView {
   }
 
   fn sync(&self, sync: &Sync, p: &Palette, cx: &mut Context<Self>) -> Stateful<Div> {
-    // The pip says at a glance that the branch and its remote differ, and
-    // the tooltip says by how much.
+    // Drawn only when branch and remote differ: the pip flags it, the tooltip says by how much.
     let state = sync_state(sync);
     let button = Button::new("workspace-sync", p)
       .aria_label(format!("Sync with remote: {state}"))
@@ -1675,8 +1663,7 @@ impl WorkspaceView {
       )
       .when(sync.ahead > 0 || sync.behind > 0, |d| {
         d.child(
-          // Solid status colour, ringed in the background so it reads against
-          // the button's border in both themes; inset so nothing clips it.
+          // Ringed to read against the border in both themes, and inset so nothing clips it.
           div()
             .selector("workspace-sync-pip")
             .absolute()
@@ -1726,8 +1713,7 @@ impl WorkspaceView {
 
   /// The workspace's tab bar: the view tabs, then its busy and loc status.
   fn tab_bar(&self, row: &TabRow, p: &Palette) -> ObservedElement<gpui::Stateful<Div>> {
-    // Counts are neutral, uncommitted changes yellow; a conflict shows once,
-    // as a danger dot.
+    // Counts are neutral and uncommitted changes yellow. A conflict shows once, as a danger dot.
     let commits = ui::Tab::new("workspace-tab-commits", "Commits").icon(theme::ICON_COMMIT);
     let commits = match &row.commits {
       Some(CommitsLabel::Count { count, tone }) => {
@@ -1846,9 +1832,7 @@ async fn in_front(this: &WeakEntity<WorkspaceView>, cx: &mut gpui::AsyncWindowCo
 
 /// One of `LocDiffMarker`'s counts, `+N` or `-N`, in its tone's color.
 pub(super) fn loc_count(text: String, color: Hsla) -> Div {
-  // Short label (['line count']): 11px is fine.
-  // ast-grep-ignore: gpui-text-xs-short-label-only
-  ui::text(div(), TextSize::Xs)
+  ui::text(div(), TextSize::Sm)
     .font_family(theme::MONO_FONT)
     .text_color(color)
     .child(text)
@@ -1954,8 +1938,7 @@ impl WorkspaceView {
     };
     let text = |key: &str| value[key].as_str().unwrap_or_default().to_string();
     match field.as_str() {
-      // A reviewer that inherits an idle agent's context would review its
-      // own work, so a review always starts a new terminal.
+      // Reusing an idle agent would review its own work, so each review gets a new terminal.
       "changes.startReview" => {
         let agent = value["agent"].as_str().map(str::to_string);
         let prompt = text("prompt");
@@ -2280,8 +2263,7 @@ impl WorkspaceView {
       self.logs = Some((logs.clone(), key));
       return Body::Logs(logs);
     }
-    // A workspace's first view of the tab draws once it has read; the
-    // tab's last view stays drawn meanwhile.
+    // A new view of the tab draws after its first read, and the last view stays drawn until then.
     if tab == Tab::Changes {
       self.code_shown = false;
       let options = changes::Options {
@@ -2305,8 +2287,7 @@ impl WorkspaceView {
     let host: Arc<dyn CommitsHost> = host;
     if tab == Tab::Commits {
       self.code_shown = false;
-      // The log reads again with the tab badges when the checkout changes
-      // (`changes_revision`), so the list and its count stay one read.
+      // The log rereads with the badges on `changes_revision`, so the list matches its count.
       let mut parent = parent;
       parent.revision += self.route.changes_revision;
       let scroll_to = self.route.scroll_to_commit.clone();
@@ -2525,9 +2506,7 @@ impl Render for WorkspaceView {
       super::remote_chrome::strip(&chrome, self.dark, &p, &press)
     });
     let body = match (code, self.sync_terminal(cx)) {
-      // The tab with the terminal pane below: a share of the whole view,
-      // header and tabs included. A maximized pane covers the tabs and
-      // keeps the header.
+      // The pane's share includes header and tabs. Maximized, it covers the tabs, not the header.
       (code, Some(pane)) => {
         pane.update(cx, |pane, cx| pane.set_dark(self.dark, cx));
         let covered = pane.read(cx).covers();

@@ -211,9 +211,7 @@ fn a_large_diff_finds_text_on_rows_not_drawn(cx: &mut TestAppContext) {
     .executor()
     .advance_clock(std::time::Duration::from_millis(150));
   h.cx.run_until_parked();
-  // Enter reveals a match: the removed or the added line 249, in the last
-  // chunk of 21 lines (removed at +9, added at +19). Either way the added
-  // one is on screen.
+  // Enter reveals line 249, removed at +9 or added at +19 in the last chunk: either way +19 shows.
   h.cx.simulate_keystrokes("enter");
   h.cx.run_until_parked();
   assert!(

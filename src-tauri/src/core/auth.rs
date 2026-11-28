@@ -522,8 +522,7 @@ impl Auth {
       }
       Err(error) => {
         log::warn!("refreshing the Supabase session failed: {error}");
-        // A refused refresh token ends the session; a network failure keeps
-        // it until the access token actually expires.
+        // A refused refresh token ends the session. A network failure keeps it until it expires.
         if (400..500).contains(&error.status) {
           self.set_session(None);
           return None;

@@ -15,8 +15,7 @@ pub(in crate::gpui_shell) struct Rows<T> {
 impl<T> Default for Rows<T> {
   fn default() -> Self {
     Self {
-      // Draws a screen's worth above and below, so a scroll rarely meets
-      // an unmeasured row.
+      // Draws a screen's worth above and below, so a scroll rarely meets an unmeasured row.
       list: ListState::new(0, ListAlignment::Top, px(800.)),
       rows: Vec::new(),
       rem: px(0.),

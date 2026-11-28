@@ -54,9 +54,7 @@ pub fn commit_repo(repo_path: &str, message: &str) -> Result<String, String> {
 /// checkout strictly from the working copy state.
 pub fn get_repo_current_branch(repo_path: &str) -> Result<RepoBranch, String> {
   jj::jj_util_import_git_refs(repo_path).map_err(|e| e.to_string())?;
-  // A jj rewrite/ref export can occasionally leave colocated Git HEAD detached at the
-  // default branch tip. Repair only that unambiguous case; preserve intentional detached
-  // checkouts at any other commit.
+  // A jj rewrite can leave Git HEAD detached at the default tip. Repair only that exact case.
   let _ = jj::repair_detached_home_head_at_default_branch(repo_path).map_err(|e| e.to_string())?;
   let resolved_branch = jj::resolve_home_repo_branch(repo_path).map_err(|e| e.to_string())?;
   let detached_head = read_detached_head_commit(repo_path)?;
@@ -137,9 +135,7 @@ pub fn repo_status(repo_path: &str) -> Result<RepoStatus, String> {
     .map(|files| !files.is_empty())
     .unwrap_or(false);
 
-  // Step 5: remote sync status for the checked-out branch (same branch pull/push use).
-  // Do not use bookmarks on `@-`: the home WC can lag on the default-branch tip while
-  // git HEAD is on a different branch that is ahead/behind its remote.
+  // Step 5: sync status for HEAD's branch. `@-` bookmarks can lag on the default-branch tip.
   let checked_out_branch = jj::resolve_home_repo_branch(repo_path)
     .ok()
     .filter(|branch| !branch.is_empty() && branch != "HEAD")
