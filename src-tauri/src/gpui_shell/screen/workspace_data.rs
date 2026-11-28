@@ -9,7 +9,7 @@ use super::{
   checklist::ToolsHost,
   workspace::{
     Checks, CommitsLabel, CreatePr, Disabled, Header, HomeTarget, Linear, Loc, Merge, Pill,
-    PrState, Rebase, Sync, Tab, TabRow, Target, Tone, Tooltip, ViewPr,
+    PrState, Rebase, Rebased, Sync, Tab, TabRow, Target, Tone, Tooltip, ViewPr,
   },
 };
 use crate::{
@@ -47,6 +47,10 @@ pub struct Route {
   pub workspace_id: Option<i64>,
   /// The home repository's checked-out branch (`mainRepoBranch`).
   pub home_branch: String,
+  /// The home row's label in the sidebar: its branch, or the commit a
+  /// detached HEAD is on. `None` until read.
+  #[serde(default)]
+  pub home_ref: Option<String>,
   pub tab: Tab,
   /// The target branch is being changed (`rebasing`).
   pub retargeting: bool,
@@ -552,6 +556,8 @@ struct Metadata {
   linear_issue_key: Option<String>,
   linear_issue_url: Option<String>,
   linear_issue_title: Option<String>,
+  /// When auto-rebase last moved the branch onto its target (RFC 3339).
+  last_rebased_at: Option<String>,
 }
 
 fn plural(n: usize, word: &str) -> String {
@@ -738,8 +744,12 @@ pub fn workspace_view(
     })
   });
 
+  let label = match (workspace, &route.home_ref) {
+    (None, Some(home_ref)) if !home_ref.is_empty() => home_ref.clone(),
+    _ => branch.clone(),
+  };
   let header = Header {
-    branch: branch.clone(),
+    branch: label,
     title: workspace.map(super::code_data::display_title),
     home: workspace.is_none(),
     linear: match (&metadata.linear_issue_key, &metadata.linear_issue_url) {
@@ -783,9 +793,19 @@ pub fn workspace_view(
         draft: p.is_draft,
       }),
     create_pr,
-    sync: (!not_on_remote && (ahead > 0 || behind > 0)).then_some(Sync {
+    sync: Some(Sync {
       ahead: ahead as u32,
       behind: behind as u32,
+      not_on_remote,
+      rebased: workspace
+        .zip(metadata.last_rebased_at.clone())
+        .map(|(w, at)| Rebased {
+          target: w
+            .target_branch
+            .clone()
+            .unwrap_or_else(|| route.default_target().to_string()),
+          at,
+        }),
       disabled: busy,
       spinning: matches!(pending, Pending::Sync | Pending::Reset),
     }),

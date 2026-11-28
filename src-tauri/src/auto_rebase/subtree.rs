@@ -210,12 +210,8 @@ pub fn rebase_root_subtree_from_workspace_force(
           repo_path,
           &convert_to_jj_branch_format(&target_branch, repo_path),
         ) {
-          local_db::update_workspace_last_rebased_commit(
-            repo_path,
-            workspace.id,
-            &current_target_commit,
-          )
-          .warn_on_err("update workspace last rebased commit");
+          local_db::record_workspaces_rebased(repo_path, &[workspace.id], &current_target_commit)
+            .warn_on_err("update workspace last rebased commit");
         }
 
         match jj::jj_sync_working_copy_if_safe(&full_path, &workspace.branch_name) {
