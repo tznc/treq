@@ -87,3 +87,80 @@ export async function adminCall(action: string, body: Record<string, unknown> = 
   if (!response.ok) throw new Error(`remote-admin ${action} answered ${response.status}: ${text}`);
   return JSON.parse(text);
 }
+
+export type RollStep = "stage" | "promote" | "retire" | "emergency";
+
+/** What one roll step sets and unsets, whether it sweeps running machines, and the public keys verify then expects. */
+export interface RollPlan {
+  set: Record<string, string>;
+  unset: string[];
+  sweep: boolean;
+  expect: { signing: string; trusted: string[] };
+}
+
+// stage: trust both, sign with current. promote: sign with next, trust both.
+// retire: trust next alone. emergency: sign with and trust next alone, at once.
+export function planRoll({ step, current, next }: { step: RollStep; current?: CaFile; next: CaFile }): RollPlan {
+  const signWithNext = () => {
+    if (!next.seed) throw new Error("the next CA file has no seed to sign with");
+    return { [SEED_SECRET]: next.seed, [PUBLIC_SECRET]: next.publicKey };
+  };
+  const both = () => {
+    if (!current) throw new Error(`${step} needs the current CA file`);
+    return [current.publicKey, next.publicKey];
+  };
+  switch (step) {
+    case "stage":
+      return {
+        set: { [TRUSTED_SECRET]: both().join(",") },
+        unset: [],
+        sweep: true,
+        expect: { signing: both()[0] ?? "", trusted: both() },
+      };
+    case "promote":
+      return { set: signWithNext(), unset: [], sweep: false, expect: { signing: next.publicKey, trusted: both() } };
+    case "retire":
+      return { set: {}, unset: [TRUSTED_SECRET], sweep: true, expect: { signing: next.publicKey, trusted: [next.publicKey] } };
+    case "emergency":
+      return {
+        set: signWithNext(),
+        unset: [TRUSTED_SECRET],
+        sweep: true,
+        expect: { signing: next.publicKey, trusted: [next.publicKey] },
+      };
+  }
+}
+
+/** Sets and unsets Edge Function secrets through the Supabase Management API. */
+export async function applySecrets(plan: Pick<RollPlan, "set" | "unset">): Promise<void> {
+  const token = Deno.env.get("SUPABASE_ACCESS_TOKEN");
+  const url = Deno.env.get("TREQ_SUPABASE_URL");
+  if (!token || !url) throw new Error("set SUPABASE_ACCESS_TOKEN and TREQ_SUPABASE_URL");
+  const ref = new URL(url).hostname.split(".")[0];
+  const call = async (method: string, body: unknown) => {
+    const response = await fetch(`https://api.supabase.com/v1/projects/${ref}/secrets`, {
+      method,
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) throw new Error(`${method} secrets answered ${response.status}: ${await response.text()}`);
+  };
+  const set = Object.entries(plan.set).map(([name, value]) => ({ name, value }));
+  if (set.length > 0) await call("POST", set);
+  if (plan.unset.length > 0) await call("DELETE", plan.unset);
+}
+
+/** Runs remote-admin `refresh_ca_trust` page by page; returns the machines that failed. */
+export async function sweepAll(): Promise<Array<{ instance_id: string; error: string }>> {
+  const failed: Array<{ instance_id: string; error: string }> = [];
+  let after: string | null = null;
+  do {
+    const page = await adminCall("refresh_ca_trust", { limit: 200, after }) as {
+      failed: Array<{ instance_id: string; error: string }>;
+      next_after: string | null;
+    };
+    failed.push(...page.failed);
+    after = page.next_after;
+  } while (after);
+  return failed;
+}
