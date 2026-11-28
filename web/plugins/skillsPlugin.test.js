@@ -70,6 +70,11 @@ describe('skillPageProps', () => {
     expect(skillPageProps({...mit, license: 'Custom'}, catalog, pages).body).toBeNull();
   });
 
+  test('marks the page noindex unless its route is kept in search', () => {
+    expect(skillPageProps(mit, catalog, pages, new Set([mit.route])).noindex).toBe(false);
+    expect(skillPageProps(mit, catalog, pages, new Set()).noindex).toBe(true);
+  });
+
   test('writes a meta description when the skill has none', () => {
     const props = skillPageProps(chief, catalog, {});
     expect(props.metaDescription).toBe(
@@ -99,4 +104,13 @@ test('every committed author write-up names a source and has every section', () 
       : [`${id}: sections must be ${sections.join(', ')}`]),
   ]);
   expect(problems).toEqual([]);
+});
+
+// web/skills-indexed.json lists the skill pages that stay in search. A route
+// that is not in the catalog never matches a page, so it fails here instead.
+test('every skill page kept in search is in the catalog', () => {
+  const {routes} = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'skills-indexed.json'), 'utf8'));
+  const catalogRoutes = new Set(require('../src/data/skills.json').skills.map((/** @type {{route: string}} */ s) => s.route));
+  expect(routes.filter((/** @type {string} */ route) => !catalogRoutes.has(route))).toEqual([]);
+  expect(new Set(routes).size).toBe(routes.length);
 });

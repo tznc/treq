@@ -199,6 +199,8 @@ pub struct ChangesView {
   committed_collapsed: bool,
   pub(super) collapsed_files: HashSet<String>,
   pub(super) expanded_large: HashSet<String>,
+  /// Committed hunks opened while Committed is hidden, by path and header.
+  pub(super) opened_hunks: HashSet<(String, String)>,
   /// Generated files whose diff "Load diff" read.
   pub(super) loaded_generated: HashSet<String>,
   /// The file list's filter: generated files left out of the list and diff.
@@ -310,6 +312,7 @@ impl ChangesView {
       committed_collapsed: false,
       collapsed_files: HashSet::new(),
       expanded_large: HashSet::new(),
+      opened_hunks: HashSet::new(),
       loaded_generated: HashSet::new(),
       hide_generated: false,
       changeset_expanded: false,
@@ -365,6 +368,10 @@ impl ChangesView {
     let reread = moved
       || self.options.revision != options.revision
       || self.options.show_committed != options.show_committed;
+    // Hiding Committed shuts every committed hunk again.
+    if moved || self.options.show_committed != options.show_committed {
+      self.opened_hunks.clear();
+    }
     // The status's conflicts stand in until the diff lists its own.
     if moved || self.parent.conflicted_files != parent.conflicted_files {
       self.layout_gen += 1;
@@ -614,7 +621,7 @@ impl ChangesView {
       return;
     }
     self.loading = true;
-    let show = self.show_committed();
+    let show = self.options.show_committed;
     // What shows now, so the read compares against it off the main thread.
     let shown = self.snapshot.clone();
     self.run_changed(
@@ -646,13 +653,13 @@ impl ChangesView {
             true
           }
           Ok(snapshot) if view.park(&snapshot) => true,
-          // The reviewed hunks were read from this same diff.
+          // The reviewed hunks were read from this same diff: only the committed side can differ.
           Ok(snapshot)
             if view.in_review()
               && snapshot.token.is_some()
               && snapshot.token == view.hunks_token =>
           {
-            false
+            view.apply(snapshot, cx)
           }
           Ok(snapshot) if view.in_review() && view.snapshot.is_some() => {
             view.recheck(snapshot, cx);
@@ -1118,6 +1125,18 @@ impl ChangesView {
     cx.notify();
   }
 
+  /// A click outside the file list drops its selection and highlight.
+  fn click_away(&mut self, cx: &mut Context<Self>) {
+    let s = &mut self.staging;
+    if self.active.is_none() && s.selected.is_empty() && s.selected_staged.is_empty() {
+      return;
+    }
+    self.active = None;
+    s.selected.clear();
+    s.selected_staged.clear();
+    cx.notify();
+  }
+
   fn stage(&mut self, path: &str, cx: &mut Context<Self>) {
     self.staging.stage(path);
     cx.notify();
@@ -1357,6 +1376,8 @@ impl ChangesView {
                   .into(),
               );
               view.committed_collapsed = true;
+              // Its own write: the read after it is not stale.
+              view.review.apply_next = true;
               if action == CommitAction::Pr {
                 view.send_react(
                   ScreenAction::Press {
@@ -2204,6 +2225,7 @@ impl ChangesView {
           }
         }),
       )
+      .on_mouse_down_out(cx.listener(|this, _, _, cx| this.click_away(cx)))
       .on_mouse_up_out(
         MouseButton::Left,
         cx.listener(|this, _, _, cx| {
@@ -2901,20 +2923,11 @@ impl ChangesView {
     };
     let red = Tone::Danger.text(p);
     let status_color = p.muted_foreground;
-    let mut actions = div()
-      .flex()
-      .items_center()
-      .gap_1()
-      .flex_none()
-      .child(self.status_letter(
-        format!("{list:?}-{}", file.path),
-        &file.status,
-        status_color,
-        cx,
-      ));
+    // The selection's last row keeps its buttons; the others show them on hover.
+    let shown = selected && (staged || last);
+    let hidden = !shown;
+    let mut actions = div().flex().items_center().gap_1().flex_none();
     if !staged {
-      // The selection's last row keeps its buttons; the others show them on hover.
-      let hidden = !(last && selected);
       let target = path.clone();
       let tip_key = format!("discard-tip-{}", file.path);
       let el = small(
@@ -2954,7 +2967,7 @@ impl ChangesView {
         format!("Unstage {}", file.path),
         theme::ICON_MINUS,
         name_color,
-        !selected,
+        hidden,
       )
       .on_click(cx.listener(move |view, _, _, cx| {
         cx.stop_propagation();
@@ -2963,6 +2976,26 @@ impl ChangesView {
       .test_support();
       actions = actions.child(self.tip(tip_key, "Unstage file", el, cx));
     }
+    // Over the last button, at the committed rows' right edge, and hidden
+    // while the buttons show. Visibility, not display: a hover that changes
+    // layout can skip a child's prepaint and then panic in paint.
+    let letter = div()
+      .absolute()
+      .top_0()
+      .bottom_0()
+      .right_0()
+      .flex()
+      .items_center()
+      .child(self.status_letter(
+        format!("{list:?}-{}", file.path),
+        &file.status,
+        status_color,
+        cx,
+      ));
+    actions = actions.relative().child(match shown {
+      true => letter.invisible(),
+      false => letter.group_hover("file-row", |s| s.invisible()),
+    });
     let (click, menu) = (path.clone(), path);
     ui::Row::new(
       SharedString::from(format!(
@@ -2983,6 +3016,8 @@ impl ChangesView {
     .min_w_0()
     .gap_1()
     .px_0()
+    // The committed rows' right inset.
+    .pr_1p5()
     .rounded_none()
     .border_l_2()
     .border_color(gpui::transparent_black())
@@ -3178,28 +3213,20 @@ impl ChangesView {
 
   /// A card's header and file comments, then the threads and comments with
   /// no line above its hunks, or what it shows in their place.
-  fn card_head(&mut self, c: usize, p: &Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
+  /// `pinned`: its header is drawn pinned over the list, which covers this
+  /// one, so it is hidden.
+  fn card_head(
+    &mut self,
+    c: usize,
+    pinned: bool,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> gpui::AnyElement {
     let card = &self.diff.cards[c];
-    let (path, status, old_path) = (
-      card.path.clone(),
-      card.status.clone(),
-      card.old_path.clone(),
-    );
-    let (committed, shut, kind, conflicted_file) =
-      (card.committed, card.shut, card.body, card.conflicted);
-    let counts = self.card_counts(c);
-    let header = self.file_header(
-      &path,
-      &status,
-      old_path.as_deref(),
-      committed,
-      shut,
-      counts,
-      p,
-      cx,
-    );
+    let (path, kind, conflicted_file) = (card.path.clone(), card.body, card.conflicted);
+    let header = self.card_header(c, p, cx);
     let card = div()
-      .child(header)
+      .child(div().when(pinned, |this| this.invisible()).child(header))
       .children(self.file_comments(&path, p, cx));
     let muted = p.muted_foreground;
     let placeholder =
@@ -3309,6 +3336,28 @@ impl ChangesView {
       Body::Collapsed => card,
     }
     .into_any_element()
+  }
+
+  /// A card's file header: its path, actions and counts.
+  fn card_header(&mut self, c: usize, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    let card = &self.diff.cards[c];
+    let (path, status, old_path) = (
+      card.path.clone(),
+      card.status.clone(),
+      card.old_path.clone(),
+    );
+    let (committed, shut) = (card.committed, card.shut);
+    let counts = self.card_counts(c);
+    self.file_header(
+      &path,
+      &status,
+      old_path.as_deref(),
+      committed,
+      shut,
+      counts,
+      p,
+      cx,
+    )
   }
 
   #[expect(
@@ -3459,6 +3508,7 @@ impl ChangesView {
         ui::Checkbox::new(format!("viewed-{path}"), p)
           .checked(viewed)
           .label("Viewed")
+          .name(format!("Viewed {path}"))
           .gap_1()
           .px_2()
           .py_0p5()

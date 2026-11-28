@@ -450,11 +450,38 @@ pub fn jj_base_remote(repo_path: &str) -> &'static str {
 
 /// Fetches origin, then upstream when a fork clone has one.
 pub(super) fn fetch_origin(repo_path: &str) -> Result<String, JjError> {
+  let home_branch = checked_out_home_branch(repo_path);
   fetch_remote(repo_path, "origin")?;
   if jj_base_remote(repo_path) == "upstream" {
     fetch_remote(repo_path, "upstream")?;
   }
+  if let Some(branch) = home_branch {
+    follow_fetched_home_branch(repo_path, &branch);
+  }
   Ok(String::new())
+}
+
+/// The branch Git HEAD is on in the colocated home repo `repo_path`; `None`
+/// for a workspace or a detached HEAD.
+fn checked_out_home_branch(repo_path: &str) -> Option<String> {
+  if derive_repo_path_from_workspace(repo_path).is_some() {
+    return None;
+  }
+  read_git_head_branch(repo_path)
+    .ok()
+    .filter(|branch| branch != "HEAD")
+}
+
+/// Puts Git HEAD back on the home's `branch` after a fetch moved it.
+///
+/// Exporting the moved branch detaches HEAD at the old tip, where the home's
+/// files still are. A clean home moves onto the new tip, which puts HEAD back
+/// on the branch; one with uncommitted changes stays where it is.
+fn follow_fetched_home_branch(repo_path: &str, branch: &str) {
+  if checked_out_home_branch(repo_path).as_deref() == Some(branch) {
+    return;
+  }
+  jj_sync_working_copy_if_safe(repo_path, branch).warn_on_err("follow fetched home branch");
 }
 
 fn fetch_remote(repo_path: &str, remote_name: &str) -> Result<String, JjError> {
