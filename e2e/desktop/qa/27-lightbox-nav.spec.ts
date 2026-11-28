@@ -41,7 +41,8 @@ test("lightbox nav: edges when wide, actions row when narrow", async ({ page }) 
     name: "27-lightbox-nav-02-narrow",
     title: "Narrow window: small arrows in the actions row",
     expectations: [
-      "Small previous/next arrows sit in the actions row, on either side of the toolbar and review input",
+      "Small previous/next arrows sit in the actions row, pinned to its far left and far right ends, in line with the slide's edges",
+      "The toolbar and review input stay centered between the arrows",
       "No arrow overlaps the attachment text",
     ],
   });

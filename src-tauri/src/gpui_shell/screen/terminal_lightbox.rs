@@ -988,17 +988,27 @@ impl Lightbox {
           .child(Input::new(&general).appearance(false).bordered(false)),
       )
     });
-    div()
+    let actions = div()
       .flex()
       .flex_wrap()
       .max_w_full()
       .items_center()
       .justify_center()
       .gap_2()
-      .when(compact, |d| d.child(self.nav(false, true, cx)))
       .child(pill)
-      .children(input)
-      .when(compact, |d| d.child(self.nav(true, true, cx)))
+      .children(input);
+    if !compact {
+      return actions;
+    }
+    // The arrows pin to the row's ends; the actions stay centered between.
+    div()
+      .w_full()
+      .flex()
+      .items_center()
+      .gap_2()
+      .child(self.nav(false, true, cx))
+      .child(actions.flex_1().min_w_0())
+      .child(self.nav(true, true, cx))
   }
 
   fn image_slide(&self, asset: &SendAsset, window: &Window, cx: &mut Context<Self>) -> Div {
