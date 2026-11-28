@@ -48,18 +48,18 @@ pub fn open<V: Render>(
   cx.defer(move |cx| {
     let Some(entity) = root.upgrade() else { return };
     let window = cx.global::<super::Nav>().window;
-    window
-      .update(cx, |_, window, cx| {
-        let view = build(window, cx);
-        entity.update(cx, |root, cx| {
-          root.sheet = Some(Sheet {
-            title,
-            body: Body::View(view.into()),
-          });
-          cx.notify();
+    if let Err(e) = window.update(cx, |_, window, cx| {
+      let view = build(window, cx);
+      entity.update(cx, |root, cx| {
+        root.sheet = Some(Sheet {
+          title,
+          body: Body::View(view.into()),
         });
-      })
-      .ok();
+        cx.notify();
+      });
+    }) {
+      log::debug!("Skipped opening a sheet: the window closed: {e}");
+    }
   });
 }
 
@@ -68,7 +68,9 @@ pub fn close(cx: &mut App) {
     return;
   };
   cx.defer(move |cx| {
-    root.update(cx, dismiss).ok();
+    if let Err(e) = root.update(cx, dismiss) {
+      log::debug!("Skipped closing the sheet: the root view is gone: {e}");
+    }
   });
 }
 
@@ -85,12 +87,12 @@ pub(super) fn dismiss(root: &mut super::Root, cx: &mut Context<super::Root>) {
   root.tap_guard = true;
   cx.spawn(async move |root, cx| {
     cx.background_executor().timer(TAP_GUARD).await;
-    root
-      .update(cx, |root, cx| {
-        root.tap_guard = false;
-        cx.notify();
-      })
-      .ok();
+    if let Err(e) = root.update(cx, |root, cx| {
+      root.tap_guard = false;
+      cx.notify();
+    }) {
+      log::debug!("Skipped releasing the tap guard: the root view is gone: {e}");
+    }
   })
   .detach();
   cx.notify();
@@ -200,12 +202,12 @@ pub fn confirm(
   };
   // Deferred: callers are usually inside another entity's update.
   cx.defer(move |cx| {
-    root
-      .update(cx, |root, cx| {
-        root.sheet = Some(sheet);
-        cx.notify();
-      })
-      .ok();
+    if let Err(e) = root.update(cx, |root, cx| {
+      root.sheet = Some(sheet);
+      cx.notify();
+    }) {
+      log::debug!("Skipped showing a confirmation: the root view is gone: {e}");
+    }
   });
 }
 

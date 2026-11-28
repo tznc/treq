@@ -188,9 +188,12 @@ impl WorkspaceDialogHost for Backend {
   fn close_window(&self) {
     let (app, label) = (self.app().clone(), self.label().to_string());
     let main = app.clone();
-    main
-      .run_on_main_thread(move || crate::gpui_shell::projects::close_confirmed(&app, &label))
-      .ok();
+    let label_for_log = label.clone();
+    if let Err(e) =
+      main.run_on_main_thread(move || crate::gpui_shell::projects::close_confirmed(&app, &label))
+    {
+      log::warn!("Failed to close window {label_for_log}: {e}");
+    }
   }
 
   fn all_workspaces(&self, repo_path: &str) -> Result<Vec<Workspace>, String> {

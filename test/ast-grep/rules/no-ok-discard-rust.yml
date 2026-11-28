@@ -17,28 +17,13 @@ files:
   - "crates/**/*.rs"
 ignores:
   # Not fixed yet. The fix PRs stacked on this one remove these entries.
-  - "src-tauri/src/gpui_shell/screen/file_browser.rs"
-  - "src-tauri/src/gpui_shell/screen/github/new_pr.rs"
-  - "src-tauri/src/gpui_shell/screen/machines.rs"
-  - "src-tauri/src/gpui_shell/screen/onboarding.rs"
-  - "src-tauri/src/gpui_shell/screen/open_workspaces.rs"
-  - "src-tauri/src/gpui_shell/screen/workspace_dialog.rs"
-  - "src-tauri/src/gpui_shell/screen/workspace_dialog_data.rs"
-  - "src-tauri/src/gpui_shell/screen/workspace_title.rs"
-  - "src-tauri/src/mobile/ui/home.rs"
-  - "src-tauri/src/mobile/ui/load.rs"
-  - "src-tauri/src/mobile/ui/mod.rs"
-  - "src-tauri/src/mobile/ui/review.rs"
   - "src-tauri/src/mobile/ui/screens/add_host.rs"
   - "src-tauri/src/mobile/ui/screens/code.rs"
   - "src-tauri/src/mobile/ui/screens/commits.rs"
   - "src-tauri/src/mobile/ui/screens/file.rs"
   - "src-tauri/src/mobile/ui/screens/github.rs"
-  - "src-tauri/src/mobile/ui/screens/issue.rs"
-  - "src-tauri/src/mobile/ui/screens/issues.rs"
   - "src-tauri/src/mobile/ui/screens/mod.rs"
   - "src-tauri/src/mobile/ui/screens/new_workspaces.rs"
-  - "src-tauri/src/mobile/ui/screens/pr_detail.rs"
   - "src-tauri/src/mobile/ui/screens/pr_review.rs"
   - "src-tauri/src/mobile/ui/screens/pull_requests.rs"
   - "src-tauri/src/mobile/ui/screens/repos.rs"
@@ -46,8 +31,6 @@ ignores:
   - "src-tauri/src/mobile/ui/screens/workspace.rs"
   - "src-tauri/src/mobile/ui/screens/workspace/changes.rs"
   - "src-tauri/src/mobile/ui/screens/workspaces.rs"
-  - "src-tauri/src/mobile/ui/sheet.rs"
-  - "src-tauri/src/mobile/ui/terminal_view.rs"
 utils:
   ok-call:
     kind: call_expression

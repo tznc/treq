@@ -400,9 +400,12 @@ impl MachinesHost for Backend {
   fn open_project(&self, id: &str) {
     let (app, id) = (self.app().clone(), id.to_string());
     let main = app.clone();
-    main
-      .run_on_main_thread(move || crate::gpui_shell::projects::open_project(&app, &id))
-      .ok();
+    let id_for_log = id.clone();
+    if let Err(e) =
+      main.run_on_main_thread(move || crate::gpui_shell::projects::open_project(&app, &id))
+    {
+      log::warn!("Failed to open project {id_for_log}: {e}");
+    }
   }
 
   fn pick_folder(&self) -> Option<String> {

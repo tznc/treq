@@ -120,12 +120,12 @@ impl TitleEditor {
       let follows = cx
         .background_spawn(async move { host.pr_sync(&repo, id).is_some() })
         .await;
-      this
-        .update(cx, |view, cx| {
-          view.follows_pr = follows;
-          cx.notify();
-        })
-        .ok();
+      if let Err(e) = this.update(cx, |view, cx| {
+        view.follows_pr = follows;
+        cx.notify();
+      }) {
+        log::debug!("Dropped the follows-PR state: the title editor closed: {e}");
+      }
     })
     .detach();
     cx.notify();
@@ -161,29 +161,29 @@ impl TitleEditor {
           }
         })
         .await;
-      this
-        .update(cx, |view, cx| {
-          view.saving = false;
-          match result {
-            Ok(pr_error) => {
-              view.title = text;
-              view.draft = None;
-              view.tell(NativeEvent::WorkspaceChanged {
-                repo_path: view.repo_path.clone(),
-              });
-              if let Some(err) = pr_error {
-                view.tell(
-                  Toast::error("Saved as a local draft")
-                    .description(format!("The pull request wasn't updated: {err}"))
-                    .into(),
-                );
-              }
+      if let Err(e) = this.update(cx, |view, cx| {
+        view.saving = false;
+        match result {
+          Ok(pr_error) => {
+            view.title = text;
+            view.draft = None;
+            view.tell(NativeEvent::WorkspaceChanged {
+              repo_path: view.repo_path.clone(),
+            });
+            if let Some(err) = pr_error {
+              view.tell(
+                Toast::error("Saved as a local draft")
+                  .description(format!("The pull request wasn't updated: {err}"))
+                  .into(),
+              );
             }
-            Err(err) => view.tell(Toast::error("Failed to save title").description(err).into()),
           }
-          cx.notify();
-        })
-        .ok();
+          Err(err) => view.tell(Toast::error("Failed to save title").description(err).into()),
+        }
+        cx.notify();
+      }) {
+        log::debug!("Dropped the title save result: the title editor closed: {e}");
+      }
     })
     .detach();
   }

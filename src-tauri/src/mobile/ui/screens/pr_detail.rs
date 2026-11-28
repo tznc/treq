@@ -240,7 +240,9 @@ pub fn open(repo: String, number: u64, cx: &mut App) {
       on_title: None,
       more: Some(Rc::new(move |_, cx| {
         if let Some(screen) = menu_screen.borrow().as_ref() {
-          screen.update(cx, |screen, cx| screen.menu(cx)).ok();
+          if let Err(e) = screen.update(cx, |screen, cx| screen.menu(cx)) {
+            log::debug!("Ignored the pull request menu: the pull request screen closed: {e}");
+          }
         }
       })),
     },
@@ -391,9 +393,9 @@ impl PrDetailScreen {
         match item {
           MenuItem::Change(action) => {
             let entry = sheet::MenuEntry::new(action.key(), action.label(), move |window, cx| {
-              this
-                .update(cx, |screen, cx| screen.tap_action(action, window, cx))
-                .ok();
+              if let Err(e) = this.update(cx, |screen, cx| screen.tap_action(action, window, cx)) {
+                log::debug!("Ignored a pull request action: the pull request screen closed: {e}");
+              }
             });
             if action.destructive() {
               entry.danger()
@@ -403,7 +405,9 @@ impl PrDetailScreen {
           }
           MenuItem::OpenOnGithub => {
             sheet::MenuEntry::new("menu-open", "Open on GitHub", move |_, cx| {
-              this.update(cx, |screen, cx| screen.open_on_github(cx)).ok();
+              if let Err(e) = this.update(cx, |screen, cx| screen.open_on_github(cx)) {
+                log::debug!("Ignored Open on GitHub: the pull request screen closed: {e}");
+              }
             })
           }
           MenuItem::CopyLink => {
@@ -413,7 +417,9 @@ impl PrDetailScreen {
             })
           }
           MenuItem::Refresh => sheet::MenuEntry::new("menu-refresh", "Refresh", move |_, cx| {
-            this.update(cx, |screen, cx| screen.reload(cx)).ok();
+            if let Err(e) = this.update(cx, |screen, cx| screen.reload(cx)) {
+              log::debug!("Skipped a pull request reload: the pull request screen closed: {e}");
+            }
           }),
         }
       })
@@ -501,9 +507,9 @@ impl PrDetailScreen {
       "Close pull request",
       true,
       move |window, cx| {
-        this
-          .update(cx, |screen, cx| screen.run_action(action, window, cx))
-          .ok();
+        if let Err(e) = this.update(cx, |screen, cx| screen.run_action(action, window, cx)) {
+          log::debug!("Ignored a pull request action: the pull request screen closed: {e}");
+        }
       },
       cx,
     );
@@ -518,9 +524,9 @@ impl PrDetailScreen {
       format!("Comment on #{}", self.number),
       self.comment.clone(),
       Rc::new(move |window, cx| {
-        this
-          .update(cx, |screen, cx| screen.send_comment(window, cx))
-          .ok();
+        if let Err(e) = this.update(cx, |screen, cx| screen.send_comment(window, cx)) {
+          log::warn!("Dropped a pull request comment: the pull request screen closed: {e}");
+        }
       }),
       cx,
     );
@@ -940,12 +946,14 @@ impl Render for PrDetailScreen {
               .on_click(cx.listener(|this, _, _, cx| {
                 let screen = cx.weak_entity();
                 let on_submitted = Rc::new(move |cx: &mut App| {
-                  screen
-                    .update(cx, |screen, cx| {
-                      screen.message = Some((true, "Review submitted.".into()));
-                      screen.reload(cx);
-                    })
-                    .ok();
+                  if let Err(e) = screen.update(cx, |screen, cx| {
+                    screen.message = Some((true, "Review submitted.".into()));
+                    screen.reload(cx);
+                  }) {
+                    log::debug!(
+                      "Skipped the review submitted message: the pull request screen closed: {e}"
+                    );
+                  }
                 });
                 super::pr_review::open(this.repo.clone(), this.number, on_submitted, cx)
               }))

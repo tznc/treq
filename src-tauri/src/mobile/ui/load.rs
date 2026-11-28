@@ -50,12 +50,12 @@ pub fn run<V: 'static, T: Send + 'static>(
   let result = backend::spawn(future);
   cx.spawn(async move |this, cx| {
     let Ok(value) = result.await else { return };
-    this
-      .update(cx, |view, cx| {
-        done(view, value, cx);
-        cx.notify();
-      })
-      .ok();
+    if let Err(e) = this.update(cx, |view, cx| {
+      done(view, value, cx);
+      cx.notify();
+    }) {
+      log::debug!("Dropped a loaded result: its view closed: {e}");
+    }
   })
   .detach();
 }
@@ -70,12 +70,12 @@ pub fn run_in<V: 'static, T: Send + 'static>(
   let result = backend::spawn(future);
   cx.spawn_in(window, async move |this, cx| {
     let Ok(value) = result.await else { return };
-    this
-      .update_in(cx, |view, window, cx| {
-        done(view, value, window, cx);
-        cx.notify();
-      })
-      .ok();
+    if let Err(e) = this.update_in(cx, |view, window, cx| {
+      done(view, value, window, cx);
+      cx.notify();
+    }) {
+      log::debug!("Dropped a loaded result: its view or window closed: {e}");
+    }
   })
   .detach();
 }

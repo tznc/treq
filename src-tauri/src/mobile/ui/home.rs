@@ -235,12 +235,12 @@ impl HomeScreen {
         let view = cx.entity().downgrade();
         let on_open: super::projects_list::OnOpen = std::rc::Rc::new(move |project, cx| {
           let error = super::open_project(project, cx).err();
-          view
-            .update(cx, |this, cx| {
-              this.open_error = error;
-              cx.notify();
-            })
-            .ok();
+          if let Err(e) = view.update(cx, |this, cx| {
+            this.open_error = error;
+            cx.notify();
+          }) {
+            log::debug!("Dropped a project open error: the home screen closed: {e}");
+          }
         });
         super::projects_list::sections(&sections, on_open, cx).into_any_element()
       }

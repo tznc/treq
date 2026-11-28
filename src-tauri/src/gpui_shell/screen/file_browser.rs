@@ -1725,12 +1725,12 @@ impl FileBrowserView {
           .selected(usize::from(previewing))
           .on_select(move |ix, _, cx| {
             let preview = (ix == 1).then(|| file.clone());
-            view
-              .update(cx, |view, cx| {
-                view.preview = preview;
-                cx.notify();
-              })
-              .ok();
+            if let Err(e) = view.update(cx, |view, cx| {
+              view.preview = preview;
+              cx.notify();
+            }) {
+              log::debug!("Ignored a Markdown preview toggle: the file browser closed: {e}");
+            }
           }),
       );
     }
