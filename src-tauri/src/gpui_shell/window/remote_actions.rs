@@ -209,7 +209,9 @@ impl Model {
       Ok(mut target) => {
         target["label"] = label.into();
         target["title"] = title.into();
-        target["launch"] = serde_json::to_value(remote::launch_for(agent)).unwrap_or_default();
+        let profile = agent.and_then(|agent| self.remote_profile(agent));
+        target["launch"] =
+          serde_json::to_value(remote::launch_for(agent, profile)).unwrap_or_default();
         target["reattach"] = reattach.into();
         self.terminal("openRemote", json!({"remote": target}));
         Vec::new()
@@ -218,6 +220,18 @@ impl Model {
         Toast::warning("Remote terminal unavailable").description(why),
       )],
     }
+  }
+
+  /// The app's default profile for `agent`; the host keeps its own sign-in for it.
+  fn remote_profile(&self, agent: RemoteAgentId) -> Option<String> {
+    let id = match agent {
+      RemoteAgentId::Claude => "claude",
+      RemoteAgentId::Codex => "codex",
+      _ => return None,
+    };
+    let settings = &self.prefs.agent_settings;
+    crate::core::agent_profiles::session_profile(|k| settings.get(k).cloned(), |_| None, id, None)
+      .map(|p| p.name)
   }
 
   /// `startRemoteAgent`: the app's default agent (a repository's setting
@@ -290,6 +304,28 @@ mod tests {
       .as_str()
       .unwrap()
       .starts_with("codex-"));
+  }
+
+  #[test]
+  fn starts_the_default_profile_on_the_host() {
+    let mut model = remote_model();
+    model.prefs.default_agent = Some("claude".into());
+    model.prefs.agent_settings = [
+      (
+        "agent_profiles".to_string(),
+        r#"[{"agent":"claude","name":"work"}]"#.to_string(),
+      ),
+      ("default_profile_claude".to_string(), "work".to_string()),
+    ]
+    .into();
+    model.start_remote_agent(None, &Data::default());
+    assert_eq!(model.commands[0]["remote"]["launch"]["profile"], "work");
+    // An agent with no default profile uses the host's own sign-in.
+    model.prefs.default_agent = Some("codex".into());
+    model.start_remote_agent(None, &Data::default());
+    assert!(model.commands[1]["remote"]["launch"]
+      .get("profile")
+      .is_none());
   }
 
   #[test]

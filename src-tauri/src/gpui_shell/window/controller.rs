@@ -1236,6 +1236,7 @@ fn settings_keys(main: &str) -> Vec<String> {
   ]
   .into_iter()
   .map(String::from)
+  .chain(model::profile_setting_keys())
   .chain([model::collapsed_key(main)])
   .collect()
 }
