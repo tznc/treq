@@ -807,8 +807,7 @@ impl Render for Screen {
       .bg(palette.background)
       .text_color(palette.foreground)
       .font_family(theme::SANS_FONT)
-      // A mouse-down blurs the focused input, as in a browser; an input
-      // under the pointer takes focus again in the bubble phase.
+      // A mouse-down blurs inputs, as in a browser. One under the pointer refocuses on bubbling.
       .capture_any_mouse_down(|_, window, cx| window.blur(cx))
       // Lets text drawn with gpui-kit (Markdown, comments) be selected.
       .child(gpui_kit::base::TextSelectionLayer)

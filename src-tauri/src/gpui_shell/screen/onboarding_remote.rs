@@ -322,8 +322,7 @@ fn browser(form: &Form, react: &ActionSink, p: &Palette) -> ObservedElement<gpui
         ))
     })
     .collect();
-  // Before the first listing: loading, or nothing when it failed (the
-  // error shows under the browser).
+  // Before the first listing: loading, or nothing if it failed (the error shows under the browser).
   let empty = match (&form.listing, form.browsing) {
     _ if !folders.is_empty() => None,
     (None, true) => Some(

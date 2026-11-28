@@ -598,8 +598,7 @@ impl LinearView {
       return;
     }
     self.section = section;
-    // React unmounts the other section, which forgets its own state and
-    // reads again (SWR keeps what it read before).
+    // As React's unmount: the other section forgets its state and reads again (SWR keeps old data).
     match section {
       Section::Issues => {
         self.mode = IssueMode::List;
@@ -1314,8 +1313,7 @@ impl LinearView {
       .map(|group| {
         let key = group.key;
         let clear = format!("linear-filter-clear-{key}");
-        // Short label (['chip']): 11px is fine.
-        // ast-grep-ignore: gpui-text-xs-short-label-only
+        // Short label (chip). ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .selector(SharedString::from(format!("linear-filter-chip-{key}")))
           .role(gpui::Role::Group)
@@ -1572,8 +1570,7 @@ impl Render for LinearView {
           ),
       )
       .children(connection.is_none().then(|| self.team_selector(&p, cx)));
-    // Without a working key no tab can show anything: the whole view says
-    // what to fix.
+    // Without a working key no tab can show anything, so the whole view says what to fix.
     if let Some(error) = connection {
       return div()
         .selector("linear-panel")
@@ -1728,8 +1725,7 @@ impl LinearView {
         }),
       );
 
-    // The list and each Kanban column are virtual lists that scroll
-    // themselves.
+    // The list and each Kanban column are virtual lists that scroll themselves.
     let mut content = div()
       .id("linear-issues-scroll")
       .flex_1()
@@ -2212,8 +2208,7 @@ impl LinearView {
           .flex_col()
           .gap_1()
           .child(
-            // Short label (['field label']): 11px is fine.
-            // ast-grep-ignore: gpui-text-xs-short-label-only
+            // Short label (field label). ast-grep-ignore: gpui-text-xs-short-label-only
             ui::text(div(), TextSize::Xs)
               .text_color(p.muted_foreground)
               .child("Team"),
@@ -2443,8 +2438,7 @@ impl LinearView {
         .mt_1p5()
         .flex_wrap()
         .children(issue.labels.iter().take(2).map(|label| {
-          // Short label (['tag']): 11px is fine.
-          // ast-grep-ignore: gpui-text-xs-short-label-only
+          // Short label (tag). ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .px_1()
             .py_0p5()
@@ -2455,8 +2449,7 @@ impl LinearView {
         }))
         .when(issue.labels.len() > 2, |this| {
           this.child(
-            // Short label (['count']): 11px is fine.
-            // ast-grep-ignore: gpui-text-xs-short-label-only
+            // Short label (count). ast-grep-ignore: gpui-text-xs-short-label-only
             ui::text(div(), TextSize::Xs)
               .px_1()
               .py_0p5()
@@ -2488,8 +2481,7 @@ impl LinearView {
           .justify_between()
           .gap_2()
           .child(
-            // Short label (['issue identifier']): 11px is fine.
-            // ast-grep-ignore: gpui-text-xs-short-label-only
+            // Short label (issue identifier). ast-grep-ignore: gpui-text-xs-short-label-only
             ui::text(div(), TextSize::Xs)
               .font_family(theme::MONO_FONT)
               .font_weight(FontWeight::MEDIUM)
@@ -2654,8 +2646,7 @@ impl LinearView {
                   .gap_2()
                   .mt_1()
                   .child(
-                    // Short label (['pill']): 11px is fine.
-                    // ast-grep-ignore: gpui-text-xs-short-label-only
+                    // Short label (pill). ast-grep-ignore: gpui-text-xs-short-label-only
                     ui::text(div(), TextSize::Xs)
                       .px_1p5()
                       .py_0p5()
@@ -2665,8 +2656,7 @@ impl LinearView {
                       .child(capitalize(&project.state)),
                   )
                   .child(
-                    // Short label (['percentage']): 11px is fine.
-                    // ast-grep-ignore: gpui-text-xs-short-label-only
+                    // Short label (percentage). ast-grep-ignore: gpui-text-xs-short-label-only
                     ui::text(div(), TextSize::Xs)
                       .text_color(p.muted_foreground)
                       .child(format!("{}%", data::percent(project.progress))),
@@ -2925,8 +2915,7 @@ impl LinearView {
         color: data::comment_mark(self.dark),
       })
       .collect();
-    // Agent quotes are multi-line markdown; only single-line ones can be
-    // highlighted without breaking the rendered markdown structure.
+    // Only single-line agent quotes highlight without breaking the rendered markdown.
     anchors.extend(
       body_comments
         .iter()
@@ -2943,8 +2932,7 @@ impl LinearView {
       let fg = p.foreground;
       ui::text(
         Button::new(SharedString::from(format!("linear-start-review-{key}")), p),
-        // Short label (['button label']): 11px is fine.
-        // ast-grep-ignore: gpui-text-xs-short-label-only
+        // Short label (button label). ast-grep-ignore: gpui-text-xs-short-label-only
         TextSize::Xs,
       )
       .variant(Variant::Outline)
@@ -2969,8 +2957,7 @@ impl LinearView {
       .gap_2()
       .when(!open.is_empty(), |this| {
         this.child(
-          // Short label (['count']): 11px is fine.
-          // ast-grep-ignore: gpui-text-xs-short-label-only
+          // Short label (count). ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .text_color(p.muted_foreground)
             .child(agent_count_label(open.len())),
@@ -2978,8 +2965,7 @@ impl LinearView {
       })
       .child(review_button);
 
-    // Inline, each comment goes under the paragraph it quotes; the rest,
-    // and every comment of an issue, go under the text.
+    // Inline, a comment sits under the paragraph it quotes. The rest, and issue comments, go below.
     let blocks = if inline {
       data::paragraphs(&shown)
     } else {
@@ -3017,15 +3003,13 @@ impl LinearView {
       }));
 
     let heading = |text: &'static str| {
-      // Short label (['section heading']): 11px is fine.
-      // ast-grep-ignore: gpui-text-xs-short-label-only
+      // Short label (section heading). ast-grep-ignore: gpui-text-xs-short-label-only
       ui::text(div(), TextSize::Xs)
         .font_weight(FontWeight::MEDIUM)
         .text_color(p.muted_foreground)
         .child(text)
     };
-    // An issue always says it has none; a document or project without
-    // comments shows only its text.
+    // An issue says when it has no comments. A document or project without any shows only its text.
     let empty = !fetch.is_loading() && !fetch.failed() && comments.is_empty();
     let show_comments = !inline || fetch.is_loading() || fetch.failed() || !unanchored.is_empty();
     let below = (show_comments || !body_comments.is_empty()).then(|| {
@@ -3169,8 +3153,7 @@ impl LinearView {
         },
       )
       .child(
-        // Short label (['author and timestamp']): 11px is fine.
-        // ast-grep-ignore: gpui-text-xs-short-label-only
+        // Short label (author and timestamp). ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .flex()
           .items_center()

@@ -374,8 +374,7 @@ impl ProjectHomeView {
           }))
           .when(count > 6, |this| {
             this.child(
-              // Short label (['count']): 11px is fine.
-              // ast-grep-ignore: gpui-text-xs-short-label-only
+              // Short label (count). ast-grep-ignore: gpui-text-xs-short-label-only
               ui::text(div(), TextSize::Xs)
                 .text_color(p.muted_foreground)
                 .child(format!("+{} more", count - 6)),
@@ -467,8 +466,7 @@ impl ProjectHomeView {
               .hover(|s| s.bg(p.hover()))
               .child(repo_title(repo, p))
               .child(
-                // Short label (['count']): 11px is fine.
-                // ast-grep-ignore: gpui-text-xs-short-label-only
+                // Short label (count). ast-grep-ignore: gpui-text-xs-short-label-only
                 ui::text(div(), TextSize::Xs)
                   .ml_auto()
                   .text_color(p.muted_foreground)
@@ -488,8 +486,7 @@ impl ProjectHomeView {
               .px_3()
               .py_1()
               .child(
-                // Short label (['status letter']): 11px is fine.
-                // ast-grep-ignore: gpui-text-xs-short-label-only
+                // Short label (status letter). ast-grep-ignore: gpui-text-xs-short-label-only
                 ui::text(div(), TextSize::Xs)
                   .w(zpx(14.))
                   .font_weight(FontWeight::SEMIBOLD)
@@ -506,8 +503,7 @@ impl ProjectHomeView {
               // jj leaves the count at 0 when it defers the diff: say nothing.
               .when(file.lines > 0, |this| {
                 this.child(
-                  // Short label (['line count']): 11px is fine.
-                  // ast-grep-ignore: gpui-text-xs-short-label-only
+                  // Short label (line count). ast-grep-ignore: gpui-text-xs-short-label-only
                   ui::text(div(), TextSize::Xs)
                     .ml_auto()
                     .text_color(p.muted_foreground)
@@ -594,16 +590,14 @@ impl ProjectHomeView {
                   .gap_2()
                   .mt_0p5()
                   .child(
-                    // Short label (['timestamp']): 11px is fine.
-                    // ast-grep-ignore: gpui-text-xs-short-label-only
+                    // Short label (timestamp). ast-grep-ignore: gpui-text-xs-short-label-only
                     ui::text(div(), TextSize::Xs)
                       .text_color(p.muted_foreground)
                       .child(time::relative(&c.timestamp)),
                   )
                   .when(c.insertions > 0 || c.deletions > 0, |this| {
                     this.child(
-                      // Short label (['diff counts']): 11px is fine.
-                      // ast-grep-ignore: gpui-text-xs-short-label-only
+                      // Short label (diff counts). ast-grep-ignore: gpui-text-xs-short-label-only
                       ui::text(div(), TextSize::Xs)
                         .ml_auto()
                         .flex()
@@ -671,8 +665,7 @@ impl ProjectHomeView {
           .gap_6()
           .pt_3()
           .child(
-            // Short label (['field label']): 11px is fine.
-            // ast-grep-ignore: gpui-text-xs-short-label-only
+            // Short label (field label). ast-grep-ignore: gpui-text-xs-short-label-only
             ui::text(div(), TextSize::Xs)
               .w(label_w)
               .flex_none()
@@ -743,8 +736,7 @@ fn stats_block(repo: &RepoCard, stats: &RepoStats, p: &theme::Palette) -> impl I
       .rounded_md()
       .bg(p.muted.opacity(0.5))
       .child(
-        // Short label (['stat label']): 11px is fine.
-        // ast-grep-ignore: gpui-text-xs-short-label-only
+        // Short label (stat label). ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .text_color(p.muted_foreground)
           .child(label),
@@ -776,8 +768,7 @@ fn stats_block(repo: &RepoCard, stats: &RepoStats, p: &theme::Palette) -> impl I
         .gap_2()
         .child(activity_chart(activity, p.primary, p.border))
         .child(
-          // Short label (['count']): 11px is fine.
-          // ast-grep-ignore: gpui-text-xs-short-label-only
+          // Short label (count). ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .flex_none()
             .text_color(p.muted_foreground)

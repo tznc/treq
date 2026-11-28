@@ -474,8 +474,7 @@ impl GithubView {
         generation: self.detail.generation + 1,
         ..Detail::default()
       };
-      // What was read last (or read ahead by the pointer) shows while the
-      // read below replaces it.
+      // The last read, or one the pointer read ahead, shows while the read below replaces it.
       if let Some(key) = detail {
         let at = (key.repo, key.number);
         match key.tab {
@@ -1559,8 +1558,7 @@ impl GithubView {
     ];
     let mut cells: Vec<gpui::AnyElement> = Vec::new();
     for (field, label, value, options) in selects {
-      // Keep a choice the loaded PRs no longer have, so the select still
-      // shows what hides the list.
+      // A choice the loaded PRs lack stays, so the select still shows what hides the list.
       let mut shown: Vec<SelectOption> = vec![SelectOption {
         value: String::new(),
         label: "Any".into(),

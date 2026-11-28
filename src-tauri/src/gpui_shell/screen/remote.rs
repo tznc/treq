@@ -450,8 +450,7 @@ impl RemoteView {
           .placeholder(placeholder.to_string())
           .default_value(value.to_string())
       });
-      // The Continue button follows what is typed, and the suggestions
-      // follow the focus.
+      // The Continue button follows what is typed, and the suggestions follow the focus.
       subscriptions.push(cx.subscribe(&state, |view, _, event: &InputEvent, cx| {
         // An edit makes the last probe's error stale.
         if matches!(event, InputEvent::Change) {
@@ -877,8 +876,7 @@ impl RemoteView {
     };
     div()
       .child(card)
-      // Opened on this screen from the Overview, there is no choice to go
-      // back to.
+      // Opened on this screen from the Overview, there is no choice to go back to.
       .when(route.allow_user_managed && route.screen.is_none(), |this| {
         this.child(
           div().mt_6().child(
@@ -1232,8 +1230,7 @@ impl RemoteView {
     } else {
       "Couldn't reach the host"
     };
-    // Opened straight on the form, there is nothing to go back to: the X
-    // closes it.
+    // Opened straight on the form, there is nothing to go back to: the X closes it.
     let back = (!direct).then(|| {
       Button::new("remote-setup-back", p)
         .variant(Variant::Outline)
@@ -1325,8 +1322,7 @@ impl RemoteView {
         .flex_col()
         .gap_2()
         .child(
-          // Short label (['section heading']): 11px is fine.
-          // ast-grep-ignore: gpui-text-xs-short-label-only
+          // Short label (section heading). ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .font_weight(FontWeight::MEDIUM)
             .text_color(p.muted_foreground)
