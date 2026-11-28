@@ -355,6 +355,46 @@ pub fn comment_date(iso: &str, this_year: i32) -> String {
   }
 }
 
+/// A GitHub review comment's ```` ```suggestion ````, with the lines it
+/// replaces as GitHub showed them (the tail of the comment's diff hunk).
+#[derive(Debug, Clone, PartialEq)]
+pub struct GithubSuggestion {
+  pub lines: (u32, u32),
+  pub original: Vec<String>,
+  pub suggested: String,
+}
+
+/// `None` when the comment has no suggestion, or it is on the old side or
+/// outdated, where it no longer lines up with the file.
+pub fn github_suggestion(
+  thread: &GhReviewThread,
+  comment: &crate::github::GhReviewComment,
+) -> Option<GithubSuggestion> {
+  if thread.is_outdated || thread.diff_side != "RIGHT" {
+    return None;
+  }
+  let suggested = crate::core::review::parse_suggestion(&comment.body)?.suggested;
+  let end = u32::try_from(thread.line?).ok()?;
+  let start = thread
+    .start_line
+    .and_then(|l| u32::try_from(l).ok())
+    .unwrap_or(end);
+  let count = (end.checked_sub(start)? + 1) as usize;
+  let new_side: Vec<String> = comment
+    .diff_hunk
+    .lines()
+    .skip(1)
+    .filter(|l| !l.starts_with('-'))
+    .map(|l| l.get(1..).unwrap_or("").to_string())
+    .collect();
+  let original = new_side.get(new_side.len().checked_sub(count)?..)?.to_vec();
+  Some(GithubSuggestion {
+    lines: (start, end),
+    original,
+    suggested,
+  })
+}
+
 /// What Quote quotes from a comment: the text selected in it, else all of it.
 /// The selection is drawn text, so it is matched without Markdown's marks.
 pub fn quoted_text(body: &str, selected: &str) -> String {
@@ -385,6 +425,32 @@ pub fn preview(body: &str) -> String {
 mod tests {
   use super::*;
   use crate::github::{GhAuthor, GhReviewComment};
+
+  #[test]
+  fn github_suggestion_reads_the_lines_it_replaces_from_the_diff_hunk() {
+    let mut t = thread("a.rs", Some(3), "RIGHT");
+    t.start_line = Some(2);
+    t.comments[0].body = "Try:\n```suggestion\nB\nC\n```".into();
+    t.comments[0].diff_hunk = "@@ -1,2 +1,3 @@\n a\n-x\n+b\n+c".into();
+    let s = github_suggestion(&t, &t.comments[0]).expect("suggestion");
+    assert_eq!(s.lines, (2, 3));
+    assert_eq!(s.original, vec!["b".to_string(), "c".to_string()]);
+    assert_eq!(s.suggested, "B\nC");
+  }
+
+  #[test]
+  fn github_suggestion_is_none_without_a_block_or_on_the_old_side() {
+    let mut t = thread("a.rs", Some(1), "RIGHT");
+    t.comments[0].diff_hunk = "@@ -0,0 +1 @@\n+a".into();
+    assert!(github_suggestion(&t, &t.comments[0]).is_none());
+    t.comments[0].body = "```suggestion\nA\n```".into();
+    assert!(github_suggestion(&t, &t.comments[0]).is_some());
+    t.diff_side = "LEFT".into();
+    assert!(github_suggestion(&t, &t.comments[0]).is_none());
+    t.diff_side = "RIGHT".into();
+    t.is_outdated = true;
+    assert!(github_suggestion(&t, &t.comments[0]).is_none());
+  }
 
   fn hunk(id: &str, header: &str, lines: &[&str]) -> JjDiffHunk {
     serde_json::from_value(serde_json::json!({
