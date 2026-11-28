@@ -1,0 +1,95 @@
+id: gpui-icon-button-needs-tooltip
+snapshots:
+  ? |
+    fn bound_not_wrapped(p: &Palette) -> impl IntoElement {
+      let button = Button::new("details", p).icon(theme::ICON_INFO, 16.);
+      div().child(button)
+    }
+  : labels:
+    - source: Button::new("details", p)
+      style: primary
+      start: 71
+      end: 96
+    - source: Button::new
+      style: secondary
+      start: 71
+      end: 82
+    - source: icon
+      style: secondary
+      start: 97
+      end: 101
+    - source: Button::new("details", p).icon
+      style: secondary
+      start: 71
+      end: 101
+    - source: Button::new("details", p).icon(theme::ICON_INFO, 16.)
+      style: secondary
+      start: 71
+      end: 124
+  ? |
+    fn icon_button(p: &Palette) -> impl IntoElement {
+      div().child(ui::IconButton::new("back", theme::ICON_ARROW_LEFT, "Back", p).on_click(f))
+    }
+  : labels:
+    - source: ui::IconButton::new("back", theme::ICON_ARROW_LEFT, "Back", p)
+      style: primary
+      start: 64
+      end: 126
+    - source: ui::IconButton::new
+      style: secondary
+      start: 64
+      end: 83
+  ? |
+    fn icon_only(p: &Palette) -> impl IntoElement {
+      div().child(Button::new("more", p).variant(Variant::Ghost).icon(theme::ICON_MORE, 16.).on_click(f))
+    }
+  : labels:
+    - source: Button::new("more", p)
+      style: primary
+      start: 62
+      end: 84
+    - source: Button::new
+      style: secondary
+      start: 62
+      end: 73
+    - source: icon
+      style: secondary
+      start: 109
+      end: 113
+    - source: Button::new("more", p).variant(Variant::Ghost).icon
+      style: secondary
+      start: 62
+      end: 113
+    - source: Button::new("more", p).variant(Variant::Ghost).icon(theme::ICON_MORE, 16.)
+      style: secondary
+      start: 62
+      end: 136
+  ? |
+    fn icon_size(p: &Palette) -> impl IntoElement {
+      Button::new("edit", p).size(Size::Icon).child(ui::icon(theme::ICON_PENCIL, 14., c))
+    }
+  : labels:
+    - source: Button::new("edit", p)
+      style: primary
+      start: 50
+      end: 72
+    - source: Button::new
+      style: secondary
+      start: 50
+      end: 61
+    - source: size
+      style: secondary
+      start: 73
+      end: 77
+    - source: Button::new("edit", p).size
+      style: secondary
+      start: 50
+      end: 77
+    - source: (Size::Icon)
+      style: secondary
+      start: 77
+      end: 89
+    - source: Button::new("edit", p).size(Size::Icon)
+      style: secondary
+      start: 50
+      end: 89
