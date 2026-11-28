@@ -365,8 +365,7 @@ pub fn preview(body: &str) -> String {
 }
 
 /// The action bar's count of pending and open comments, and its breakdown
-/// by source for the tooltip: `("3 comments", "1 pending comment, 2 GitHub
-/// comments")`. Comments on resolved GitHub threads are left out.
+/// by source for the tooltip: `("3 comments", "1 pending · 2 GitHub")`. Comments on resolved GitHub threads are left out.
 pub fn comment_summary(
   pending: usize,
   github: &[GhReviewThread],
@@ -380,16 +379,12 @@ pub fn comment_summary(
   let local = agent.iter().filter(|c| c.status != "resolved").count();
   let total = pending + github + local;
   (total > 0).then(|| {
-    let sources: Vec<String> = [
-      (pending, "pending comment"),
-      (github, "GitHub comment"),
-      (local, "local review comment"),
-    ]
-    .into_iter()
-    .filter(|&(n, _)| n > 0)
-    .map(|(n, word)| count_label(n, word))
-    .collect();
-    (count_label(total, "comment"), sources.join(", "))
+    let sources: Vec<String> = [(pending, "pending"), (github, "GitHub"), (local, "local")]
+      .into_iter()
+      .filter(|&(n, _)| n > 0)
+      .map(|(n, source)| format!("{n} {source}"))
+      .collect();
+    (count_label(total, "comment"), sources.join(" · "))
   })
 }
 
@@ -627,10 +622,7 @@ mod tests {
     ];
     assert_eq!(
       comment_summary(1, &[resolved, replied], &agents),
-      Some((
-        "4 comments".into(),
-        "1 pending comment, 2 GitHub comments, 1 local review comment".into()
-      ))
+      Some(("4 comments".into(), "1 pending · 2 GitHub · 1 local".into()))
     );
   }
 
@@ -639,11 +631,11 @@ mod tests {
     let github = [thread("a.rs", Some(1), "RIGHT")];
     assert_eq!(
       comment_summary(0, &github, &[]),
-      Some(("1 comment".into(), "1 GitHub comment".into()))
+      Some(("1 comment".into(), "1 GitHub".into()))
     );
     assert_eq!(
       comment_summary(2, &[], &[]),
-      Some(("2 comments".into(), "2 pending comments".into()))
+      Some(("2 comments".into(), "2 pending".into()))
     );
     assert_eq!(comment_summary(0, &[], &[]), None);
   }

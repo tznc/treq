@@ -1474,10 +1474,7 @@ fn the_comment_count_tooltip_breaks_it_down_by_source(cx: &mut TestAppContext) {
     } => Some(text.to_string()),
     _ => None,
   });
-  assert_eq!(
-    text.as_deref(),
-    Some("1 GitHub comment, 1 local review comment")
-  );
+  assert_eq!(text.as_deref(), Some("1 GitHub · 1 local"));
 }
 
 #[gpui::test]

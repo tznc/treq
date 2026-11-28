@@ -79,7 +79,7 @@ test("changes: comment count and its source tooltip", async ({ page }) => {
     screen: true,
     rest: false,
     expectations: [
-      "A tooltip by the '3 comments' pill reads '1 pending comment, 1 GitHub comment, 1 local review comment'",
+      "A tooltip by the '3 comments' pill reads '1 pending · 1 GitHub · 1 local'",
       "The tooltip text sits on one line, not clipped",
     ],
   });
