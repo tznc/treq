@@ -33,6 +33,8 @@ AKS = "AKS"
 ITMS = "ITMS"
 # three.js material property.
 metalness = "metalness"
+# Infor (ERP vendor), as in "Infor M3".
+Infor = "Infor"
 # Paket (.NET package manager) lockfile.
 paket = "paket"
 # Tests that feed deliberate typos or wrong input.
@@ -40,5 +42,3 @@ teh = "teh"
 abd = "abd"
 # "ATTACHed" (SQL ATTACH).
 Hed = "Hed"
-# Infor, the ERP vendor (Infor M3).
-Infor = "Infor"
