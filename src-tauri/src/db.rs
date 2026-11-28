@@ -1,6 +1,6 @@
 use crate::result_ext::ResultExt;
 use chrono::Utc;
-use rusqlite::{params, Connection, Result};
+use rusqlite::{params, Connection, OptionalExtension, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
@@ -33,13 +33,18 @@ impl Database {
   }
 
   pub fn init(&self) -> Result<()> {
+    // `project_id` is '' for an app-wide setting, else the project the
+    // value belongs to.
     self.conn.execute(
       "CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
+                key TEXT NOT NULL,
+                project_id TEXT NOT NULL DEFAULT '',
+                value TEXT NOT NULL,
+                PRIMARY KEY (key, project_id)
             )",
       [],
     )?;
+    self.migrate_settings_project_id()?;
 
     self.conn.execute(
       "CREATE TABLE IF NOT EXISTS sessions (
@@ -206,11 +211,60 @@ impl Database {
         .warn_on_err("set setting");
       self
         .conn
-        .execute("DELETE FROM settings WHERE key = 'repo_path'", [])
+        .execute(
+          "DELETE FROM settings WHERE key = 'repo_path' AND project_id = ''",
+          [],
+        )
         .warn_on_err("delete old repo_path setting");
     }
 
     crate::core::projects::init(&self.conn)?;
+    Ok(())
+  }
+
+  /// Migration: an older `settings` table keyed by `key` alone gains
+  /// `project_id` (rebuilt, since SQLite cannot change a primary key).
+  fn migrate_settings_project_id(&self) -> Result<()> {
+    let has: i64 = self.conn.query_row(
+      "SELECT COUNT(*) FROM pragma_table_info('settings') WHERE name = 'project_id'",
+      [],
+      |r| r.get(0),
+    )?;
+    if has > 0 {
+      return Ok(());
+    }
+    self.conn.execute_batch(
+      "BEGIN;
+       CREATE TABLE settings_new (
+         key TEXT NOT NULL,
+         project_id TEXT NOT NULL DEFAULT '',
+         value TEXT NOT NULL,
+         PRIMARY KEY (key, project_id)
+       );
+       INSERT INTO settings_new (key, value) SELECT key, value FROM settings;
+       DROP TABLE settings;
+       ALTER TABLE settings_new RENAME TO settings;
+       COMMIT;",
+    )
+  }
+
+  /// Project `project_id`'s value for `key`, apart from the app-wide one.
+  pub fn get_project_setting(&self, project_id: &str, key: &str) -> Result<Option<String>> {
+    self
+      .conn
+      .query_row(
+        "SELECT value FROM settings WHERE key = ?1 AND project_id = ?2",
+        [key, project_id],
+        |r| r.get(0),
+      )
+      .optional()
+  }
+
+  pub fn set_project_setting(&self, project_id: &str, key: &str, value: &str) -> Result<()> {
+    self.conn.execute(
+      "INSERT OR REPLACE INTO settings (key, project_id, value) VALUES (?1, ?2, ?3)",
+      [key, project_id, value],
+    )?;
     Ok(())
   }
 
@@ -223,7 +277,7 @@ impl Database {
   pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
     let mut stmt = self
       .conn
-      .prepare("SELECT value FROM settings WHERE key = ?1")?;
+      .prepare("SELECT value FROM settings WHERE key = ?1 AND project_id = ''")?;
     let mut rows = stmt.query([key])?;
 
     if let Some(row) = rows.next()? {
@@ -256,7 +310,7 @@ impl Database {
     // Build placeholders for IN clause
     let placeholders = keys.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
     let query = format!(
-      "SELECT key, value FROM settings WHERE key IN ({})",
+      "SELECT key, value FROM settings WHERE project_id = '' AND key IN ({})",
       placeholders
     );
 
@@ -422,6 +476,83 @@ impl Database {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  fn db() -> (tempfile::TempDir, Database) {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let db = Database::new(temp.path().join("treq.db")).expect("open");
+    db.init().expect("init");
+    (temp, db)
+  }
+
+  #[test]
+  fn a_project_setting_is_kept_apart_from_the_app_setting() {
+    let (_t, db) = db();
+    db.set_setting("clone_directory", "/app").unwrap();
+    db.set_project_setting("p1", "clone_directory", "/p1")
+      .unwrap();
+    db.set_project_setting("p2", "clone_directory", "/p2")
+      .unwrap();
+    assert_eq!(
+      db.get_setting("clone_directory").unwrap().as_deref(),
+      Some("/app")
+    );
+    assert_eq!(
+      db.get_project_setting("p1", "clone_directory")
+        .unwrap()
+        .as_deref(),
+      Some("/p1")
+    );
+    assert_eq!(
+      db.get_project_setting("p2", "clone_directory")
+        .unwrap()
+        .as_deref(),
+      Some("/p2")
+    );
+    assert_eq!(
+      db.get_project_setting("p3", "clone_directory").unwrap(),
+      None
+    );
+    let batch = db.get_settings_batch(&["clone_directory".into()]).unwrap();
+    assert_eq!(batch["clone_directory"].as_deref(), Some("/app"));
+    db.set_project_setting("p1", "clone_directory", "/p1b")
+      .unwrap();
+    assert_eq!(
+      db.get_project_setting("p1", "clone_directory")
+        .unwrap()
+        .as_deref(),
+      Some("/p1b")
+    );
+  }
+
+  #[test]
+  fn init_migrates_an_old_settings_table_keeping_its_rows() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let path = temp.path().join("treq.db");
+    {
+      let old = Connection::open(&path).unwrap();
+      old
+        .execute_batch(
+          "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+           INSERT INTO settings VALUES ('theme', 'dark');",
+        )
+        .unwrap();
+    }
+    let db = Database::new(path).expect("open");
+    db.init().expect("init");
+    db.init().expect("a second init is a no-op");
+    assert_eq!(db.get_setting("theme").unwrap().as_deref(), Some("dark"));
+    let has_project_id: i64 = db
+      .conn
+      .query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('settings') WHERE name = 'project_id'",
+        [],
+        |r| r.get(0),
+      )
+      .unwrap();
+    assert_eq!(has_project_id, 1);
+    db.set_project_setting("p1", "theme", "light").unwrap();
+    assert_eq!(db.get_setting("theme").unwrap().as_deref(), Some("dark"));
+  }
 
   #[test]
   fn a_write_waits_for_another_handles_transaction() {
