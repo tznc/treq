@@ -55,7 +55,7 @@ export function requireKind(value: unknown): ProviderKind {
   return value as ProviderKind;
 }
 
-function batch(value: unknown): number {
+export function batch(value: unknown): number {
   return typeof value === "number" && Number.isInteger(value) && value > 0 && value <= 200 ? value : DEFAULT_BATCH;
 }
 

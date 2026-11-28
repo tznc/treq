@@ -29,6 +29,8 @@ unparseable = "unparseable"
 PN = "PN"
 # Azure Kubernetes Service.
 AKS = "AKS"
+# Infor, the ERP vendor (Infor M3).
+Infor = "Infor"
 # App Store Connect error codes (ITMS-90717).
 ITMS = "ITMS"
 # three.js material property.

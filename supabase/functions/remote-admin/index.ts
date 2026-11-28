@@ -29,6 +29,8 @@
 //   "destroy_retired_placements" {limit?}
 //   "reverse_cutover" {migration_id}
 //   "force_migration" {migration_id, reason}
+//   "refresh_ca_trust" {limit?, after?}         - rewrite the trusted SSH CAs on running machines
+//                                                (a CA roll; page with next_after, ca-trust-refresh.ts)
 //
 // Operator actions are audited as `admin_*` events, not as the affected
 // user's own actions.
@@ -43,6 +45,7 @@ import { enforceSpendCaps, supabaseSpendCapStore } from "../_shared/billing/spen
 import { createStripeClient } from "../_shared/billing/stripe-api.ts";
 import { reconcileStaleSubscriptions, reconcileStoreFor } from "../_shared/billing/reconcile.ts";
 import * as ops from "../_shared/remote/operator-controls.ts";
+import { refreshCaTrust, supabaseCaTrustRefreshStore } from "../_shared/remote/ca-trust-refresh.ts";
 import { isProviderStubEnabled } from "../_shared/remote/local-provider.ts";
 import { errorMessage } from "../_shared/error-message.ts";
 
@@ -126,6 +129,14 @@ const ACTIONS: Record<string, (ctx: Ctx, body: Record<string, unknown>) => Promi
   destroy_retired_placements: ops.destroyRetiredPlacements,
   reverse_cutover: ops.reverseCutover,
   force_migration: ops.forceMigration,
+  // No machine to write to under the stub.
+  refresh_ca_trust: async (ctx, body) =>
+    ctx.stub ? { skipped: "stub" } : await refreshCaTrust(
+      supabaseCaTrustRefreshStore(ctx.supabase, ctx.correlationId),
+      ctx.providers,
+      ops.batch(body.limit),
+      typeof body.after === "string" ? body.after : null,
+    ),
 };
 
 Deno.serve(async (req) => {
