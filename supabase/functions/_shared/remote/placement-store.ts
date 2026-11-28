@@ -180,7 +180,7 @@ export async function listInstanceRepositories(
 
 export async function claimMigrations(
   supabase: SupabaseClient,
-  p: { owner: string; leaseSec: number; limit: number; migrationId?: string },
+  p: { owner: string; leaseSec: number; limit: number; migrationId?: string | undefined },
 ): Promise<string[]> {
   const data = must(await supabase.rpc("claim_sandbox_migrations", {
     p_owner: p.owner,
@@ -269,7 +269,7 @@ export async function cutoverMigration(
  * The engine's store. With `leaseOwner`, every state change also requires
  * that worker to still hold the migration's lease (advance_migration_leased).
  */
-export function supabaseMigrationStore(supabase: SupabaseClient, opts: { leaseOwner?: string } = {}): MigrationStore {
+export function supabaseMigrationStore(supabase: SupabaseClient, opts: { leaseOwner?: string | undefined } = {}): MigrationStore {
   const findCandidate = async (instanceId: string) => {
     return must(await supabase
       .from("remote_instance_placements")

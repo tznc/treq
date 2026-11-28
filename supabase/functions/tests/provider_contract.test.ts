@@ -289,7 +289,8 @@ const backstops: { name: string; create(): Promise<{ provider: SandboxProvider; 
     name: "E2B",
     async create() {
       const fake = new FakeE2B();
-      const provider = new E2BProvider({ ...E2B_CONFIG, autoStopMinutes: undefined }, { fetch: fake.fetch });
+      const { autoStopMinutes: _, ...config } = E2B_CONFIG;
+      const provider = new E2BProvider(config, { fetch: fake.fetch });
       await provider.createInstance(params("s"));
       const body = defined(fake.requests.find((r) => r.method === "POST" && r.path.endsWith("/sandboxes"))).body as { timeout: number };
       return { provider, seconds: body.timeout };
@@ -299,7 +300,8 @@ const backstops: { name: string; create(): Promise<{ provider: SandboxProvider; 
     name: "Cloudflare",
     async create() {
       const fake = new FakeCloudflare();
-      const provider = new CloudflareProvider({ ...CF_CONFIG, autoStopMinutes: undefined }, { fetch: fake.fetch });
+      const { autoStopMinutes: _, ...config } = CF_CONFIG;
+      const provider = new CloudflareProvider(config, { fetch: fake.fetch });
       await provider.createInstance(params("s"));
       const body = defined(fake.requests.find((r) => r.method === "PUT")).body as { sleepAfterSec: number };
       return { provider, seconds: body.sleepAfterSec };

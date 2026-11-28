@@ -335,11 +335,7 @@ pub fn resolve_alias_from_paths(
       result.identity_file = Some(value.trim().to_string());
       identity_set = true;
     }
-    // Unrecognized directives are ignored rather than rejected: OpenSSH
-    // itself tolerates keywords a given client build does not act on, and
-    // this resolver only ever *uses* the supported fields above to build a
-    // connection, so an ignored directive can never widen trust or change
-    // what gets connected to.
+    // Unknown directives are ignored. Only the fields above are used, so they can't widen trust.
   }
 
   if !matched_any_block {
@@ -451,9 +447,7 @@ mod tests {
 
     let resolved = resolve_alias_from_paths("prod", &[config]).unwrap();
 
-    // The specific `Host prod` block set HostName first, so the later
-    // wildcard block's HostName must not override it, but User (never set by
-    // the specific block) still comes from the wildcard block.
+    // First match wins per key: HostName stays from `Host prod`, User comes from the wildcard.
     assert_eq!(resolved.hostname, "specific.example.com");
     assert_eq!(resolved.username, Some("wildcard-user".to_string()));
   }
@@ -585,9 +579,7 @@ mod tests {
 
   #[test]
   fn resolving_an_alias_never_touches_the_network() {
-    // A resolvable alias pointing at a hostname that does not exist proves
-    // resolution succeeds purely from parsing: if this function attempted a
-    // connection, it would hang or fail rather than returning promptly.
+    // The hostname doesn't exist, so a connection attempt would hang or fail, not return promptly.
     let dir = TempDir::new().unwrap();
     let config = write(
       &dir,
@@ -603,10 +595,7 @@ mod tests {
 
   #[test]
   fn alias_resolution_never_references_a_system_ssh_program() {
-    // Pure static inspection of this module's own source: everything in the
-    // explicit-alias resolution path lives here, and none of it
-    // may spawn a system `ssh` binary or shell out at all (PRD "Remove the
-    // system-ssh subprocess from the reachable alias product flow").
+    // Alias resolution must never spawn `ssh` or a shell (PRD: remove the system-ssh subprocess).
     let source = include_str!("remote_ssh_config.rs");
     let production_code = source
       .split("#[cfg(test)]")
@@ -624,11 +613,7 @@ mod tests {
 
   #[test]
   fn core_remote_typed_commands_never_shell_out_to_ssh() {
-    // Static inspection of `core::remote` and its submodules, whose typed
-    // commands reach an endpoint only over the native transport: the only
-    // remaining `"ssh"` program-name reference is `build_ssh_shell_command`,
-    // which builds an *interactive PTY* shell command line and is never called
-    // by the typed probe/clone/inspect commands.
+    // The one allowed "ssh" reference is `build_ssh_shell_command`, an interactive PTY line only.
     let source = [
       include_str!("remote.rs"),
       include_str!("remote/github.rs"),

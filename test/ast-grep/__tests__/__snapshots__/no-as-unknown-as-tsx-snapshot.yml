@@ -1,0 +1,16 @@
+id: no-as-unknown-as-tsx
+snapshots:
+  ? |
+    const el = <List rows={data as any as Row[]} />;
+  : labels:
+    - source: data as any as Row[]
+      style: primary
+      start: 23
+      end: 43
+  ? |
+    const rows = (data ?? []) as unknown as Row[];
+  : labels:
+    - source: (data ?? []) as unknown as Row[]
+      style: primary
+      start: 13
+      end: 45

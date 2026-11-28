@@ -88,8 +88,7 @@ fn validate_filename(filename: &str) -> Result<(), String> {
 }
 
 fn validate_working_directory(wd: &str) -> Result<(), String> {
-  // `Path::is_absolute()` only recognizes drive-rooted paths on Windows (e.g. `C:\foo`),
-  // so a Unix-style `/foo` slips past it there. Reject a leading separator explicitly.
+  // On Windows `is_absolute()` needs a drive, so a leading separator is rejected explicitly.
   if Path::new(wd).is_absolute() || wd.starts_with('/') || wd.starts_with('\\') {
     return Err(format!(
       "working-directory must be a relative path, got: '{}'",

@@ -729,8 +729,7 @@ impl StashView {
     } else {
       div()
         .child(
-          // Short label (['section heading']): 11px is fine.
-          // ast-grep-ignore: gpui-text-xs-short-label-only
+          // Short label (section heading). ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .px_2()
             .py_1p5()
@@ -964,8 +963,7 @@ impl Render for StashView {
     }
     self.sync_rows(window);
     let viewport = window.viewport_size();
-    // With no stashes there is only a sentence to show: size the dialog to
-    // it (`sm:max-w-lg`) instead of the list-and-detail layout's 75vw × 80vh.
+    // No stashes: the dialog fits its one sentence (`sm:max-w-lg`), not the 75vw × 80vh layout.
     let empty = self
       .entries
       .as_ref()

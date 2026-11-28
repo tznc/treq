@@ -322,7 +322,7 @@ pub fn rebase_workspaces_for_target(
     }
   }
 
-  local_db::update_workspaces_last_rebased_commit(repo_path, &rebased_ids, &current_target_commit)?;
+  local_db::record_workspaces_rebased(repo_path, &rebased_ids, &current_target_commit)?;
 
   Ok(Some(AutoRebaseResult {
     target_branch: target_branch.to_string(),
@@ -398,8 +398,7 @@ pub fn rebase_single_workspace(
   if !passes_guard(repo_path, &workspace, &sync) {
     return Ok(None);
   }
-  // A squash-merged stack lands upstream under new hashes; rebasing it would
-  // conflict every commit. Leave it alone when the target already has its changes.
+  // A squash-merged stack lands under new hashes, so rebasing it would conflict on every commit.
   if jj::jj_branch_changes_landed_on_target(&full_path, &workspace.branch_name, &target_branch)
     .unwrap_or(false)
   {
@@ -427,11 +426,7 @@ pub fn rebase_single_workspace(
     &jj_target_branch,
     conflict_marker_style,
   )? {
-    local_db::update_workspace_last_rebased_commit(
-      repo_path,
-      workspace.id,
-      &current_target_commit,
-    )?;
+    local_db::record_workspaces_rebased(repo_path, &[workspace.id], &current_target_commit)?;
     return Ok(Some(AutoRebaseResult {
       target_branch: target_branch.clone(),
       workspaces_rebased: vec![workspace.branch_name],
@@ -493,7 +488,7 @@ pub fn rebase_single_workspace(
     }
   }
 
-  local_db::update_workspace_last_rebased_commit(repo_path, workspace.id, &current_target_commit)?;
+  local_db::record_workspaces_rebased(repo_path, &[workspace.id], &current_target_commit)?;
 
   Ok(Some(AutoRebaseResult {
     target_branch,

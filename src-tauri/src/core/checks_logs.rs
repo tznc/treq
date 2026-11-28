@@ -796,8 +796,7 @@ pub fn query_log_timeseries(
   let conn = connect_with_logs_view(repo_path)?;
   let width = bucket_seconds.clamp(1, 86_400);
 
-  // Integer division truncates toward the earlier bucket for our
-  // always-non-negative epoch seconds, matching a floor().
+  // Epoch seconds are non-negative, so integer division acts as floor().
   let sql = format!(
     "SELECT strftime('%Y-%m-%dT%H:%M:%SZ',
                 (unixepoch(timestamp) / {w}) * {w}, 'unixepoch') AS bucket,
@@ -1184,11 +1183,7 @@ mod tests {
 
   #[test]
   fn test_concurrent_writers_to_same_day_do_not_error() {
-    // Regression test: multiple jobs in one run (or across runs on the same
-    // day) all write into the same dated database concurrently. Each opens
-    // its own connection and races to set journal_mode/create the schema on
-    // first use -- without busy_timeout configured before that race, SQLite
-    // returns "database is locked" instead of waiting its turn.
+    // Concurrent first-use setup needs busy_timeout set first, or SQLite says "database is locked".
     let dir = TempDir::new().unwrap();
     let repo = dir.path().to_string_lossy().to_string();
 
@@ -1523,9 +1518,7 @@ mod tests {
 
   #[test]
   fn test_timeseries_truncates_fractional_seconds_not_rounds() {
-    // Both lines fall in the same integer second, but one is past the
-    // half-second mark. A rounding bucket (rather than a floor) would push
-    // it into the next second and split what should be one bucket in two.
+    // Both lines share a second, one past the half. Rounding would split them into two buckets.
     let dir = TempDir::new().unwrap();
     let repo = dir.path().to_string_lossy().to_string();
     let writer = LogWriter::create(&repo, 1, "build").unwrap();
@@ -1597,8 +1590,7 @@ mod tests {
     let telemetry_dir = dir.path().join(".treq");
     std::fs::create_dir_all(&telemetry_dir).unwrap();
 
-    // Simulate "yesterday"'s database directly, since LogWriter always
-    // writes to today's file.
+    // Write yesterday's database directly, since LogWriter always writes to today's file.
     let yesterday = (chrono::Utc::now() - chrono::Duration::days(1))
       .format("%Y-%m-%d")
       .to_string();

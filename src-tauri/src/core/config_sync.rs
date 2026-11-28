@@ -809,8 +809,7 @@ mod tests {
 
   #[test]
   fn three_way_merge_propagates_deletions_both_ways() {
-    // `b` was synced, then deleted here: it leaves the server.
-    // `c` was synced, then deleted on the server: this copy does not bring it back.
+    // `b` was deleted here so it leaves the server. `c` was deleted there so it stays gone here.
     let base = manifest(&files(&[("a", "1"), ("b", "1"), ("c", "1")]));
     let remote = files(&[("a", "1"), ("b", "1"), ("d", "theirs")]);
     let local = files(&[("a", "2"), ("c", "1")]);

@@ -349,6 +349,10 @@ pub struct Sidebar {
   menu_anchor: Rc<Cell<Point<Pixels>>>,
   /// The project button's last painted bounds, for its menu's anchor.
   project_button_bounds: Rc<Cell<gpui::Bounds<Pixels>>>,
+  /// The project menu is open, so the button's chevron points up.
+  project_menu_open: bool,
+  /// How many times the project menu opened.
+  menu_generation: u64,
   /// The element the pointer rests on, and whether its tooltip shows yet.
   tooltip: Option<(SharedString, bool)>,
   /// The row under the pointer. A button inside it takes the tooltip, and
@@ -436,6 +440,8 @@ impl Sidebar {
       tooltip_sent: Rc::default(),
       menu_anchor: Rc::default(),
       project_button_bounds: Rc::default(),
+      project_menu_open: false,
+      menu_generation: 0,
       tooltip: None,
       hovered_row: None,
       drag_width: None,
@@ -480,6 +486,20 @@ impl Sidebar {
   /// Where the last right-click was, in the window's coordinates.
   pub fn menu_anchor(&self) -> Point<Pixels> {
     self.menu_anchor.get()
+  }
+
+  /// Counts the project menu's openings, so a late close from an earlier
+  /// menu is told apart.
+  pub fn menu_generation(&self) -> u64 {
+    self.menu_generation
+  }
+
+  /// The menu opened at `generation` closed.
+  pub fn menu_closed(&mut self, generation: u64, cx: &mut Context<Self>) {
+    if generation == self.menu_generation && self.project_menu_open {
+      self.project_menu_open = false;
+      cx.notify();
+    }
   }
 
   pub fn set_snapshot(&mut self, snapshot: SidebarSnapshot, cx: &mut Context<Self>) {
@@ -750,6 +770,9 @@ pub(super) fn pr_color(pr: PrState, palette: &Palette) -> Hsla {
 /// Three 20px row buttons with 2px gaps.
 const ROW_ACTIONS_WIDTH: f32 = 3. * 20. + 2. * 2.;
 
+/// How long the project button's chevron takes to turn over.
+const CHEVRON_TURN: Duration = Duration::from_millis(150);
+
 fn icon(path: &'static str, size: f32, color: Hsla) -> gpui::Svg {
   svg()
     .path(path)
@@ -802,18 +825,15 @@ impl Render for Sidebar {
       .h_full()
       .bg(palette.sidebar)
       .text_color(palette.sidebar_foreground)
-      // Room for the right edge line, drawn as a child below so the modal
-      // backdrop covers it (GPUI paints a border above the children).
+      // Room for the edge line child: a GPUI border would paint over the modal backdrop.
       .pr_px()
-      // The traffic lights sit here; the edge line runs past them to the
-      // window's top edge.
+      // The traffic lights sit here, and the edge line runs past them to the window's top.
       .when(title_bar::SHOWN, |this| {
         this.child(title_bar::drag_area("sidebar-title-bar"))
       })
       .child(header);
 
-    // With several repositories each group header is its repository's home
-    // row; a single repository keeps its home row up here.
+    // A lone repository's home row sits here. With several, each group header is the home row.
     if !snapshot.repos.iter().any(|repo| repo.label.is_some()) {
       for repo in &snapshot.repos {
         sidebar = sidebar.child(self.home_row(repo, &palette, None, cx));
@@ -882,9 +902,7 @@ impl Render for Sidebar {
           .pt_3()
           .pb_1()
           .child(
-            // Short label (['section heading']): 11px is fine.
-            // ast-grep-ignore: gpui-text-xs-short-label-only
-            ui::text(div(), TextSize::Xs)
+            ui::text(div(), TextSize::Sm)
               .font_weight(gpui::FontWeight::MEDIUM)
               .text_color(palette.sidebar_foreground.opacity(0.7))
               .child("WORKSPACES"),
@@ -1079,8 +1097,7 @@ impl Sidebar {
           this.hover_tooltip(key.clone(), *hovered, cx)
         }),
       )
-      // A click closes the tooltip, as base-ui's does: the dialog or menu
-      // the button opens would otherwise sit under it.
+      // A click closes the tooltip, as base-ui's does, so it never covers what the button opens.
       .on_mouse_down(
         gpui::MouseButton::Left,
         cx.listener(|this, _, _, cx| {
@@ -1226,23 +1243,19 @@ impl Sidebar {
       .relative()
       .gap_1p5()
       .mx_2()
-      // A group header spans its rows' width, so its fold chevron ends
-      // where their status dots do; the padding keeps its name in place.
+      // A group header spans its rows to align its chevron with their status dots.
       .when(group_header, |this| this.mx_0().pl_4())
       .rounded_md()
       .text_color(palette.sidebar_foreground)
       .when(repo.missing, |this| this.opacity(0.5))
-      // A group header names its repository; only a lone home row keeps
-      // the house.
+      // A group header names its repository, so only a lone home row keeps the house.
       .when(repo.label.is_none(), |this| {
         this.leading(icon(theme::ICON_HOUSE, 16., palette.sidebar_foreground))
       })
       .child(title)
       .when(repo.missing, |this| {
         this.child(
-          // Short label (['tag']): 11px is fine.
-          // ast-grep-ignore: gpui-text-xs-short-label-only
-          ui::text(div(), TextSize::Xs)
+          ui::text(div(), TextSize::Sm)
             .flex_none()
             .text_color(palette.muted_foreground)
             .child("missing"),
@@ -1284,6 +1297,11 @@ impl Sidebar {
     let bounds = self.project_button_bounds.clone();
     let anchor = self.menu_anchor.clone();
     let sink = self.sink.clone();
+    let this = cx.entity().downgrade();
+    let (open, generation) = (self.project_menu_open, self.menu_generation);
+    // Half a turn while the menu is open; still until it first opens.
+    let to = if open { 0.5 } else { 0. };
+    let from = if generation == 0 { to } else { 0.5 - to };
     div()
       .relative()
       .flex_1()
@@ -1293,6 +1311,7 @@ impl Sidebar {
           .selector("project-button")
           .role(Role::Button)
           .aria_label(SharedString::from(format!("Project: {name}")))
+          .aria_expanded(open)
           .flex()
           .items_center()
           .gap_1p5()
@@ -1324,22 +1343,28 @@ impl Sidebar {
                   .border_color(palette.muted_foreground)
                   .text_color(palette.muted_foreground)
               })
-              // Short label (['avatar initial']): 11px is fine.
-              // ast-grep-ignore: gpui-text-xs-short-label-only
-              .child(ui::text(div(), TextSize::Xs).child(initial)),
+              .child(ui::text(div(), TextSize::Sm).child(initial)),
           )
           .child(
             ui::text(div(), TextSize::Sm)
+              .flex_1()
               .min_w_0()
               .truncate()
               .font_weight(gpui::FontWeight::MEDIUM)
               .when(!saved, |this| this.text_color(palette.muted_foreground))
               .child(name),
           )
-          .child(icon(
-            theme::ICON_CHEVRON_DOWN,
-            14.,
-            palette.muted_foreground,
+          .child(div().selector("project-chevron").flex().flex_none().child(
+            icon(theme::ICON_CHEVRON_DOWN, 14., palette.muted_foreground).with_animation(
+              // A new id each time the menu opens or closes starts the turn.
+              ("project-chevron", generation * 2 + u64::from(open)),
+              Animation::new(CHEVRON_TURN).with_easing(gpui::ease_in_out),
+              move |svg, delta| {
+                svg.with_transformation(Transformation::rotate(gpui::percentage(
+                  from + (to - from) * delta,
+                )))
+              },
+            ),
           ))
           .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
             this.hover_tooltip(key.clone(), *hovered, cx)
@@ -1356,6 +1381,13 @@ impl Sidebar {
           .on_click(move |_, _, cx| {
             let b = bounds.get();
             anchor.set(gpui::point(b.left(), b.bottom() + gpui::px(4.)));
+            this
+              .update(cx, |this, cx| {
+                this.menu_generation += 1;
+                this.project_menu_open = true;
+                cx.notify();
+              })
+              .ignore_closed();
             sink(SidebarAction::ProjectMenu, cx);
           }),
       )
@@ -1482,8 +1514,7 @@ impl Sidebar {
         None => div().into_any_element(),
       },
     };
-    // Each repository's rows sit in their own element, so workspace ids,
-    // which are per repository, do not collide.
+    // Each repository gets its own element, so per-repository workspace ids do not collide.
     div()
       .id(("repo-section", index))
       .px_2()
@@ -1666,9 +1697,7 @@ impl Sidebar {
           .justify_end()
           .child(indicators)
           .when(interactive, |this| {
-            // Hovering reserves the buttons' width, so the title truncates
-            // before them instead of running under them. Hover styles do not
-            // reach layout, so this follows the hovered row instead.
+            // Hover styles skip layout: `hovered_row` makes the title truncate before the buttons.
             this
               .when(self.hovered_row.as_ref() == Some(&key), |this| {
                 this.min_w(zpx(ROW_ACTIONS_WIDTH))
@@ -1747,8 +1776,7 @@ impl Sidebar {
       );
 
     if row.exiting {
-      // Collapse out of the list, as the React sidebar does before the
-      // archived workspace is dropped from the data.
+      // Collapse out before the archived workspace leaves the data, as in the React sidebar.
       row_el
         .with_animation(
           ("exiting", id as u64),

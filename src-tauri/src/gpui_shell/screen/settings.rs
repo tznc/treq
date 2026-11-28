@@ -568,8 +568,7 @@ impl SettingsView {
     cx: &mut Context<Self>,
   ) -> Self {
     let view = cx.weak_entity();
-    // Controls report changes from inside this view's update, so handle them
-    // after it.
+    // Controls report changes inside this view's update, so they are handled after it.
     let sink: ActionSink = Rc::new(move |action, cx| {
       let view = view.clone();
       cx.defer(move |cx| {
@@ -1156,9 +1155,7 @@ impl SettingsView {
       return;
     }
     skills.pending = Some(id.clone());
-    // Agents edit inside the repository, so every customisation starts from
-    // a repository copy: of a global skill, the installed pack, or the
-    // registry's files for a skill not installed yet.
+    // Agents edit in the repo, so each customisation starts from a repo copy of the skill.
     let work = move |host: &dyn SettingsHost| match (&custom, &installed) {
       (Some(skill), _) => {
         let source = skill.paths.first().cloned().unwrap_or_default();
@@ -1877,8 +1874,7 @@ impl SettingsView {
         let mut merged: Vec<(&str, CustomSkillLevel)> = Vec::new();
         let (mut labelled, mut rest) = (Vec::new(), Vec::new());
         for view in data::filter_skills(catalog, &skills.query) {
-          // The registry can't install proprietary skills, so only list
-          // ones already installed.
+          // The registry can't install proprietary skills, so only installed ones are listed.
           if view.skill.proprietary && view.installed.is_none() {
             continue;
           }
@@ -3258,8 +3254,7 @@ impl SettingsView {
                 )
                 .when(!row.source.is_empty(), |this| {
                   this.child(
-                    // Short label (['source tag']): 11px is fine.
-                    // ast-grep-ignore: gpui-text-xs-short-label-only
+                    // Short label (source tag). ast-grep-ignore: gpui-text-xs-short-label-only
                     ui::text(div(), TextSize::Xs)
                       .text_color(p.muted_foreground)
                       .child(row.source.clone()),
@@ -3271,8 +3266,7 @@ impl SettingsView {
                     LABEL_CUSTOM_REPO | LABEL_CUSTOM_GLOBAL => p.warning,
                     _ => p.muted_foreground,
                   };
-                  // Short label (['tag']): 11px is fine.
-                  // ast-grep-ignore: gpui-text-xs-short-label-only
+                  // Short label (tag). ast-grep-ignore: gpui-text-xs-short-label-only
                   ui::text(div(), TextSize::Xs)
                     .flex_none()
                     .px_1p5()

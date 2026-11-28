@@ -36,7 +36,7 @@ export type CheckoutDeps = {
   stripe: StripeClient;
   webUrl: string;
   /** Lookup key of the metered usage price Pro carries. */
-  usagePriceLookupKey?: string;
+  usagePriceLookupKey?: string | undefined;
   /**
    * Internal test accounts: when the signed-in user's email equals one of
    * `emails` exactly, checkout applies `couponId` (a 100%-off coupon) so plans can be

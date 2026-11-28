@@ -144,8 +144,7 @@ async fn r7_startup_and_focus_request_counts() {
     fx.changed.load(Ordering::SeqCst)
   );
 
-  // Four concurrent reads, as parallel fetches would issue them: HTTP/1.1
-  // opens one connection each.
+  // Four concurrent reads, like parallel fetches. HTTP/1.1 opens one connection each.
   let before = connections.load(Ordering::SeqCst);
   let reads = (0..4).map(|_| account::subscription(&cloud.supabase));
   let _ = futures::future::join_all(reads).await;

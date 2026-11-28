@@ -413,9 +413,7 @@ fn cleanup_resolve_workspace(
   let full_path_str = abs_path_for_resolve_db_workspace(repo_path, workspace);
   let full_path = Path::new(&full_path_str);
 
-  // Detach `@` from the resolved change onto a disposable empty child before
-  // forgetting the resolve workspace. Otherwise `remove_wc_commit` can hide the
-  // rewritten change when it was the resolve WC tip.
+  // Move `@` to an empty child first, or `remove_wc_commit` can hide a rewritten resolve WC tip.
   if full_path.exists() {
     jj::jj_detach_resolve_workspace_wc(&full_path_str)
       .warn_on_err("jj detach resolve workspace wc");

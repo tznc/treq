@@ -1171,8 +1171,7 @@ fn sidebar_perf(cx: &mut TestAppContext) {
       })
       .collect();
     report(&format!("{count} rows: select"), &mut select);
-    // Another view beside the sidebar redraws (a terminal's output, a
-    // hover in the screen), as in the shell.
+    // A view beside the sidebar redraws, as terminal output or a screen hover does in the shell.
     for cached in [false, true] {
       let sidebar = h.sidebar.clone();
       let (shell, vcx) = cx.add_window_view(|_, cx| Beside {
@@ -1240,6 +1239,57 @@ fn project_button_opens_the_project_menu(cx: &mut TestAppContext) {
     (at.x - button.left()).abs() <= gpui::px(2.),
     "{at:?} {button:?}"
   );
+}
+
+#[gpui::test]
+fn project_button_chevron_ends_the_button(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![]));
+  let button = h.bounds("project-button").expect("button");
+  let chevron = h.bounds("project-chevron").expect("chevron");
+  // A short name leaves room; the chevron still trails at the button's
+  // right edge (inside its border and padding), not after the name.
+  assert!(
+    button.right() - chevron.right() <= gpui::px(10.),
+    "chevron ends at {:?}, button at {:?}",
+    chevron.right(),
+    button.right()
+  );
+}
+
+/// Whether the project button reads as expanded, its menu open.
+fn project_expanded(h: &mut Harness) -> Option<bool> {
+  use gpui_testing_library::prelude::*;
+  h.cx.run_until_parked();
+  let window = h.cx.update(|window, _| window.window_handle());
+  let screen = gpui_testing_library::Screen::new(&h.cx, window);
+  screen.redraw();
+  screen
+    .get_by_role(gpui_testing_library::by::role(Role::Button).name("Project: Unsaved"))
+    .snapshot()
+    .expanded()
+}
+
+#[gpui::test]
+fn project_button_is_expanded_while_its_menu_is_open(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![]));
+  assert_eq!(project_expanded(&mut h), Some(false), "closed at first");
+  h.click("project-button");
+  assert_eq!(project_expanded(&mut h), Some(true));
+  h.sidebar
+    .update_in(&mut h.cx, |s, _, cx| s.menu_closed(s.menu_generation(), cx));
+  assert_eq!(project_expanded(&mut h), Some(false), "the menu closed");
+}
+
+#[gpui::test]
+fn an_earlier_menu_closing_leaves_the_project_menu_open(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![]));
+  h.click("project-button");
+  let first = h.sidebar.read_with(&h.cx, |s, _| s.menu_generation());
+  // Clicked again: the first menu's close lands after the second opens.
+  h.click("project-button");
+  h.sidebar
+    .update_in(&mut h.cx, |s, _, cx| s.menu_closed(first, cx));
+  assert_eq!(project_expanded(&mut h), Some(true));
 }
 
 #[gpui::test]
@@ -1467,8 +1517,7 @@ fn a_stacked_rows_elbow_reaches_up_to_its_parents_icon(cx: &mut TestAppContext) 
   // Rows are 28px tall and sit flush.
   assert_eq!(parent.size.height, gpui::px(28.));
   assert_eq!(child.top() - parent.bottom(), gpui::px(0.));
-  // The elbow leaves the parent's icon about as close as it meets the
-  // child's, so the two ends of the elbow look alike.
+  // The elbow's gap above matches its gap beside, within 2px, so both ends look alike.
   let above = elbow.top() - parent_icon.bottom();
   let beside = child_icon.left() - elbow.right();
   assert!(

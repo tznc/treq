@@ -183,10 +183,26 @@ pub(super) fn stack_label(home: bool) -> &'static str {
 
 fn sync_state(sync: &Sync) -> String {
   match (sync.ahead, sync.behind) {
+    _ if sync.not_on_remote => "Not on remote".into(),
+    (0, 0) => "Up to date".into(),
     (a, 0) => format!("{a} to push"),
     (0, b) => format!("{b} to pull"),
     (a, b) => format!("{a} to push, {b} to pull"),
   }
+}
+
+fn sync_tooltip(sync: &Sync, now: chrono::DateTime<chrono::FixedOffset>) -> String {
+  let rebased = sync.rebased.as_ref().map_or(String::new(), |r| {
+    format!(
+      " Last rebased on {} {}.",
+      r.target,
+      crate::gpui_shell::time::relative_at(&r.at, now)
+    )
+  });
+  format!(
+    "{}.{rebased} Sync with remote (fetch and push)",
+    sync_state(sync)
+  )
 }
 
 fn view_pr_name(pr: &ViewPr) -> String {
@@ -216,8 +232,22 @@ pub struct CreatePr {
 pub struct Sync {
   pub ahead: u32,
   pub behind: u32,
+  /// The branch has never been pushed.
+  #[serde(default)]
+  pub not_on_remote: bool,
+  /// When the branch was last rebased onto its target; `None` until a
+  /// rebase is recorded.
+  #[serde(default)]
+  pub rebased: Option<Rebased>,
   pub disabled: bool,
   pub spinning: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct Rebased {
+  pub target: String,
+  /// RFC 3339.
+  pub at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -297,6 +327,10 @@ pub struct TabRow {
 /// How often the branch's pull request is re-read from the PR poller's
 /// cache, which the poller itself refreshes.
 const PR_POLL: Duration = Duration::from_secs(5);
+
+/// How long after a sync or a new pull request the branch's pull request is
+/// read again: GitHub starts the pushed commit's checks a moment after.
+const CHECKS_AFTER_PUSH: Duration = Duration::from_secs(5);
 
 /// The header and tab row, drawn from what they read from the backend.
 pub struct WorkspaceView {
@@ -485,15 +519,13 @@ impl WorkspaceView {
     }
     let moved = self.route.key() != route.key();
     let changed = self.route.changes_revision != route.changes_revision;
-    // A changed checkout or a refocused window (`changes_revision`) may mean
-    // history was rewritten outside treq: the tab badges read again too.
+    // A new `changes_revision` can mean history changed outside treq: the tab badges read again.
     let stale = moved || changed || self.route.revision != route.revision;
     let left = std::mem::replace(&mut self.route, route);
     self.dark = dark;
     if moved {
       self.close_popover(cx);
-      // The header the workspace last read, or one read ahead, draws at
-      // once; the load below reads it again behind.
+      // The last or prefetched header draws at once, and the load below refreshes it behind.
       let now = cx.background_executor().now();
       if let Some(loaded) = self.loaded.take() {
         self
@@ -819,8 +851,7 @@ impl WorkspaceView {
 
   fn rebuild(&mut self, cx: &mut Context<Self>) {
     let route = self.drawn_route(cx);
-    // While another workspace loads, the last one stays drawn and swaps in
-    // one frame once it lands, rather than flashing an empty header.
+    // The last workspace stays drawn until the next one loads, so the header never flashes empty.
     let Some(loaded) = self.loaded.as_ref() else {
       self.sync_popover(cx);
       return;
@@ -893,8 +924,7 @@ impl WorkspaceView {
       return;
     };
     self.close_popover(cx);
-    // The button's tooltip would cover the popover and swallow the next
-    // click; `hover_tooltip` keeps it hidden while the popover shows.
+    // The tooltip would swallow the popover's next click, so `hover_tooltip` keeps it hidden.
     if self.tooltip.take().is_some() {
       self.sync_tooltip_popup(cx);
       cx.notify();
@@ -989,11 +1019,15 @@ impl WorkspaceView {
     self.rebuild(cx);
     let host = self.host.clone();
     let repo_path = self.route.repo_path.clone();
+    let key = self.route.key();
     cx.spawn(async move |this, cx| {
       let outcome = cx.background_spawn(async move { work(&*host) }).await;
       this
         .update(cx, |view, cx| {
           view.pending = Pending::None;
+          if pending == Pending::Sync && outcome.ok && view.route.key() == key {
+            view.refresh_checks_later(cx);
+          }
           view.host.notify(NativeEvent::from(Toast::new(
             match (outcome.ok, outcome.warning) {
               (false, _) => ToastTone::Error,
@@ -1003,14 +1037,32 @@ impl WorkspaceView {
             outcome.title,
             outcome.description,
           )));
-          // The window reads again on this and bumps the route's revision,
-          // which reloads the header (`set_route`).
+          // The window rereads and bumps the revision, which reloads the header (`set_route`).
           view
             .host
             .notify(NativeEvent::WorkspaceChanged { repo_path });
           view.rebuild(cx);
         })
         .ignore_closed();
+    })
+    .detach();
+  }
+
+  /// Has the poller read the branch's pull request again once GitHub has
+  /// started the checks of a sync or a new pull request, rather than draw
+  /// the old ones until its next round.
+  fn refresh_checks_later(&self, cx: &mut Context<Self>) {
+    let repo = self.route.repo_path.clone();
+    let Some(branch) = self
+      .pr_branch()
+      .filter(|_| self.actions.acts_locally(&repo))
+    else {
+      return;
+    };
+    let (host, executor) = (self.actions.clone(), cx.background_executor().clone());
+    cx.background_spawn(async move {
+      executor.timer(CHECKS_AFTER_PUSH).await;
+      host.refresh_pr_status(&repo, &branch);
     })
     .detach();
   }
@@ -1078,7 +1130,8 @@ impl WorkspaceView {
       }
       _ => {
         let host: Arc<dyn super::code_data::CodeHost> = self.code_host.clone();
-        self.title = Some(cx.new(|cx| TitleEditor::new(host, repo, id, title, dark, cx)));
+        let popups = self.popups.clone();
+        self.title = Some(cx.new(|cx| TitleEditor::new(host, repo, id, title, dark, popups, cx)));
       }
     }
   }
@@ -1230,8 +1283,7 @@ impl WorkspaceView {
       });
 
     if !h.home {
-      // The title in place of the branch: the branch, its target and Stack
-      // on this… live in the Code tab's stack card.
+      // The title stands in for the branch, which lives in the Code tab's stack card.
       if let Some(title) = &self.title {
         left = left.child(title.clone());
       }
@@ -1336,8 +1388,7 @@ impl WorkspaceView {
       ));
     }
 
-    // The row wraps it whole first; alone on its row and still too wide (at
-    // a large zoom), its buttons wrap too, right-aligned.
+    // The row wraps the group whole first. At a large zoom its buttons wrap too, right-aligned.
     let mut right = div()
       .flex()
       .flex_wrap()
@@ -1365,9 +1416,7 @@ impl WorkspaceView {
       let url = linear.url.clone();
       let sink = self.sink.clone();
       right = right.child(
-        // Short label (['issue key']): 11px is fine.
-        // ast-grep-ignore: gpui-text-xs-short-label-only
-        ui::text(div(), TextSize::Xs)
+        ui::text(div(), TextSize::Sm)
           .selector("workspace-linear")
           .role(gpui::Role::Link)
           .aria_label(linear.key.clone())
@@ -1386,6 +1435,9 @@ impl WorkspaceView {
           .on_click(move |_, _, cx| sink(ScreenAction::OpenUrl { url: url.clone() }, cx)),
       );
     }
+    if let Some(sync) = &h.sync {
+      right = right.child(self.sync(sync, p, cx));
+    }
     if let Some(checks) = &h.checks {
       right = right.child(
         div()
@@ -1400,9 +1452,6 @@ impl WorkspaceView {
     }
     if let Some(create) = &h.create_pr {
       right = right.child(self.create_pr(create, p, cx));
-    }
-    if let Some(sync) = &h.sync {
-      right = right.child(self.sync(sync, p, cx));
     }
     let merged = h
       .view_pr
@@ -1484,8 +1533,7 @@ impl WorkspaceView {
           .flex()
           .flex_wrap()
           .items_center()
-          // React's `justify-between` too, which CSS ignores beside the
-          // right group's `ml-auto`; taffy would add the free space twice.
+          // Omits React's `justify-between`: beside `ml-auto` taffy would add the free space twice.
           .gap_x_2()
           .gap_y_1()
           .child(left)
@@ -1494,8 +1542,7 @@ impl WorkspaceView {
   }
 
   fn view_pr(&self, pr: &ViewPr, p: &Palette, cx: &mut Context<Self>) -> Stateful<Div> {
-    // The PR's state as GitHub labels it, as a pill that is also the button:
-    // the label opens the PR in Treq, the trailing half on GitHub.
+    // A pill of the PR's GitHub state: the label opens it in Treq, the trailing half on GitHub.
     let draft = pr.draft && pr.state == PrState::Open;
     let (label, icon, tone) = match pr.state {
       _ if draft => ("Draft", theme::ICON_PR_DRAFT, ui::Tone::Neutral),
@@ -1580,8 +1627,7 @@ impl WorkspaceView {
   }
 
   fn sync(&self, sync: &Sync, p: &Palette, cx: &mut Context<Self>) -> Stateful<Div> {
-    // The header only draws sync while the branch and its remote differ;
-    // the pip says so at a glance, and the tooltip says by how much.
+    // Drawn only when branch and remote differ: the pip flags it, the tooltip says by how much.
     let state = sync_state(sync);
     let button = Button::new("workspace-sync", p)
       .aria_label(format!("Sync with remote: {state}"))
@@ -1595,8 +1641,6 @@ impl WorkspaceView {
       .px_2()
       .text_color(p.muted_foreground)
       .disabled(sync.disabled)
-      .when(sync.behind > 0, |b| b.child(format!("↓{}", sync.behind)))
-      .when(sync.ahead > 0, |b| b.child(format!("↑{}", sync.ahead)))
       .map(|b| {
         let icon = ui::icon(theme::ICON_REFRESH, 16., p.muted_foreground);
         if sync.spinning {
@@ -1605,30 +1649,33 @@ impl WorkspaceView {
           b.child(icon)
         }
       })
+      .when(sync.behind > 0, |b| b.child(format!("↓{}", sync.behind)))
+      .when(sync.ahead > 0, |b| b.child(format!("↑{}", sync.ahead)))
       .on_click(self.press("workspace.sync"));
     self
       .with_tooltip(
         "workspace-sync",
         Some(TooltipContent::Text(
-          format!("{state}. Sync with remote (fetch and push)").into(),
+          sync_tooltip(sync, chrono::Local::now().fixed_offset()).into(),
         )),
         button,
         cx,
       )
-      .child(
-        // Solid status colour, ringed in the background so it reads against
-        // the button's border in both themes; inset so nothing clips it.
-        div()
-          .selector("workspace-sync-pip")
-          .absolute()
-          .top(zpx(-4.))
-          .right(zpx(-4.))
-          .size(zpx(10.))
-          .rounded_full()
-          .border(zpx(1.5))
-          .border_color(p.background)
-          .bg(ui::Tone::Warning.color(p)),
-      )
+      .when(sync.ahead > 0 || sync.behind > 0, |d| {
+        d.child(
+          // Ringed to read against the border in both themes, and inset so nothing clips it.
+          div()
+            .selector("workspace-sync-pip")
+            .absolute()
+            .top(zpx(-4.))
+            .right(zpx(-4.))
+            .size(zpx(10.))
+            .rounded_full()
+            .border(zpx(1.5))
+            .border_color(p.background)
+            .bg(ui::Tone::Warning.color(p)),
+        )
+      })
   }
 
   fn checks(&self, checks: &Checks, p: &Palette) -> Button {
@@ -1666,8 +1713,7 @@ impl WorkspaceView {
 
   /// The workspace's tab bar: the view tabs, then its busy and loc status.
   fn tab_bar(&self, row: &TabRow, p: &Palette) -> ObservedElement<gpui::Stateful<Div>> {
-    // Counts are neutral, uncommitted changes yellow; a conflict shows once,
-    // as a danger dot.
+    // Counts are neutral and uncommitted changes yellow. A conflict shows once, as a danger dot.
     let commits = ui::Tab::new("workspace-tab-commits", "Commits").icon(theme::ICON_COMMIT);
     let commits = match &row.commits {
       Some(CommitsLabel::Count { count, tone }) => {
@@ -1786,9 +1832,7 @@ async fn in_front(this: &WeakEntity<WorkspaceView>, cx: &mut gpui::AsyncWindowCo
 
 /// One of `LocDiffMarker`'s counts, `+N` or `-N`, in its tone's color.
 pub(super) fn loc_count(text: String, color: Hsla) -> Div {
-  // Short label (['line count']): 11px is fine.
-  // ast-grep-ignore: gpui-text-xs-short-label-only
-  ui::text(div(), TextSize::Xs)
+  ui::text(div(), TextSize::Sm)
     .font_family(theme::MONO_FONT)
     .text_color(color)
     .child(text)
@@ -1889,12 +1933,12 @@ impl WorkspaceView {
         agent,
         session_name: Some(name.into()),
         link: None,
+        profile: None,
       }
     };
     let text = |key: &str| value[key].as_str().unwrap_or_default().to_string();
     match field.as_str() {
-      // A reviewer that inherits an idle agent's context would review its
-      // own work, so a review always starts a new terminal.
+      // Reusing an idle agent would review its own work, so each review gets a new terminal.
       "changes.startReview" => {
         let agent = value["agent"].as_str().map(str::to_string);
         let prompt = text("prompt");
@@ -2219,8 +2263,7 @@ impl WorkspaceView {
       self.logs = Some((logs.clone(), key));
       return Body::Logs(logs);
     }
-    // A workspace's first view of the tab draws once it has read; the
-    // tab's last view stays drawn meanwhile.
+    // A new view of the tab draws after its first read, and the last view stays drawn until then.
     if tab == Tab::Changes {
       self.code_shown = false;
       let options = changes::Options {
@@ -2244,8 +2287,7 @@ impl WorkspaceView {
     let host: Arc<dyn CommitsHost> = host;
     if tab == Tab::Commits {
       self.code_shown = false;
-      // The log reads again with the tab badges when the checkout changes
-      // (`changes_revision`), so the list and its count stay one read.
+      // The log rereads with the badges on `changes_revision`, so the list matches its count.
       let mut parent = parent;
       parent.revision += self.route.changes_revision;
       let scroll_to = self.route.scroll_to_commit.clone();
@@ -2464,9 +2506,7 @@ impl Render for WorkspaceView {
       super::remote_chrome::strip(&chrome, self.dark, &p, &press)
     });
     let body = match (code, self.sync_terminal(cx)) {
-      // The tab with the terminal pane below: a share of the whole view,
-      // header and tabs included. A maximized pane covers the tabs and
-      // keeps the header.
+      // The pane's share includes header and tabs. Maximized, it covers the tabs, not the header.
       (code, Some(pane)) => {
         pane.update(cx, |pane, cx| pane.set_dark(self.dark, cx));
         let covered = pane.read(cx).covers();
@@ -2603,9 +2643,36 @@ mod sync_state_tests {
     Sync {
       ahead,
       behind,
+      not_on_remote: false,
+      rebased: None,
       disabled: false,
       spinning: false,
     }
+  }
+
+  #[test]
+  fn tooltip_says_when_the_branch_was_last_rebased() {
+    let now = chrono::DateTime::parse_from_rfc3339("2026-11-27T12:00:00Z").expect("now");
+    let sync = Sync {
+      rebased: Some(Rebased {
+        target: "main".into(),
+        at: "2026-11-27T09:00:00Z".into(),
+      }),
+      ..sync(38, 0)
+    };
+    assert_eq!(
+      sync_tooltip(&sync, now),
+      "38 to push. Last rebased on main 3 hours ago. Sync with remote (fetch and push)"
+    );
+  }
+
+  #[test]
+  fn tooltip_leaves_out_a_rebase_never_recorded() {
+    let now = chrono::DateTime::parse_from_rfc3339("2026-11-27T12:00:00Z").expect("now");
+    assert_eq!(
+      sync_tooltip(&sync(38, 0), now),
+      "38 to push. Sync with remote (fetch and push)"
+    );
   }
 
   #[test]
@@ -2613,5 +2680,19 @@ mod sync_state_tests {
     assert_eq!(sync_state(&sync(2, 0)), "2 to push");
     assert_eq!(sync_state(&sync(0, 3)), "3 to pull");
     assert_eq!(sync_state(&sync(2, 3)), "2 to push, 3 to pull");
+  }
+
+  #[test]
+  fn names_a_branch_that_matches_its_remote() {
+    assert_eq!(sync_state(&sync(0, 0)), "Up to date");
+  }
+
+  #[test]
+  fn names_a_branch_not_on_the_remote() {
+    let sync = Sync {
+      not_on_remote: true,
+      ..sync(0, 0)
+    };
+    assert_eq!(sync_state(&sync), "Not on remote");
   }
 }

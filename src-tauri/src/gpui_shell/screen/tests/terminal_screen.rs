@@ -26,6 +26,7 @@ fn terminal_pane_opens_the_active_agent_session(cx: &mut TestAppContext) {
       permission_mode: Some("plan".into()),
       agent: Some("codex".into()),
       workspace_path: None,
+      profile: None,
     },
   );
   set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
@@ -62,6 +63,35 @@ fn terminal_pane_opens_the_active_agent_session(cx: &mut TestAppContext) {
       "agent": "codex",
       "isStreaming": false,
     }]))
+  );
+}
+
+#[gpui::test]
+fn terminal_pane_starts_the_agent_with_its_profile(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  host.settings.lock().unwrap().extend([
+    (
+      "agent_profiles".to_string(),
+      Some(r#"[{"agent":"claude","name":"work"},{"agent":"claude","name":"personal"}]"#.into()),
+    ),
+    (
+      "/repo:default_profile_claude".to_string(),
+      Some("work".into()),
+    ),
+  ]);
+  host.pending.lock().unwrap().insert(
+    3,
+    launch_data::PendingSession {
+      agent: Some("claude".into()),
+      profile: Some("personal".into()),
+      ..Default::default()
+    },
+  );
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  let calls = host.calls();
+  assert!(
+    calls.contains(&"prepare profile claude personal".to_string()),
+    "{calls:?}"
   );
 }
 
@@ -400,8 +430,7 @@ fn terminal_pane_opens_and_closes_shells_by_shortcut(cx: &mut TestAppContext) {
       && c.contains("Some(\"/repo/.treq/workspaces/login\") running Some(\"export\")")
   });
   assert!(spawned_shell, "{:?}", host.calls());
-  // The new shell has focus: Cmd+W closes it, and the agent next to it
-  // takes focus.
+  // The new shell has focus: Cmd+W closes it, and the agent next to it takes focus.
   h.cx.simulate_keystrokes("cmd-w");
   h.cx.run_until_parked();
   assert!(!h.shows(gpui::Role::Group, "Shell terminal"));
@@ -1206,8 +1235,7 @@ fn double_clicking_a_remote_session_scrolls_it_fully_into_view(cx: &mut TestAppC
     .cx
     .debug_bounds("terminal-scroll-container")
     .expect("container");
-  // The newest session opened in view; drag the row's scrollbar back to
-  // the start so the last one overflows again.
+  // The newest session opened in view: drag the scrollbar back so the last one overflows again.
   let thumb = h
     .cx
     .debug_bounds("terminal-row-scrollbar")
@@ -1276,8 +1304,7 @@ fn double_clicking_a_session_clipped_on_the_left_scrolls_it_into_view(cx: &mut T
     .cx
     .debug_bounds("terminal-scroll-container")
     .expect("container");
-  // Drag the row's scrollbar to the end so the first session is clipped
-  // by the left edge.
+  // With the row's scrollbar dragged to the end, the left edge clips the first session.
   let thumb = h
     .cx
     .debug_bounds("terminal-row-scrollbar")
@@ -2011,6 +2038,7 @@ fn terminal_workspace_label_click_navigates_by_path(cx: &mut TestAppContext) {
       permission_mode: None,
       agent: None,
       workspace_path: Some("/repo/.treq/workspaces/b".into()),
+      profile: None,
     },
   );
   let (mut h, _) = workspace_harness(cx, host, terminal_route(serde_json::json!({})));

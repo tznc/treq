@@ -265,8 +265,7 @@ impl OpenWorkspacesDialog {
       errors: Vec::new(),
       dismissed: false,
     };
-    // A repository seen before lists its pull requests at once, without
-    // waiting for the remote to be read again.
+    // A repository seen before lists its PRs at once, without waiting to read the remote again.
     let repo = view.route.repo_path.clone();
     if let Some(name) = cache(cx).remote_names.get(&repo).cloned() {
       view.github = Some(name);
@@ -289,8 +288,7 @@ impl OpenWorkspacesDialog {
   /// the remote's latest.
   fn load(&mut self, cx: &mut Context<Self>) {
     let (host, route) = (self.host.clone(), self.route.clone());
-    // The pull request list needs only the remote, a file read: it does not
-    // wait for the branches and settings behind jj.
+    // The PR list needs only the remote, a file read, not jj's branches and settings.
     cx.spawn({
       let (host, route) = (host.clone(), route.clone());
       async move |this, cx| {
@@ -513,8 +511,7 @@ impl OpenWorkspacesDialog {
     }
     self.query = query;
     if self.github.is_some() {
-      // Searching from the first keystroke: the debounce counts as the wait,
-      // and an answer for the old query no longer lands.
+      // Searching from the first keystroke: the debounce is the wait. Stale answers don't land.
       self.prs.start();
       cx.notify();
     }
@@ -1089,8 +1086,7 @@ impl OpenWorkspacesDialog {
   ) -> impl IntoElement {
     let muted = p.muted;
     let rows = checks.len() + self.chosen.len() + self.chosen_issues.len();
-    // The invalid count goes under the summary, so neither runs under the
-    // buttons.
+    // The invalid count goes under the summary, so neither runs under the buttons.
     div()
       .relative()
       .flex()
@@ -1575,8 +1571,7 @@ fn pane(
         )
         .when(picked > 0, |this| {
           this.child(
-            // Short label (['count']): 11px is fine.
-            // ast-grep-ignore: gpui-text-xs-short-label-only
+            // Short label (count). ast-grep-ignore: gpui-text-xs-short-label-only
             ui::text(div(), TextSize::Xs)
               .text_color(p.muted_foreground)
               .child(format!("{picked} selected")),
@@ -1909,8 +1904,7 @@ impl Render for OpenWorkspacesDialog {
         "Create a workspace for each line."
       })
       .focus(&self.focus)
-      // Escape closes the lines popover first; a click outside waits
-      // while workspaces are created.
+      // Escape closes the lines popover first. A click outside waits while workspaces are created.
       .on_close(ui::handler(cx, |view, _, cx| {
         if view.lines_open {
           view.close_lines(cx);

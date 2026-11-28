@@ -14,7 +14,7 @@ use std::{
 
 use tauri::{AppHandle, Wry};
 use tauri_plugin_gpui::{
-  gpui::{self, prelude::*, Global, SharedString, WeakEntity},
+  gpui::{self, prelude::*, Global, MouseButton, NavigationDirection, SharedString, WeakEntity},
   GpuiConfig, GpuiWindowExt,
 };
 
@@ -236,6 +236,14 @@ impl Render for Shell {
         // Blurs the focused input too, as a browser does.
         window.blur(cx);
         defer_main(&app, |_| popup::hide_menus())
+      })
+      .on_mouse_down(MouseButton::Navigate(NavigationDirection::Back), {
+        let label = self.label.to_string();
+        move |_, _, cx| window::shortcut(&label, window::Shortcut::Back, cx)
+      })
+      .on_mouse_down(MouseButton::Navigate(NavigationDirection::Forward), {
+        let label = self.label.to_string();
+        move |_, _, cx| window::shortcut(&label, window::Shortcut::Forward, cx)
       })
       .bg(theme::palette(dark).background)
       .when_some(self.sidebar.clone(), |this, sidebar| {
@@ -610,8 +618,15 @@ fn action_sink(app: AppHandle, label: String) -> sidebar::ActionSink {
         .and_then(WeakEntity::upgrade)
         .and_then(|shell| shell.read(cx).sidebar.clone())
         .map(|sidebar| sidebar.read(cx).snapshot().clone());
-      if let Some(snapshot) = snapshot {
-        sidebar_actions::handle(&app, &label, &snapshot, &action, cx);
+      let shown = snapshot
+        .is_some_and(|snapshot| sidebar_actions::handle(&app, &label, &snapshot, &action, cx));
+      // No menu opened (an empty project has none): close the project button.
+      if !shown {
+        if let Some(sidebar) = window_sidebar(cx, &label) {
+          sidebar.update(cx, |sidebar, cx| {
+            sidebar.menu_closed(sidebar.menu_generation(), cx)
+          });
+        }
       }
     });
   })
@@ -732,19 +747,39 @@ pub fn show_menu(app: &AppHandle, label: &str, entries: Vec<MenuEntry>) {
     let anchor = tauri_plugin_gpui::with_app({
       let label = label.clone();
       move |cx| {
-        let sidebar = cx
-          .try_global::<Shells>()
-          .and_then(|shells| shells.0.get(&label))
-          .and_then(WeakEntity::upgrade)
-          .and_then(|shell| shell.read(cx).sidebar.clone())?;
+        let sidebar = window_sidebar(cx, &label)?;
         let sidebar = sidebar.read(cx);
-        Some((sidebar.menu_anchor(), sidebar.snapshot().dark))
+        Some((
+          sidebar.menu_anchor(),
+          sidebar.snapshot().dark,
+          sidebar.menu_generation(),
+        ))
       }
     });
-    if let Ok(Some((at, dark))) = anchor {
+    if let Ok(Some((at, dark, generation))) = anchor {
       popup::show_menu(app, &label, entries, at, dark);
+      // Tell the sidebar when the menu closes, to turn its chevron back.
+      let app = app.clone();
+      popup::on_menu_closed(move || {
+        defer_main(&app, move |_| {
+          tauri_plugin_gpui::with_app(move |cx| {
+            if let Some(sidebar) = window_sidebar(cx, &label) {
+              sidebar.update(cx, |sidebar, cx| sidebar.menu_closed(generation, cx));
+            }
+          })
+          .ignore_closed();
+        });
+      });
     }
   });
+}
+
+/// The sidebar of shell window `label`.
+fn window_sidebar(cx: &gpui::App, label: &str) -> Option<gpui::Entity<Sidebar>> {
+  cx.try_global::<Shells>()
+    .and_then(|shells| shells.0.get(label))
+    .and_then(WeakEntity::upgrade)
+    .and_then(|shell| shell.read(cx).sidebar.clone())
 }
 
 /// Closes every popup, as when a shell window loses focus.

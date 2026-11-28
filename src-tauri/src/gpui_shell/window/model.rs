@@ -488,6 +488,8 @@ pub struct Model {
   pub skill_install: Option<String>,
   /// The confirmation on screen, over everything else.
   pub confirm: Option<Confirm>,
+  /// Where back and forward go.
+  pub history: super::history::History,
 }
 
 /// A workspace to select once the window's data lists it.
@@ -723,8 +725,7 @@ impl Model {
     }
     self.last_index = Some(index);
     if toggle {
-      // The open workspace's row is highlighted too, so the first Ctrl+click
-      // adds to it rather than starting a selection without it.
+      // The open row counts as selected, so the first Ctrl+click adds to it, not a new selection.
       let shown = !matches!(
         self.page,
         Page::Github(_) | Page::Linear | Page::Settings { .. }

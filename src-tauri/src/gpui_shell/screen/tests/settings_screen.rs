@@ -367,8 +367,7 @@ fn settings_reviews_proposed_prompt_edits_with_the_review_cards(cx: &mut TestApp
     ..FakeHost::default()
   });
   let mut h = code_review_settings(cx, host.clone());
-  // The shared agent card: its header row, then Dismiss and Apply only,
-  // Apply as the primary on the right, at the condensed size.
+  // Shared agent card: header row, then Dismiss and a condensed primary Apply on the right.
   assert!(h.shows(gpui::Role::Article, "You dismiss style comments"));
   assert!(h.shows(gpui::Role::Heading, "Local Line 2"));
   assert!(!h.shows(gpui::Role::Button, "Resolve"));

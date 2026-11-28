@@ -104,6 +104,7 @@ pub struct Pending {
   pub permission_mode: Option<String>,
   pub agent: Option<String>,
   pub workspace_path: Option<String>,
+  pub profile: Option<String>,
 }
 
 impl Pending {
@@ -113,6 +114,7 @@ impl Pending {
       permission_mode: self.permission_mode.clone(),
       agent: self.agent.clone(),
       workspace_path: self.workspace_path.clone(),
+      profile: self.profile.clone(),
     }
   }
 }
@@ -314,8 +316,7 @@ pub fn cursor_div(
   (focused, on): (bool, bool),
   color: gpui::Hsla,
 ) -> ObservedElement<gpui::Stateful<Div>> {
-  // Plain pixels: the cell already carries the zoom, so rems would apply
-  // it twice and move the cursor off its row.
+  // Plain pixels: the cell carries the zoom, so rems would apply it twice and shift the cursor.
   let origin = cell_origin(row, col, (w, h));
   let base = div()
     .selector("terminal-cursor")
@@ -627,8 +628,7 @@ impl TerminalView {
     else {
       return;
     };
-    // An agent runs once its shell starts the typed command; until then
-    // `treq agent msg` neither lists it nor types into its shell.
+    // Until its shell starts the typed command, `treq agent msg` can't list or type to the agent.
     if !self.host.agent_started(&self.pty) {
       self._tasks.push(cx.spawn(async move |this, cx| loop {
         cx.background_executor().timer(AGENT_START_POLL).await;
@@ -831,8 +831,7 @@ impl TerminalView {
         if let Ok(mut emulator) = live.emulator.lock() {
           emulator.resize(cols, rows);
         }
-        // A resize while the PTY starts reaches it once it runs; otherwise
-        // the program draws for a size the grid isn't.
+        // A resize during PTY start lands once it runs, or the program draws for the wrong size.
         let size = Some((cols, rows));
         if self.pty_size == size {
           self.pty_settle = None;
@@ -1119,8 +1118,7 @@ impl TerminalView {
         .size(ui::Size::Xs)
         .h_6()
         .px_2(),
-      // Short label (['button label']): 11px is fine.
-      // ast-grep-ignore: gpui-text-xs-short-label-only
+      // Short label (button label). ast-grep-ignore: gpui-text-xs-short-label-only
       TextSize::Xs,
     )
     .label("Deliver")
@@ -1268,9 +1266,7 @@ impl TerminalView {
     if paste {
       let item = cx.read_from_clipboard();
       let mut pasted = Vec::new();
-      // A copied image goes in as the path of a file holding it: Claude Code
-      // and Codex attach a pasted image path, and nothing else reaches them
-      // through a PTY. A remote host can't read a local file.
+      // An image pastes as a file path, which Claude Code and Codex attach. Remotes can't read it.
       let text = item.as_ref().and_then(|item| item.text()).or_else(|| {
         let image = item?.into_entries().find_map(|entry| match entry {
           gpui::ClipboardEntry::Image(image) => Some(image),
@@ -1951,9 +1947,7 @@ impl Render for TerminalView {
       .cursor_text()
       .on_key_down(cx.listener(Self::on_key))
       .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
-      // A click anywhere else blurs the terminal, as it does xterm's
-      // textarea; its cursor turns to an outline. It also drops the
-      // selection, so no stale highlight is left behind.
+      // A click elsewhere blurs the terminal, as with xterm's textarea, and drops its selection.
       .on_mouse_down_out(cx.listener(|view, _, window, cx| {
         if view.focus.is_focused(window) {
           window.blur(cx);
@@ -2230,8 +2224,7 @@ impl TerminalPane {
     place: Place,
     _: &mut Context<Self>,
   ) -> Self {
-    // Unzoomed: each view scales it by the window's rem size, so zoom
-    // changes reach open terminals.
+    // Unzoomed: each view scales it by the window's rem size, so zoom reaches open terminals.
     let font_size = host
       .settings(&["terminal_font_size".to_string()])
       .unwrap_or_default()
@@ -2617,9 +2610,7 @@ impl TerminalPane {
     let moved = self.place.working_directory != place.working_directory;
     self.adopt_due |= self.place.repo_path != place.repo_path;
     self.place = place;
-    // A newly selected workspace's first terminal becomes the active one,
-    // unless the active one is already there (a click on it switched
-    // workspace): the row then stays where the click left it.
+    // A new workspace's first terminal goes active, unless a click there already picked one.
     let dir = &self.place.working_directory;
     let active_here = self
       .columns
@@ -2682,8 +2673,7 @@ impl TerminalPane {
       || route.pending != previous.pending
     {
       if let Some(id) = route.active_session_id {
-        // A session that just became active shows: the pane expands to at
-        // least its default height.
+        // A newly active session shows, so the pane expands to at least its default height.
         if previous.active_session_id != Some(id) {
           self.reveal_pane();
         }
@@ -2772,8 +2762,7 @@ impl TerminalPane {
     };
     if let Some(view) = self.view(&column) {
       view.update(cx, |view, cx| view.write(text, cx));
-      // Enter as its own later write: a TUI reads a burst ending in it
-      // as a paste and leaves the text unsent.
+      // Enter goes as a later write: a TUI reads a burst ending in it as a paste and won't send.
       let view = view.downgrade();
       cx.spawn(async move |_, cx| {
         cx.background_executor().timer(SUBMIT_DELAY).await;
@@ -3014,8 +3003,7 @@ impl TerminalPane {
   fn open_agent(&mut self, pane_id: i64, window: &mut Window, cx: &mut Context<Self>) {
     let id = agent_column_id(pane_id);
     if self.columns.iter().any(|c| c.id == id) {
-      // Clicking a column makes it the active session, which React echoes
-      // back: focus stays where the click put it (the search input, say).
+      // React echoes a clicked column back as active: focus stays where the click put it.
       if self.active.as_deref() != Some(id.as_str()) {
         self.focus_column(&id, window, cx);
       }
@@ -3071,8 +3059,7 @@ impl TerminalPane {
   fn add_shell(&mut self, dir: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
     let dir = dir.unwrap_or_else(|| self.active_dir());
     if self.route.remote_shell {
-      // A remote repository's paths exist only on the host: the window resolves
-      // the session and opens it with `openRemote`.
+      // Remote paths exist only on the host: the window resolves the session and uses `openRemote`.
       self.send("terminal.newRemoteShell", dir.into(), cx);
       return;
     }
@@ -3355,8 +3342,7 @@ impl TerminalPane {
           .gap_1()
           .child(ui::icon(icon, 16., dark.foreground))
           .child(
-            // Clipped at the end, so the name's start shows; hovering it
-            // shows the whole name.
+            // Clipped at the end, so the name's start shows. Hovering shows the whole name.
             self
               .tooltips
               .wrap(
@@ -3747,8 +3733,7 @@ impl TerminalPane {
     let column = &self.columns[index];
     let active = self.active.as_deref() == Some(column.id.as_str());
     let id = column.id.clone();
-    // Agent headers, and in the dark theme a shell's while selected, sit on
-    // a dark fill, so their text and badge go light to stay readable.
+    // Agent headers, and a selected shell's in dark theme, sit on a dark fill, so text goes light.
     let on_dark = !matches!(column.kind, Kind::Shell { .. }) || (active && self.dark);
     let d = theme::palette(true);
     let (title_fg, icon_fg): (gpui::Hsla, gpui::Hsla) = if on_dark {
@@ -3792,8 +3777,7 @@ impl TerminalPane {
             ui::Tone::DiffRemoved.text(tones),
           ))
       });
-      // Short label (['workspace label']): 11px is fine.
-      // ast-grep-ignore: gpui-text-xs-short-label-only
+      // Short label (workspace label). ast-grep-ignore: gpui-text-xs-short-label-only
       ui::text(div(), TextSize::Xs)
         .selector(SharedString::from(format!("terminal-workspace-label-{id}")))
         .role(gpui::Role::Button)
@@ -3867,8 +3851,7 @@ impl TerminalPane {
         let link = link.clone().map(|url| {
           let host = self.host.clone();
           let open = url.clone();
-          // Short label (['link label']): 11px is fine.
-          // ast-grep-ignore: gpui-text-xs-short-label-only
+          // Short label (link label). ast-grep-ignore: gpui-text-xs-short-label-only
           ui::text(div(), TextSize::Xs)
             .selector(SharedString::from(format!(
               "terminal-link-label-{}",
@@ -4021,8 +4004,7 @@ impl TerminalPane {
             .disabled(stopping)
             .h_6()
             .px_2(),
-          // Short label (['button label']): 11px is fine.
-          // ast-grep-ignore: gpui-text-xs-short-label-only
+          // Short label (button label). ast-grep-ignore: gpui-text-xs-short-label-only
           TextSize::Xs,
         )
         .label("Stop")
@@ -4085,8 +4067,7 @@ impl TerminalPane {
                     Some(code) => format!("(session ended, exit {code})"),
                     None => "(session ended)".into(),
                   };
-                  // Short label (['status label']): 11px is fine.
-                  // ast-grep-ignore: gpui-text-xs-short-label-only
+                  // Short label (status label). ast-grep-ignore: gpui-text-xs-short-label-only
                   ui::text(div(), TextSize::Xs)
                     .selector("remote-terminal-ended")
                     .role(gpui::Role::Status)
@@ -4168,8 +4149,7 @@ impl TerminalPane {
       column.bounds.clone(),
     );
     let active = self.active.as_deref() == Some(id.as_str());
-    // Every workspace's terminals show: the shown workspace's stand out,
-    // the others dim until hovered or focused.
+    // Every workspace's terminals show, and other workspaces' dim until hovered or focused.
     let current = self.column_key(column) == self.place.working_directory;
     let dimmed = !current && !active && self.hovered_column.as_deref() != Some(id.as_str());
     let state = format!(
@@ -4231,9 +4211,7 @@ impl TerminalPane {
           .size_full(),
       )
       .on_hover(cx.listener(move |pane, hovered: &bool, _, cx| {
-        // A drag step lands the mouse in a column before the divider
-        // catches up: hovering it would cost a frame (and the sidebar's
-        // highlight) per step.
+        // A drag step lands in a column before the divider catches up; hovering would cost a frame per step.
         if pane.drag.is_some() {
           return;
         }
@@ -4254,8 +4232,7 @@ impl TerminalPane {
             d.debug_selector(|| "terminal-column-active".into())
           }),
       )
-      // The focused terminal: an accent along the top, over the header,
-      // which keeps its own colours.
+      // The focused terminal gets a top accent over the header, which keeps its own colours.
       .when(active, |d| {
         d.child(
           div()
@@ -4293,21 +4270,17 @@ impl TerminalPane {
               on_files.update(cx, |view, cx| view.insert(&text.join(" "), cx));
             }
           })
-          // Measured before the view draws: a resized view renders in this
-          // frame's prepaint, ahead of its own measure, so it would fit
-          // its grid a frame late.
+          // Measured before the view draws: a resized view would otherwise fit its grid a frame late.
           .child({
             let bounds = view.read(cx).bounds.clone();
             gpui::canvas(move |b, _, _| bounds.set(Some(b)), |_, _, _, _| {})
               .absolute()
               .inset_0()
           })
-          // Its own redraws (output, the blink) leave the other
-          // terminals' drawing as it was.
+          // Its redraws (output, the blink) leave other terminals' drawing untouched.
           .child(view.cached(gpui::StyleRefinement::default().size_full()))
           .children(previews)
-          // Lights up while files or an attachment hover it; a remote
-          // session takes no drops.
+          // Lights up while files or an attachment hover it. A remote session takes no drops.
           .when(!remote, |d| {
             d.child(
               div()
@@ -4577,8 +4550,7 @@ fn agent_session(
     else {
       continue;
     };
-    // What the session starts with: the backend's, for a session it
-    // started, else React's.
+    // The session's start state: the backend's for a session it started, else React's.
     let pending = host.pending_session(pane_id).or_else(|| {
       route_pending
         .iter()
@@ -4607,6 +4579,12 @@ fn agent_session(
       session_id: session.id,
       pending_prompt: pending.and_then(|p| p.pending_prompt.clone()),
       permission_mode: pending.and_then(|p| p.permission_mode.clone()),
+      profile: agent_profile(
+        host,
+        &repo,
+        &agent,
+        pending.and_then(|p| p.profile.as_deref()),
+      ),
     };
     let kind = Kind::Agent {
       pane_id,
@@ -4653,6 +4631,24 @@ fn default_agent(host: &dyn terminal_data::TerminalHost, repo: &str) -> String {
   read(host.repo_settings(repo, &key))
     .or_else(|| read(host.settings(&key)))
     .unwrap_or_else(|| "claude".into())
+}
+
+/// The session's account profile: the chosen one, else the defaults.
+fn agent_profile(
+  host: &dyn terminal_data::TerminalHost,
+  repo: &str,
+  agent: &str,
+  chosen: Option<&str>,
+) -> Option<crate::core::agent_profiles::AgentProfile> {
+  let read = |v: Result<super::settings_data::Values, String>, key: &str| {
+    v.ok().and_then(|v| v.get(key).cloned().flatten())
+  };
+  crate::core::agent_profiles::session_profile(
+    |key| read(host.settings(&[key.to_string()]), key),
+    |key| read(host.repo_settings(repo, &[key.to_string()]), key),
+    agent,
+    chosen,
+  )
 }
 
 /// The emulator's name for a mouse button xterm reports.
@@ -4768,8 +4764,7 @@ impl Render for TerminalPane {
     let scrollbar = self.row_scrollbar(&p, cx);
     let controls = self.controls(&p, cx);
     let maximized = self.maximized;
-    // `height%` of the workspace view, as React sizes the pane, with the
-    // divider above it.
+    // `height%` of the workspace view, as React sizes the pane, with the divider above it.
     let view_height = self.container.get().map(|b| f32::from(b.size.height));
     div()
       .flex()
@@ -4793,8 +4788,7 @@ impl Render for TerminalPane {
           cx.notify();
         }
       }))
-      // A drag follows the mouse anywhere in the window, as React's
-      // document listeners do, not only over the pane.
+      // A drag follows the mouse anywhere in the window, as React's document listeners do.
       .when(self.drag.is_some(), |d| {
         let pane = cx.entity().downgrade();
         d.child(
@@ -4887,12 +4881,10 @@ impl Render for TerminalPane {
                 terminal_emu::scheme(self.dark).background,
               ))
               .children(row)
-              // After the columns, so a column's index in the row stays
-              // what `scroll_to_item` counts.
+              // After the columns, so a column's row index stays what `scroll_to_item` counts.
               .child(
                 gpui::canvas(
-                  // Inside the scrolled row: undo the scroll so the bounds stay the
-                  // row's own, not its scrolled content's.
+                  // Inside the scrolled row: the scroll is undone so the bounds are the row's own.
                   move |b, _, _| {
                     row_bounds.set(Some(Bounds::new(
                       b.origin - measured_scroll.offset(),
@@ -4900,8 +4892,7 @@ impl Render for TerminalPane {
                     )))
                   },
                   move |b, _, window, _| {
-                    // Painted inside the scrolled row: undo the scroll to get
-                    // the row's own bounds.
+                    // Painted inside the scrolled row: undoing the scroll gives the row's bounds.
                     let b = Bounds::new(b.origin - row_scroll.offset(), b.size);
                     // Ahead of GPUI's own scroll, which maps shift+down left.
                     window.on_mouse_event(move |e: &ScrollWheelEvent, phase, window, cx| {
@@ -4974,8 +4965,7 @@ mod tests {
 
   #[test]
   fn places_the_cursor_on_the_cell_the_text_paints() {
-    // Cells are zoomed pixels already (the font size carries `ui_zoom`), so
-    // the cursor's offset from the grid's origin is plain pixels.
+    // Cells are already zoomed pixels (the font size carries `ui_zoom`), so offsets are plain px.
     let cell = (7.5, 17.);
     assert_eq!(cell_origin(0, 0, cell), point(px(0.), px(TOP_PAD)));
     assert_eq!(cell_origin(40, 2, cell), point(px(15.), px(TOP_PAD + 680.)));

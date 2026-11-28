@@ -58,7 +58,7 @@ export interface CreateInstanceParams {
   // Providers with one machine shape ignore it.
   machineType?: string;
   // The placement this machine backs, so a provider can name or tag it.
-  placementId?: string;
+  placementId?: string | null;
 }
 
 export interface DeleteInstanceOptions {

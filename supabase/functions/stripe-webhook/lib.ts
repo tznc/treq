@@ -270,7 +270,7 @@ export interface WebhookDeps {
   rpc: (fn: string, args: Record<string, unknown>) => Promise<RpcResult>;
   nowSeconds?: () => number;
   /** Re-reads a subscription when two events from one second disagree. */
-  stripe?: StripeClient;
+  stripe?: StripeClient | undefined;
   log?: (entry: Record<string, unknown>) => void;
 }
 

@@ -1202,8 +1202,7 @@ impl GithubView {
               view.close_popover(Popover::CiChecks, cx)
             })
             .child(
-              // Short label (['section heading']): 11px is fine.
-              // ast-grep-ignore: gpui-text-xs-short-label-only
+              // Short label (section heading). ast-grep-ignore: gpui-text-xs-short-label-only
               ui::text(div(), TextSize::Xs)
                 .px_2()
                 .pb_1()
@@ -1416,8 +1415,7 @@ impl GithubView {
                     .child(wf.name.clone()),
                 )
                 .child(
-                  // Short label (['short status']): 11px is fine.
-                  // ast-grep-ignore: gpui-text-xs-short-label-only
+                  // Short label (short status). ast-grep-ignore: gpui-text-xs-short-label-only
                   ui::text(div(), TextSize::Xs)
                     .font_family(theme::MONO_FONT)
                     .text_color(p.muted_foreground)
@@ -1515,8 +1513,7 @@ impl GithubView {
   ) -> impl IntoElement {
     let open = self.detail.history_open.contains(filename);
     let file = filename.to_string();
-    // Short label (['toggle label']): 11px is fine.
-    // ast-grep-ignore: gpui-text-xs-short-label-only
+    // Short label (toggle label). ast-grep-ignore: gpui-text-xs-short-label-only
     let toggle = ui::text(named(div(), format!("github-history-{w}")), TextSize::Xs)
       .role(gpui::Role::Button)
       .aria_label("Run history")
@@ -1585,15 +1582,13 @@ impl GithubView {
                 p,
               ))
               .child(
-                // Short label (['run number']): 11px is fine.
-                // ast-grep-ignore: gpui-text-xs-short-label-only
+                // Short label (run number). ast-grep-ignore: gpui-text-xs-short-label-only
                 ui::text(div(), TextSize::Xs)
                   .font_family(theme::MONO_FONT)
                   .child(format!("#{run_id}")),
               )
               .child(
-                // Short label (['timestamp']): 11px is fine.
-                // ast-grep-ignore: gpui-text-xs-short-label-only
+                // Short label (timestamp). ast-grep-ignore: gpui-text-xs-short-label-only
                 ui::text(div(), TextSize::Xs)
                   .text_color(p.muted_foreground)
                   .child(time::run_time(&run.started_at)),

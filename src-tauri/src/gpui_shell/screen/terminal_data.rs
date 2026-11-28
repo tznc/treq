@@ -47,6 +47,8 @@ pub struct AgentStart {
   pub session_id: i64,
   pub pending_prompt: Option<String>,
   pub permission_mode: Option<String>,
+  /// The account profile the agent signs in with; `None` uses its own config.
+  pub profile: Option<crate::core::agent_profiles::AgentProfile>,
 }
 
 /// Where a persistent remote shell or agent runs (`RemoteTerminalTarget`).
@@ -298,8 +300,7 @@ impl TerminalHost for Backend {
       emit,
     )?;
     if let Some(command) = &spawn.auto_command {
-      // As React did: the shell is given a moment to start, then the
-      // command is typed with its echo hidden.
+      // As React did: the shell gets a moment to start, then the command is typed with echo hidden.
       let manager = state.pty_manager.clone();
       let (id, command) = (spawn.id.clone(), agent_command::normalize_command(command));
       std::thread::spawn(move || {
@@ -392,8 +393,7 @@ impl TerminalHost for Backend {
       RemoteAgentId::Gemini => "gemini",
     };
     self.connect_agent_msg();
-    // The repository is on the host; what its agent sends is recorded on
-    // this machine, where the window keeps the repository's state.
+    // The repo is on the host, but agent messages are recorded here, where the window keeps state.
     let ledger = crate::gpui_shell::remote_repo::for_window(self.label())
       .map(|repo| repo.scope(&repo.canonical_path))
       .or_else(|| {
@@ -599,6 +599,24 @@ impl TerminalHost for Backend {
       .ok()
       .flatten();
     let bin_dir = crate::commands::binary::get_treq_bin_dir().ok();
+    // In a devcontainer the agent runs inside the container, where profiles
+    // live in their volume rather than the host's app data directory.
+    let in_container = {
+      use tauri::Manager;
+      let state = self.app().state::<crate::AppState>();
+      crate::commands::pty_commands::devcontainer_repo(
+        &state,
+        Some(&start.repo_path),
+        start.workspace_path.as_deref(),
+      )
+      .is_some()
+    };
+    let base =
+      crate::core::devcontainer::agent_profiles_base(in_container, crate::core::app_data_dir());
+    let env = match (&start.profile, base) {
+      (Some(profile), Some(base)) => crate::core::agent_profiles::env(&base, profile),
+      _ => Vec::new(),
+    };
     let supporting = self.supporting_repos(&start.repo_path);
     let project = crate::gpui_shell::projects::window_project(self.app(), self.label())
       .map(agent_command::ProjectContext::from);
@@ -625,6 +643,7 @@ impl TerminalHost for Backend {
         session_model: model.as_deref(),
         pending_prompt: start.pending_prompt.as_deref(),
         treq_bin_dir: bin_dir.as_deref(),
+        env: &env,
       },
     )?;
     Ok(Prepared {
@@ -1012,8 +1031,7 @@ mod tests {
     assert!(live.pending_echo.lock_or_recover().text.len() <= ECHO_MAX);
     live.typed("x");
     live.pending_echo.lock_or_recover().typed_at = Some(Instant::now() - ECHO_EXPIRES * 2);
-    // Output that does not start with the typing is the process writing, and
-    // the expired typing is forgotten rather than matched against later output.
+    // Output not starting with the typing is the process's own, and expired typing is forgotten.
     assert_eq!(live.pending_echo.lock_or_recover().pending().len(), 0);
   }
 

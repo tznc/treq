@@ -1,6 +1,7 @@
 {
   "nodeModulesDir": "auto",
   "compilerOptions": {
-    "noUncheckedIndexedAccess": true
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true
   }
 }

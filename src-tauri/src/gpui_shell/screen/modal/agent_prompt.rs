@@ -265,8 +265,7 @@ impl AgentPromptView {
     if self.route.starting != route.starting {
       self.submitted = false;
     }
-    // Keeps the chosen workspace and the text while React refreshes its
-    // lists; a workspace that went away falls back to the default branch.
+    // Workspace and text survive React's list refresh. A removed workspace falls back to default.
     if self
       .selected
       .is_some_and(|id| !route.workspaces.iter().any(|w| w.id == id))
@@ -772,6 +771,7 @@ impl AgentPromptView {
       agent: agent.id().into(),
       mode: "acceptEdits".into(),
       save_as_repo_default: self.save_default && agent != configured,
+      profile: None,
     };
     read!(
       self,
@@ -958,8 +958,7 @@ impl AgentPromptView {
       .px_3()
       .pt_3()
       .child(
-        // Short label (['chip']): 11px is fine.
-        // ast-grep-ignore: gpui-text-xs-short-label-only
+        // Short label (chip). ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .selector("issue-chip")
           .role(gpui::Role::Group)
@@ -1043,8 +1042,7 @@ impl AgentPromptView {
             cx.stop_propagation();
           }
         }))
-        // ⌘/Ctrl+Enter is unbound in inputs (treq-ui `init`), so it
-        // arrives as a key, not an `Enter` action.
+        // ⌘/Ctrl+Enter is unbound in inputs (treq-ui `init`): a key event, not an `Enter` action.
         .capture_key_down(cx.listener(|view, e: &gpui::KeyDownEvent, _, cx| {
           let k = &e.keystroke;
           let held = crate::gpui_shell::keys::held(k.modifiers);
@@ -1102,8 +1100,7 @@ impl AgentPromptView {
       .bg(p.muted.opacity(0.5))
       .overflow_hidden()
       .child(
-        // Short label (['section heading']): 11px is fine.
-        // ast-grep-ignore: gpui-text-xs-short-label-only
+        // Short label (section heading). ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .px_3()
           .py_1()
@@ -1156,8 +1153,7 @@ impl AgentPromptView {
           .px_2()
           .gap_1()
           .child(
-            // Short label (['button label']): 11px is fine.
-            // ast-grep-ignore: gpui-text-xs-short-label-only
+            // Short label (button label). ast-grep-ignore: gpui-text-xs-short-label-only
             ui::text(div(), TextSize::Xs)
               .flex()
               .items_center()
@@ -1214,8 +1210,7 @@ impl AgentPromptView {
         .flex()
         .items_center()
         .child(
-          // The wrapper keeps the combobox name, value and click; the
-          // picker inside draws it.
+          // The wrapper keeps the combobox name, value and click. The picker inside draws it.
           div()
             .selector("task-agent")
             .role(gpui::Role::ComboBox)
@@ -1368,8 +1363,7 @@ impl Render for AgentPromptView {
     let viewport = window.viewport_size();
     let card = self.task_card(&p, window, cx);
     let picker = self.workspace_picker(&p, cx);
-    // Escape closes the open menu, picker or mention list first; the file
-    // picker hears its own.
+    // Escape closes an open menu, picker or mention list first. The file picker hears its own.
     let close = ui::handler(cx, |view, window, cx| {
       if view.file_picker.is_some() {
         return;

@@ -1,0 +1,19 @@
+id: no-as-unknown-as-ts
+valid:
+  - |
+    const config = { port: 8080 } satisfies Config;
+  - |
+    const body = (await res.json()) as unknown;
+  - |
+    const id = value as string;
+  - |
+    function isRow(v: unknown): v is Row { return typeof v === "object" && v !== null && "id" in v; }
+invalid:
+  - |
+    const client = fake as unknown as SupabaseClient;
+  - |
+    const client = (fake as unknown) as SupabaseClient;
+  - |
+    const client = <SupabaseClient><unknown>fake;
+  - |
+    const client = fake as any as SupabaseClient;

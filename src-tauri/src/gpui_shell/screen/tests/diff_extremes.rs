@@ -107,8 +107,7 @@ fn diff_extremes_line_number_scaling() {
     })
     .collect();
   let hunks = vec![big.clone()];
-  // As the drawn rows ask: the file's lines numbered once, kept per file,
-  // and a comment's outdatedness worked out once per layout.
+  // As the drawn rows ask: line numbers once per file, each comment's outdatedness once per layout.
   let numbers = commits_data::line_numbers(&big);
   let memo = std::cell::RefCell::new(HashMap::new());
   let outdated = |c: &review::LineComment| {

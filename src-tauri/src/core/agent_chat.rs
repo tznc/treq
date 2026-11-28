@@ -443,8 +443,7 @@ fn update_last_agent_message(
   if *previous == agent_message || agent_message.is_empty() {
     return false;
   }
-  // Terminal snapshots are cumulative. Persist only the newly arrived portion
-  // so every screen update remains an individually timestamped log event.
+  // Snapshots are cumulative, so persist only the new part: one timestamped event per update.
   let event_message = if last_is_user {
     Some(agent_message.clone())
   } else {
@@ -605,8 +604,7 @@ fn append_chat_unlocked(repo_path: &str, cached: &mut CachedChat) -> Result<(), 
   }
   bytes.extend_from_slice(b"]}");
   let path = chat_path(repo_path, cached.chat.session_id);
-  // Only a file that ends as this process writes it can be appended to;
-  // another writer's formatting is replaced by a whole write.
+  // Append only to a file this process wrote. Another writer's formatting gets a whole rewrite.
   let written = fs::OpenOptions::new()
     .read(true)
     .write(true)
@@ -698,8 +696,7 @@ pub fn record_user_message(
   let mut cached = registered(repo_path, session_id)?;
   let CachedChat { chat, snapshot, .. } = &mut cached;
   note_user_message(chat, snapshot, screen_before, text, &now_rfc3339());
-  // The message also moves `screen_before_last_user_message`, which comes
-  // before the messages in the file: this is the one record that rewrites it.
+  // It also moves `screen_before_last_user_message`, stored ahead of the messages, so it rewrites.
   let saved = save_chat_unlocked(repo_path, &mut cached);
   keep(repo_path, session_id, cached);
   saved

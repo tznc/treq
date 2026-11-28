@@ -187,8 +187,7 @@ mod tests {
 
   #[test]
   fn keeps_an_ambiguous_attempts_key_until_it_is_confirmed() {
-    // Elapsed time does not show the first attempt never landed: nothing
-    // here expires.
+    // Elapsed time doesn't show the first attempt never landed, so nothing here expires.
     let keys = counter();
     let first = keys.key_for("SplitCommit", &inputs(&["/r", "abc"]), "");
     keys.settle(&first, Outcome::Ambiguous);

@@ -33,7 +33,7 @@ export type OrganizationsDeps = {
    * Stripe is not configured. A failure is logged, never returned: the
    * membership change has already committed.
    */
-  syncSeats?: (organizationId: string) => Promise<unknown>;
+  syncSeats?: ((organizationId: string) => Promise<unknown>) | undefined;
 };
 
 /**

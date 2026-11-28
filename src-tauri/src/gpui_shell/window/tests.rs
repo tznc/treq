@@ -810,8 +810,7 @@ fn a_read_that_panics_does_not_stop_the_window_reading(cx: &mut TestAppContext) 
     .panic_once
     .store(true, std::sync::atomic::Ordering::SeqCst);
   let window = Window::open(cx, host.clone(), Some("/repo"));
-  // The first read failed; `prepare_repo` finishing after it reads again,
-  // and otherwise the poll does.
+  // The first read failed, so `prepare_repo` finishing reads again, or else the poll does.
   cx.executor().advance_clock(POLL);
   cx.run_until_parked();
   assert_eq!(window.sidebar_ids(), [1, 2]);
@@ -961,6 +960,34 @@ fn selects_a_workspace_from_the_sidebar(cx: &mut TestAppContext) {
   assert_eq!(window.route_workspace(), Some(2));
   let sidebar = window.last().sidebar.unwrap();
   assert!(sidebar.repos[0].workspaces[1].selected);
+}
+
+/// The mouse's back and forward buttons walk the places shown.
+#[gpui::test]
+fn back_and_forward_walk_the_places_shown(cx: &mut TestAppContext) {
+  let window = Window::open(cx, repo_host(), Some("/repo"));
+  let select = |id| SidebarAction::SelectWorkspace {
+    id,
+    shift: false,
+    toggle: false,
+  };
+  window.sidebar(cx, select(2));
+  window.sidebar(cx, SidebarAction::OpenLinear);
+  let page = |cx: &mut TestAppContext| {
+    window
+      .controller
+      .read_with(cx, |c, _| c.model().page.clone())
+  };
+  let go = |cx: &mut TestAppContext, shortcut| {
+    window
+      .controller
+      .update(cx, |c, cx| c.shortcut(shortcut, cx));
+    cx.run_until_parked();
+  };
+  go(cx, Shortcut::Back);
+  assert_eq!(window.route_workspace(), Some(2));
+  go(cx, Shortcut::Forward);
+  assert_eq!(page(cx), super::model::Page::Linear);
 }
 
 /// What a click on a workspace row would show, for reading it ahead, is
