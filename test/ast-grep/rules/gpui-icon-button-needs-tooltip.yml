@@ -1,0 +1,178 @@
+id: gpui-icon-button-needs-tooltip
+language: rust
+severity: error
+message: >
+  An icon-only button needs a tooltip: the icon alone does not say what it
+  does. Wrap it with the view's `Tooltips::wrap(..)` (or its
+  `with_tooltip(..)`), or show one from `.on_hover(..)`, with text that
+  names the action.
+note: >
+  Checked: `IconButton::new(..)`, and a `Button::new(..)` chain that takes
+  `.icon(..)`, `.copy_icon(..)` or `.size(Size::Icon*)` and no `.label(..)`.
+  A button bound with `let` passes when a later statement in the same block
+  hands it to a tooltip wrapper.
+files:
+  - "src-tauri/src/gpui_shell/**/*.rs"
+  - "crates/treq-ui/src/**/*.rs"
+ignores:
+  - "src-tauri/src/gpui_shell/**/tests.rs"
+  - "src-tauri/src/gpui_shell/**/tests/**"
+  - "crates/treq-ui/src/**/*_tests.rs"
+  # Builds the `Button` every `IconButton` is made of.
+  - "crates/treq-ui/src/icon_button.rs"
+  # Baseline: files that already have icon buttons without tooltips. Do not
+  # add to it; fix a file and drop it from this list instead.
+  - "crates/treq-ui/src/dialog.rs"
+  - "crates/treq-ui/src/path_field.rs"
+  - "crates/treq-ui/src/split_button.rs"
+  - "src-tauri/src/gpui_shell/popover/checks.rs"
+  - "src-tauri/src/gpui_shell/screen/changes.rs"
+  - "src-tauri/src/gpui_shell/screen/changes/review.rs"
+  - "src-tauri/src/gpui_shell/screen/code.rs"
+  - "src-tauri/src/gpui_shell/screen/file_browser.rs"
+  - "src-tauri/src/gpui_shell/screen/file_browser/review.rs"
+  - "src-tauri/src/gpui_shell/screen/github.rs"
+  - "src-tauri/src/gpui_shell/screen/github/detail.rs"
+  - "src-tauri/src/gpui_shell/screen/github/new_pr.rs"
+  - "src-tauri/src/gpui_shell/screen/linear.rs"
+  - "src-tauri/src/gpui_shell/screen/logs.rs"
+  - "src-tauri/src/gpui_shell/screen/merge.rs"
+  - "src-tauri/src/gpui_shell/screen/modal/prompt_history.rs"
+  - "src-tauri/src/gpui_shell/screen/onboarding.rs"
+  - "src-tauri/src/gpui_shell/screen/onboarding_remote.rs"
+  - "src-tauri/src/gpui_shell/screen/pr_review.rs"
+  - "src-tauri/src/gpui_shell/screen/reactions.rs"
+  - "src-tauri/src/gpui_shell/screen/settings.rs"
+  - "src-tauri/src/gpui_shell/screen/settings/account/team.rs"
+  - "src-tauri/src/gpui_shell/screen/workspace.rs"
+utils:
+  # A step of the builder chain the button is built in: a method call on
+  # it, or a `.when(..)`/`.map(..)`-style closure that continues it.
+  in-chain:
+    any:
+      - kind: field_expression
+      - kind: call_expression
+      - kind: closure_expression
+      - kind: arguments
+        inside:
+          kind: call_expression
+          has:
+            field: function
+            kind: field_expression
+            has:
+              field: field
+              regex: ^(when|when_some|map)$
+      - kind: block
+        inside:
+          kind: closure_expression
+  icon-step:
+    any:
+      - kind: call_expression
+        has:
+          field: function
+          kind: field_expression
+          has:
+            field: field
+            regex: ^(icon|copy_icon)$
+      - kind: call_expression
+        all:
+          - has:
+              field: function
+              kind: field_expression
+              has:
+                field: field
+                regex: ^size$
+          - has:
+              field: arguments
+              regex: Size::Icon
+  label-step:
+    kind: call_expression
+    has:
+      field: function
+      kind: field_expression
+      has:
+        field: field
+        regex: ^(label|child_label)$
+  hover-step:
+    kind: call_expression
+    has:
+      field: function
+      kind: field_expression
+      has:
+        field: field
+        regex: ^on_hover$
+  tooltip-call:
+    kind: call_expression
+    has:
+      field: function
+      any:
+        - kind: field_expression
+          has:
+            field: field
+            regex: ^(wrap|with_tooltip|tooltip)$
+        - kind: identifier
+          regex: ^(with_tooltip|tooltip)$
+        - kind: scoped_identifier
+          regex: (^|::)(with_tooltip|tooltip)$
+  icon-button:
+    any:
+      - kind: call_expression
+        has:
+          field: function
+          regex: (^|::)IconButton::new$
+      - all:
+          - kind: call_expression
+            has:
+              field: function
+              regex: (^|::)Button::new$
+          - inside:
+              stopBy:
+                not:
+                  matches: in-chain
+              matches: icon-step
+          - not:
+              inside:
+                stopBy:
+                  not:
+                    matches: in-chain
+                matches: label-step
+rule:
+  matches: icon-button
+  not:
+    any:
+      - inside:
+          stopBy:
+            not:
+              matches: in-chain
+          matches: hover-step
+      - inside:
+          stopBy: end
+          kind: arguments
+          inside:
+            matches: tooltip-call
+      # `let button = ..;` then `wrap(.., button, cx)` later in the block.
+      - inside:
+          stopBy:
+            not:
+              matches: in-chain
+          kind: let_declaration
+          has:
+            field: pattern
+            pattern: $NAME
+          precedes:
+            stopBy: end
+            has:
+              stopBy: end
+              kind: arguments
+              inside:
+                matches: tooltip-call
+              has:
+                stopBy: end
+                kind: identifier
+                pattern: $NAME
+      - inside:
+          kind: mod_item
+          has:
+            field: name
+            regex: ^tests$
+          stopBy: end

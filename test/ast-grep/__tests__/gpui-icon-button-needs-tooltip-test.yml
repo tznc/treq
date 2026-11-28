@@ -1,0 +1,43 @@
+id: gpui-icon-button-needs-tooltip
+valid:
+  - |
+    fn wrapped(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+      self.tips.wrap("edit", Side::Bottom, Some(tip), Button::new("edit", p).size(Size::Icon).child(icon(PENCIL)), cx)
+    }
+  - |
+    fn bound_then_wrapped(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+      let button = Button::new("details", p).icon(theme::ICON_INFO, 16.);
+      div().child(self.with_tooltip("details", Some(tip), button, cx))
+    }
+  - |
+    fn nested_in_wrap(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+      let detach = Button::new("detach", p).size(Size::IconXs).icon(theme::ICON_X, 14.);
+      let detach = self.tooltips.wrap("detach", Side::Bottom, Some(tip), div().child(detach), cx);
+      detach
+    }
+  - |
+    fn hovered(p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+      IconButton::new("close", theme::ICON_X, "Close", p).on_hover(cx.listener(|v, h: &bool, _, cx| v.hover(*h, cx)))
+    }
+  - |
+    fn labelled(p: &Palette) -> impl IntoElement {
+      Button::new("save", p).icon(theme::ICON_CHECK, 14.).label("Save")
+    }
+invalid:
+  - |
+    fn icon_button(p: &Palette) -> impl IntoElement {
+      div().child(ui::IconButton::new("back", theme::ICON_ARROW_LEFT, "Back", p).on_click(f))
+    }
+  - |
+    fn icon_only(p: &Palette) -> impl IntoElement {
+      div().child(Button::new("more", p).variant(Variant::Ghost).icon(theme::ICON_MORE, 16.).on_click(f))
+    }
+  - |
+    fn icon_size(p: &Palette) -> impl IntoElement {
+      Button::new("edit", p).size(Size::Icon).child(ui::icon(theme::ICON_PENCIL, 14., c))
+    }
+  - |
+    fn bound_not_wrapped(p: &Palette) -> impl IntoElement {
+      let button = Button::new("details", p).icon(theme::ICON_INFO, 16.);
+      div().child(button)
+    }
