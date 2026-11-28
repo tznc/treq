@@ -183,6 +183,38 @@ pub fn split_target(target: &str) -> (&str, Option<&str>) {
   }
 }
 
+/// Typed launch arguments that start `agent` in `mode` (remote hosts); empty without modes.
+pub fn cli_args(agent: &str, mode: &Mode) -> Vec<String> {
+  let set = |flag: &str, value: &Option<String>| {
+    value
+      .iter()
+      .flat_map(|v| [flag.to_string(), v.clone()])
+      .collect::<Vec<_>>()
+  };
+  let config = |key: &str, value: &Option<String>| {
+    value
+      .iter()
+      .flat_map(|v| ["-c".to_string(), format!("{key}={v}")])
+      .collect::<Vec<_>>()
+  };
+  match agent {
+    "claude" => [
+      set("--model", &mode.model),
+      set("--effort", &mode.effort),
+      set("--permission-mode", &mode.permission_mode),
+      set("--append-system-prompt", &mode.instructions),
+    ]
+    .concat(),
+    "codex" => [
+      set("-m", &mode.model),
+      config("model_reasoning_effort", &mode.effort),
+      config("developer_instructions", &mode.instructions),
+    ]
+    .concat(),
+    _ => Vec::new(),
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -311,5 +343,35 @@ mod tests {
     assert_eq!(split_target("work"), ("work", None));
     assert_eq!(split_target("work/deep"), ("work", Some("deep")));
     assert_eq!(split_target("work/"), ("work", None));
+  }
+
+  #[test]
+  fn turns_a_mode_into_claude_and_codex_arguments() {
+    assert_eq!(
+      cli_args("claude", &deep()),
+      [
+        "--model",
+        "opus",
+        "--effort",
+        "high",
+        "--permission-mode",
+        "plan",
+        "--append-system-prompt",
+        "Think it through.",
+      ]
+    );
+    assert_eq!(
+      cli_args("codex", &deep()),
+      [
+        "-m",
+        "opus",
+        "-c",
+        "model_reasoning_effort=high",
+        "-c",
+        "developer_instructions=Think it through.",
+      ]
+    );
+    assert!(cli_args("claude", &mode("plain")).is_empty());
+    assert!(cli_args("gemini", &deep()).is_empty());
   }
 }

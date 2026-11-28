@@ -209,9 +209,14 @@ impl Model {
       Ok(mut target) => {
         target["label"] = label.into();
         target["title"] = title.into();
-        let profile = agent.and_then(|agent| self.remote_profile(agent));
-        target["launch"] =
-          serde_json::to_value(remote::launch_for(agent, profile)).unwrap_or_default();
+        let (profile, mode_args) = agent
+          .map(|agent| self.remote_profile(agent))
+          .unwrap_or_default();
+        let mut launch = remote::launch_for(agent, profile);
+        if let crate::core::remote_pty::PtyLaunchSpec::Agent { args, .. } = &mut launch {
+          *args = mode_args;
+        }
+        target["launch"] = serde_json::to_value(launch).unwrap_or_default();
         target["reattach"] = reattach.into();
         self.terminal("openRemote", json!({"remote": target}));
         Vec::new()
@@ -222,16 +227,25 @@ impl Model {
     }
   }
 
-  /// The app's default profile for `agent`; the host keeps its own sign-in for it.
-  fn remote_profile(&self, agent: RemoteAgentId) -> Option<String> {
+  /// The app's default profile for `agent` and its default mode's arguments.
+  fn remote_profile(&self, agent: RemoteAgentId) -> (Option<String>, Vec<String>) {
+    use crate::core::agent_modes;
     let id = match agent {
       RemoteAgentId::Claude => "claude",
       RemoteAgentId::Codex => "codex",
-      _ => return None,
+      _ => return (None, Vec::new()),
     };
     let settings = &self.prefs.agent_settings;
-    crate::core::agent_profiles::session_profile(|k| settings.get(k).cloned(), |_| None, id, None)
-      .map(|p| p.name)
+    let get = |k: &str| settings.get(k).cloned();
+    let Some(profile) = crate::core::agent_profiles::session_profile(get, |_| None, id, None)
+    else {
+      return (None, Vec::new());
+    };
+    let modes = agent_modes::parse(get(agent_modes::MODES_SETTING).as_deref());
+    let args = agent_modes::resolve(&modes, id, &profile.name, None)
+      .map(|mode| agent_modes::cli_args(id, &mode))
+      .unwrap_or_default();
+    (Some(profile.name), args)
   }
 
   /// `startRemoteAgent`: the app's default agent (a repository's setting
@@ -326,6 +340,31 @@ mod tests {
     assert!(model.commands[1]["remote"]["launch"]
       .get("profile")
       .is_none());
+  }
+
+  #[test]
+  fn starts_the_default_profile_mode_on_the_host() {
+    let mut model = remote_model();
+    model.prefs.default_agent = Some("claude".into());
+    model.prefs.agent_settings = [
+      (
+        "agent_profiles".to_string(),
+        r#"[{"agent":"claude","name":"work"}]"#.to_string(),
+      ),
+      ("default_profile_claude".to_string(), "work".to_string()),
+      (
+        "agent_modes".to_string(),
+        r#"[{"agent":"claude","profile":"work","default":"deep","modes":[{"name":"deep","model":"opus","effort":"high"}]}]"#.to_string(),
+      ),
+    ]
+    .into();
+    model.start_remote_agent(None, &Data::default());
+    let launch = &model.commands[0]["remote"]["launch"];
+    assert_eq!(launch["profile"], "work");
+    assert_eq!(
+      launch["args"],
+      json!(["--model", "opus", "--effort", "high"])
+    );
   }
 
   #[test]
