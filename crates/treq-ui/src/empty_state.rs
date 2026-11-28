@@ -7,6 +7,7 @@ use gpui::{
   div, prelude::*, Animation, AnimationExt as _, AnyElement, App, ClickEvent, SharedString, Window,
 };
 use gpui_kit::base::TestSupportExt as _;
+use gpui_rsx::rsx;
 
 use crate::{icon, spinner, text, theme, theme::Palette, zpx, Button, Size, TextSize, Variant};
 
@@ -87,44 +88,42 @@ impl RenderOnce for EmptyState {
       p.muted_foreground
     };
     let message_id = format!("{}-message", self.id);
-    div()
-      .selector(self.id)
-      .role(gpui::Role::Status)
-      .aria_label(self.title.clone())
-      .flex()
-      .flex_col()
-      .items_center()
-      .justify_center()
-      .max_w_full()
-      .gap_2()
-      .py_8()
-      .px_6()
-      .text_center()
-      .child(icon(self.icon, 24., icon_color))
-      .child(
-        text(div(), TextSize::Sm)
-          .font_weight(gpui::FontWeight::MEDIUM)
-          .text_color(p.foreground)
-          .child(self.title),
-      )
-      .when_some(self.message, |el, message| {
-        el.child(
-          text(div(), TextSize::Sm)
-            .id(message_id)
-            // Readable on its own, so tests and assistive tech find the why.
-            .role(gpui::Role::Paragraph)
-            .aria_label(message.clone())
-            .max_w(zpx(360.))
-            .w_full()
-            .text_color(p.muted_foreground)
-            .child(message)
-            .test_support(),
-        )
-      })
-      .when_some(self.action, |el, action| {
-        el.child(div().pt_2().child(action))
-      })
+    // Readable on its own, so tests and assistive tech find the why.
+    let message = self.message.map(|message| {
+      rsx! {
+        <text(div(), TextSize::Sm)
+          id={message_id}
+          role={gpui::Role::Paragraph}
+          aria_label={message.clone()}
+          max_w={zpx(360.)}
+          w_full
+          text_color={p.muted_foreground}
+        >
+          {message}
+        </text>
+      }
       .test_support()
+    });
+    rsx! {
+      <div
+        selector={self.id}
+        role={gpui::Role::Status}
+        aria_label={self.title.clone()}
+        flex flex_col items_center justify_center max_w_full
+        gap_2 py_8 px_6 text_center
+      >
+        {icon(self.icon, 24., icon_color)}
+        <text(div(), TextSize::Sm)
+          font_weight={gpui::FontWeight::MEDIUM}
+          text_color={p.foreground}
+        >
+          {self.title}
+        </text>
+        {...message}
+        {...self.action.map(|action| rsx! { <div pt_2>{action}</div> })}
+      </div>
+    }
+    .test_support()
   }
 }
 
@@ -298,7 +297,7 @@ mod tests {
       div().size_full().child(
         EmptyState::new("prs", "No pull requests", &p)
           .message("Push a branch to open one.")
-          .action(div().id("prs-action").child("Retry")),
+          .action(div().selector("prs-action").child("Retry")),
       )
     }
   }

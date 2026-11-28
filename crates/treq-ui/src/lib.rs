@@ -28,6 +28,7 @@ pub mod press;
 pub mod row;
 pub mod section_header;
 pub mod selector;
+mod rsx_spike;
 pub mod split_button;
 pub mod tabs;
 pub mod theme;
