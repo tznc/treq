@@ -46,7 +46,7 @@ test("changes: conflict card and resolve popover", async ({ page }) => {
     expectations: [
       "File list: Conflicts (Home.tsx, C) above Committed 3 (A/A/M badges)",
       "Review bar: '0 comments pending', Start Review, Reset, red Resolve conflicts…",
-      "No commit box: nothing is uncommitted, so 'Nothing to commit' sits between Conflicts and Committed",
+      "No commit box: Changes 0 holds 'No changes' between Conflicts and Committed",
     ],
   });
   await page.mouse.move(330, 183, { steps: 4 }); // Home.tsx under Conflicts
@@ -337,6 +337,69 @@ test("changes: filter menu picks what the lists show", async ({ page }) => {
   await settle(page, 500);
 });
 
+test("changes: the Changes group holds the no changes placeholder", async ({ page }) => {
+  await openWorkspace(page, "feat/keyvalues-cache");
+  await openTab(page, "Changes");
+  const placeholder = page.getByRole("status", { name: "No changes", exact: true });
+  const changes = page.getByRole("button", { name: "Collapse Changes", exact: true });
+  // The Hide toggle is not observable: click it on the Committed header's
+  // row, at the sidebar's right edge (1400x900 window).
+  const toggleHide = async () => {
+    const header = await page.getByRole("button", { name: /^(Expand|Collapse) Committed$/ }).boundingBox();
+    if (!header) throw new Error("no Committed header");
+    await page.mouse.click(463, header.y + header.height / 2);
+    await settle(page, 500);
+  };
+  await expect.soft(changes).toBeVisible();
+  await expect(placeholder).toBeVisible();
+  await capture(page, {
+    name: "05-changes-no-changes-committed-shown",
+    title: "Nothing uncommitted, Committed files shown",
+    expectations: [
+      "A Changes 0 header holds 'No changes' and its check icon",
+      "Committed 2 follows, listing cache.ts and cache.test.ts, Hide unchecked",
+      "No 'Nothing to commit' line and no commit box",
+    ],
+  });
+  await page.getByRole("button", { name: "Collapse Committed", exact: true }).click();
+  await settle(page, 500);
+  await expect(placeholder).toBeVisible();
+  await capture(page, {
+    name: "05-changes-no-changes-committed-collapsed",
+    title: "Nothing uncommitted, Committed collapsed",
+    expectations: [
+      "A Changes 0 header holds 'No changes' and its check icon",
+      "The collapsed Committed header follows, Hide unchecked",
+    ],
+  });
+  await page.getByRole("button", { name: "Expand Committed", exact: true }).click();
+  await settle(page, 500);
+  await toggleHide();
+  await expect(placeholder).toBeVisible();
+  await capture(page, {
+    name: "05-changes-no-changes-committed-hidden",
+    title: "Nothing uncommitted, Committed hidden",
+    expectations: [
+      "A Changes 0 header holds 'No changes' and its check icon",
+      "Committed follows with Hide checked and no rows",
+    ],
+  });
+  await toggleHide();
+  await changes.click();
+  await settle(page, 500);
+  await expect(placeholder).toHaveCount(0);
+  await capture(page, {
+    name: "05-changes-no-changes-group-collapsed",
+    title: "Nothing uncommitted, Changes collapsed",
+    expectations: [
+      "The collapsed Changes 0 header shows no placeholder under it",
+      "Committed sits a group's gap below it, its files listed",
+    ],
+  });
+  await page.getByRole("button", { name: "Expand Changes", exact: true }).click();
+  await settle(page, 500);
+});
+
 test("changes: empty state wraps inside the file list", async ({ page }) => {
   await home(page);
   await page.keyboard.press(`${mod}+n`);
@@ -354,7 +417,7 @@ test("changes: empty state wraps inside the file list", async ({ page }) => {
     name: "05-changes-empty",
     title: "Changes tab: a workspace with no changes",
     expectations: [
-      "'No changes' and its check icon centered in the file list",
+      "A Changes 0 header holds 'No changes' and its check icon",
       "The message wraps onto several lines inside the file list, clipped at neither edge",
     ],
   });

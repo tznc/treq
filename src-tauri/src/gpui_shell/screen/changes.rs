@@ -129,14 +129,16 @@ enum SideRow {
     error: bool,
     pending: bool,
   },
-  /// Where the uncommitted groups would be, when nothing is uncommitted.
-  NothingToCommit,
   /// By index into the list's files in [`SideData`].
   File(List, usize),
-  CommittedHeader,
+  /// `flush` under the Changes group's placeholder, which brings its own
+  /// gap.
+  CommittedHeader {
+    flush: bool,
+  },
   /// By index into [`SideData::committed`].
   Committed(usize),
-  /// Nothing changed, nothing committed.
+  /// The Changes group's placeholder, when nothing is uncommitted.
   Empty,
 }
 
@@ -2079,14 +2081,11 @@ impl ChangesView {
       error: self.message_error.is_some(),
       pending: self.pending.is_some(),
     };
-    if listed.is_empty() && (committed == 0 || committed_hidden) && data.conflicted.is_empty() {
-      rows.push(SideRow::Empty);
-    } else if listed.is_empty() {
-      // The filter button shares the "Nothing to commit" row.
-      if rows == [SideRow::Filter] {
-        rows.clear();
+    if listed.is_empty() {
+      rows.push(SideRow::Header(List::Changes));
+      if !self.collapsed_sections.contains(&Section::Changes) {
+        rows.push(SideRow::Empty);
       }
-      rows.push(SideRow::NothingToCommit);
     } else {
       if !data.staged.is_empty() {
         rows.push(SideRow::Header(List::Selected));
@@ -2104,7 +2103,8 @@ impl ChangesView {
       }
     }
     if committed > 0 {
-      rows.push(SideRow::CommittedHeader);
+      let flush = rows.last() == Some(&SideRow::Empty);
+      rows.push(SideRow::CommittedHeader { flush });
       if !self.committed_collapsed && !committed_hidden {
         data.committed = self.visible_committed_at();
         rows.extend((0..data.committed.len()).map(SideRow::Committed));
@@ -2142,18 +2142,6 @@ impl ChangesView {
           .justify_center()
           .child(ui::spinner("changes-sidebar-spin", 24., p.muted_foreground)),
       )
-    } else if self.side.get(self.side.len().wrapping_sub(1)) == Some(&SideRow::Empty) {
-      // Nothing to scroll: the empty state fills what the rows leave.
-      #[expect(
-        clippy::needless_collect,
-        reason = "the rows borrow self, which side_row needs mutably"
-      )]
-      let rows: Vec<SideRow> = (0..self.side.len())
-        .filter_map(|ix| self.side.get(ix).copied())
-        .collect();
-      scroll
-        .overflow_y_scroll()
-        .children(rows.into_iter().map(|row| self.side_row(row, p, cx)))
     } else {
       // Only the rows on screen are built, however many files changed.
       scroll.child(
@@ -2289,34 +2277,13 @@ impl ChangesView {
           .into_any_element()
       }
       SideRow::CommitBox { .. } => self.commit_box(p, cx).into_any_element(),
-      SideRow::NothingToCommit => div()
-        .flex()
-        .items_center()
-        .justify_between()
-        .child(
-          ui::text(div(), TextSize::Sm)
-            .selector("changes-nothing-to-commit")
-            .role(gpui::Role::Status)
-            .aria_label("Nothing to commit")
-            .test_support()
-            .py_2()
-            .text_color(p.muted_foreground)
-            .child("Nothing to commit"),
-        )
-        .children(self.filter_row(p, cx))
+      SideRow::CommittedHeader { flush } => self
+        .committed_header(p, cx)
+        .when(flush, |this| this.pt_0())
         .into_any_element(),
-      SideRow::CommittedHeader => {
-        // Flush under "Nothing to commit": no gap above the header.
-        let d = &self.side_data;
-        let flush = d.staged.is_empty() && d.unstaged.is_empty() && d.conflicted.is_empty();
-        self
-          .committed_header(p, cx)
-          .when(flush, |this| this.pt_0())
-          .into_any_element()
-      }
       SideRow::Committed(i) => self.committed_row(i, p, cx).into_any_element(),
       SideRow::Empty => div()
-        .size_full()
+        .w_full()
         .flex()
         .items_center()
         .justify_center()
