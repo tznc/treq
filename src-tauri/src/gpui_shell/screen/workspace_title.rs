@@ -18,7 +18,9 @@ use super::code::menu_panel;
 use super::code_data::CodeHost;
 use crate::gpui_shell::{
   native::NativeEvent,
+  popup::{PopupSink, Side, TooltipContent},
   theme::{self, Palette},
+  tooltips::{HasTooltips, Tooltips},
   ui::{self, zpx, Button, DismissExt as _, Size, TextSize, Variant},
 };
 
@@ -34,10 +36,17 @@ pub struct TitleEditor {
   menu_open: bool,
   /// The workspace follows a pull request, read when the editor opens.
   follows_pr: bool,
+  tips: Tooltips,
   /// Focused as a drag selects in the title, so ⌘C / Ctrl+C reaches it.
   focus: FocusHandle,
   selection: TextSelectionHandle,
   _subscriptions: Vec<Subscription>,
+}
+
+impl HasTooltips for TitleEditor {
+  fn tooltips(&mut self) -> &mut Tooltips {
+    &mut self.tips
+  }
 }
 
 impl TitleEditor {
@@ -47,6 +56,7 @@ impl TitleEditor {
     workspace_id: i64,
     title: String,
     dark: bool,
+    popups: PopupSink,
     cx: &mut Context<Self>,
   ) -> Self {
     let focus = cx.focus_handle();
@@ -68,6 +78,7 @@ impl TitleEditor {
       saving: false,
       menu_open: false,
       follows_pr: false,
+      tips: Tooltips::new(popups, dark),
       focus,
       selection,
       _subscriptions: Vec::new(),
@@ -83,6 +94,7 @@ impl TitleEditor {
     if self.title != title || self.dark != dark {
       self.title = title;
       self.dark = dark;
+      self.tips.dark = dark;
       cx.notify();
     }
   }
@@ -232,6 +244,7 @@ impl TitleEditor {
 
 impl Render for TitleEditor {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    self.tips.sync(cx);
     let p = theme::palette(self.dark);
     let heading = |el: gpui::Div| {
       ui::text(el, TextSize::Sm)
@@ -271,15 +284,21 @@ impl Render for TitleEditor {
             )),
         )
         .child(
-          Button::new("workspace-title-edit", &p)
-            .aria_label("Edit workspace title")
-            .variant(Variant::Ghost)
-            .size(Size::Icon)
-            .flex_none()
-            .w(zpx(20.))
-            .h(zpx(20.))
-            .child(ui::icon(theme::ICON_PENCIL, 14., p.muted_foreground))
-            .on_click(cx.listener(|view, _, window, cx| view.edit(window, cx))),
+          self.tips.wrap(
+            "workspace-title-edit",
+            Side::Bottom,
+            Some(TooltipContent::Text("Edit title".into())),
+            Button::new("workspace-title-edit", &p)
+              .aria_label("Edit workspace title")
+              .variant(Variant::Ghost)
+              .size(Size::Icon)
+              .flex_none()
+              .w(zpx(20.))
+              .h(zpx(20.))
+              .child(ui::icon(theme::ICON_PENCIL, 14., p.muted_foreground))
+              .on_click(cx.listener(|view, _, window, cx| view.edit(window, cx))),
+            cx,
+          ),
         )
         .into_any_element();
     };

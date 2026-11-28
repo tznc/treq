@@ -810,6 +810,8 @@ impl Render for Screen {
       // A mouse-down blurs the focused input, as in a browser; an input
       // under the pointer takes focus again in the bubble phase.
       .capture_any_mouse_down(|_, window, cx| window.blur(cx))
+      // Lets text drawn with gpui-kit (Markdown, comments) be selected.
+      .child(gpui_kit::base::TextSelectionLayer)
       .child(body)
       .children(remote)
       .children(workspace_modal.map(|m| window_layer(m, 1, window)))

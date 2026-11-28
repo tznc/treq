@@ -2,7 +2,7 @@ import type React from "react";
 import clsx from "clsx";
 import { useAuth } from "./AuthProvider";
 import { APP_DEEP_LINK } from "../lib/constants";
-import Link from "@docusaurus/Link";
+import { DownloadButton } from "./DownloadLinks";
 
 type Props = {
   mobile?: boolean;
@@ -45,9 +45,11 @@ export default function NavbarAuthLinks({
             Open App
           </a>
         ) : (
-          <Link to="/download/" className="button button--primary button--sm">
-            Download
-          </Link>
+          <DownloadButton
+            location="navbar"
+            className="button button--primary button--sm"
+            label="Download"
+          />
         )}
       </Wrapper>
     </>
