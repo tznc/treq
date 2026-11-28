@@ -290,6 +290,33 @@ mod tests {
     assert_eq!(Skeleton::new("rows", 3, &p).rows, 3);
   }
 
+  struct EmptyView;
+
+  impl gpui::Render for EmptyView {
+    fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+      let p = theme::palette(false);
+      div().size_full().child(
+        EmptyState::new("prs", "No pull requests", &p)
+          .message("Push a branch to open one.")
+          .action(div().id("prs-action").child("Retry")),
+      )
+    }
+  }
+
+  #[gpui::test]
+  fn test_empty_state_renders_title_message_and_action(cx: &mut gpui::TestAppContext) {
+    use gpui_testing_library::{prelude::*, Screen};
+    let (_, cx) = cx.add_window_view(|_, _| EmptyView);
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("prs").is_some());
+    let window = cx.update(|window, _| window.window_handle());
+    let screen = Screen::new(cx, window);
+    screen.redraw();
+    assert!(screen.query_by_element_id("prs").is_some());
+    assert!(screen.query_by_element_id("prs-message").is_some());
+    assert!(screen.query_by_element_id("prs-action").is_some());
+  }
+
   #[test]
   fn test_skeleton_row_height() {
     let p = theme::palette(false);
