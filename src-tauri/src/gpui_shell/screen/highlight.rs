@@ -250,29 +250,60 @@ pub(super) fn hunk_spans(language: &'static str, lines: &[String]) -> Rc<Vec<Spa
     Ok(hit) => return hit,
     Err(key) => key,
   };
-  let (mut old, mut new) = (Side::new(syntax), Side::new(syntax));
-  let out: Rc<Vec<Spans>> = Rc::new(
-    lines
-      .iter()
-      .map(|line| {
-        let text = line.get(1..).unwrap_or("");
-        if text.len() > LONG_LINE {
-          return Rc::default();
-        }
-        Rc::new(match line.as_bytes().first() {
-          Some(b'-') => old.parse(language, text),
-          Some(b'+') => new.parse(language, text),
-          Some(b' ') | None => {
-            old.parse(language, text);
-            new.parse(language, text)
-          }
-          // `\ No newline at end of file`.
-          _ => Vec::new(),
-        })
+  // `\ No newline at end of file` is on neither side, and stays plain.
+  let mut out: Vec<Spans> = vec![Rc::default(); lines.len()];
+  // Context lines are on both sides, and keep the new side's spans.
+  for side in *b"-+" {
+    let on_side: Vec<usize> = (0..lines.len())
+      .filter(|&i| {
+        let marker = lines[i].bytes().next().unwrap_or(b' ');
+        marker == b' ' || marker == side
       })
-      .collect(),
-  );
+      .collect();
+    let texts: Vec<&str> = on_side
+      .iter()
+      .map(|&i| lines[i].get(1..).unwrap_or(""))
+      .collect();
+    for (i, spans) in on_side
+      .into_iter()
+      .zip(side_spans(language, syntax, &texts))
+    {
+      out[i] = Rc::new(spans);
+    }
+  }
+  let out = Rc::new(out);
   HUNKS.with(|c| c.borrow_mut().insert(key, lines, out.clone()));
+  out
+}
+
+/// One side's lines, each continuing the state the line above left.
+///
+/// A hunk can start inside a heredoc or block comment, and its closing
+/// `"""` then reads as an opener and the code after it as text. So when
+/// the side ends inside a string or comment that a line without letters
+/// or digits opened, that line is taken as the closer and the lines after
+/// it are read again from the state before it.
+fn side_spans(
+  language: &str,
+  syntax: &SyntaxReference,
+  lines: &[&str],
+) -> Vec<Vec<(Range<usize>, Token)>> {
+  let mut side = Side::new(syntax);
+  let mut opened: Option<(usize, Side)> = None;
+  let mut out = Vec::with_capacity(lines.len());
+  for (i, text) in lines.iter().enumerate() {
+    let before = (opened.is_none() && !side.in_text()).then(|| side.clone());
+    out.push(side.parse(language, text));
+    if let Some(before) = before.filter(|_| side.in_text()) {
+      opened = Some((i, before));
+    }
+  }
+  let closer = opened.filter(|(i, _)| side.in_text() && !lines[*i].contains(char::is_alphanumeric));
+  if let Some((i, mut side)) = closer {
+    for (spans, text) in out.iter_mut().zip(lines).skip(i + 1) {
+      *spans = side.parse(language, text);
+    }
+  }
   out
 }
 
@@ -349,8 +380,21 @@ impl Side {
     }
   }
 
+  /// `line`'s spans. A long line is left plain, and the state as it was.
   fn parse(&mut self, language: &str, line: &str) -> Vec<(Range<usize>, Token)> {
+    if line.len() > LONG_LINE {
+      return Vec::new();
+    }
     parse_from(&mut self.state, &mut self.scopes, language, line)
+  }
+
+  /// Whether the lines read so far left a string or comment open.
+  fn in_text(&self) -> bool {
+    self
+      .scopes
+      .scopes
+      .iter()
+      .any(|s| matches!(token(*s, false), Some(Token::String | Token::Comment)))
   }
 }
 
@@ -787,6 +831,41 @@ mod tests {
     assert!(matches!(doc, Token::String | Token::Comment), "{body:?}");
     assert!(t[2].iter().all(|(_, k)| *k == doc), "{:?}", t[2]);
     assert!(t[3].contains(&("def".into(), Token::Keyword)), "{:?}", t[3]);
+  }
+
+  #[test]
+  fn a_hunk_starting_on_a_closing_heredoc_reads_on_as_code() {
+    let t = hunk_tokens(
+      "ex",
+      &[
+        "   \"\"\"",
+        "   def delete(%User{id: id}) do",
+        "-    from(sb in \"sources_backends\")",
+        "+    from(u in User, lock: \"FOR UPDATE\")",
+      ],
+    );
+    assert!(t[1].contains(&("def".into(), Token::Keyword)), "{:?}", t[1]);
+    let quoted = |s: &str| (format!("\"{s}\""), Token::String);
+    assert!(t[2].contains(&quoted("sources_backends")), "{:?}", t[2]);
+    assert!(t[3].contains(&quoted("FOR UPDATE")), "{:?}", t[3]);
+  }
+
+  #[test]
+  fn a_heredoc_opened_in_the_hunk_runs_past_its_end() {
+    let t = hunk_tokens(
+      "ex",
+      &[
+        "-  @moduledoc \"\"\"",
+        "+  @moduledoc \"\"\"",
+        "   Deletes a user's backends",
+      ],
+    );
+    assert_eq!(t[2].len(), 1, "{:?}", t[2]);
+    assert!(
+      matches!(t[2][0].1, Token::String | Token::Comment),
+      "{:?}",
+      t[2]
+    );
   }
 
   #[test]
