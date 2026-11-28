@@ -38,16 +38,18 @@ pub enum Agent {
   Copilot,
   Devin,
   Gemini,
+  OpenCode,
 }
 
 impl Agent {
-  pub const ALL: [Agent; 6] = [
+  pub const ALL: [Agent; 7] = [
     Agent::Claude,
     Agent::Codex,
     Agent::Cursor,
     Agent::Copilot,
     Agent::Devin,
     Agent::Gemini,
+    Agent::OpenCode,
   ];
 
   pub fn id(self) -> &'static str {
@@ -58,6 +60,7 @@ impl Agent {
       Agent::Copilot => "copilot",
       Agent::Devin => "devin",
       Agent::Gemini => "gemini",
+      Agent::OpenCode => "opencode",
     }
   }
 
@@ -69,6 +72,7 @@ impl Agent {
       Agent::Copilot => "Copilot",
       Agent::Devin => "Devin",
       Agent::Gemini => "Gemini",
+      Agent::OpenCode => "OpenCode",
     }
   }
 
@@ -81,6 +85,7 @@ impl Agent {
       Agent::Copilot => "copilot",
       Agent::Devin => "devin",
       Agent::Gemini => "gemini",
+      Agent::OpenCode => "opencode",
     }
   }
 

@@ -197,7 +197,7 @@ struct Known {
 
 /// The tools, in display order. Their binaries are
 /// `core::PREREQUISITE_BINARIES`, and `core::HOST_BINARIES` on a host.
-const TOOLS: [Known; 10] = [
+const TOOLS: [Known; 11] = [
   Known {
     binary: "git",
     host_only: false,
@@ -268,6 +268,14 @@ const TOOLS: [Known; 10] = [
     label: "Gemini CLI",
     kind: Kind::Agent,
     install_url: "https://geminicli.com/docs/get-started/installation",
+    note: None,
+  },
+  Known {
+    binary: "opencode",
+    host_only: false,
+    label: "OpenCode",
+    kind: Kind::Agent,
+    install_url: "https://opencode.ai/docs",
     note: None,
   },
   Known {

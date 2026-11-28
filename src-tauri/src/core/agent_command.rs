@@ -259,7 +259,7 @@ pub struct AutoCommand<'a> {
 /// The PTY auto-command for an agent CLI.
 ///
 /// Long prompt/settings bodies are never inlined. Claude reads files via native
-/// flags; Codex, Cursor, Devin and Gemini have no append-from-file flags, so the shell expands
+/// flags; Codex, Cursor, Devin, Gemini and OpenCode have no append-from-file flags, so the shell expands
 /// `$(cat -- path)` at exec time (the typed command stays short).
 pub fn build_auto_command(
   options: &AutoCommand<'_>,
@@ -313,6 +313,7 @@ pub fn build_auto_command(
         shell_cat(&files.prompt_path)
       )
     }
+    "opencode" => format!("opencode --prompt \"{}\"", shell_cat(&files.prompt_path)),
     "copilot" => {
       let command = format!(
         "copilot --allow-all-tools -- \"{}\"",
@@ -387,7 +388,7 @@ pub fn prepare_auto_command(
   let system = system_prompt(paths);
   let (prompt, settings) = match options.agent {
     // No system-prompt flag: the task rides in the prompt file.
-    "cursor" | "devin" | "gemini" => (
+    "cursor" | "devin" | "gemini" | "opencode" => (
       cursor_prompt_file_contents(&system, options.pending_prompt),
       None,
     ),
@@ -414,7 +415,7 @@ pub fn prepare_auto_command(
       write_agent_cli_files(&prompt, settings.as_deref(), None)?
     }
   };
-  let pending_prompt = if matches!(options.agent, "cursor" | "devin" | "gemini") {
+  let pending_prompt = if matches!(options.agent, "cursor" | "devin" | "gemini" | "opencode") {
     None
   } else {
     options.pending_prompt.filter(|p| !p.is_empty())
@@ -903,8 +904,55 @@ mod tests {
   }
 
   #[test]
+  fn starts_opencode_with_the_prompt_file() {
+    let prompt = "\"$(cat -- '/tmp/treq-agent-1/prompt.txt')\"";
+    let edit = build_auto_command(&opts("opencode"), &files()).unwrap();
+    assert!(edit.contains(&format!("opencode --prompt {prompt}")));
+    let plan = build_auto_command(
+      &AutoCommand {
+        permission_mode: Some("plan"),
+        ..opts("opencode")
+      },
+      &files(),
+    )
+    .unwrap();
+    assert_eq!(plan, edit);
+  }
+
+  #[test]
+  fn prepares_opencode_with_the_task_in_the_prompt_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let prepared = prepare_auto_command(
+      &AgentPaths {
+        workspace_path: None,
+        repo_path: dir.path().to_str().unwrap(),
+        supporting_repo_paths: NONE,
+        project: None,
+        app_instructions: None,
+        repo_instructions: None,
+      },
+      &AutoCommand {
+        pending_prompt: Some("Fix the parser."),
+        ..opts("opencode")
+      },
+    )
+    .unwrap();
+    assert!(!prepared.command.contains(TASK_ARG), "{}", prepared.command);
+    let prompt = launch_files(&prepared)
+      .into_iter()
+      .find(|p| p.ends_with("prompt.txt"))
+      .unwrap();
+    assert!(std::fs::read_to_string(prompt)
+      .unwrap()
+      .contains(" Fix the parser."));
+    super::super::agent_cli::cleanup_agent_cli_files(&prepared.file_paths).unwrap();
+  }
+
+  #[test]
   fn tells_treq_when_the_agent_exits() {
-    for agent in ["claude", "codex", "cursor", "copilot", "devin", "gemini"] {
+    for agent in [
+      "claude", "codex", "cursor", "copilot", "devin", "gemini", "opencode",
+    ] {
       let command = build_auto_command(
         &AutoCommand {
           treq_bin_dir: Some("/opt/treq/bin"),

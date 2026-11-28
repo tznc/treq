@@ -17,13 +17,14 @@ use serde::{Deserialize, Serialize};
 use crate::lock_ext::LockExt;
 
 /// Every agent treq can launch.
-pub const AGENTS: [(&str, &str); 6] = [
+pub const AGENTS: [(&str, &str); 7] = [
   ("claude", "Claude"),
   ("codex", "Codex"),
   ("cursor", "Cursor"),
   ("copilot", "Copilot"),
   ("devin", "Devin"),
   ("gemini", "Gemini"),
+  ("opencode", "OpenCode"),
 ];
 
 /// `toAgentKind`: the agent id, when treq knows it.
@@ -1295,6 +1296,10 @@ mod tests {
     assert_eq!(
       resolve_agent(&store, "/r", Some("gemini")).as_deref(),
       Some("gemini")
+    );
+    assert_eq!(
+      resolve_agent(&store, "/r", Some("opencode")).as_deref(),
+      Some("opencode")
     );
     assert_eq!(resolve_agent(&store, "/r", Some("bogus")), None);
   }

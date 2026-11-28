@@ -2123,7 +2123,7 @@ fn agent_start_refuses_a_harness_treq_does_not_launch() {
   let start = sub.matches.subcommand.expect("start subcommand");
   let error = super::workspace_handlers::start_agent_kind(&start.matches, "/no/repo").unwrap_err();
   assert!(
-    error.contains("claude, codex, cursor, copilot, devin, gemini"),
+    error.contains("claude, codex, cursor, copilot, devin, gemini, opencode"),
     "{error}"
   );
 }
