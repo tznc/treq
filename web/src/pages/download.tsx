@@ -83,6 +83,7 @@ function Focus({
         <h2 id="focus-name" className={styles.focusName}>
           Download for {platform.name}
         </h2>
+        {platform.preview ? <span className={styles.preview}>Preview</span> : null}
         {detected ? <span className={styles.tag}>Your system</span> : null}
       </div>
       <div className={styles.focusRows}>
@@ -115,6 +116,9 @@ function Others({platforms}: {platforms: PlatformDownloads[]}): ReactNode {
             <div className={styles.cardHead}>
               <PlatformIcon id={platform.id} />
               <h3 className={styles.cardName}>{platform.name}</h3>
+              {platform.preview ? (
+                <span className={styles.preview}>Preview</span>
+              ) : null}
             </div>
             {platform.installers.map((installer) => (
               <Installer

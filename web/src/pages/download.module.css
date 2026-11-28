@@ -98,6 +98,15 @@
   white-space: nowrap;
 }
 
+/* An early build, such as the Android app. */
+.preview {
+  padding: 2px 8px;
+  border: 1px solid var(--treq-line-strong);
+  border-radius: 999px;
+  font: 500 0.75rem / 1.4 var(--font-mono);
+  color: var(--treq-mute);
+}
+
 .focusRows {
   display: grid;
   gap: 12px;
