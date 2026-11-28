@@ -68,8 +68,9 @@ function skillPageTitle(skill, sources) {
  * @param {Skill} skill
  * @param {Catalog} catalog
  * @param {SkillPages} pages SKILL.md bodies and frontmatter flags, by skill id
+ * @param {Set<string>} [indexed] routes kept in search (skills-indexed.json); every other skill page is noindex
  */
-function skillPageProps(skill, catalog, pages) {
+function skillPageProps(skill, catalog, pages, indexed = new Set()) {
   const source = catalog.sources.find((s) => s.id === skill.source);
   const author = source?.name ?? skill.source;
   const page = pages[skill.id];
@@ -87,12 +88,13 @@ function skillPageProps(skill, catalog, pages) {
     trigger: triggerClause(skill.description),
     install: source && skill.path ? installCommands({path: skill.path}, source) : null,
     related: relatedSkills(skill, catalog.skills, catalog.sources),
+    noindex: !indexed.has(skill.route),
   };
 }
 
 /**
  * @param {import('@docusaurus/types').LoadContext} context
- * @returns {import('@docusaurus/types').Plugin<Catalog & {pages: SkillPages, writeups: AuthorWriteups}>}
+ * @returns {import('@docusaurus/types').Plugin<Catalog & {pages: SkillPages, writeups: AuthorWriteups, indexed: string[]}>}
  */
 function skillsPlugin(context) {
   return {
@@ -100,7 +102,7 @@ function skillsPlugin(context) {
     async loadContent() {
       const dataDir = path.join(context.siteDir, 'src', 'data');
       const catalogPath = path.join(dataDir, 'skills.json');
-      if (!fs.existsSync(catalogPath)) return {sources: [], skills: [], pages: {}, writeups: {}};
+      if (!fs.existsSync(catalogPath)) return {sources: [], skills: [], pages: {}, writeups: {}, indexed: []};
       const catalog = JSON.parse(fs.readFileSync(catalogPath, 'utf8'));
       const pagesPath = path.join(dataDir, 'skill-pages.json');
       const pages = fs.existsSync(pagesPath) ? JSON.parse(fs.readFileSync(pagesPath, 'utf8')) : {};
@@ -108,15 +110,17 @@ function skillsPlugin(context) {
       fs.mkdirSync(staticDir, { recursive: true });
       fs.copyFileSync(catalogPath, path.join(staticDir, 'catalog.json'));
       const writeups = loadAuthorWriteups(path.join(context.siteDir, 'skill-authors'));
-      return {...catalog, pages, writeups};
+      const {routes: indexed} = JSON.parse(fs.readFileSync(path.join(context.siteDir, 'skills-indexed.json'), 'utf8'));
+      return {...catalog, pages, writeups, indexed};
     },
-    async contentLoaded({ content: {pages, writeups, ...catalog}, actions }) {
+    async contentLoaded({ content: {pages, writeups, indexed, ...catalog}, actions }) {
+      const indexedRoutes = new Set(indexed);
       for (const skill of catalog.skills) {
         actions.addRoute({
           path: skill.route,
           component: '@site/src/components/SkillDetailPage/index.tsx',
           exact: true,
-          props: skillPageProps(skill, catalog, pages),
+          props: skillPageProps(skill, catalog, pages, indexedRoutes),
         });
       }
       for (const page of buildAuthorPages(catalog, writeups)) {

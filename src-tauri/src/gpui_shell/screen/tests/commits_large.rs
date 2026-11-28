@@ -103,14 +103,19 @@ fn a_large_commit_scrolls_and_comments_on_a_line_far_down(cx: &mut TestAppContex
   }
   assert!(!shows_line(&mut h, 0, 0), "scrolled away from the top");
   assert!(!h.shows(gpui::Role::Button, "work"), "the commit's row");
-  // The first line on screen, wherever the scroll landed.
+  // The first line on screen under the pinned file row, wherever the
+  // scroll landed.
   let list = h.cx.debug_bounds("commits-list").expect("list");
+  let top = h
+    .cx
+    .debug_bounds("commit-file-sticky")
+    .map_or(list.top(), |b| b.bottom());
   let (f, l) = (0..FILES)
     .flat_map(|f| (0..lines()).map(move |l| (f, l)))
     .find(|&(f, l)| {
       h.cx
         .debug_bounds(line(f, l))
-        .is_some_and(|b| b.top() >= list.top() && b.bottom() <= list.bottom())
+        .is_some_and(|b| b.top() >= top && b.bottom() <= list.bottom())
     })
     .expect("a line on screen");
   let row = h.cx.debug_bounds(line(f, l)).expect("line");
@@ -139,6 +144,63 @@ fn a_large_commit_folds_and_unfolds_its_files(cx: &mut TestAppContext) {
   );
   h.click("commit-row-a");
   assert!(shows_line(&mut h, 1, 0), "folds outlive the commit closing");
+}
+
+/// Scrolls the list down by `dy` pixels.
+fn scroll(h: &mut Harness, dy: f32) {
+  let at = h.cx.debug_bounds("commits-list").expect("list").center();
+  h.cx.simulate_event(gpui::ScrollWheelEvent {
+    position: at,
+    delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), gpui::px(-dy))),
+    modifiers: Modifiers::none(),
+    touch_phase: gpui::TouchPhase::Moved,
+  });
+  h.cx.run_until_parked();
+}
+
+#[gpui::test]
+fn a_large_commit_pins_the_file_row_over_its_lines(cx: &mut TestAppContext) {
+  let mut h = opened(cx);
+  assert!(
+    h.cx.debug_bounds("commit-file-sticky").is_none(),
+    "the file's own row shows"
+  );
+  for _ in 0..3 {
+    scroll(&mut h, 400.);
+  }
+  let list = h.cx.debug_bounds("commits-list").expect("list");
+  let pinned = h.cx.debug_bounds("commit-file-sticky").expect("pinned row");
+  assert_eq!(pinned.top(), list.top());
+  h.click("commit-file-sticky");
+  assert!(
+    (0..lines()).all(|l| h.cx.debug_bounds(line(0, l)).is_none()),
+    "the pinned row folds its file"
+  );
+}
+
+#[gpui::test]
+fn a_large_commit_pushes_the_pinned_row_up_with_the_next_file(cx: &mut TestAppContext) {
+  let mut h = opened(cx);
+  let last = lines() - 1;
+  for _ in 0..40 {
+    if h.cx.debug_bounds(line(0, last)).is_some() {
+      break;
+    }
+    scroll(&mut h, 400.);
+  }
+  let list = h.cx.debug_bounds("commits-list").expect("list");
+  let end = h
+    .cx
+    .debug_bounds(line(0, last))
+    .expect("last line")
+    .bottom();
+  // The next file's row 10px under the list's top.
+  scroll(&mut h, f32::from(end - list.top()) - 10.);
+  let pinned = h.cx.debug_bounds("commit-file-sticky").expect("pinned row");
+  assert!(
+    (pinned.bottom() - (list.top() + gpui::px(10.))).abs() < gpui::px(1.),
+    "ends where the next file's row starts: {pinned:?}"
+  );
 }
 
 #[gpui::test]

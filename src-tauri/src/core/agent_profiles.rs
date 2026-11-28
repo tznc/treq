@@ -133,6 +133,54 @@ pub fn resolve(
     })
 }
 
+/// [`resolve`] from settings: the profiles and app default from the app
+/// settings, the repository default from the repository's.
+pub fn session_profile(
+  app_setting: impl Fn(&str) -> Option<String>,
+  repo_setting: impl Fn(&str) -> Option<String>,
+  agent: &str,
+  chosen: Option<&str>,
+) -> Option<AgentProfile> {
+  let key = default_setting(agent);
+  resolve(
+    &parse(app_setting(PROFILES_SETTING).as_deref()),
+    agent,
+    chosen,
+    repo_setting(&key).as_deref(),
+    app_setting(&key).as_deref(),
+  )
+}
+
+/// A leading `@name` or `@name/mode` in a prompt: the profile it names,
+/// preferring `agent`'s, the session's target (`name` or `name/mode`), and
+/// the prompt after it. `None` when no single profile has
+/// that name, so other `@` text is left alone.
+pub fn mention<'a>(
+  profiles: &[AgentProfile],
+  agent: &str,
+  prompt: &'a str,
+) -> Option<(AgentProfile, String, &'a str)> {
+  let rest = prompt.trim_start().strip_prefix('@')?;
+  let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+  let (token, rest) = rest.split_at(end);
+  // `@profile/mode`; a part after `/` that is no valid name (a path) is
+  // no mention.
+  let (name, mode) = super::agent_modes::split_target(token);
+  if mode.is_some_and(|m| validate_name(m).as_deref() != Ok(m)) {
+    return None;
+  }
+  let named: Vec<_> = profiles.iter().filter(|p| p.name == name).collect();
+  let found = named
+    .iter()
+    .find(|p| p.agent == agent)
+    .or_else(|| (named.len() == 1).then(|| &named[0]))?;
+  let target = match mode {
+    Some(mode) => format!("{name}/{mode}"),
+    None => name.to_string(),
+  };
+  Some(((*found).clone(), target, rest.trim_start()))
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -254,5 +302,72 @@ mod tests {
     );
     // Another agent's profile never applies.
     assert_eq!(resolve(&profiles, "claude", Some("solo"), None, None), None);
+  }
+
+  #[test]
+  fn session_profile_reads_profiles_and_defaults_from_settings() {
+    let json = to_json(&[profile("claude", "work"), profile("claude", "personal")]);
+    let app = |key: &str| match key {
+      PROFILES_SETTING => Some(json.clone()),
+      "default_profile_claude" => Some("personal".to_string()),
+      _ => None,
+    };
+    let repo = |key: &str| (key == "default_profile_claude").then(|| "work".to_string());
+    assert_eq!(
+      session_profile(app, repo, "claude", None),
+      Some(profile("claude", "work"))
+    );
+    assert_eq!(
+      session_profile(app, |_| None, "claude", None),
+      Some(profile("claude", "personal"))
+    );
+    assert_eq!(session_profile(app, repo, "codex", None), None);
+  }
+
+  #[test]
+  fn mention_routes_to_the_named_profile() {
+    let profiles = vec![
+      profile("claude", "work"),
+      profile("codex", "work"),
+      profile("codex", "personal"),
+    ];
+    assert_eq!(
+      mention(&profiles, "claude", "  @work fix the bug"),
+      Some((profile("claude", "work"), "work".into(), "fix the bug"))
+    );
+    assert_eq!(
+      mention(&profiles, "codex", "@work fix"),
+      Some((profile("codex", "work"), "work".into(), "fix"))
+    );
+    // Only Codex has it: the prompt goes to Codex.
+    assert_eq!(
+      mention(&profiles, "claude", "@personal\nfix"),
+      Some((profile("codex", "personal"), "personal".into(), "fix"))
+    );
+  }
+
+  #[test]
+  fn mention_routes_to_a_profile_mode() {
+    let profiles = vec![profile("claude", "work"), profile("src", "x")];
+    assert_eq!(
+      mention(&profiles, "claude", "@work/deep fix"),
+      Some((profile("claude", "work"), "work/deep".into(), "fix"))
+    );
+    // A path is not a mode: only a valid mode name counts.
+    let with_src = vec![profile("claude", "src")];
+    assert_eq!(mention(&with_src, "claude", "@src/main.rs is broken"), None);
+    assert_eq!(
+      mention(&profiles, "claude", "@work/ fix"),
+      Some((profile("claude", "work"), "work".into(), "fix"))
+    );
+  }
+
+  #[test]
+  fn mention_leaves_other_prompts_alone() {
+    let profiles = vec![profile("claude", "work"), profile("codex", "work")];
+    assert_eq!(mention(&profiles, "claude", "fix @work later"), None);
+    assert_eq!(mention(&profiles, "claude", "@src/main.rs is broken"), None);
+    // Two other agents share the name: ambiguous.
+    assert_eq!(mention(&profiles, "gemini", "@work fix"), None);
   }
 }
