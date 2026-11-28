@@ -23,7 +23,7 @@ use crate::{
   gpui_shell::screen::{
     changes_review::{count_label, number_and_side, Pending, Quote, Side},
     changes_threads::{
-      agent_by_line, comment_date, github_suggestion_original, line_label, original_text,
+      agent_by_line, by_line, comment_date, github_suggestion_original, line_label, original_text,
       place_threads, preview, suggestion_diff, suggestion_span, LineKey, Placed, RowKind,
     },
     commits_data::LineRef,
@@ -443,29 +443,44 @@ impl ChangesView {
       .as_ref()
       .is_some_and(|d| d.file_path == path && d.hunk_id.is_empty());
     let quoted = self.quoted_thread(path, None).filter(|_| drafting);
-    for t in threads.iter().filter_map(|&i| self.threads.github.get(i)) {
-      let line = t.line.and_then(|n| u32::try_from(n).ok()).unwrap_or(0);
-      let label = line_label(t).map(|label| {
+    // Threads left on one line sit together under its label.
+    for group in by_line(threads.iter().filter_map(|&i| self.threads.github.get(i))) {
+      let first = group[0];
+      let label = line_label(first).map(|label| {
         // Short label (line number). ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
-          .selector(SharedString::from(format!("github-thread-line-{}", t.id)))
+          .selector(SharedString::from(format!(
+            "github-thread-line-{}",
+            first.id
+          )))
           .role(gpui::Role::Label)
           .aria_label(label.clone())
           .text_color(p.muted_foreground)
           .child(label)
           .test_support()
       });
-      section = section.child(
-        div()
-          .flex()
-          .flex_col()
-          .gap_1p5()
-          .children(label)
-          .child(self.thread_card(t, path, None, line, Side::New, p, cx)),
-      );
-      if quoted == Some(t.id.as_str()) {
-        section = section.child(self.comment_input(p, cx));
+      let mut line = div()
+        .selector(SharedString::from(format!(
+          "github-line-threads-{}",
+          first.id
+        )))
+        .flex()
+        .flex_col()
+        .gap_1p5()
+        .children(label);
+      if let Some(n) = first.line.or(first.original_line) {
+        line = line
+          .role(gpui::Role::Group)
+          .aria_label(format!("Threads on line {n}"));
       }
+      for t in group {
+        let n = t.line.and_then(|n| u32::try_from(n).ok()).unwrap_or(0);
+        line = line.child(self.thread_card(t, path, None, n, Side::New, p, cx));
+        if quoted == Some(t.id.as_str()) {
+          line = line.child(self.comment_input(p, cx));
+        }
+      }
+      section = section.child(line.test_support());
     }
     if drafting && quoted.is_none() {
       section = section.child(self.comment_input(p, cx));
