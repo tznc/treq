@@ -36,6 +36,8 @@ pub enum MenuAction {
   /// The window's branch switcher.
   /// Switch the branch of the repository at this path.
   OpenBranchSwitcher(String),
+  /// Fetches the repository at this path and rebases its workspaces.
+  SyncWithRemote(String),
   AddRepository,
   OpenRepoSettings(String),
   LocateRepo(String),
@@ -187,6 +189,8 @@ pub struct HomeMenu {
   pub supporting: bool,
   /// The window can let this repository go.
   pub removable: bool,
+  /// Read and changed over SSH, so there is no local clone to sync.
+  pub remote: bool,
 }
 
 /// `homeMenuEntries`, with the items `useGpuiSidebar` passes handlers for.
@@ -201,6 +205,12 @@ pub fn home_items(menu: &HomeMenu, editors: EditorApps) -> Vec<MenuItem> {
       )
       .icon(MenuIcon::GitBranch),
     );
+    if !menu.remote {
+      items.push(
+        MenuItem::item("Sync with remote", MenuAction::SyncWithRemote(path.clone()))
+          .icon(MenuIcon::RotateCcw),
+      );
+    }
     items.push(MenuItem::Separator);
   }
   if !menu.missing {
@@ -744,6 +754,7 @@ mod tests {
       labels(&home_items(&menu, NO_EDITORS)),
       [
         "Switch Branch...",
+        "Sync with remote",
         "---",
         "Copy relative path",
         "Copy full path",
@@ -755,12 +766,37 @@ mod tests {
   }
 
   #[test]
+  fn syncs_the_home_repository_with_its_remote() {
+    let menu = HomeMenu {
+      repo_path: "/r".into(),
+      ..Default::default()
+    };
+    assert!(matches!(
+      &home_items(&menu, NO_EDITORS)[1],
+      MenuItem::Item { action: MenuAction::SyncWithRemote(path), .. } if path == "/r"
+    ));
+  }
+
+  #[test]
+  fn hides_sync_for_a_repository_read_over_ssh() {
+    let menu = HomeMenu {
+      repo_path: "/r".into(),
+      remote: true,
+      ..Default::default()
+    };
+    assert!(!labels(&home_items(&menu, NO_EDITORS))
+      .iter()
+      .any(|l| l == "Sync with remote"));
+  }
+
+  #[test]
   fn drops_path_items_for_a_missing_supporting_repository() {
     let menu = HomeMenu {
       repo_path: "/r".into(),
       missing: true,
       supporting: true,
       removable: true,
+      remote: false,
     };
     let items = home_items(&menu, NO_EDITORS);
     assert_eq!(labels(&items), ["---", "Locate…", "Remove Repository"]);
@@ -779,7 +815,7 @@ mod tests {
     };
     let items = home_items(&menu, NO_EDITORS);
     assert_eq!(
-      labels(&items)[5..],
+      labels(&items)[6..],
       ["---", "Add Repository…", "Remove Repository"]
     );
     let fixed = HomeMenu {
@@ -801,7 +837,7 @@ mod tests {
     };
     let items = home_items(&menu, NO_EDITORS);
     assert_eq!(
-      labels(&items)[5..],
+      labels(&items)[6..],
       ["---", "Repository Settings", "Remove Repository"]
     );
   }

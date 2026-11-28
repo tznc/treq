@@ -12,6 +12,8 @@ use treq_ui::SelectorExt as _;
 
 use gpui::{AnyElement, StrikethroughStyle, StyledText, Task};
 
+use crate::gpui_shell::screen::changes_threads::quoted_text;
+
 use super::*;
 
 /// Comment cards cap their width so lines stay readable on wide screens.
@@ -56,6 +58,9 @@ pub(in crate::gpui_shell::screen) struct Threads {
   poll: Option<Task<()>>,
   /// The review comment whose reaction picker is open.
   reaction_picker: Option<String>,
+  /// The text selected when the pointer was last let go: a press clears
+  /// the selection before Quote's click reads it.
+  pub(super) selected: String,
 }
 
 impl ChangesView {
@@ -89,6 +94,13 @@ impl ChangesView {
 
   pub(super) fn stop_threads(&mut self) {
     self.threads.poll = None;
+  }
+
+  /// The pointer let go: ends a drag over the diff, and keeps what is
+  /// selected for Quote.
+  pub(super) fn end_pointer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    self.end_drag(cx);
+    self.threads.selected = gpui_kit::base::TextSelection::selected_text(window, cx);
   }
 
   fn read_threads(&mut self, github: bool, cx: &mut Context<Self>) {
@@ -273,7 +285,7 @@ impl ChangesView {
         at,
         start_line: line,
         end_line: line,
-        line_content: vec![comment.body.clone()],
+        line_content: vec![quoted_text(&comment.body, &self.threads.selected)],
         side,
         quote: Some(Quote {
           author: comment.author.login.clone(),
@@ -644,7 +656,10 @@ impl ChangesView {
         self.dark,
       )
     };
-    let body = div().selector("github-comment-body");
+    let body = div()
+      .selector("github-comment-body")
+      .role(gpui::Role::Article)
+      .aria_label(preview(&comment.body));
     let Some(s) = crate::core::review::parse_suggestion(&comment.body) else {
       return body.child(md("", &comment.body));
     };
@@ -814,7 +829,13 @@ impl ChangesView {
       card = card.child(suggestion_box(original.as_deref(), suggested, p));
     }
     let id = comment.id.clone();
-    let mut actions = div().flex().flex_wrap().items_center().gap_2();
+    // Buttons read in the UI font, not the card's mono.
+    let mut actions = div()
+      .flex()
+      .flex_wrap()
+      .items_center()
+      .gap_2()
+      .font_family(theme::SANS_FONT);
     if comment.suggested_replacement.is_some() {
       let id = id.clone();
       actions = actions.child(
@@ -838,7 +859,7 @@ impl ChangesView {
             .size(Size::Sm)
             .gap_1p5()
             .disabled(busy)
-            .icon(theme::ICON_TERMINAL, 12.)
+            .icon(theme::ICON_SEND, 12.)
             .label("Send to agent")
             .on_click(
               cx.listener(move |view, _, _, cx| view.send_agent_comment(&comment_sent, cx)),
@@ -864,7 +885,6 @@ impl ChangesView {
             .variant(Variant::Ghost)
             .size(Size::Sm)
             .gap_1p5()
-            .text_color(muted)
             .disabled(busy)
             .icon(theme::ICON_TRASH, 12.)
             .label("Delete")
@@ -878,7 +898,7 @@ impl ChangesView {
       let id = comment.id.clone();
       return card
         .child(
-          div().flex().child(
+          div().flex().font_family(theme::SANS_FONT).child(
             Button::new(SharedString::from(format!("sent-review-expanded-{id}")), p)
               .variant(Variant::Ghost)
               .size(Size::Sm)
