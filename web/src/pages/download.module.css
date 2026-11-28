@@ -1,0 +1,273 @@
+/* The landing page's wrap: the visitor's platform lit, the others below. */
+
+.page {
+  padding-block: 72px 112px;
+}
+
+.wrap {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding-left: max(24px, min(80px, 5.6vw));
+  padding-right: max(24px, min(80px, 5.6vw));
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 72px 24px;
+  align-items: start;
+}
+
+.intro {
+  grid-column: 1 / span 5;
+}
+
+.label {
+  margin: 0;
+  font: 500 0.8125rem / 1.4 var(--font-mono);
+  color: var(--treq-mute);
+}
+
+.title {
+  margin: 16px 0 0;
+  font-size: clamp(2.375rem, 4.2vw, 3.875rem);
+  line-height: 1.02;
+  letter-spacing: -0.04em;
+  font-weight: 400;
+}
+
+.lead {
+  margin: 22px 0 0;
+  max-width: 34ch;
+  font-size: clamp(1.0625rem, 1.35vw, 1.25rem);
+  line-height: 1.5;
+  color: var(--treq-mute);
+}
+
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 24px;
+  margin: 20px 0 0;
+}
+
+.links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--treq-link);
+  text-decoration: underline;
+  text-decoration-color: var(--treq-link-line);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
+}
+
+.links a:hover {
+  text-decoration-thickness: 3px;
+}
+
+/* The visitor's platform */
+.focus {
+  grid-column: 7 / span 6;
+  padding: 32px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, var(--treq-lit-a), var(--treq-lit-b));
+}
+
+.focusHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+}
+
+.focusName {
+  margin: 0;
+  font-size: clamp(1.5rem, 2vw, 1.875rem);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  font-weight: 400;
+}
+
+.tag {
+  margin-left: auto;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--treq-bg);
+  font: 500 0.8125rem / 1.4 var(--font-mono);
+  white-space: nowrap;
+}
+
+.focusRows {
+  display: grid;
+  gap: 12px;
+  margin-top: 28px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 0 20px;
+  text-align: left;
+  white-space: normal;
+}
+
+/* Secondary rows sit on the lit frame, so they take the page ground. */
+.focus :global(.button--secondary),
+.focus :global(.button--secondary:hover) {
+  background: var(--treq-bg);
+}
+
+.format {
+  margin-left: auto;
+  font: 500 0.8125rem / 1 var(--font-mono);
+}
+
+.icon {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+}
+
+/* Black marks turn white on the dark theme. */
+:global([data-theme='dark']) .ink {
+  filter: invert(1);
+}
+
+/* The other platforms */
+.others {
+  grid-column: 1 / -1;
+}
+
+.othersTitle {
+  margin: 0 0 20px;
+  font-size: 1.25rem;
+  font-weight: 500;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.card {
+  margin: 0;
+  padding: 24px;
+  border: 1px solid var(--treq-line);
+  border-radius: 12px;
+}
+
+.cardHead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.cardHead .icon {
+  width: 28px;
+  height: 28px;
+}
+
+.cardName {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 500;
+}
+
+.link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  margin: 0 -12px;
+  padding: 0 12px;
+  border-radius: 6px;
+  color: var(--treq-fg);
+  text-decoration: none;
+  transition: background-color 0.15s ease;
+}
+
+.link svg {
+  flex: none;
+  color: var(--treq-mute);
+  transition: transform 0.15s ease;
+}
+
+.link .format {
+  color: var(--treq-mute);
+}
+
+.link:hover {
+  background: var(--treq-tint);
+  color: var(--treq-fg);
+  text-decoration: none;
+}
+
+.link:hover svg {
+  color: var(--treq-fg);
+  transform: translateY(2px);
+}
+
+@media (max-width: 999px) {
+  .page {
+    padding-block: 40px 72px;
+  }
+
+  .grid {
+    row-gap: 40px;
+  }
+
+  .intro,
+  .focus {
+    grid-column: 1 / -1;
+  }
+
+  .cards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 599px) {
+  .focus {
+    padding: 20px;
+  }
+}
+
+/* The intro and the frame enter once on load. */
+@media (prefers-reduced-motion: no-preference) {
+  .enter > *,
+  .focus {
+    animation: rise 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  }
+
+  .enter > *:nth-child(n + 2) {
+    animation-delay: 0.08s;
+  }
+
+  .focus {
+    animation-delay: 0.16s;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .link,
+  .link svg {
+    transition: none;
+  }
+}

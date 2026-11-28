@@ -238,18 +238,6 @@
   margin-top: 32px;
 }
 
-.heroOther {
-  margin: 14px 0 0;
-  color: var(--treq-mute);
-}
-
-.heroOther a {
-  color: var(--treq-link);
-  text-decoration-color: var(--treq-link-line);
-  text-decoration-thickness: 2px;
-  text-underline-offset: 3px;
-}
-
 .platforms {
   display: flex;
   align-items: center;
@@ -855,10 +843,6 @@
   margin-top: 16px;
   font-size: 0.9375rem;
   color: var(--treq-mute);
-}
-
-.after p {
-  margin: 0;
 }
 
 /* The hero enters once on load. Nothing waits on scroll to become readable. */

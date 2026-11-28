@@ -75,10 +75,25 @@ impl TargetSync {
 /// origin lacks while also behind it is left alone and reported as diverged.
 pub fn sync_target(repo_path: &str, target_branch: &str) -> TargetSync {
   let fetch_error = jj::jj_git_fetch(repo_path).err().map(|e| e.to_string());
-  let bookmark = target_branch
+  let bookmark = target_bookmark(target_branch);
+  TargetSync {
+    diverged: fast_forward_target(repo_path, target_branch),
+    parent_dirty: parent_dirty(repo_path, bookmark),
+    fetch_error,
+  }
+}
+
+fn target_bookmark(target_branch: &str) -> &str {
+  target_branch
     .strip_prefix("origin/")
-    .unwrap_or(target_branch);
-  let diverged = match target_state(repo_path, bookmark) {
+    .unwrap_or(target_branch)
+}
+
+/// [`sync_target`]'s fast-forward, after a fetch the caller ran: the
+/// bookmark when it diverged from origin instead.
+pub fn fast_forward_target(repo_path: &str, target_branch: &str) -> Option<String> {
+  let bookmark = target_bookmark(target_branch);
+  match target_state(repo_path, bookmark) {
     TargetState::Diverged => Some(bookmark.to_string()),
     TargetState::Behind => {
       let remote = format!("{bookmark}@origin");
@@ -88,11 +103,6 @@ pub fn sync_target(repo_path: &str, target_branch: &str) -> TargetSync {
       None
     }
     TargetState::Synced => None,
-  };
-  TargetSync {
-    parent_dirty: parent_dirty(repo_path, bookmark),
-    diverged,
-    fetch_error,
   }
 }
 

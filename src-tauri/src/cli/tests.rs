@@ -1710,8 +1710,10 @@ mod help_text {
   }
 
   #[test]
-  fn diff_help_says_it_shows_conflicts_not_a_diff() {
-    assert!(subcommand_help("diff").contains("changes workspace-diff"));
+  fn diff_help_names_the_patch_and_its_conflicts_mode() {
+    let help = subcommand_help("diff");
+    assert!(help.contains("commits and working copy"), "{help}");
+    assert!(help.contains("--conflicts"), "{help}");
   }
 }
 
