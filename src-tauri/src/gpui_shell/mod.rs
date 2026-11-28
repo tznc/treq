@@ -14,7 +14,7 @@ use std::{
 
 use tauri::{AppHandle, Wry};
 use tauri_plugin_gpui::{
-  gpui::{self, prelude::*, Global, SharedString, WeakEntity},
+  gpui::{self, prelude::*, Global, MouseButton, NavigationDirection, SharedString, WeakEntity},
   GpuiConfig, GpuiWindowExt,
 };
 
@@ -236,6 +236,14 @@ impl Render for Shell {
         // Blurs the focused input too, as a browser does.
         window.blur(cx);
         defer_main(&app, |_| popup::hide_menus())
+      })
+      .on_mouse_down(MouseButton::Navigate(NavigationDirection::Back), {
+        let label = self.label.to_string();
+        move |_, _, cx| window::shortcut(&label, window::Shortcut::Back, cx)
+      })
+      .on_mouse_down(MouseButton::Navigate(NavigationDirection::Forward), {
+        let label = self.label.to_string();
+        move |_, _, cx| window::shortcut(&label, window::Shortcut::Forward, cx)
       })
       .bg(theme::palette(dark).background)
       .when_some(self.sidebar.clone(), |this, sidebar| {
