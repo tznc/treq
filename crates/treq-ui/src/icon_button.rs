@@ -52,10 +52,12 @@ impl IconButton {
     label: impl Into<SharedString>,
     palette: &Palette,
   ) -> Self {
+    let label = label.into();
     Self {
       button: Button::new(id, palette)
         .variant(Variant::Ghost)
         .size(Size::IconXs)
+        .tooltip(label.clone())
         .aria_label(label),
       icon,
       size: IconButtonSize::default(),
@@ -122,7 +124,19 @@ impl IconButton {
     self
   }
 
-  /// Runs `f` as the pointer enters and leaves, to show the tooltip.
+  /// Shows `text` on hover in place of the label.
+  pub fn tooltip(mut self, text: impl Into<SharedString>) -> Self {
+    self.button = self.button.tooltip(text);
+    self
+  }
+
+  pub fn tooltip_side(mut self, side: crate::tooltip::Side) -> Self {
+    self.button = self.button.tooltip_side(side);
+    self
+  }
+
+  /// Runs `f` as the pointer enters and leaves, to show a tooltip of the
+  /// caller's own in place of the label.
   pub fn on_hover(mut self, f: impl Fn(&bool, &mut Window, &mut App) + 'static) -> Self {
     self.button = self.button.on_hover(f);
     self

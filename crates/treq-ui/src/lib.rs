@@ -31,6 +31,7 @@ pub mod selector;
 pub mod split_button;
 pub mod tabs;
 pub mod theme;
+pub mod tooltip;
 pub mod touch;
 
 pub use alert::{Alert, Severity};
@@ -306,6 +307,9 @@ pub struct Button {
   name: Option<SharedString>,
   /// The action's shortcut, drawn after every other child.
   shortcut: Option<Kbd>,
+  /// Shown on hover, as [`tooltip`] draws it.
+  tooltip: Option<SharedString>,
+  tooltip_side: tooltip::Side,
 }
 
 impl Button {
@@ -326,7 +330,22 @@ impl Button {
       hover_bg: None,
       name: None,
       shortcut: None,
+      tooltip: None,
+      tooltip_side: tooltip::Side::Bottom,
     }
+  }
+
+  /// Shows `text` beside the button while the pointer rests on it: what an
+  /// icon does, or why it is disabled.
+  pub fn tooltip(mut self, text: impl Into<SharedString>) -> Self {
+    self.tooltip = Some(text.into());
+    self
+  }
+
+  /// Shows the tooltip on `side` of the button; below by default.
+  pub fn tooltip_side(mut self, side: tooltip::Side) -> Self {
+    self.tooltip_side = side;
+    self
   }
 
   /// The background on hover, in place of the variant's (`hover:bg-…`).
@@ -636,8 +655,28 @@ impl RenderOnce for Button {
       .when_some(self.on_right_click, |b, f| {
         b.on_mouse_down(MouseButton::Right, move |e, w, cx| f(e, w, cx))
       })
-      .when_some(self.on_hover, |b, f| {
-        b.on_hover(move |e, w, cx| f(e, w, cx))
+      .map(|b| match (self.on_hover, self.tooltip) {
+        (Some(f), _) => b.on_hover(move |e, w, cx| f(e, w, cx)),
+        (None, Some(text)) => {
+          let (key, recorded, pressed) = (id.clone(), id.clone(), id.clone());
+          let side = self.tooltip_side;
+          b.relative()
+            .on_hover(move |hovered, w, cx| tooltip::hover(&key, &text, side, *hovered, w, cx))
+            .on_mouse_down(MouseButton::Left, move |_, w, cx| {
+              tooltip::press(&pressed, w, cx)
+            })
+            .child(
+              gpui::canvas(
+                move |bounds, w, _| tooltip::record(recorded.clone(), bounds, w),
+                |_, _, _, _| {},
+              )
+              .absolute()
+              .top_0()
+              .left_0()
+              .size_full(),
+            )
+        }
+        (None, None) => b,
       })
       .children(self.children.into_iter().map(|child| match child {
         ButtonChild::Element(el) => el,
