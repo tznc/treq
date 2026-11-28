@@ -638,6 +638,7 @@ impl TerminalHost for Backend {
         project: project.as_ref(),
         app_instructions: app_instructions.as_deref(),
         repo_instructions: repo_instructions.as_deref(),
+        review: None,
       },
       &AutoCommand {
         agent: &start.agent,
