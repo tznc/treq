@@ -14,9 +14,7 @@ use std::{
 
 use tauri::{AppHandle, Wry};
 use tauri_plugin_gpui::{
-  gpui::{
-    self, prelude::*, Global, MouseButton, NavigationDirection, SharedString, WeakEntity,
-  },
+  gpui::{self, prelude::*, Global, MouseButton, NavigationDirection, SharedString, WeakEntity},
   GpuiConfig, GpuiWindowExt,
 };
 
