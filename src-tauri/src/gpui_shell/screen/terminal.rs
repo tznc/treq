@@ -4572,19 +4572,25 @@ fn agent_session(
       .and_then(|p| p.agent.clone())
       .unwrap_or_else(|| default_agent(host, &repo));
     let pty = terminal_data::agent_pty_id(&repo, session.id);
+    let (profile, mode) = agent_profile_mode(
+      host,
+      &repo,
+      &agent,
+      pending.and_then(|p| p.profile.as_deref()),
+    );
     let start = AgentStart {
       agent: agent.clone(),
       repo_path: repo.clone(),
       workspace_path: workspace_path.clone(),
       session_id: session.id,
       pending_prompt: pending.and_then(|p| p.pending_prompt.clone()),
-      permission_mode: pending.and_then(|p| p.permission_mode.clone()),
-      profile: agent_profile(
-        host,
-        &repo,
-        &agent,
-        pending.and_then(|p| p.profile.as_deref()),
-      ),
+      // A mode's permission mode wins over the request's.
+      permission_mode: mode
+        .as_ref()
+        .and_then(|m| m.permission_mode.clone())
+        .or_else(|| pending.and_then(|p| p.permission_mode.clone())),
+      profile,
+      mode,
     };
     let kind = Kind::Agent {
       pane_id,
@@ -4633,22 +4639,37 @@ fn default_agent(host: &dyn terminal_data::TerminalHost, repo: &str) -> String {
     .unwrap_or_else(|| "claude".into())
 }
 
-/// The session's account profile: the chosen one, else the defaults.
-fn agent_profile(
+/// The session's profile and mode from `chosen` (`profile` or `profile/mode`), else the defaults.
+fn agent_profile_mode(
   host: &dyn terminal_data::TerminalHost,
   repo: &str,
   agent: &str,
   chosen: Option<&str>,
-) -> Option<crate::core::agent_profiles::AgentProfile> {
+) -> (
+  Option<crate::core::agent_profiles::AgentProfile>,
+  Option<crate::core::agent_modes::Mode>,
+) {
+  use crate::core::agent_modes;
   let read = |v: Result<super::settings_data::Values, String>, key: &str| {
     v.ok().and_then(|v| v.get(key).cloned().flatten())
   };
-  crate::core::agent_profiles::session_profile(
-    |key| read(host.settings(&[key.to_string()]), key),
+  let app = |key: &str| read(host.settings(&[key.to_string()]), key);
+  let (chosen_profile, chosen_mode) = match chosen.map(agent_modes::split_target) {
+    Some((profile, mode)) => (Some(profile), mode),
+    None => (None, None),
+  };
+  let profile = crate::core::agent_profiles::session_profile(
+    app,
     |key| read(host.repo_settings(repo, &[key.to_string()]), key),
     agent,
-    chosen,
-  )
+    chosen_profile,
+  );
+  let mode = profile.as_ref().and_then(|p| {
+    let modes = agent_modes::parse(app(agent_modes::MODES_SETTING).as_deref());
+    let chosen = chosen_mode.filter(|_| chosen_profile == Some(p.name.as_str()));
+    agent_modes::resolve(&modes, agent, &p.name, chosen)
+  });
+  (profile, mode)
 }
 
 /// The emulator's name for a mouse button xterm reports.

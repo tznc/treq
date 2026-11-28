@@ -49,6 +49,8 @@ pub struct AgentStart {
   pub permission_mode: Option<String>,
   /// The account profile the agent signs in with; `None` uses its own config.
   pub profile: Option<crate::core::agent_profiles::AgentProfile>,
+  /// The profile's mode: its model, effort, permission and instructions.
+  pub mode: Option<crate::core::agent_modes::Mode>,
 }
 
 /// Where a persistent remote shell or agent runs (`RemoteTerminalTarget`).
@@ -636,6 +638,7 @@ impl TerminalHost for Backend {
         project: project.as_ref(),
         app_instructions: app_instructions.as_deref(),
         repo_instructions: repo_instructions.as_deref(),
+        mode_instructions: start.mode.as_ref().and_then(|m| m.instructions.as_deref()),
       },
       &AutoCommand {
         agent: &start.agent,
@@ -644,6 +647,8 @@ impl TerminalHost for Backend {
         pending_prompt: start.pending_prompt.as_deref(),
         treq_bin_dir: bin_dir.as_deref(),
         env: &env,
+        model: start.mode.as_ref().and_then(|m| m.model.as_deref()),
+        effort: start.mode.as_ref().and_then(|m| m.effort.as_deref()),
       },
     )?;
     Ok(Prepared {
