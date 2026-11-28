@@ -111,8 +111,6 @@ pub(in crate::gpui_shell::screen) struct Review {
   pub use_idle: bool,
   pub sending: bool,
   pub discard_dialog: bool,
-  /// `hasUserAddedComments`.
-  pub user_added: bool,
   /// Files that changed since the review started, and the read parked
   /// until Reload.
   pub stale: Vec<String>,
@@ -162,7 +160,6 @@ impl ChangesView {
             view.review.comments = stored.comments;
             view.review.summary = stored.summary;
             view.review.notes = stored.notes;
-            view.review.user_added = true;
           }
         }
         Ok(None) => {}
@@ -174,7 +171,8 @@ impl ChangesView {
 
   /// `isInReviewMode`: a refreshed file list waits behind the stale banner.
   pub(super) fn in_review(&self) -> bool {
-    self.review.user_added
+    !self.review.comments.is_empty()
+      || !self.review.notes.is_empty()
       || self.review.draft.is_some()
       || self.review.finish_open
       || !self.review.summary.trim().is_empty()
@@ -512,7 +510,6 @@ impl ChangesView {
       .review
       .comments
       .push(draft.comment(&text, new_id(), now()));
-    self.review.user_added = true;
     self.review.draft_input = None;
     self.review.draft_text.clear();
     self.review.selection = None;
@@ -606,10 +603,6 @@ impl ChangesView {
       return;
     }
     self.review.comments.retain(|c| c.id != id);
-    // The last comment gone ends the review: refreshes show as they land.
-    if self.review.comments.is_empty() {
-      self.review.user_added = false;
-    }
     if self.review.editing.as_deref() == Some(id) {
       self.cancel_edit(cx);
     }
@@ -916,15 +909,30 @@ impl ChangesView {
     if !std::mem::take(&mut self.review.prune) {
       return;
     }
-    let listed: HashSet<String> = self.files().iter().map(|f| f.path.clone()).collect();
+    // Committed files take comments too, on the diff their card shows.
+    let listed: HashSet<String> = self
+      .files()
+      .iter()
+      .map(|f| f.path.clone())
+      .chain(
+        self
+          .snapshot
+          .iter()
+          .flat_map(|s| s.committed.iter().map(|f| f.path.clone())),
+      )
+      .collect();
     let before = self.review.comments.len();
-    let hunks = self.hunks.clone();
+    let hunks: HashMap<String, FileHunks> = listed
+      .iter()
+      .filter_map(|p| Some((p.clone(), self.file_hunks(p)?)))
+      .collect();
+    // A file with no diff read (Committed hidden) keeps its comments.
     self.review.comments.retain(|c| {
       listed.contains(&c.file_path)
         && (c.is_file()
           || hunks
             .get(&c.file_path)
-            .is_some_and(|d| d.hunks.iter().any(|h| h.id == c.hunk_id)))
+            .is_none_or(|d| d.hunks.iter().any(|h| h.id == c.hunk_id)))
     });
     let dropped = before - self.review.comments.len();
     if dropped > 0 {

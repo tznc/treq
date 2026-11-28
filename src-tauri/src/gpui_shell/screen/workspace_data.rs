@@ -9,7 +9,7 @@ use super::{
   checklist::ToolsHost,
   workspace::{
     Checks, CommitsLabel, CreatePr, Disabled, Header, HomeTarget, Linear, Loc, Merge, Pill,
-    PrState, Rebase, Sync, Tab, TabRow, Target, Tone, Tooltip, ViewPr,
+    PrState, Rebase, Rebased, Sync, Tab, TabRow, Target, Tone, Tooltip, ViewPr,
   },
 };
 use crate::{
@@ -556,6 +556,8 @@ struct Metadata {
   linear_issue_key: Option<String>,
   linear_issue_url: Option<String>,
   linear_issue_title: Option<String>,
+  /// When auto-rebase last moved the branch onto its target (RFC 3339).
+  last_rebased_at: Option<String>,
 }
 
 fn plural(n: usize, word: &str) -> String {
@@ -791,9 +793,19 @@ pub fn workspace_view(
         draft: p.is_draft,
       }),
     create_pr,
-    sync: (!not_on_remote && (ahead > 0 || behind > 0)).then_some(Sync {
+    sync: Some(Sync {
       ahead: ahead as u32,
       behind: behind as u32,
+      not_on_remote,
+      rebased: workspace
+        .zip(metadata.last_rebased_at.clone())
+        .map(|(w, at)| Rebased {
+          target: w
+            .target_branch
+            .clone()
+            .unwrap_or_else(|| route.default_target().to_string()),
+          at,
+        }),
       disabled: busy,
       spinning: matches!(pending, Pending::Sync | Pending::Reset),
     }),

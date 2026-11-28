@@ -173,6 +173,137 @@ fn workspace_header_syncs_itself(cx: &mut TestAppContext) {
   assert_eq!(reads, 1);
 }
 
+fn in_sync_loaded() -> workspace_data::Loaded {
+  let mut loaded = feature_loaded();
+  if let Some(status) = loaded.status.as_mut() {
+    status.remote_sync = crate::core::workspaces::RemoteSyncStatus::InSync;
+  }
+  loaded
+}
+
+#[test]
+fn workspace_header_shows_sync_when_the_branch_matches_its_remote() {
+  let (header, _) = workspace_data::workspace_view(
+    route_of(&workspace_route()),
+    &in_sync_loaded(),
+    &open_pr(),
+    workspace_data::Pending::None,
+  );
+  let sync = header.sync.expect("sync");
+  assert_eq!((sync.ahead, sync.behind), (0, 0));
+}
+
+#[test]
+fn workspace_header_shows_sync_when_the_branch_is_not_on_the_remote() {
+  let mut loaded = in_sync_loaded();
+  if let Some(w) = loaded.workspace.as_mut() {
+    w.not_on_remote = true;
+  }
+  let (header, _) = workspace_data::workspace_view(
+    route_of(&workspace_route()),
+    &loaded,
+    &open_pr(),
+    workspace_data::Pending::None,
+  );
+  assert!(header.sync.expect("sync").not_on_remote);
+}
+
+#[test]
+fn workspace_header_sync_carries_the_last_rebase_onto_the_target() {
+  let mut loaded = feature_loaded();
+  if let Some(w) = loaded.workspace.as_mut() {
+    w.metadata = Some(r#"{"last_rebased_at":"2026-11-27T09:00:00Z"}"#.into());
+  }
+  let (header, _) = workspace_data::workspace_view(
+    route_of(&workspace_route()),
+    &loaded,
+    &open_pr(),
+    workspace_data::Pending::None,
+  );
+  assert_eq!(
+    header.sync.expect("sync").rebased,
+    Some(workspace::Rebased {
+      target: "main".into(),
+      at: "2026-11-27T09:00:00Z".into(),
+    })
+  );
+}
+
+#[gpui::test]
+fn workspace_header_draws_no_sync_pip_when_in_sync(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    loaded: in_sync_loaded(),
+    pr: open_pr(),
+    ..FakeHost::default()
+  };
+  let (mut h, _) = workspace_harness(cx, host, workspace_route());
+  let screen = h.rendered();
+  gpui_testing_library::expect(screen.get_by_role(
+    gpui_testing_library::by::role(gpui::Role::Button).name("Sync with remote: Up to date"),
+  ))
+  .to_be_visible();
+  h.cx.run_until_parked();
+  assert!(h.cx.debug_bounds("workspace-sync-pip").is_none());
+}
+
+#[gpui::test]
+fn workspace_header_draws_the_sync_pip_when_out_of_sync(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, feature_host(), workspace_route());
+  h.rendered();
+  h.cx.run_until_parked();
+  assert!(h.cx.debug_bounds("workspace-sync-pip").is_some());
+}
+
+fn refreshed_prs(host: &FakeHost) -> Vec<String> {
+  host
+    .calls()
+    .into_iter()
+    .filter(|c| c.starts_with("refresh pr status"))
+    .collect()
+}
+
+/// A sync's push starts new checks on GitHub a moment later: the poller
+/// reads the branch's pull request again then, not on its next round.
+#[gpui::test]
+fn workspace_header_reads_checks_again_a_moment_after_a_sync(cx: &mut TestAppContext) {
+  let host = FakeHost {
+    synced: true,
+    ..feature_host()
+  };
+  let (mut h, host) = workspace_harness(cx, host, workspace_route());
+  h.click("workspace-sync");
+  h.cx.run_until_parked();
+  assert!(
+    refreshed_prs(&host).is_empty(),
+    "GitHub has no new checks yet"
+  );
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_secs(5));
+  h.cx.run_until_parked();
+  assert_eq!(refreshed_prs(&host), ["refresh pr status feature/login"]);
+}
+
+#[gpui::test]
+fn workspace_header_leaves_checks_after_a_failed_or_remote_sync(cx: &mut TestAppContext) {
+  // A local sync that fails, then a remote repository's that succeeds.
+  for remote in [false, true] {
+    let host = FakeHost {
+      synced: remote,
+      react_actions: remote,
+      ..feature_host()
+    };
+    let (mut h, host) = workspace_harness(cx, host, workspace_route());
+    h.click("workspace-sync");
+    h.cx.run_until_parked();
+    h.cx
+      .executor()
+      .advance_clock(std::time::Duration::from_secs(5));
+    h.cx.run_until_parked();
+    assert!(refreshed_prs(&host).is_empty());
+  }
+}
+
 #[gpui::test]
 fn workspace_header_reads_again_when_the_model_refreshes(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, feature_host(), workspace_route());

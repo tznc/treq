@@ -5,8 +5,8 @@
 
 use std::ops::Range;
 use std::time::Duration;
+use treq_ui::SelectorExt as _;
 
-use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::input::{Escape, InputEvent, InputState};
 use tauri_plugin_gpui::gpui::{
   div, prelude::*, Context, Entity, Hsla, SharedString, Subscription, Task, Window,
@@ -351,8 +351,7 @@ pub(in crate::gpui_shell::screen) fn bar<V: Findable>(
   let close_button = button("close", theme::ICON_X, "Close search", "Close (Esc)", None);
   Some(
     div()
-      .id(id)
-      .debug_selector(move || id.into())
+      .selector(id)
       .role(tauri_plugin_gpui::gpui::Role::Search)
       .aria_label("Find")
       .absolute()
@@ -374,7 +373,7 @@ pub(in crate::gpui_shell::screen) fn bar<V: Findable>(
       }))
       .child(
         ui::text(div(), TextSize::Sm)
-          .debug_selector(move || format!("{id}-input"))
+          .selector(format!("{id}-input"))
           .h_6()
           .w_48()
           .px_2()
@@ -389,7 +388,7 @@ pub(in crate::gpui_shell::screen) fn bar<V: Findable>(
         // Short label (['count']): 11px is fine.
         // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
-          .debug_selector(move || format!("{id}-count"))
+          .selector(format!("{id}-count"))
           .px_2()
           .whitespace_nowrap()
           .text_color(p.muted_foreground)
@@ -397,8 +396,7 @@ pub(in crate::gpui_shell::screen) fn bar<V: Findable>(
       )
       .child(prev)
       .child(next)
-      .child(close_button)
-      .test_support(),
+      .child(close_button),
   )
 }
 

@@ -416,6 +416,129 @@ fn changes_tab_offers_file_actions_on_unselected_rows(cx: &mut TestAppContext) {
   }
 }
 
+/// Unhiding Committed during a review reads the committed diffs it hid,
+/// though the working copy did not change.
+#[gpui::test]
+fn unhiding_committed_in_a_review_shows_the_committed_diffs(cx: &mut TestAppContext) {
+  let mut host = changes_host_with_committed();
+  if let Some(working) = host.working.as_mut() {
+    working.working_copy_token = Some("t1".into());
+  }
+  let (mut h, _) = workspace_harness(cx, host, committed_route(false));
+  comment_line(&mut h, "Why?");
+  h.update(|s| {
+    if let View::Workspace(r) = &mut s.view {
+      r.show_committed = Some(true);
+    }
+  });
+  h.cx.run_until_parked();
+  let screen = h.rendered();
+  assert!(
+    screen
+      .query_by_element_id(gpui::SharedString::from("diff-line-c.rs-0-0"))
+      .is_some(),
+    "c.rs is still loading"
+  );
+}
+
+/// An uncommitted row's status letter lines up with a committed row's.
+#[gpui::test]
+fn changes_tab_aligns_status_letters_across_lists(cx: &mut TestAppContext) {
+  use gpui_testing_library::by;
+  let (mut h, _) = workspace_harness(cx, changes_host_with_committed(), committed_route(true));
+  let screen = h.rendered();
+  let right = |key: &str| {
+    let id = gpui::ElementId::Name(format!("status-{key}").into());
+    screen
+      .query_all_by_element_id(by::element_id(id))
+      .first()
+      .unwrap_or_else(|| panic!("{key} not drawn"))
+      .snapshot()
+      .bounds()
+      .right()
+  };
+  assert_eq!(right("Changes-a.rs"), right("committed-c.rs"));
+}
+
+/// Whether the file row named `name` is drawn selected.
+fn row_selected(h: &mut Harness, name: &str) -> bool {
+  h.rendered()
+    .query_by_role(
+      gpui_testing_library::by::role(gpui::Role::Button)
+        .name(name)
+        .selected(true),
+    )
+    .is_some()
+}
+
+/// A click outside the file list drops the row's highlight; its actions wait
+/// for hover again.
+#[gpui::test]
+fn changes_tab_hides_row_actions_after_a_click_away(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  h.click("file-row-a.rs");
+  assert!(row_selected(&mut h, "a.rs"));
+  assert!(h.shows(gpui::Role::Button, "Stage a.rs"));
+  h.click("file-card-a.rs");
+  assert!(!row_selected(&mut h, "a.rs"));
+  assert!(!h.shows(gpui::Role::Button, "Stage a.rs"));
+  assert!(shows_hidden(&mut h, "Stage a.rs"), "still offered on hover");
+}
+
+/// Whether the status letter `key` (`<list>-<path>`) shows.
+fn shows_letter(h: &mut Harness, key: &str) -> bool {
+  let id = gpui::ElementId::Name(format!("status-{key}").into());
+  h.rendered()
+    .query_all_by_element_id(gpui_testing_library::by::element_id(id))
+    .iter()
+    .any(|n| n.is_visible())
+}
+
+/// A hovered row shows its buttons in place of its status letter.
+#[gpui::test]
+fn changes_tab_hides_the_status_letter_on_a_hovered_row(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  assert!(shows_letter(&mut h, "Changes-b.rs"));
+  h.hover("file-row-b.rs");
+  assert!(!shows_letter(&mut h, "Changes-b.rs"));
+  assert!(h.shows(gpui::Role::Button, "Stage b.rs"));
+  assert!(
+    shows_letter(&mut h, "Changes-a.rs"),
+    "other rows keep theirs"
+  );
+}
+
+/// A clicked row keeps its buttons in the letter's place off hover, until a
+/// click away.
+#[gpui::test]
+fn changes_tab_hides_the_status_letter_on_a_clicked_row(cx: &mut TestAppContext) {
+  let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
+  h.click("file-row-a.rs");
+  h.hover("file-card-b.rs");
+  assert!(!shows_letter(&mut h, "Changes-a.rs"));
+  assert!(h.shows(gpui::Role::Button, "Stage a.rs"));
+  h.click("file-card-b.rs");
+  assert!(shows_letter(&mut h, "Changes-a.rs"));
+}
+
+/// The click that drops the row's highlight still reaches the diff control.
+#[gpui::test]
+fn changes_tab_click_away_reaches_the_diff_control(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  h.click("file-row-a.rs");
+  h.click("viewed-a.rs");
+  h.cx.run_until_parked();
+  assert!(!row_selected(&mut h, "a.rs"));
+  assert!(
+    host
+      .writes()
+      .iter()
+      .any(|w| w.starts_with("mark viewed a.rs ")),
+    "{:?}",
+    host.writes()
+  );
+}
+
 #[gpui::test]
 fn changes_tab_commits_only_staged_files(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
@@ -1011,6 +1134,36 @@ fn deleting_the_last_comment_ends_the_review(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_reload_that_drops_the_last_comment_ends_the_review(cx: &mut TestAppContext) {
+  use gpui::Role;
+  use gpui_testing_library::prelude::*;
+  let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
+  let screen = h.rendered();
+  let user = screen.user();
+  user.click(&screen.get_by_role(by::role(Role::Button).name("Add file comment on b.rs")));
+  user.keyboard("Nit");
+  user.click(&screen.get_by_role(by::role(Role::Button).name("Add comment")));
+  // b.rs leaves the working copy: the review holds the refresh back.
+  let mut without_b = host.working.clone().expect("working");
+  without_b.uncommitted_files.remove(1);
+  without_b.hunks_by_file.remove(1);
+  *host.edited.lock().unwrap() = Some(without_b.clone());
+  bump_changes_revision(&mut h);
+  assert!(shows_stale_banner(&mut h));
+  // Reload drops the comment on b.rs, the review's last.
+  let screen = h.rendered();
+  screen
+    .user()
+    .click(&screen.get_by_role(by::role(Role::Button).name("Reload")));
+  h.cx.run_until_parked();
+  without_b.hunks_by_file[0].hunks[0].lines = vec![" a".into(), "+b".into(), "+e".into()];
+  *host.edited.lock().unwrap() = Some(without_b);
+  bump_changes_revision(&mut h);
+  assert!(!shows_stale_banner(&mut h), "no comments, no review");
+  assert_eq!(shown_lines(&mut h, "a.rs"), [" a", "+b", "+e"]);
+}
+
+#[gpui::test]
 fn arrow_keys_move_and_extend_the_line_selection(cx: &mut TestAppContext) {
   let (mut h, _) = workspace_harness(cx, changes_host(), changes_route());
   // a.rs: " a", "+b", "+c"; b.rs: "+d".
@@ -1227,6 +1380,25 @@ fn changes_tab_comments_a_line_and_keeps_the_review(cx: &mut TestAppContext) {
   assert!(!has_comment(&mut h, "^Comments on a.rs line \\d+$"));
   assert!(!h.shows(gpui::Role::Toolbar, "Review"));
   assert!(host.writes().contains(&"clear review 7".to_string()));
+}
+
+/// A Reload keeps comments on committed files whose lines are still there.
+#[gpui::test]
+fn a_reload_keeps_comments_on_committed_files(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, changes_host_with_committed(), committed_route(true));
+  hover_line(&mut h, "diff-line-c.rs-0-1");
+  h.click("add-comment-c.rs-0-1");
+  h.click("comment-input");
+  h.cx.simulate_input("On committed");
+  h.click("comment-submit");
+  h.cx.run_until_parked();
+  let mut edited = host.working.clone().expect("working");
+  edited.hunks_by_file[0].hunks[0].lines = vec!["-a".into(), "+e".into()];
+  *host.edited.lock().unwrap() = Some(edited);
+  bump_changes_revision(&mut h);
+  h.click("reload-stale");
+  h.cx.run_until_parked();
+  assert!(has_comment(&mut h, "^Comments on c.rs line \\d+$"));
 }
 
 #[gpui::test]

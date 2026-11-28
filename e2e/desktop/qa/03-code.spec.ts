@@ -240,6 +240,19 @@ test("code: workspace title in the header, edited inline", async ({ page }) => {
     ],
   });
 
+  await edit.hover();
+  await settle(page, 1500);
+  await capture(page, {
+    name: "03-code-title-edit-tooltip",
+    title: "Header: hovering the title's edit pencil",
+    screen: true,
+    rest: false,
+    expectations: [
+      "A tooltip reading \"Edit title\" shows just below the pencil",
+      "The pencil shows its ghost hover background",
+    ],
+  });
+
   await edit.click();
   const input = page.getByRole("textbox", { name: "Workspace title" });
   await expect(input).toBeVisible();
