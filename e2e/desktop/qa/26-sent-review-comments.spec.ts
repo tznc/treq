@@ -57,8 +57,8 @@ test("sent review comments stay on the diff until resolved", async ({ page }) =>
     name: "26-sent-review-03-unfolded",
     title: "Clicking the folded row shows the comment again",
     expectations: [
-      "Above the card, a separate pill with a down chevron and '1 comment' folds it, with a 'Resolved' badge beside it, as on an open review thread",
-      "The full sent card shows its text again, with no buttons inside it",
+      "Above the card, one row holds a pill with a down chevron and '1 comment' that folds it, a 'Resolved' badge, then the robot icon and 'Sent to agent'",
+      "The full sent card below shows the file:line label and its text, with no 'Sent to agent' tag and no buttons inside it",
     ],
   });
 });

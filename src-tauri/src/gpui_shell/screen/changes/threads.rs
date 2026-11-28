@@ -670,20 +670,23 @@ impl ChangesView {
           .flex()
           .items_center()
           .gap_2()
-          .child(
-            div()
-              .flex()
-              .items_center()
-              .gap_2()
-              .child(ui::icon(theme::ICON_BOT, 14., tone.color(p)))
-              .child(
-                // Short label (tag). ast-grep-ignore: gpui-text-xs-short-label-only
-                ui::text(div(), TextSize::Xs)
-                  .font_weight(FontWeight::MEDIUM)
-                  .text_color(tone.color(p))
-                  .child(label),
-              ),
-          )
+          // Resolved, the tag sits on the fold toggle's row instead.
+          .when(!resolved, |row| {
+            row.child(
+              div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(ui::icon(theme::ICON_BOT, 14., tone.color(p)))
+                .child(
+                  // Short label (tag). ast-grep-ignore: gpui-text-xs-short-label-only
+                  ui::text(div(), TextSize::Xs)
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(tone.color(p))
+                    .child(label),
+                ),
+            )
+          })
           .child(
             ui::text(div(), TextSize::Sm)
               .text_color(muted)
@@ -791,25 +794,13 @@ impl ChangesView {
     )
     .on_click(cx.listener(move |view, _, _, cx| view.toggle_sent(&id, cx)));
     toggle = if collapsed {
-      let sent = Tone::Primary.color(p);
-      toggle
-        .child(ui::icon(theme::ICON_BOT, 14., sent))
-        .child(
-          // Short label (tag). ast-grep-ignore: gpui-text-xs-short-label-only
-          ui::text(div(), TextSize::Xs)
-            .flex_none()
-            .font_weight(FontWeight::MEDIUM)
-            .text_color(sent)
-            .child("Sent to agent"),
-        )
-        .child(resolved_badge(p))
-        .child(
-          ui::text(div(), TextSize::Sm)
-            .min_w_0()
-            .truncate()
-            .text_color(p.muted_foreground.opacity(0.7))
-            .child(preview(&comment.comment_text)),
-        )
+      toggle.child(sent_tag(p)).child(resolved_badge(p)).child(
+        ui::text(div(), TextSize::Sm)
+          .min_w_0()
+          .truncate()
+          .text_color(p.muted_foreground.opacity(0.7))
+          .child(preview(&comment.comment_text)),
+      )
     } else {
       toggle.child(
         // Short label (count). ast-grep-ignore: gpui-text-xs-short-label-only
@@ -825,7 +816,9 @@ impl ChangesView {
           .items_center()
           .gap_2()
           .child(toggle.test_support())
-          .when(!collapsed, |row| row.child(resolved_badge(p))),
+          .when(!collapsed, |row| {
+            row.child(resolved_badge(p)).child(sent_tag(p))
+          }),
       )
       .children(card.map(|card| div().w_full().child(card)))
       .into_any_element()
@@ -896,6 +889,24 @@ fn fold_frame(collapsed: bool, tone: Tone, p: &Palette) -> Div {
   } else {
     frame.flex().flex_col().items_start().gap_1p5()
   }
+}
+
+/// A sent comment's tag: the robot icon and "Sent to agent".
+fn sent_tag(p: &Palette) -> impl IntoElement {
+  let sent = Tone::Primary.color(p);
+  div()
+    .flex_none()
+    .flex()
+    .items_center()
+    .gap_2()
+    .child(ui::icon(theme::ICON_BOT, 14., sent))
+    .child(
+      // Short label (tag). ast-grep-ignore: gpui-text-xs-short-label-only
+      ui::text(div(), TextSize::Xs)
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(sent)
+        .child("Sent to agent"),
+    )
 }
 
 /// A resolved comment's "Resolved" badge.
