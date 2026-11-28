@@ -653,13 +653,13 @@ impl ChangesView {
             true
           }
           Ok(snapshot) if view.park(&snapshot) => true,
-          // The reviewed hunks were read from this same diff.
+          // The reviewed hunks were read from this same diff: only the committed side can differ.
           Ok(snapshot)
             if view.in_review()
               && snapshot.token.is_some()
               && snapshot.token == view.hunks_token =>
           {
-            false
+            view.apply(snapshot, cx)
           }
           Ok(snapshot) if view.in_review() && view.snapshot.is_some() => {
             view.recheck(snapshot, cx);
@@ -1987,11 +1987,11 @@ impl Render for ChangesView {
       }))
       .on_mouse_up(
         MouseButton::Left,
-        cx.listener(|view, _, _, cx| view.end_drag(cx)),
+        cx.listener(|view, _, window, cx| view.end_pointer(window, cx)),
       )
       .on_mouse_up_out(
         MouseButton::Left,
-        cx.listener(|view, _, _, cx| view.end_drag(cx)),
+        cx.listener(|view, _, window, cx| view.end_pointer(window, cx)),
       )
       .when(self.dragging(), |this| {
         // A drag follows the pointer anywhere in the window, off the rows.

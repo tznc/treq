@@ -395,6 +395,23 @@ pub fn github_suggestion(
   })
 }
 
+/// What Quote quotes from a comment: the text selected in it, else all of it.
+/// The selection is drawn text, so it is matched without Markdown's marks.
+pub fn quoted_text(body: &str, selected: &str) -> String {
+  let words = |s: &str| {
+    s.split(|c: char| c.is_whitespace() || "`*_~>#[]()".contains(c))
+      .filter(|w| !w.is_empty())
+      .collect::<Vec<_>>()
+      .join(" ")
+  };
+  let selected = selected.trim();
+  if !words(selected).is_empty() && words(body).contains(&words(selected)) {
+    selected.to_string()
+  } else {
+    body.to_string()
+  }
+}
+
 /// A collapsed thread's one-line preview of its first comment, with
 /// shortcodes as emoji.
 pub fn preview(body: &str) -> String {
@@ -650,5 +667,21 @@ mod tests {
     assert_eq!(comment_date("2026-03-04T10:00:00Z", 2026), "Mar 4");
     assert_eq!(comment_date("2025-12-31T10:00:00Z", 2026), "Dec 31, 2025");
     assert_eq!(preview(" a\n  b "), "a b");
+  }
+
+  #[test]
+  fn quotes_the_selection_when_it_is_part_of_the_comment() {
+    let body = "`Users.delete_user/1` calls this **inside** its transaction.";
+    assert_eq!(
+      quoted_text(body, " Users.delete_user/1 calls this inside \n"),
+      "Users.delete_user/1 calls this inside"
+    );
+  }
+
+  #[test]
+  fn quotes_the_whole_comment_without_a_selection_in_it() {
+    let body = "Why two lines?";
+    assert_eq!(quoted_text(body, ""), body);
+    assert_eq!(quoted_text(body, "elsewhere"), body);
   }
 }

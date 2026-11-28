@@ -732,7 +732,7 @@ pub fn init_new_workspace_state(
     )
     .map_err(|e| format!("Failed to update workspace title: {}", e))?;
   }
-  set_last_rebased_commit(&tx, id, "")?;
+  set_last_rebased_commit(&tx, id, "", None)?;
   let workspace = workspace_by_id(&tx, repo_path, id)?;
   tx.commit()
     .map_err(|e| format!("Failed to commit workspace update: {}", e))?;
@@ -1324,12 +1324,12 @@ pub fn update_workspace_last_rebased_commit(
   commit_id: &str,
 ) -> Result<(), String> {
   let conn = get_connection(repo_path)?;
-  set_last_rebased_commit(&conn, id, commit_id)
+  set_last_rebased_commit(&conn, id, commit_id, None)
 }
 
-/// Records the same rebased target commit for several workspaces in one
-/// transaction (one commit instead of one per workspace).
-pub fn update_workspaces_last_rebased_commit(
+/// Records that several workspaces were rebased onto `commit_id` just now, in
+/// one transaction (one commit instead of one per workspace).
+pub fn record_workspaces_rebased(
   repo_path: &str,
   ids: &[i64],
   commit_id: &str,
@@ -1340,14 +1340,21 @@ pub fn update_workspaces_last_rebased_commit(
   let conn = get_connection(repo_path)?;
   let tx =
     write_transaction(&conn).map_err(|e| format!("Failed to start rebase bookkeeping: {}", e))?;
+  let now = Utc::now().to_rfc3339();
   for id in ids {
-    set_last_rebased_commit(&tx, *id, commit_id)?;
+    set_last_rebased_commit(&tx, *id, commit_id, Some(&now))?;
   }
   tx.commit()
     .map_err(|e| format!("Failed to commit rebase bookkeeping: {}", e))
 }
 
-fn set_last_rebased_commit(conn: &Connection, id: i64, commit_id: &str) -> Result<(), String> {
+/// `rebased_at` stamps when the rebase ran; `None` keeps the last stamp.
+fn set_last_rebased_commit(
+  conn: &Connection,
+  id: i64,
+  commit_id: &str,
+  rebased_at: Option<&str>,
+) -> Result<(), String> {
   let current_metadata: Option<String> = conn
     .query_row(
       "SELECT metadata FROM workspaces WHERE id = ?1",
@@ -1361,6 +1368,9 @@ fn set_last_rebased_commit(conn: &Connection, id: i64, commit_id: &str) -> Resul
     .unwrap_or(serde_json::json!({}));
 
   meta["last_rebased_target_commit"] = serde_json::Value::String(commit_id.to_string());
+  if let Some(at) = rebased_at {
+    meta["last_rebased_at"] = serde_json::Value::String(at.to_string());
+  }
 
   let new_metadata =
     serde_json::to_string(&meta).map_err(|e| format!("Failed to serialize metadata: {}", e))?;
@@ -3638,6 +3648,68 @@ mod tests {
       .expect("init state")
       .expect("row");
     assert_eq!(untitled.title, "A title", "no title leaves the title alone");
+  }
+
+  #[test]
+  fn record_workspaces_rebased_stamps_the_rebase_time() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+    init_local_db(repo_path).expect("initialize database");
+    let id = add_workspace(
+      repo_path,
+      "feat-r".to_string(),
+      "feat-r".to_string(),
+      "feat/r".to_string(),
+      None,
+      None,
+      None,
+    )
+    .expect("register workspace");
+
+    record_workspaces_rebased(repo_path, &[id], "abc").expect("record rebase");
+
+    let workspace = get_workspace_by_id(repo_path, id)
+      .expect("read")
+      .expect("row");
+    assert_eq!(last_rebased_commit_of(&workspace).as_deref(), Some("abc"));
+    let at = rebased_at(&workspace).expect("rebase time");
+    assert!(chrono::DateTime::parse_from_rfc3339(&at).is_ok(), "{at}");
+  }
+
+  /// A commit records the branch's new tip without rebasing it.
+  #[test]
+  fn update_workspace_last_rebased_commit_keeps_the_rebase_time() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+    init_local_db(repo_path).expect("initialize database");
+    let id = add_workspace(
+      repo_path,
+      "feat-s".to_string(),
+      "feat-s".to_string(),
+      "feat/s".to_string(),
+      None,
+      None,
+      None,
+    )
+    .expect("register workspace");
+    record_workspaces_rebased(repo_path, &[id], "abc").expect("record rebase");
+    let read = || {
+      get_workspace_by_id(repo_path, id)
+        .expect("read")
+        .expect("row")
+    };
+    let before = rebased_at(&read());
+
+    update_workspace_last_rebased_commit(repo_path, id, "def").expect("update");
+
+    assert_eq!(last_rebased_commit_of(&read()).as_deref(), Some("def"));
+    assert_eq!(rebased_at(&read()), before);
+  }
+
+  fn rebased_at(workspace: &Workspace) -> Option<String> {
+    let metadata: serde_json::Value =
+      serde_json::from_str(workspace.metadata.as_deref()?).expect("json");
+    metadata["last_rebased_at"].as_str().map(str::to_string)
   }
 
   /// Another writer commits between the read and the write of a new
