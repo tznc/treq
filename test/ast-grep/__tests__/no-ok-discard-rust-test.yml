@@ -1,0 +1,94 @@
+id: no-ok-discard-rust
+valid:
+  - |
+    fn propagates(path: &Path) -> std::io::Result<()> {
+      std::fs::remove_file(path)?;
+      Ok(())
+    }
+  - |
+    fn logs_the_failure(path: &Path) {
+      if let Err(e) = std::fs::remove_file(path) {
+        log::debug!("Could not remove {}: {e}", path.display());
+      }
+    }
+  - |
+    fn names_why_it_is_ignored(tx: Sender<u32>, r: u32) {
+      if let Err(e) = tx.send(r) {
+        tracing::trace!(%e, "receiver gone; shutdown in progress");
+      }
+    }
+  - |
+    fn keeps_the_option(path: &Path) -> Option<String> {
+      let text = std::fs::read_to_string(path).ok();
+      text
+    }
+  - |
+    fn short_circuits_on_none(path: &Path) -> Option<u32> {
+      std::fs::read_to_string(path).ok()?;
+      Some(1)
+    }
+  - |
+    fn returns_the_option(path: &Path) -> Option<String> {
+      std::fs::read_to_string(path).ok()
+    }
+  - |
+    fn unwraps_in_a_test() {
+      treq_lib::core::init(&repo.repo_path).unwrap();
+    }
+  - |
+    fn holds_a_guard() {
+      let _guard = lock.lock().expect("lock");
+    }
+  - |
+    fn calls_another_method() {
+      checker.okay();
+    }
+invalid:
+  - |
+    fn discards_a_send(tx: Sender<u32>, r: u32) {
+      tx.send(r).ok();
+    }
+  - |
+    fn discards_a_cleanup(tmp: &Path) {
+      std::fs::remove_file(&tmp).ok();
+    }
+  - |
+    fn discards_an_entity_update(this: WeakEntity<Screen>, cx: &mut App) {
+      this
+        .update(cx, |screen, cx| screen.reload(cx))
+        .ok();
+    }
+  - |
+    async fn discards_an_await(ws: Ws) {
+      ws.close(None).await.ok();
+    }
+  - |
+    fn checks_and_drops_the_option(tx: Sender<u32>, r: u32) {
+      tx.send(r).ok().is_some();
+    }
+  - |
+    fn checks_none_and_drops_the_option(tx: Sender<u32>, r: u32) {
+      tx.send(r).ok().is_none();
+    }
+  - |
+    fn drops_the_option(tx: Sender<u32>, r: u32) {
+      drop(tx.send(r).ok());
+    }
+  - |
+    fn binds_to_underscore(tx: Sender<u32>, r: u32) {
+      let _ = tx.send(r).ok();
+    }
+  - |
+    fn binds_to_a_renamed_underscore(tx: Sender<u32>, r: u32) {
+      let _ignored = tx.send(r).ok();
+    }
+  - |
+    fn binds_to_a_typed_underscore(tx: Sender<u32>, r: u32) {
+      let _: Option<()> = tx.send(r).ok();
+    }
+  - |
+    fn discards_in_a_closure(this: WeakEntity<Screen>) {
+      button.on_click(move |_, _, cx| {
+        this.update(cx, |screen, cx| screen.stop(cx)).ok();
+      });
+    }

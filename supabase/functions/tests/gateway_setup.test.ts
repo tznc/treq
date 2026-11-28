@@ -38,6 +38,13 @@ function recorder(caps: Partial<ProviderCapabilities>, launcherInstalled = () =>
   return { provider, execs, envs, services };
 }
 
+// A wake writes the trusted CAs, so it needs a configured CA.
+function useCa() {
+  Deno.env.set("REMOTE_SSH_CA_ED25519_SEED_BASE64", btoa("s".repeat(32)));
+  Deno.env.set("REMOTE_SSH_CA_ED25519_PUBLIC_KEY_BASE64", btoa("p".repeat(32)));
+  Deno.env.delete("REMOTE_SSH_CA_TRUSTED_PUBLIC_KEYS_BASE64");
+}
+
 function memoryStore(initial: Record<string, string> = {}): GatewaySecretStore & { saved: Record<string, string> } {
   const saved = { ...initial };
   return {
@@ -101,6 +108,7 @@ Deno.test("the secret file is written mode 600", () => {
 });
 
 Deno.test("reensureServicesAfterWake re-runs sshd and the gateway under a pidfile supervisor", async () => {
+  useCa();
   const { provider, services } = recorder({ serviceSupervisor: false });
   await reensureServicesAfterWake(provider, "m1", "pl-1");
   assertEquals(services.map(([n]) => n), ["treq-sshd", "treq-gateway"]);
@@ -129,18 +137,21 @@ Deno.test("a wake fails when finishing the setup still leaves sshd missing", asy
 });
 
 Deno.test("a wake with sshd installed restarts the services and skips the setup", async () => {
+  useCa();
   const { provider, services } = recorder({ serviceSupervisor: false });
   await reensureServicesAfterWake(provider, "m1", "pl-1", () => Promise.reject(new Error("setup ran")));
   assertEquals(services.map(([n]) => n), ["treq-sshd", "treq-gateway"]);
 });
 
 Deno.test("reensureServicesAfterWake leaves a real service supervisor alone", async () => {
+  useCa();
   const { provider, services } = recorder({ serviceSupervisor: true });
   await reensureServicesAfterWake(provider, "m1", "pl-1");
   assertEquals(services.length, 0);
 });
 
 Deno.test("the gateway listens where the provider says, loopback by default", async () => {
+  useCa();
   const { provider, services } = recorder({ serviceSupervisor: false });
   await reensureServicesAfterWake(provider, "m1", "pl-1");
   assert(defined(services[1])[1].args.join(" ").includes("--listen 127.0.0.1:8022"));

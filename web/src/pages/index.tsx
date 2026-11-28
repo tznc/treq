@@ -5,7 +5,7 @@ import Head from '@docusaurus/Head';
 import Layout from '@theme/Layout';
 import Heading from '@theme/Heading';
 import useBaseUrl from '@docusaurus/useBaseUrl';
-import {DownloadButton, OtherDownloads} from '@site/src/components/DownloadLinks';
+import {DownloadButton} from '@site/src/components/DownloadLinks';
 import {DOWNLOAD_HREF} from '@site/src/lib/downloads';
 import {CloseRail, HeroLines, RebaseDiagram} from '@site/src/components/landing/BranchLines';
 
@@ -70,7 +70,6 @@ function Hero(): ReactNode {
                 Read the docs
               </Link>
             </div>
-            <OtherDownloads location="hero" className={styles.heroOther} />
             <div className={styles.platforms}>
               <span>Available for</span>
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16" aria-label="macOS">
@@ -442,7 +441,6 @@ function ClosingCTA(): ReactNode {
             <Link className={styles.textLink ?? ''} to="/pricing">
               See pricing
             </Link>
-            <OtherDownloads location="closing" />
           </div>
         </div>
       </div>

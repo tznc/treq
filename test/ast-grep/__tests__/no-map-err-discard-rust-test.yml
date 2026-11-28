@@ -1,0 +1,56 @@
+id: no-map-err-discard-rust
+valid:
+  - |
+    fn keeps_the_source(raw: &str) -> Result<Url, String> {
+      Url::parse(raw).map_err(|e| format!("Invalid URL: {e}"))
+    }
+  - |
+    fn converts_with_a_function(raw: &str) -> Result<u64, Error> {
+      raw.parse().map_err(Error::Parse)
+    }
+  - |
+    fn unit_error_has_nothing_to_keep(path: &Path) -> Result<Url, String> {
+      Url::from_file_path(path).map_err(|()| format!("not absolute: {}", path.display()))
+    }
+  - |
+    fn ignores_other_closures(r: Result<u64, String>) -> u64 {
+      r.map(|_| 1).unwrap_or_default()
+    }
+  - |
+    fn uses_both_params(items: &[u8]) -> Vec<u8> {
+      items.iter().enumerate().map(|(_, b)| *b).collect()
+    }
+invalid:
+  - |
+    fn drops_the_source(raw: &str) -> Result<Url, String> {
+      Url::parse(raw).map_err(|_| "Invalid URL".to_string())
+    }
+  - |
+    fn drops_into_a_variant(raw: &str) -> Result<u64, TokenError> {
+      raw.parse().map_err(|_| TokenError::Malformed)
+    }
+  - |
+    fn renames_to_underscore_e(raw: &str) -> Result<u64, String> {
+      raw.parse().map_err(|_e| "not a number".to_string())
+    }
+  - |
+    fn types_the_ignored_param(raw: &str) -> Result<u64, String> {
+      raw.parse().map_err(|_: std::num::ParseIntError| "not a number".to_string())
+    }
+  - |
+    fn uses_a_block(raw: &str) -> Result<u64, String> {
+      raw
+        .parse()
+        .map_err(|_| {
+          tracing::warn!("bad number");
+          "not a number".to_string()
+        })
+    }
+  - |
+    fn calls_the_function_form(raw: &str) -> Result<u64, String> {
+      Result::map_err(raw.parse::<u64>(), |_| "not a number".to_string())
+    }
+  - |
+    fn moves_the_closure(raw: &str) -> Result<u64, String> {
+      raw.parse().map_err(move |_| format!("{raw} is not a number"))
+    }
