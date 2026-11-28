@@ -2153,6 +2153,12 @@ pub struct GhReviewThread {
   /// First line of a multi-line comment; `None` for a single line.
   #[serde(default)]
   pub start_line: Option<i64>,
+  /// The line and first line the thread had when it was left, which an
+  /// outdated thread keeps after `line` goes away.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub original_line: Option<i64>,
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub original_start_line: Option<i64>,
   pub diff_side: String,
   pub comments: Vec<GhReviewComment>,
 }
@@ -2169,6 +2175,8 @@ pub(crate) const REVIEW_THREADS_QUERY: &str = r#"query($owner: String!, $repo: S
           path
           line
           startLine
+          originalLine
+          originalStartLine
           diffSide
           comments(first: 50) {
             nodes {
@@ -2239,6 +2247,10 @@ struct GqlReviewThread {
   line: Option<i64>,
   #[serde(rename = "startLine", default)]
   start_line: Option<i64>,
+  #[serde(rename = "originalLine", default)]
+  original_line: Option<i64>,
+  #[serde(rename = "originalStartLine", default)]
+  original_start_line: Option<i64>,
   #[serde(rename = "diffSide")]
   diff_side: String,
   comments: GqlCommentsConnection,
@@ -2290,6 +2302,8 @@ impl GqlResponse {
         path: node.path,
         line: node.line,
         start_line: node.start_line,
+        original_line: node.original_line,
+        original_start_line: node.original_start_line,
         diff_side: node.diff_side,
         comments: node
           .comments
@@ -2712,6 +2726,8 @@ mod tests {
       path: "a.rs".into(),
       line: Some(4),
       start_line: None,
+      original_line: None,
+      original_start_line: None,
       diff_side: "RIGHT".into(),
       comments: vec![GhReviewComment {
         author_id: None,
@@ -4052,6 +4068,32 @@ echo '[{"name":"build","bucket":"pass","link":"https://x/1"}]'"#,
       thread.comments[0].author.avatar_url.as_deref(),
       Some("https://avatars.example/reviewer1.png")
     );
+  }
+
+  #[test]
+  #[cfg(unix)]
+  fn test_gh_list_pr_review_threads_maps_an_outdated_threads_original_lines() {
+    let bin_dir = TempDir::new().unwrap();
+    let response = serde_json::json!({
+        "data": {"repository": {"pullRequest": {"reviewThreads": {
+            "pageInfo": {"hasNextPage": false, "endCursor": null},
+            "nodes": [{
+                "id": "PRRT_1", "isResolved": false, "isOutdated": true,
+                "path": "a.rs", "line": null, "originalLine": 7, "originalStartLine": 5,
+                "diffSide": "RIGHT",
+                "comments": {"nodes": []}
+            }]
+        }}}}
+    });
+    let script = format!("cat <<'EOF'\n{response}\nEOF\n");
+    let gh_path = write_fake_gh(&bin_dir, &script);
+
+    let threads =
+      gh_list_pr_review_threads_impl(&gh_path, "owner", "repo", 1, "/usr/bin:/bin").unwrap();
+
+    assert_eq!(threads[0].line, None);
+    assert_eq!(threads[0].original_line, Some(7));
+    assert_eq!(threads[0].original_start_line, Some(5));
   }
 
   #[test]

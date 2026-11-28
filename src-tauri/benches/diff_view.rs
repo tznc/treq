@@ -77,6 +77,8 @@ fn threads() -> Vec<GhReviewThread> {
         path: path(f),
         line: Some(3 + t as i64 * 70),
         start_line: None,
+        original_line: None,
+        original_start_line: None,
         diff_side: "RIGHT".into(),
         comments: Vec::new(),
       })

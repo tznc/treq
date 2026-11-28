@@ -381,6 +381,24 @@ pub fn preview(body: &str) -> String {
     .join(" ")
 }
 
+/// The line a thread was left on, as the threads above a file name it; an
+/// outdated thread has no line, only the one it was left on.
+pub fn line_label(thread: &GhReviewThread) -> Option<String> {
+  let (start, end, one, many) = match thread.line {
+    Some(end) => (thread.start_line, end, "Line", "Lines"),
+    None => (
+      thread.original_start_line,
+      thread.original_line?,
+      "Outdated · line",
+      "Outdated · lines",
+    ),
+  };
+  Some(match start.filter(|s| *s != end) {
+    Some(start) => format!("{many} {start}–{end}"),
+    None => format!("{one} {end}"),
+  })
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -401,6 +419,8 @@ mod tests {
       path: path.into(),
       line,
       start_line: None,
+      original_line: None,
+      original_start_line: None,
       diff_side: side.into(),
       comments: vec![GhReviewComment {
         author_id: None,
@@ -594,6 +614,25 @@ mod tests {
   fn an_empty_suggestion_removes_the_line() {
     let rows = suggestion_diff(Some("No scrape endpoint."), "").expect("rows");
     assert_eq!(rows, vec![plain(RowKind::Removed, "No scrape endpoint.")]);
+  }
+
+  #[test]
+  fn line_labels_name_the_line_or_range() {
+    let mut t = thread("a.rs", Some(40), "RIGHT");
+    assert_eq!(line_label(&t).as_deref(), Some("Line 40"));
+    t.start_line = Some(38);
+    assert_eq!(line_label(&t).as_deref(), Some("Lines 38–40"));
+  }
+
+  #[test]
+  fn line_labels_name_an_outdated_threads_original_line() {
+    let mut t = thread("a.rs", None, "RIGHT");
+    t.is_outdated = true;
+    assert_eq!(line_label(&t), None);
+    t.original_line = Some(7);
+    assert_eq!(line_label(&t).as_deref(), Some("Outdated · line 7"));
+    t.original_start_line = Some(5);
+    assert_eq!(line_label(&t).as_deref(), Some("Outdated · lines 5–7"));
   }
 
   #[test]
