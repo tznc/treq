@@ -1820,6 +1820,33 @@ fn changes_tab_marks_a_sent_review_comment_and_folds_it_once_resolved(cx: &mut T
   assert!(h.shows(Role::Button, "Hide resolved comment"));
 }
 
+/// A resolved sent comment folds like a review thread: open, its fold
+/// toggle is a separate button above the card, not inside it.
+#[gpui::test]
+fn a_resolved_sent_comment_folds_from_a_toggle_above_its_card(cx: &mut TestAppContext) {
+  use gpui::Role;
+  use gpui_testing_library::prelude::*;
+  let host = changes_host();
+  let mut sent = agent_comment(None);
+  sent.source = "sent-review".into();
+  sent.status = "resolved".into();
+  *host.agent.lock().unwrap() = vec![sent];
+  let (mut h, _) = workspace_harness(cx, host, changes_route());
+  click_named(&mut h, Role::Button, "Show resolved comment");
+  let screen = a11y_screen(&mut h);
+  let hide = screen.get_by_role(
+    by::role(Role::Button)
+      .name("Hide resolved comment")
+      .expanded(true),
+  );
+  let card = screen.get_by_role(by::role(Role::Group).name("Sent comment on a.rs line 2"));
+  assert!(hide.bounds().bottom() <= card.bounds().top());
+  screen.user().click(&hide);
+  h.cx.run_until_parked();
+  assert!(!h.shows(Role::Group, "Sent comment on a.rs line 2"));
+  assert!(h.shows(Role::Button, "Show resolved comment"));
+}
+
 #[gpui::test]
 fn changes_tab_marks_an_agent_comment_as_local(cx: &mut TestAppContext) {
   use gpui::Role;

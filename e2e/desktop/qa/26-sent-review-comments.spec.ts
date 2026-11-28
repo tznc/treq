@@ -43,9 +43,9 @@ test("sent review comments stay on the diff until resolved", async ({ page }) =>
   await settle(page, 600);
   await capture(page, {
     name: "26-sent-review-02-resolved",
-    title: "A resolved sent comment folds to one line",
+    title: "A resolved sent comment folds like a review thread",
     expectations: [
-      "Under the commented line a one-line row shows a chevron, a robot icon, 'Resolved' and the comment text, all muted",
+      "Under the commented line a one-line bordered row, like a folded review thread: a chevron, a robot icon with 'Sent to agent', a 'Resolved' badge and the comment text",
       "No Resolve button and no full card",
     ],
   });
@@ -57,7 +57,8 @@ test("sent review comments stay on the diff until resolved", async ({ page }) =>
     name: "26-sent-review-03-unfolded",
     title: "Clicking the folded row shows the comment again",
     expectations: [
-      "The full sent card shows its text again, with 'Hide resolved comment' instead of Resolve",
+      "Above the card, one row holds a pill with a down chevron and '1 comment' that folds it, a 'Resolved' badge, then the robot icon and 'Sent to agent'",
+      "The full sent card below shows the file:line label and its text, with no 'Sent to agent' tag and no buttons inside it",
     ],
   });
 });
