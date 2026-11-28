@@ -830,22 +830,27 @@ impl TerminalView {
     };
     match self.live.clone() {
       Some(live) => {
-        if let Ok(mut emulator) = live.emulator.lock() {
-          emulator.resize(cols, rows);
-        }
+        let ready = self.status == Status::Ready;
+        // Once the PTY runs, a new width waits for the size to settle: it
+        // rewraps the whole scrollback, and the program redraws for it.
+        let width = live.emulator.lock().ok().map(|mut emulator| {
+          let width = if ready { emulator.size().cols } else { cols };
+          emulator.resize(width, rows);
+          width
+        });
         // A resize while the PTY starts reaches it once it runs; otherwise
         // the program draws for a size the grid isn't.
         let size = Some((cols, rows));
-        if self.pty_size == size {
+        if self.pty_size == size && width == Some(cols) {
           self.pty_settle = None;
-        } else if self.status == Status::Ready && self.pty_settle.as_ref().map(|(s, _)| *s) != size
-        {
+        } else if ready && self.pty_settle.as_ref().map(|(s, _)| *s) != size {
           let task = cx.spawn(async move |this, cx| {
             cx.background_executor().timer(PTY_SETTLE).await;
             this
-              .update(cx, |view, _| {
+              .update(cx, |view, cx| {
                 view.pty_settle = None;
-                view.resize_pty(cols, rows);
+                view.settle(cols, rows);
+                cx.notify();
               })
               .ignore_closed();
           });
@@ -864,7 +869,11 @@ impl TerminalView {
     }
   }
 
-  fn resize_pty(&mut self, cols: usize, rows: usize) {
+  /// The grid's settled size: the emulator's width and the PTY follow it.
+  fn settle(&mut self, cols: usize, rows: usize) {
+    if let Some(Ok(mut emulator)) = self.live.as_ref().map(|live| live.emulator.lock()) {
+      emulator.resize(cols, rows);
+    }
     self
       .host
       .resize_pty(&self.pty, rows as u16, cols as u16)

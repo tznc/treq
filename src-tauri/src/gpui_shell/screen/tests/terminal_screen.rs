@@ -367,6 +367,31 @@ fn terminal_pty_resizes_once_the_grid_settles(cx: &mut TestAppContext) {
   );
 }
 
+/// A width change reflows the scrollback once the grid settles, along
+/// with the PTY's resize, not per drag step: a reflow rewraps every line.
+#[gpui::test]
+fn terminal_grid_reflows_once_its_width_settles(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
+  set_terminal(&mut h, serde_json::json!({ "activeSessionId": 3 }));
+  let pty = agent_pty();
+  let wait = |h: &mut Harness, ms: u64| {
+    h.cx
+      .executor()
+      .advance_clock(std::time::Duration::from_millis(ms));
+    h.cx.run_until_parked();
+  };
+  wait(&mut h, 1000);
+  let cols = grid(&host, &pty).cols;
+  h.cx
+    .simulate_resize(gpui::size(gpui::px(1100.), gpui::px(900.)));
+  assert_eq!(grid(&host, &pty).cols, cols);
+  wait(&mut h, 100);
+  let settled = grid(&host, &pty);
+  assert!(settled.cols < cols);
+  let last = host.resizes.lock().unwrap().last().cloned();
+  assert_eq!(last, Some((pty, settled.cols as u16, settled.rows as u16)));
+}
+
 #[gpui::test]
 fn terminal_search_keeps_what_is_typed_out_of_the_pty(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, terminal_host(), terminal_route(serde_json::json!({})));
@@ -2172,11 +2197,8 @@ fn terminal_divider_drag_fits_the_grids_in_one_frame(cx: &mut TestAppContext) {
   h.cx.run_until_parked();
   let ptys = host.ptys.lock().unwrap().clone();
   assert_eq!(ptys.len(), 2);
-  let left = h
-    .cx
-    .debug_bounds(super::changes_large::leak(format!("terminal-{}", ptys[0])))
-    .expect("left terminal");
-  let cols = grid(&host, &ptys[0]).cols;
+  let selector = super::changes_large::leak(format!("terminal-{}", ptys[0]));
+  let left = h.cx.debug_bounds(selector).expect("left terminal");
   let mut at = gpui::point(left.right() + gpui::px(2.), left.center().y);
   h.cx
     .simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
@@ -2187,7 +2209,8 @@ fn terminal_divider_drag_fits_the_grids_in_one_frame(cx: &mut TestAppContext) {
     h.cx
       .simulate_mouse_move(at, Some(MouseButton::Left), Modifiers::none());
   }
-  assert!(grid(&host, &ptys[0]).cols < cols);
+  let narrowed = h.cx.debug_bounds(selector).expect("left terminal");
+  assert_eq!(narrowed.size.width, left.size.width - gpui::px(60.));
   assert_eq!(frames.get() - drawn, 20);
 }
 
