@@ -1,63 +1,91 @@
 export const DOWNLOAD_HREF = 'https://github.com/tznc/treq/releases/latest';
 
-export type DownloadPlatform =
-  | 'mac-arm64'
-  | 'mac-x64'
-  | 'windows'
-  | 'linux'
-  | 'release-page';
-
-export type DownloadLink = {
-  href: string;
-  label: string;
-  platform: DownloadPlatform;
-};
-
 export type ReleaseAsset = {name: string; url: string};
-
-export const RELEASE_PAGE_LINK: DownloadLink = {
-  href: DOWNLOAD_HREF,
-  label: 'Download Treq',
-  platform: 'release-page',
-};
 
 const ARM = /aarch64|arm64/i;
 
-function asset(
-  assets: ReleaseAsset[],
-  ext: RegExp,
-  platform: DownloadPlatform,
-  label: string,
-  arm = false,
-): DownloadLink | undefined {
-  const match = assets.find((a) => ext.test(a.name) && ARM.test(a.name) === arm);
-  return match && {href: match.url, label, platform};
+export type PlatformId = 'macos' | 'windows' | 'linux' | 'android';
+
+export const PLATFORM_NAMES: Record<PlatformId, string> = {
+  macos: 'macOS',
+  windows: 'Windows',
+  linux: 'Linux',
+  android: 'Android',
+};
+
+export type InstallerLink = {href: string; label: string; format: string};
+
+export type PlatformDownloads = {
+  id: PlatformId;
+  name: string;
+  // An early build, labelled as such on the download page.
+  preview: boolean;
+  installers: InstallerLink[];
+};
+
+// iOS user agents also contain "Mac OS X", and Android's contain "Linux".
+export function detectPlatform(userAgent: string): PlatformId | null {
+  if (/Android/.test(userAgent)) return 'android';
+  if (/iPhone|iPad|iPod/.test(userAgent)) return null;
+  if (/Mac OS X/.test(userAgent)) return 'macos';
+  if (/Windows/.test(userAgent)) return 'windows';
+  if (/Linux/.test(userAgent)) return 'linux';
+  return null;
 }
 
-// Picks installers for the visitor's OS from the latest release's assets.
-// Browsers don't reliably say whether a Mac is Apple silicon or Intel, so
-// macOS gets the arm64 DMG with the x64 DMG as a secondary link. Any OS
-// without a matching asset falls back to the release page.
-export function pickDownloads(
+const PLATFORMS: {
+  id: PlatformId;
+  preview?: boolean;
+  installers: {ext: RegExp; format: string; label: string; arm?: boolean}[];
+}[] = [
+  {
+    id: 'macos',
+    installers: [
+      {ext: /\.dmg$/i, format: '.dmg', label: 'Apple silicon', arm: true},
+      {ext: /\.dmg$/i, format: '.dmg', label: 'Intel', arm: false},
+    ],
+  },
+  {
+    id: 'windows',
+    installers: [
+      {ext: /\.exe$/i, format: '.exe', label: 'Installer'},
+      {ext: /\.msi$/i, format: '.msi', label: 'MSI package'},
+    ],
+  },
+  {
+    id: 'linux',
+    installers: [
+      {ext: /\.AppImage$/i, format: '.AppImage', label: 'AppImage'},
+      {ext: /\.deb$/i, format: '.deb', label: 'Debian and Ubuntu'},
+      {ext: /\.rpm$/i, format: '.rpm', label: 'Fedora and RHEL'},
+    ],
+  },
+  {
+    id: 'android',
+    preview: true,
+    installers: [{ext: /\.apk$/i, format: '.apk', label: 'arm64'}],
+  },
+];
+
+// Groups the release's installers by platform, the current platform first.
+// A platform with no installer in the release is left out.
+export function listPlatforms(
   assets: ReleaseAsset[],
-  userAgent: string,
-): {primary: DownloadLink; secondary?: DownloadLink | undefined} {
-  // iOS user agents also contain "Mac OS X", and Android's contain "Linux".
-  if (/Android|iPhone|iPad|iPod/.test(userAgent)) {
-    return {primary: RELEASE_PAGE_LINK};
-  }
-  let primary: DownloadLink | undefined;
-  let secondary: DownloadLink | undefined;
-  if (/Mac OS X/.test(userAgent)) {
-    primary = asset(assets, /\.dmg$/, 'mac-arm64', 'Download for macOS', true);
-    secondary = asset(assets, /\.dmg$/, 'mac-x64', 'Intel Mac');
-  } else if (/Windows/.test(userAgent)) {
-    primary =
-      asset(assets, /setup\.exe$/i, 'windows', 'Download for Windows') ??
-      asset(assets, /\.msi$/i, 'windows', 'Download for Windows');
-  } else if (/Linux/.test(userAgent)) {
-    primary = asset(assets, /\.AppImage$/i, 'linux', 'Download for Linux');
-    secondary = asset(assets, /\.deb$/, 'linux', '.deb package');
-  }
-  return {primary: primary ?? RELEASE_PAGE_LINK, secondary};
+  current: PlatformId | null,
+): PlatformDownloads[] {
+  const platforms = PLATFORMS.map(({id, preview = false, installers}) => ({
+    id,
+    name: PLATFORM_NAMES[id],
+    preview,
+    installers: installers.flatMap(({ext, format, label, arm}) => {
+      const match = assets.find(
+        (a) => ext.test(a.name) && (arm === undefined || ARM.test(a.name) === arm),
+      );
+      return match ? [{href: match.url, label, format}] : [];
+    }),
+  })).filter((p) => p.installers.length > 0);
+  return [
+    ...platforms.filter((p) => p.id === current),
+    ...platforms.filter((p) => p.id !== current),
+  ];
 }

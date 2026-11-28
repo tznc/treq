@@ -6,7 +6,7 @@
 import { readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { capture } from "./capture.ts";
 import { home, popupBox, ready, settle, xPointer } from "./helpers.ts";
 
@@ -33,6 +33,25 @@ function editHomeCheckouts(): void {
   writeFileSync(join(root, "docs-site/quotes.md"), "# Quotes\n\nHow quote events reach the docs.\n");
 }
 
+/** The project button's chevron ends the button, not the name; close-up. */
+async function chevronAtEnd(page: Page, name: string, title: string): Promise<void> {
+  const button = page.getByRole("button", { name: /^Project: /, expanded: false });
+  await expect(button).toBeVisible();
+  const b = await button.boundingBox();
+  const c = await page.getByTestId("project-chevron").boundingBox();
+  if (!b || !c) throw new Error("no project button or chevron");
+  expect(b.x + b.width - (c.x + c.width)).toBeLessThanOrEqual(10);
+  await capture(page, {
+    name,
+    title,
+    clip: { x: b.x - 8, y: b.y - 8, width: b.width + 16, height: b.height + 16 },
+    expectations: [
+      "The chevron sits at the button's right edge, not right after the name",
+      "The chevron points down: the menu is closed",
+    ],
+  });
+}
+
 test("projects: sidebar, project menu, save and welcome list", async ({ page }) => {
   await ready(page);
   await settle(page, 2500);
@@ -49,16 +68,21 @@ test("projects: sidebar, project menu, save and welcome list", async ({ page }) 
 
   const button = page.getByRole("button", { name: /^Project: / });
   if ((await button.count()) === 0) return; // the build before projects
+  await chevronAtEnd(page, "20-projects-01b-button-unsaved", "Project button, unsaved");
 
   await button.click();
   await settle(page, 1000);
   const menu = popupBox();
+  await expect(page.getByRole("button", { name: /^Project: /, expanded: true })).toBeVisible();
   await capture(page, {
     name: "20-projects-02-menu-unsaved",
     title: "Project menu of an unsaved project",
     screen: true,
     rest: false,
-    expectations: ["The menu offers Save Project… and New Window…"],
+    expectations: [
+      "The menu offers Save Project… and New Window…",
+      "The project button's chevron points up while its menu is open",
+    ],
   });
   if (!menu) throw new Error("no project menu");
   // "Save Project…" is the first row.
@@ -85,6 +109,7 @@ test("projects: sidebar, project menu, save and welcome list", async ({ page }) 
     title: "Sidebar after saving the project",
     expectations: ["The project button reads 'Event platform' with a filled 'E' badge"],
   });
+  await chevronAtEnd(page, "20-projects-04b-button-saved", "Project button, saved");
 
   await page.getByRole("button", { name: "Project: Event platform" }).click();
   await settle(page, 1000);

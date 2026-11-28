@@ -33,7 +33,7 @@ does not appear in another.
 ```bash
 treq st
 treq st <workspace_name>
-treq diff
+treq diff [--stat]
 treq diff <workspace_name>
 treq add <branch_name> [-d <description>] [-l <title>] [-s <source_branch>] [-p <sparse_path>]... [-k <symlink_path>]...
 treq set [<workspace_name>] [-d <description>] [-l <title>] [-t <target_branch>]
@@ -44,8 +44,8 @@ treq mv <source> <destination> -c <commit> [-c <commit> ...]
 `treq st` from a workspace directory shows that workspace only. You get the
 stacked parent and children, the uncommitted change count, whether files are
 conflicted, and the commit count. It omits the repository default branch. If
-files are conflicted, it tells you to run `treq diff`. `treq st` from the home
-repository with no name lists every workspace.
+files are conflicted, it tells you to run `treq diff --conflicts`. `treq st`
+from the home repository with no name lists every workspace.
 
 Use `.` as a workspace name when a command needs the home repository. Create a
 new workspace when the task should stay isolated from the current working copy.
@@ -68,7 +68,8 @@ It shows the home repo's state, and write commands such as `stash`,
 | Instead of | Use |
 | --- | --- |
 | `git status` | `treq st` or `jj st` |
-| `git diff` | `treq changes workspace-diff --repo . --workspace <id>` (commits and working copy) or `jj diff` (working copy only) |
+| `git diff` | `treq diff` (commits and working copy against the target) or `jj diff` (working copy only) |
+| `git diff --stat` | `treq diff --stat` |
 | `git log` | `jj log` |
 | `git show <rev>` | `jj show <rev>` |
 | `git show HEAD~1:<path>` | `jj file show -r @- <path>` |
@@ -247,16 +248,17 @@ commits.
 
 ## Conflict resolution
 
-Run `treq st` first. If it reports conflicts, run `treq diff`. That command
-lists conflicted files, conflict hunks, and conflicted commits with change
-ids. Pick one of the two flows below. Do not mix them on the same conflict.
+Run `treq st` first. If it reports conflicts, run `treq diff --conflicts`.
+That command lists conflicted files, conflict hunks, and conflicted commits
+with change ids. Pick one of the two flows below. Do not mix them on the same
+conflict.
 
 ### New-commit resolution
 
 Use this when the workspace working copy holds the conflict and you should
 record a new commit on the branch.
 
-1. Run `treq st` and `treq diff` in the workspace.
+1. Run `treq st` and `treq diff --conflicts` in the workspace.
 2. Edit each conflicted file in the workspace working copy.
 3. Remove conflict markers and keep the intended result.
 4. Run `treq st` until it reports no conflicts.
@@ -273,7 +275,7 @@ rewrites those commits in place. It does not dirty the product workspace
 working copy. Resolve directories live under `.treq/resolve/<workspace-slug>/`.
 The Commits tab **Resolve conflicts…** action creates them.
 
-1. Confirm `treq diff` lists conflicted commits and their change ids.
+1. Confirm `treq diff --conflicts` lists conflicted commits and their change ids.
 2. Work in `.treq/resolve/<workspace-slug>/<change-id>/` once that directory
    exists.
 3. Edit the conflict markers in those files.

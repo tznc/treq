@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import Layout from '@theme/Layout';
 import Link from '@docusaurus/Link';
+import Head from '@docusaurus/Head';
 import { useColorMode } from '@docusaurus/theme-common';
 import { Highlight, themes } from 'prism-react-renderer';
 import { FileTree } from './FileTree';
@@ -27,6 +28,11 @@ function pickDefaultFile(files: SkillFile[], bodyShown: boolean): SkillFile | nu
 export default function SkillDetailPage(props: SkillPageProps) {
   return (
     <Layout title={props.title} description={props.metaDescription}>
+      {props.noindex && (
+        <Head>
+          <meta name="robots" content="noindex" />
+        </Head>
+      )}
       <SkillDetailContent {...props} />
     </Layout>
   );

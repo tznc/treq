@@ -177,4 +177,18 @@ test("commits: large commit defers its diff", async ({ page }) => {
     title: "Large commit: diff loaded",
     expectations: ["The JSON fixture's added lines render with line numbers and green background"],
   });
+  // Scrolled into the file's lines, its row stays pinned over them.
+  await page.mouse.move(900, 600);
+  await page.mouse.wheel(0, 1200);
+  await settle(page, 1000);
+  await expect(page.getByTestId("commit-file-sticky")).toBeVisible();
+  await capture(page, {
+    name: "04-commits-sticky-file-row",
+    title: "Large commit: file row pinned while its lines scroll",
+    expectations: [
+      "The file's row (chevron, path, status badge) sits at the top of the list over the scrolled lines",
+      "The pinned row lines up with the card's side borders and has a border under it",
+      "No diff line shows through the pinned row",
+    ],
+  });
 });

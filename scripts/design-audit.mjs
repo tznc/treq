@@ -27,6 +27,7 @@ const RULES = [
   "gpui-escape-via-layers",
   "gpui-no-adhoc-controls",
   "gpui-button-no-restyle",
+  "gpui-button-sans-font",
   "gpui-row-selected-token",
   "gpui-no-local-row",
   "gpui-no-local-header-or-toast",
