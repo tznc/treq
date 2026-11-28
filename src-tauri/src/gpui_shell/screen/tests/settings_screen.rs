@@ -188,9 +188,9 @@ fn settings_saves_the_application_itself(cx: &mut TestAppContext) {
     [
       "set theme=dark",
       "notify settingsChanged",
-      "set default_model= default_agent= conflict_marker_style=git notify_agent_finished=true agent_instructions= terminal_font_size=16 ui_zoom=120 agent_profiles=[] default_profile_claude= default_profile_codex=",
+      "set default_model= default_agent= conflict_marker_style=git notify_agent_finished=true agent_instructions= terminal_font_size=16 ui_zoom=120 agent_profiles=[] default_profile_claude= default_profile_codex= agent_modes=[]",
       "notify settingsChanged",
-      "set default_model= default_agent=codex conflict_marker_style=git notify_agent_finished=true agent_instructions= terminal_font_size=16 ui_zoom=120 agent_profiles=[] default_profile_claude= default_profile_codex=",
+      "set default_model= default_agent=codex conflict_marker_style=git notify_agent_finished=true agent_instructions= terminal_font_size=16 ui_zoom=120 agent_profiles=[] default_profile_claude= default_profile_codex= agent_modes=[]",
       "notify settingsChanged",
     ]
   );
@@ -258,6 +258,113 @@ fn settings_manages_agent_account_profiles(cx: &mut TestAppContext) {
   let app = drawn_settings(&mut h).application.expect("drawn");
   assert_eq!(app.profiles.len(), 2);
   assert_eq!(host.setting("default_profile_claude").as_deref(), Some(""));
+}
+
+#[gpui::test]
+fn settings_manages_profile_modes(cx: &mut TestAppContext) {
+  use crate::core::agent_modes::{self, Mode};
+  let host = Arc::new(FakeHost::with_settings(&[
+    (
+      "agent_profiles",
+      r#"[{"agent":"claude","name":"work"},{"agent":"claude","name":"personal"}]"#,
+    ),
+    (
+      "agent_modes",
+      r#"[{"agent":"claude","profile":"work","default":"deep","modes":[{"name":"deep","model":"opus","effort":"high"}]}]"#,
+    ),
+  ]));
+  let stored = |host: &FakeHost, profile: &str| -> Vec<Mode> {
+    let all = agent_modes::parse(host.setting("agent_modes").as_deref());
+    agent_modes::modes_for(&all, "claude", profile).to_vec()
+  };
+  let mut h = Harness::with_host(cx, settings_route("application"), host.clone());
+  let app = drawn_settings(&mut h).application.expect("application tab");
+  let rows: Vec<_> = app
+    .modes
+    .iter()
+    .map(|m| (m.key.as_str(), m.summary.as_str(), m.default))
+    .collect();
+  assert_eq!(rows, [("claude/work/deep", "opus · high effort", true)]);
+  let work = &app.default_modes[0];
+  assert_eq!(
+    (work.profile.as_str(), work.value.as_str()),
+    ("claude/work", "deep")
+  );
+  let values: Vec<_> = work.options.iter().map(|o| o.value.as_str()).collect();
+  assert_eq!(values, ["", "deep"]);
+
+  let view = h
+    .screen
+    .read_with(&h.cx, |s, _| s.settings.clone().expect("drawn"));
+  let send = |h: &mut Harness, action: ScreenAction| {
+    view.update(&mut h.cx, |view, cx| view.handle(action, cx));
+    h.cx.run_until_parked();
+  };
+  let press = |id: &str| ScreenAction::Press { id: id.into() };
+
+  // A new mode for another profile.
+  for (name, value) in [
+    ("app.modeProfile", "claude/personal"),
+    ("app.modeName", "fast"),
+    ("app.modeModel", "haiku"),
+    ("app.modeEffort", "low"),
+    ("app.modePermission", "acceptEdits"),
+    ("app.modeInstructions", "Be quick."),
+  ] {
+    send(&mut h, field(name, value.into()));
+  }
+  send(&mut h, press("app.saveMode"));
+  assert_eq!(
+    stored(&host, "personal"),
+    [Mode {
+      name: "fast".into(),
+      model: Some("haiku".into()),
+      effort: Some("low".into()),
+      permission_mode: Some("acceptEdits".into()),
+      instructions: Some("Be quick.".into()),
+    }]
+  );
+  let app = drawn_settings(&mut h).application.expect("drawn");
+  assert_eq!(app.mode_draft.name, "");
+  assert_eq!(app.mode_error, None);
+
+  // A bad name is refused in place.
+  send(&mut h, field("app.modeName", "Deep Work".into()));
+  send(&mut h, press("app.saveMode"));
+  assert!(drawn_settings(&mut h)
+    .application
+    .expect("drawn")
+    .mode_error
+    .is_some());
+
+  // Edit loads a mode into the form; saving it again replaces it.
+  send(&mut h, press("app.editMode:claude/work/deep"));
+  let draft = drawn_settings(&mut h)
+    .application
+    .expect("drawn")
+    .mode_draft;
+  assert_eq!(
+    (
+      draft.profile.as_str(),
+      draft.name.as_str(),
+      draft.model.as_str()
+    ),
+    ("claude/work", "deep", "opus")
+  );
+  send(&mut h, field("app.modeModel", "sonnet".into()));
+  send(&mut h, press("app.saveMode"));
+  assert_eq!(stored(&host, "work")[0].model.as_deref(), Some("sonnet"));
+
+  // The profile's default mode, cleared.
+  send(&mut h, field("app.defaultMode.claude/work", "".into()));
+  let all = agent_modes::parse(host.setting("agent_modes").as_deref());
+  assert_eq!(agent_modes::resolve(&all, "claude", "work", None), None);
+
+  send(&mut h, press("app.removeMode:claude/work/deep"));
+  assert!(stored(&host, "work").is_empty());
+  // Removing a profile drops its modes.
+  send(&mut h, press("app.removeProfile:claude/personal"));
+  assert!(stored(&host, "personal").is_empty());
 }
 
 #[gpui::test]
