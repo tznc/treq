@@ -1492,8 +1492,7 @@ fn changes_tab_finish_popover_stays_under_its_button_when_zoomed(cx: &mut TestAp
 #[gpui::test]
 fn changes_tab_starts_an_ai_review_in_a_new_terminal(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, changes_host(), changes_route());
-  h.click("start-agent-review");
-  h.cx.run_until_parked();
+  click_named(&mut h, gpui::Role::Button, "Review");
   assert!(fields(&h, "changes.startReview").is_empty());
   let launches = host.launches.lock().unwrap().clone();
   assert_eq!(launches.len(), 1, "{:?}", host.calls());
