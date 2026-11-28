@@ -2706,8 +2706,7 @@ impl SettingsView {
       .children((!app.profiles.is_empty()).then(|| self.profile_modes(app, p, window, cx)))
   }
 
-  /// Modes: each profile's default mode, its modes, and a form that adds a
-  /// mode or saves an edited one.
+  /// Modes: each profile's default mode, its modes, and the add or edit form.
   fn profile_modes(
     &mut self,
     app: &Application,
