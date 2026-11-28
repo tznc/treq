@@ -13,7 +13,7 @@ import { dirname, join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { port } from "../env.ts";
 import { capture } from "./capture.ts";
-import { focusMain, home, popupBox, ready, row, settle, xPointer } from "./helpers.ts";
+import { focusMain, home, noteMiss, popupBox, ready, row, settle, xPointer } from "./helpers.ts";
 
 test.describe.configure({ mode: "serial" });
 
@@ -50,7 +50,9 @@ function appPid(): number {
     try {
       const env = readFileSync(`/proc/${d}/environ`, "utf8").split("\0");
       if (env.includes(`GPUI_PLAYWRIGHT=${port}`)) return Number(d);
-    } catch {}
+    } catch {
+      // ENOENT or EACCES: the process exited, or it belongs to another user.
+    }
   }
   throw new Error(`no app on port ${port}`);
 }
@@ -190,8 +192,8 @@ test("projects-chaos: targeted scenarios", async ({ page }) => {
   ]);
   const save = page.getByRole("button", { name: "Save", exact: true });
   if (await save.count()) {
-    await save.click({ timeout: 3000 }).catch(() => {});
-    await save.click({ timeout: 1000 }).catch(() => {});
+    await save.click({ timeout: 3000 }).catch(noteMiss(note, "save"));
+    await save.click({ timeout: 1000 }).catch(noteMiss(note, "second save"));
   }
   await settle(page, 2000);
   await alive(page);
@@ -281,9 +283,9 @@ async function step(page: Page): Promise<string> {
     case "homeTab": {
       await page.keyboard.press("Escape");
       const homeBtn = page.getByRole("button", { name: "Home", exact: true });
-      if (await homeBtn.count()) await homeBtn.first().click({ timeout: 3000 }).catch(() => {});
+      if (await homeBtn.count()) await homeBtn.first().click({ timeout: 3000 }).catch(noteMiss(note, "Home"));
       const tab = pick(["Code", "Changes", "Commits"]);
-      await page.getByRole("tab", { name: tab }).first().click({ timeout: 3000 }).catch(() => {});
+      await page.getByRole("tab", { name: tab }).first().click({ timeout: 3000 }).catch(noteMiss(note, `tab ${tab}`));
       return `home tab ${tab}`;
     }
     case "header": {
@@ -291,7 +293,7 @@ async function step(page: Page): Promise<string> {
       const n = await rows.count();
       if (!n) return "header none";
       const i = Math.floor(random() * n);
-      await rows.nth(i).click({ timeout: 3000 }).catch(() => {});
+      await rows.nth(i).click({ timeout: 3000 }).catch(noteMiss(note, `header ${i}`));
       return `header ${i}`;
     }
     case "card": {
@@ -299,7 +301,7 @@ async function step(page: Page): Promise<string> {
       const n = await cards.count();
       if (!n) return "card none";
       const i = Math.floor(random() * n);
-      await cards.nth(i).click({ timeout: 3000 }).catch(() => {});
+      await cards.nth(i).click({ timeout: 3000 }).catch(noteMiss(note, `card ${i}`));
       return `card ${i}`;
     }
     case "palette": {

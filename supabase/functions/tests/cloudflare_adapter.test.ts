@@ -84,7 +84,7 @@ Deno.test("capabilities: per-10ms billing rounds to 1 s, sleep drops the disk, g
 Deno.test("create PUTs a sandbox named after the placement, with the tier's instance type", async () => {
   const { fake, provider } = setup();
   const instance = await provider.createInstance(PARAMS);
-  const [req] = fake.requests;
+  const req = defined(fake.requests[0]);
   assertEquals([req.method, req.host, req.path], ["PUT", "treq-sandbox.acme.example.invalid", "/v1/sandboxes/treq-pl-1"]);
   assertEquals(req.headers.get("Authorization"), "Bearer cf_test");
   assertEquals(req.body, {
@@ -178,7 +178,7 @@ Deno.test("ensureService runs a pidfile supervisor and fails when it fails", asy
   const { providerResourceId: id } = await provider.createInstance(PARAMS);
   await provider.ensureService(id, "sshd", { cmd: "/usr/sbin/sshd", args: ["-D"] });
   const argv = (defined(fake.requests.at(-1)).body as { argv: string[] }).argv;
-  assert(argv[2].includes("sshd.pid"));
+  assert(defined(argv[2]).includes("sshd.pid"));
   fake.commandResult = { exitCode: 1, stdout: "", stderr: "boom" };
   await assertRejects(() => provider.ensureService(id, "sshd", { cmd: "/usr/sbin/sshd", args: [] }), ProviderError);
 });

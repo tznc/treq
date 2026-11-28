@@ -10,8 +10,8 @@
 
 use crate::core::review::selected_range;
 use crate::gpui_shell::ui::radius;
-use gpui_kit::base::TestSupportExt as _;
 use std::{collections::HashSet, rc::Rc};
+use treq_ui::SelectorExt as _;
 
 use tauri_plugin_gpui::gpui::{
   self, div, list, prelude::*, px, rems, AnyElement, Context, ListAlignment, ListOffset, ListState,
@@ -80,6 +80,19 @@ impl Row {
       | Row::CommentBox(e, _)
       | Row::Deferred(e, _)
       | Row::Missing(e, _) => Some(e),
+      _ => None,
+    }
+  }
+
+  /// The commit and file of a file's row and of the rows under it.
+  fn file(self) -> Option<(usize, usize)> {
+    match self {
+      Row::File(e, f)
+      | Row::HunkHeader(e, f, _)
+      | Row::Line(e, f, ..)
+      | Row::CommentBox(e, f)
+      | Row::Deferred(e, f)
+      | Row::Missing(e, f) => Some((e, f)),
       _ => None,
     }
   }
@@ -491,10 +504,10 @@ impl CommitsView {
   }
 
   /// The tab's list.
-  pub(super) fn feed_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
+  pub(super) fn feed_list(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
     div()
-      .id("commits-scroll")
-      .debug_selector(|| "commits-list".into())
+      .selector("commits-list")
+      .relative()
       .size_full()
       .child(
         list(
@@ -503,6 +516,56 @@ impl CommitsView {
         )
         .size_full(),
       )
+      .children(self.pinned_file(cx))
+  }
+
+  /// The row of the open file whose lines are at the top of the list,
+  /// pinned there until the row after its last line pushes it up.
+  fn pinned_file(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    let top = self.feed.list.logical_scroll_top();
+    let rows = &self.feed.rows;
+    let (row, _) = *rows.get(top.item_ix)?;
+    let file = row.file()?;
+    let next = rows.get(top.item_ix + 1).and_then(|(r, _)| r.file());
+    if matches!(row, Row::File(..)) && (top.offset_in_item <= px(0.) || next != Some(file)) {
+      return None;
+    }
+    let end = (top.item_ix + 1..rows.len())
+      .find(|&ix| rows[ix].0.file() != Some(file))
+      .unwrap_or(rows.len());
+    let room = self
+      .feed
+      .list
+      .bounds_for_item(end)
+      .map(|b| (b.top() - self.feed.list.viewport_bounds().top()).max(px(0.)));
+    let p = theme::palette(self.dark);
+    let content = self.file_row_at(file.0, file.1, &p, cx)?;
+    Some(
+      div()
+        .selector("commit-file-sticky")
+        .absolute()
+        .top_0()
+        .left_0()
+        .right_0()
+        .when_some(room, |this, room| this.max_h(room))
+        .overflow_hidden()
+        .flex()
+        .flex_col()
+        .justify_end()
+        .px_4()
+        .child(
+          div()
+            .flex_none()
+            .ml_7()
+            .border_x_1()
+            .border_b_1()
+            .border_color(p.border)
+            .bg(p.background)
+            .block_mouse_except_scroll()
+            .child(content),
+        )
+        .into_any_element(),
+    )
   }
 
   fn row(&mut self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
@@ -540,14 +603,12 @@ impl CommitsView {
           "There are no commits within this workspace branch yet."
         };
         div()
-          .id("own-commits-empty")
-          .debug_selector(|| "own-commits-empty".into())
+          .selector("own-commits-empty")
           .role(gpui::Role::Status)
           .aria_label(message)
           .pl_7()
           .text_color(p.muted_foreground)
           .child(message)
-          .test_support()
           .into_any_element()
       }
       Row::LoadMore(target) => self.load_more_row(target, &p, cx).into_any_element(),
@@ -562,15 +623,13 @@ impl CommitsView {
           .child(div().pb_4().child(div().h(zpx(1.)).bg(p.border).mx_2()))
           .child(
             ui::text(div(), ui::TextSize::Sm)
-              .debug_selector(|| "target-divider".into())
+              .selector("target-divider")
               .font_weight(gpui::FontWeight::SEMIBOLD)
               .text_color(p.muted_foreground)
               .pl_7()
               .child(format!("On {branch} (read-only)"))
-              .id("target-divider")
               .role(gpui::Role::Heading)
-              .aria_label(format!("On {branch} (read-only)"))
-              .test_support(),
+              .aria_label(format!("On {branch} (read-only)")),
           )
           .into_any_element()
       }
@@ -611,7 +670,10 @@ impl CommitsView {
       .get(ix + 1)
       .is_some_and(|(next, _)| next.in_card() && next.entry() == row.entry());
     let content = match row {
-      Row::File(e, f) => self.file_row_at(e, f, p, cx),
+      Row::File(e, f) => div()
+        .when(f > 0, |this| this.border_t_1().border_color(p.border))
+        .children(self.file_row_at(e, f, p, cx))
+        .into_any_element(),
       _ => div()
         .bg(p.muted.opacity(0.2))
         .child(self.body_line(row, p, cx))
@@ -628,24 +690,22 @@ impl CommitsView {
       .into_any_element()
   }
 
-  fn file_row_at(&mut self, e: usize, f: usize, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+  fn file_row_at(
+    &mut self,
+    e: usize,
+    f: usize,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> Option<AnyElement> {
     let commit = self.feed.entries[e].commit.clone();
-    let Some(state) = self.diffs.get(&commit.commit_id) else {
-      return div().into_any_element();
-    };
-    let Some(file) = state
-      .diff
-      .as_ref()
-      .and_then(|d| d.committed_files.get(f))
-      .cloned()
-    else {
-      return div().into_any_element();
-    };
+    let state = self.diffs.get(&commit.commit_id)?;
+    let file = state.diff.as_ref()?.committed_files.get(f)?.clone();
     let open = !state.collapsed.contains(&file.path);
-    div()
-      .when(f > 0, |this| this.border_t_1().border_color(p.border))
-      .child(self.file_row(&commit, &file, open, p, cx))
-      .into_any_element()
+    Some(
+      self
+        .file_row(&commit, &file, open, p, cx)
+        .into_any_element(),
+    )
   }
 
   /// A row under a file's row: a hunk's header, a line, the comment box,
@@ -787,13 +847,12 @@ impl CommitsView {
         .pr_0p5()
         .child(
           div()
-            .id(SharedString::from(format!("add-comment-{h}-{l}")))
+            .selector(SharedString::from(format!("add-comment-{h}-{l}")))
             .role(gpui::Role::Button)
             .aria_label(format!(
               "Add comment on {path} line {}",
               new.or(old).unwrap_or_default()
             ))
-            .debug_selector(move || format!("add-comment-{h}-{l}"))
             .p_px()
             .rounded(radius::SM)
             .bg(p.primary)
@@ -805,13 +864,11 @@ impl CommitsView {
             .on_click(cx.listener(move |view, _, _, cx| {
               cx.stop_propagation();
               view.add_comment(&c, &file, at, cx);
-            }))
-            .test_support(),
+            })),
         )
     };
     let (id, file) = (commit.commit_id.clone(), path.to_string());
     let (press_id, press_file) = (commit.commit_id.clone(), path.to_string());
-    let selector = format!("commit-line-{path}-{h}-{l}");
     let code_selector = format!("commit-code-{path}-{h}-{l}");
     let picked: Vec<_> = self
       .text
@@ -841,8 +898,7 @@ impl CommitsView {
       (commit.commit_id.clone(), path.to_string(), at),
     );
     div()
-      .id(SharedString::from(format!("diff-line-{h}-{l}")))
-      .debug_selector(move || selector)
+      .selector(SharedString::from(format!("commit-line-{path}-{h}-{l}")))
       .role(gpui::Role::Row)
       .aria_label(line.to_string())
       .group("diff-line")
@@ -866,8 +922,7 @@ impl CommitsView {
       )
       .child(
         div()
-          .id(SharedString::from(code_selector.clone()))
-          .debug_selector(move || code_selector)
+          .selector(SharedString::from(code_selector))
           .relative()
           .flex_1()
           .min_w_0()
@@ -893,6 +948,5 @@ impl CommitsView {
             .size_0(),
           ),
       )
-      .test_support()
   }
 }

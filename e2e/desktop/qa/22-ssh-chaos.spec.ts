@@ -18,7 +18,7 @@ import { appBinary, port } from "../env.ts";
 import { errorMessage } from "../error-message.ts";
 import { appEnv, makeFixture } from "../harness.ts";
 import { capture, theme } from "./capture.ts";
-import { popupBox, xPointer } from "./helpers.ts";
+import { noteMiss, popupBox, xPointer } from "./helpers.ts";
 
 const env = {
   host: process.env.QA_SSH_HOST ?? "",
@@ -124,12 +124,15 @@ async function launchOnce(): Promise<void> {
     },
   });
   const deadline = Date.now() + 120_000;
+  let lastError: unknown;
   for (;;) {
     try {
       if ((await fetch(`http://127.0.0.1:${appPort}/`)).ok) break;
-    } catch {}
+    } catch (err) {
+      lastError = err;
+    }
     if (app.exitCode !== null || app.signalCode) throw new Error("app exited on start");
-    if (Date.now() > deadline) throw new Error("ssh chaos app did not start");
+    if (Date.now() > deadline) throw new Error("ssh chaos app did not start", { cause: lastError });
     await new Promise((r) => setTimeout(r, 500));
   }
   for (let attempt = 1; ; attempt++) {
@@ -138,7 +141,7 @@ async function launchOnce(): Promise<void> {
       page = await (await browser.newContext()).newPage();
       break;
     } catch (error) {
-      await browser?.close().catch(() => {});
+      await browser?.close();
       if (attempt >= 10) throw error;
       await new Promise((r) => setTimeout(r, 1000));
     }
@@ -198,7 +201,7 @@ const workspaceRow = (name: string) => page.getByRole("button", { name, exact: t
 async function addMachine(name: string, host: string, sshPort: string, user: string): Promise<void> {
   // Once a host is saved, SSH HOSTS has its own + ("Add SSH host").
   const other = page.getByRole("button", { name: "Add another machine" });
-  if (await other.isVisible().catch(() => false)) await other.click();
+  if (await other.isVisible()) await other.click();
   await page.getByRole("button", { name: "Add SSH host" }).first().click();
   await page.waitForTimeout(1200);
   const fields = page.getByRole("textbox");
@@ -242,7 +245,7 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   docker("unpause", CONTAINER);
   docker("start", CONTAINER);
-  await browser?.close().catch(() => {});
+  await browser?.close();
   app?.kill("SIGTERM");
   console.log(`[ssh-chaos seed=${seed0}] findings:\n${findings.join("\n") || "(none)"}`);
   console.log(`[ssh-chaos seed=${seed0}] trail:\n${trail.join("\n")}`);
@@ -261,7 +264,7 @@ test("ssh chaos: wrong host, port and user on Add SSH host", async () => {
     await addMachine(`QA ${what}`, host, p, user);
     // A wrong user is still asked to trust the (real) host key first.
     const trust = page.getByRole("button", { name: "Trust and connect" });
-    if (await trust.isVisible({ timeout: 15_000 }).catch(() => false)) await trust.click();
+    if (await trust.isVisible({ timeout: 15_000 })) await trust.click();
     await page.waitForTimeout(5000);
     await alive(`add machine ${what}`);
     await recovered(`add machine ${what}`, 45_000);
@@ -296,7 +299,7 @@ test("ssh chaos: double-submit New workspace", async () => {
   await expect(create).toBeEnabled({ timeout: 20_000 });
   note("double-click Create workspace");
   await create.dblclick();
-  await create.click({ timeout: 1000 }).catch(() => {});
+  await create.click({ timeout: 1000 }).catch(noteMiss(note, "third Create workspace click"));
   await page.keyboard.press("Enter");
   await expect(workspaceRow("Chaos one")).toBeVisible({ timeout: 60_000 });
   await page.waitForTimeout(4000);
@@ -315,7 +318,7 @@ test("ssh chaos: host paused and stopped mid-operation", async () => {
   await page.getByRole("tab", { name: "Commits" }).click();
   note("docker pause during Refresh");
   docker("pause", CONTAINER);
-  await page.getByRole("button", { name: "Refresh" }).first().click().catch(() => {});
+  await page.getByRole("button", { name: "Refresh" }).first().click().catch(noteMiss(note, "Refresh"));
   await page.waitForTimeout(8000);
   await alive("refresh while paused");
   await shot("paused", "Refresh while the host is paused", [
@@ -341,7 +344,7 @@ test("ssh chaos: host paused and stopped mid-operation", async () => {
   docker("start", CONTAINER);
   await hostBack();
   await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "Refresh" }).first().click().catch(() => {});
+  await page.getByRole("button", { name: "Refresh" }).first().click().catch(noteMiss(note, "Refresh"));
   await recovered("after docker start", 90_000);
   await alive("host started");
   await shot("restarted", "After the host restarts", [
@@ -370,7 +373,7 @@ test("ssh chaos: changes behind the app (tmux, deleted dir, new commit)", async 
   // main's home row, whose Commits list main.
   await page.getByRole("button", { name: "main", exact: true }).first().click().catch((e) => note(`main row: ${errorMessage(e)}`));
   await page.getByRole("tab", { name: "Commits" }).click();
-  await page.getByRole("button", { name: "Refresh" }).first().click().catch(() => {});
+  await page.getByRole("button", { name: "Refresh" }).first().click().catch(noteMiss(note, "Refresh"));
   await recovered("refresh after remote commit");
   await page.waitForTimeout(3000);
   await alive("remote commit");
@@ -380,9 +383,9 @@ test("ssh chaos: changes behind the app (tmux, deleted dir, new commit)", async 
 
   note("delete the workspace dir behind the app");
   note(onServer(`rm -rf '${env.repo}/.treq/workspaces/'*chaos-one*; ls '${env.repo}/.treq/workspaces'`));
-  await row.click().catch(() => {});
-  await page.getByRole("tab", { name: "Changes" }).click().catch(() => {});
-  await page.getByRole("button", { name: "Refresh" }).first().click().catch(() => {});
+  await row.click().catch(noteMiss(note, "workspace row"));
+  await page.getByRole("tab", { name: "Changes" }).click().catch(noteMiss(note, "Changes tab"));
+  await page.getByRole("button", { name: "Refresh" }).first().click().catch(noteMiss(note, "Refresh"));
   await recovered("deleted workspace dir");
   await page.waitForTimeout(2000);
   await alive("deleted workspace dir");
@@ -390,12 +393,12 @@ test("ssh chaos: changes behind the app (tmux, deleted dir, new commit)", async 
     "An error says the workspace folder is missing (or the row goes away); no endless loading",
   ]);
   // Archive what's left.
-  await row.hover().catch(() => {});
+  await row.hover().catch(noteMiss(note, "hover workspace row"));
   const archive = page.getByRole("button", { name: /^Archive( workspace)?$/ }).first();
-  if (await archive.isVisible().catch(() => false)) {
+  if (await archive.isVisible()) {
     note("archive deleted workspace");
     await archive.click();
-    await page.getByRole("button", { name: /^Archive/ }).last().click({ timeout: 3000 }).catch(() => {});
+    await page.getByRole("button", { name: /^Archive/ }).last().click({ timeout: 3000 }).catch(noteMiss(note, "confirm Archive"));
     await page.waitForTimeout(4000);
     await alive("archive deleted workspace");
     await shot("archived", "After archiving the deleted workspace", ["The row is gone or an error explains why not"]);
@@ -406,7 +409,7 @@ test("ssh chaos: switch local and remote, save project", async () => {
   test.setTimeout(300_000);
   // Local repository recent: open it via the command palette's Overview if
   // there is one; otherwise relaunch on it, which leaves the remote recent.
-  await browser.close().catch(() => {});
+  await browser.close();
   app.kill("SIGTERM");
   await new Promise((r) => app.once("exit", r));
   const { DatabaseSync } = await import("node:sqlite");
@@ -430,7 +433,7 @@ test("ssh chaos: switch local and remote, save project", async () => {
     await page.keyboard.press("Enter");
     await page.waitForTimeout(800);
     await page.keyboard.press("Escape");
-    if (!(await remoteRecent.isVisible().catch(() => false))) {
+    if (!(await remoteRecent.isVisible())) {
       note("no way back to the Overview from the palette; stopping the switch loop");
       break;
     }
@@ -491,24 +494,24 @@ test("ssh chaos: seeded monkey over the remote screens", async () => {
       await recovered(`monkey #${step} ${fault}`, 60_000);
     } else if (r < 0.55) {
       const role = pick(["button", "tab", "listitem", "checkbox"] as const);
-      const all = await page.getByRole(role).all().catch(() => []);
+      const all = await page.getByRole(role).all();
       const visible = [];
-      for (const el of all.slice(0, 80)) if (await el.isVisible().catch(() => false)) visible.push(el);
+      for (const el of all.slice(0, 80)) if (await el.isVisible()) visible.push(el);
       if (!visible.length) continue;
       const el = pick(visible);
-      const name = (await el.getAttribute("aria-label").catch(() => null)) ?? (await el.textContent().catch(() => "")) ?? "";
+      const name = (await el.getAttribute("aria-label").catch(noteMiss(note, `label of ${role}`))) ?? (await el.textContent().catch(() => "")) ?? "";
       // Never quit, remove the host, reset terminals or sign out from the monkey.
       if (/Quit|Remove host|Reset terminals|Delete|Sign (in|out)|Use tmux|Use Treq daemon|Install/i.test(name)) continue;
       note(`#${step} click ${role} '${name.slice(0, 40)}'`);
-      await el.click({ timeout: 3000 }).catch(() => {});
+      await el.click({ timeout: 3000 }).catch(noteMiss(note, `click ${role}`));
     } else if (r < 0.85) {
       const key = pick(keys);
       note(`#${step} key ${key}`);
-      await page.keyboard.press(key).catch(() => {});
+      await page.keyboard.press(key);
     } else {
       const t = pick(texts);
       note(`#${step} type ${JSON.stringify(t.slice(0, 20))}`);
-      await page.keyboard.type(t).catch(() => {});
+      await page.keyboard.type(t);
     }
     await page.waitForTimeout(300 + rand() * 900);
     await alive(`monkey #${step}`);

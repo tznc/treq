@@ -349,6 +349,10 @@ pub struct Sidebar {
   menu_anchor: Rc<Cell<Point<Pixels>>>,
   /// The project button's last painted bounds, for its menu's anchor.
   project_button_bounds: Rc<Cell<gpui::Bounds<Pixels>>>,
+  /// The project menu is open, so the button's chevron points up.
+  project_menu_open: bool,
+  /// How many times the project menu opened.
+  menu_generation: u64,
   /// The element the pointer rests on, and whether its tooltip shows yet.
   tooltip: Option<(SharedString, bool)>,
   /// The row under the pointer. A button inside it takes the tooltip, and
@@ -436,6 +440,8 @@ impl Sidebar {
       tooltip_sent: Rc::default(),
       menu_anchor: Rc::default(),
       project_button_bounds: Rc::default(),
+      project_menu_open: false,
+      menu_generation: 0,
       tooltip: None,
       hovered_row: None,
       drag_width: None,
@@ -480,6 +486,20 @@ impl Sidebar {
   /// Where the last right-click was, in the window's coordinates.
   pub fn menu_anchor(&self) -> Point<Pixels> {
     self.menu_anchor.get()
+  }
+
+  /// Counts the project menu's openings, so a late close from an earlier
+  /// menu is told apart.
+  pub fn menu_generation(&self) -> u64 {
+    self.menu_generation
+  }
+
+  /// The menu opened at `generation` closed.
+  pub fn menu_closed(&mut self, generation: u64, cx: &mut Context<Self>) {
+    if generation == self.menu_generation && self.project_menu_open {
+      self.project_menu_open = false;
+      cx.notify();
+    }
   }
 
   pub fn set_snapshot(&mut self, snapshot: SidebarSnapshot, cx: &mut Context<Self>) {
@@ -635,7 +655,9 @@ impl Sidebar {
   }
 
   fn start_tooltip(&mut self, key: SharedString, cx: &mut Context<Self>) {
-    self.tooltip = Some((key.clone(), false));
+    if !crate::gpui_shell::tooltips::enter(&mut self.tooltip, &key) {
+      return;
+    }
     cx.spawn(async move |this, cx| {
       cx.background_executor().timer(TOOLTIP_DELAY).await;
       this
@@ -708,8 +730,6 @@ impl Sidebar {
 /// group header's repository name.
 const GROUP_INDENT: f32 = 4.;
 
-/// Indentation of a row's content: one 12px icon per level, so a child's
-/// icon starts past its parent's.
 /// The space between two workspace rows.
 const ROW_GAP: f32 = 0.;
 
@@ -717,12 +737,15 @@ const ROW_GAP: f32 = 0.;
 /// the parent row's space under its 12px icon, stopping 1px short of it.
 const ELBOW_REACH: f32 = ROW_GAP + (theme::ROW_HEIGHT_COMPACT - 12.) / 2. - 1.;
 
+/// Indentation of a row's content: every row stacked on a root sits one 12px
+/// icon past it, however deep, so a tall stack keeps its titles in view.
 fn row_indent(depth: u32) -> f32 {
-  10. + depth as f32 * 12.
+  10. + depth.min(1) as f32 * 12.
 }
 
-/// Where a nested row's elbow starts: under its parent's icon centre, so it
-/// runs from the parent into the row's own icon.
+/// Where a nested row's connector runs: under the icon centre of the row it
+/// hangs from (the root's for the first level's elbow, the row above's for
+/// a deeper row's straight line).
 fn guide_left(depth: u32) -> f32 {
   row_indent(depth.saturating_sub(1)) + 5.
 }
@@ -746,6 +769,9 @@ pub(super) fn pr_color(pr: PrState, palette: &Palette) -> Hsla {
 
 /// Three 20px row buttons with 2px gaps.
 const ROW_ACTIONS_WIDTH: f32 = 3. * 20. + 2. * 2.;
+
+/// How long the project button's chevron takes to turn over.
+const CHEVRON_TURN: Duration = Duration::from_millis(150);
 
 fn icon(path: &'static str, size: f32, color: Hsla) -> gpui::Svg {
   svg()
@@ -1281,6 +1307,11 @@ impl Sidebar {
     let bounds = self.project_button_bounds.clone();
     let anchor = self.menu_anchor.clone();
     let sink = self.sink.clone();
+    let this = cx.entity().downgrade();
+    let (open, generation) = (self.project_menu_open, self.menu_generation);
+    // Half a turn while the menu is open; still until it first opens.
+    let to = if open { 0.5 } else { 0. };
+    let from = if generation == 0 { to } else { 0.5 - to };
     div()
       .relative()
       .flex_1()
@@ -1290,6 +1321,7 @@ impl Sidebar {
           .selector("project-button")
           .role(Role::Button)
           .aria_label(SharedString::from(format!("Project: {name}")))
+          .aria_expanded(open)
           .flex()
           .items_center()
           .gap_1p5()
@@ -1327,16 +1359,24 @@ impl Sidebar {
           )
           .child(
             ui::text(div(), TextSize::Sm)
+              .flex_1()
               .min_w_0()
               .truncate()
               .font_weight(gpui::FontWeight::MEDIUM)
               .when(!saved, |this| this.text_color(palette.muted_foreground))
               .child(name),
           )
-          .child(icon(
-            theme::ICON_CHEVRON_DOWN,
-            14.,
-            palette.muted_foreground,
+          .child(div().selector("project-chevron").flex().flex_none().child(
+            icon(theme::ICON_CHEVRON_DOWN, 14., palette.muted_foreground).with_animation(
+              // A new id each time the menu opens or closes starts the turn.
+              ("project-chevron", generation * 2 + u64::from(open)),
+              Animation::new(CHEVRON_TURN).with_easing(gpui::ease_in_out),
+              move |svg, delta| {
+                svg.with_transformation(Transformation::rotate(gpui::percentage(
+                  from + (to - from) * delta,
+                )))
+              },
+            ),
           ))
           .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
             this.hover_tooltip(key.clone(), *hovered, cx)
@@ -1353,6 +1393,13 @@ impl Sidebar {
           .on_click(move |_, _, cx| {
             let b = bounds.get();
             anchor.set(gpui::point(b.left(), b.bottom() + gpui::px(4.)));
+            this
+              .update(cx, |this, cx| {
+                this.menu_generation += 1;
+                this.project_menu_open = true;
+                cx.notify();
+              })
+              .ignore_closed();
             sink(SidebarAction::ProjectMenu, cx);
           }),
       )
@@ -1615,7 +1662,7 @@ impl Sidebar {
           .when_some(fill, |this, fill| this.bg(fill))
           .debug_selector(move || format!("workspace-peek-{id}"))
       })
-      .when(row.depth > 0, |this| {
+      .when(row.depth == 1, |this| {
         // An elbow into the row, not a bar that reads as a selection marker.
         this.overlay(
           div()
@@ -1627,6 +1674,20 @@ impl Sidebar {
             .w(zpx(6.))
             .border_l_1()
             .border_b_1()
+            .border_color(palette.stack_connector()),
+        )
+      })
+      .when(row.depth > 1, |this| {
+        // Deeper rows keep the first level's indent: a line from the icon above.
+        this.overlay(
+          div()
+            .selector(format!("{prefix}workspace-{id}-line"))
+            .absolute()
+            .top(zpx(-ELBOW_REACH))
+            .left(zpx(guide_left(row.depth) + group_indent))
+            .h(zpx(2. * ELBOW_REACH - ROW_GAP))
+            .w(zpx(1.))
+            .border_l_1()
             .border_color(palette.stack_connector()),
         )
       })

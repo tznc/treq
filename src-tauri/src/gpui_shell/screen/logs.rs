@@ -11,8 +11,9 @@
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
 use crate::result_ext::ResultExt;
-use gpui_kit::base::TestSupportExt as _;
+use gpui_kit::base::ObservedElement;
 use std::{cell::RefCell, collections::HashMap, ops::Range, rc::Rc, time::Duration};
+use treq_ui::SelectorExt as _;
 
 use gpui_kit::component::input::{Escape, InputEvent, InputState, Textarea, TextareaState};
 use tauri_plugin_gpui::gpui::{
@@ -796,10 +797,9 @@ impl LogsView {
     min_width: f32,
     disabled: bool,
     p: &Palette,
-  ) -> gpui::Stateful<Div> {
+  ) -> ObservedElement<gpui::Stateful<Div>> {
     ui::text(div(), TextSize::Sm)
-      .id(key)
-      .debug_selector(move || key.into())
+      .selector(key)
       .role(gpui::Role::ComboBox)
       .aria_label(SharedString::from(format!("{name}: {label}")))
       .relative()
@@ -830,7 +830,7 @@ impl LogsView {
       Source::Checks => "repo-logs-search",
     };
     ui::text(div(), TextSize::Sm)
-      .debug_selector(move || label.into())
+      .selector(label)
       .ml_auto()
       .h_8()
       .w(zpx(384.))
@@ -871,8 +871,7 @@ impl LogsView {
             false,
             p,
           )
-          .on_click(cx.listener(|view, _, _, cx| view.source_menu(cx)))
-          .test_support(),
+          .on_click(cx.listener(|view, _, _, cx| view.source_menu(cx))),
       )
       .when(self.source == Source::Checks, |this| {
         this.child(
@@ -1033,8 +1032,7 @@ impl LogsView {
             chats.is_empty(),
             p,
           )
-          .on_click(cx.listener(|view, _, _, cx| view.chat_menu(cx)))
-          .test_support(),
+          .on_click(cx.listener(|view, _, _, cx| view.chat_menu(cx))),
       )
       .child(self.search_box(p))
   }
@@ -1076,18 +1074,24 @@ impl LogsView {
   }
 
   /// `LogFeed`.
-  fn feed(&mut self, records: Rc<Vec<LogRecordView>>, p: &Palette, cx: &mut Context<Self>) -> Div {
+  fn feed(
+    &mut self,
+    records: Rc<Vec<LogRecordView>>,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> gpui::AnyElement {
     let spec = feed_spec(self.source);
     if records.is_empty() {
       let (title, why) = self.empty_message();
       return div()
-        .debug_selector(move || spec.output.into())
+        .selector(spec.output)
         .flex_1()
         .child(
           ui::EmptyState::new("logs-empty", title, p)
             .icon(theme::ICON_FILE_TEXT)
             .message(why),
-        );
+        )
+        .into_any_element();
     }
     let selected = self.selection.selected.len();
     let multi = self.selection.multi;
@@ -1138,13 +1142,11 @@ impl LogsView {
         this
           .child(
             div()
-              .id("selection-count")
-              .debug_selector(|| "selection-count".into())
+              .selector("selection-count")
               .role(gpui::Role::Status)
               .aria_label(format!("{selected} selected"))
               .text_color(p.muted_foreground)
-              .child(format!("{selected} selected"))
-              .test_support(),
+              .child(format!("{selected} selected")),
           )
           .child(
             Button::new("clear-selection", p)
@@ -1199,8 +1201,7 @@ impl LogsView {
           .min_h_0()
           .child(
             ui::text(div(), TextSize::Sm)
-              .id(spec.output)
-              .debug_selector(move || spec.output.into())
+              .selector(spec.output)
               .role(gpui::Role::List)
               .aria_label(spec.name)
               .size_full()
@@ -1208,12 +1209,12 @@ impl LogsView {
               .flex_col()
               .font_family(theme::MONO_FONT)
               .child(header)
-              .child(list)
-              .test_support(),
+              .child(list),
           )
           .children(self.find_bar(p, cx)),
       )
       .children(inspected.map(|record| self.inspect_panel(&record, p, cx)))
+      .into_any_element()
   }
 
   fn rows(
@@ -1294,9 +1295,14 @@ impl LogsView {
       .collect()
   }
 
-  fn inspect_panel(&self, record: &LogRecordView, p: &Palette, cx: &mut Context<Self>) -> Div {
+  fn inspect_panel(
+    &self,
+    record: &LogRecordView,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> ObservedElement<gpui::Stateful<Div>> {
     ui::text(div(), TextSize::Sm)
-      .debug_selector(|| "log-inspect-panel".into())
+      .selector("log-inspect-panel")
       .flex_none()
       .border_t_1()
       .border_color(p.border)
@@ -1358,8 +1364,7 @@ impl LogsView {
       };
     Some(
       div()
-        .id("logs-find")
-        .debug_selector(|| "logs-find".into())
+        .selector("logs-find")
         .absolute()
         .top_2()
         .right_3()
@@ -1579,8 +1584,7 @@ impl LogsView {
         .border_color(p.border)
         .child(
           div()
-            .id("logs-timeseries-chart")
-            .debug_selector(|| "logs-timeseries-chart".into())
+            .selector("logs-timeseries-chart")
             .role(gpui::Role::Figure)
             .aria_label("Log lines over time")
             .relative()
@@ -1589,14 +1593,13 @@ impl LogsView {
             .child(legend)
             .child(grid)
             .child(y_labels)
-            .child(x_labels)
-            .test_support(),
+            .child(x_labels),
         ),
     )
   }
 
   /// `LogsSqlExplorer`.
-  fn explorer(&self, p: &Palette, cx: &mut Context<Self>) -> Div {
+  fn explorer(&self, p: &Palette, cx: &mut Context<Self>) -> ObservedElement<gpui::Stateful<Div>> {
     let has_result = self.explorer.result.is_some() && self.explorer.error.is_none();
     let bar = div()
       .flex()
@@ -1642,7 +1645,7 @@ impl LogsView {
       .border_color(p.border)
       .child(
         ui::text(div(), TextSize::Sm)
-          .debug_selector(|| "sql-editor".into())
+          .selector("sql-editor")
           .font_family(theme::MONO_FONT)
           .children(self.explorer.input.as_ref().map(|input| {
             ui::text(
@@ -1697,8 +1700,7 @@ impl LogsView {
     if let Some(error) = &self.explorer.error {
       results = results.child(
         ui::text(div(), TextSize::Sm)
-          .id("sql-error")
-          .debug_selector(|| "sql-error".into())
+          .selector("sql-error")
           .role(gpui::Role::Alert)
           .aria_label(error.clone())
           .m_3()
@@ -1716,8 +1718,7 @@ impl LogsView {
             16.,
             ui::Tone::Danger.text(p),
           ))
-          .child(div().font_family(theme::MONO_FONT).child(error.clone()))
-          .test_support(),
+          .child(div().font_family(theme::MONO_FONT).child(error.clone())),
       );
     } else if let Some(result) = &self.explorer.result {
       results = results.child(
@@ -1752,7 +1753,7 @@ impl LogsView {
       );
     }
     div()
-      .debug_selector(|| "logs-sql-explorer".into())
+      .selector("logs-sql-explorer")
       .flex_1()
       .min_h_0()
       .flex()
@@ -1785,8 +1786,7 @@ impl LogsView {
       })
       .collect();
     ui::text(div(), TextSize::Sm)
-      .id("sql-results")
-      .debug_selector(|| "sql-results".into())
+      .selector("sql-results")
       .role(gpui::Role::Table)
       .aria_label(format!("{} rows", result.row_count))
       .font_family(theme::MONO_FONT)
@@ -1830,7 +1830,6 @@ impl LogsView {
             }
           }))
       }))
-      .test_support()
   }
 
   /// The open filter's or template list's popover, below its button.
@@ -1843,8 +1842,7 @@ impl LogsView {
     };
     let anchor = self.anchors.borrow().get(key).copied()?;
     let mut list = div()
-      .id("logs-filter-list")
-      .debug_selector(|| "logs-filter-list".into())
+      .selector("logs-filter-list")
       .w(zpx(width))
       .p_1()
       .rounded(radius::MD)
@@ -1908,13 +1906,12 @@ impl LogsView {
         }
       }
       Open::Templates => {
-        for (i, (label, description, sql)) in TEMPLATES.iter().enumerate() {
+        for (label, description, sql) in &TEMPLATES {
           list = list.child(
             div()
-              .id(("sql-template", i))
+              .selector(format!("sql-template-{label}"))
               .role(gpui::Role::Button)
               .aria_label(*label)
-              .debug_selector(move || format!("sql-template-{label}"))
               .flex()
               .flex_col()
               .gap_0p5()
@@ -1940,8 +1937,7 @@ impl LogsView {
                 }
                 view.open = None;
                 cx.notify();
-              }))
-              .test_support(),
+              })),
           );
         }
       }
@@ -1974,7 +1970,7 @@ impl Render for LogsView {
     self.matches = find_matches(&shown, &self.find.query);
     self.visible = shown.clone();
     let body = if self.source == Source::Checks && self.explorer_open {
-      self.explorer(&p, cx)
+      self.explorer(&p, cx).into_any_element()
     } else {
       let bar = match self.source {
         Source::Agent => self.agent_bar(&p, cx).into_any_element(),
@@ -1985,7 +1981,7 @@ impl Render for LogsView {
         _ => "Loading logs…",
       };
       let feed = if self.records.is_none() {
-        self.pending(loading, &p)
+        self.pending(loading, &p).into_any_element()
       } else {
         self.feed(shown, &p, cx)
       };
@@ -2001,11 +1997,11 @@ impl Render for LogsView {
             .flatten(),
         )
         .child(feed)
+        .into_any_element()
     };
     let popover = self.popover(&p, cx);
     div()
-      .id("logs-tab")
-      .debug_selector(|| "logs-tab".into())
+      .selector("logs-tab")
       .size_full()
       .flex()
       .flex_col()

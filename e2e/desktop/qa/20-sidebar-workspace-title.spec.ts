@@ -64,7 +64,7 @@ test("sidebar-workspace-title: a titled row shows its title", async ({ page }) =
   const picker = page;
   await search(picker).fill("fail-readiness");
   await settle(page, 800);
-  await picker.keyboard.press("Enter").catch(() => {});
+  await picker.keyboard.press("Enter");
   await page.getByTestId("confirm-confirm").click();
   await page.waitForTimeout(2500);
   await ready(page);

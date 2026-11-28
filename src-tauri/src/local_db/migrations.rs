@@ -263,9 +263,7 @@ mod tests {
 
   #[test]
   fn user_version_from_earlier_releases_counts_as_applied() {
-    // Releases before the table recorded the last migration in
-    // `user_version`: 2 for the pre-timestamp baseline, then the baseline's
-    // timestamp. Only migrations at or below it count as applied.
+    // Older releases kept the last migration in `user_version`: 2, then the baseline's timestamp.
     let baseline = MIGRATIONS[0].version;
     for (user_version, applied) in [(0, vec![]), (2, vec![]), (baseline, vec![baseline])] {
       let conn = fresh_db();
@@ -278,8 +276,7 @@ mod tests {
 
   #[test]
   fn each_migration_file_is_named_by_its_unix_timestamp_version() {
-    // `migrations/<unix seconds>_<name>.rs`, as Rails, sqlx and Supabase name
-    // theirs: branches adding migrations in parallel cannot pick the same one.
+    // `<unix seconds>_<name>.rs`, like Rails, sqlx and Supabase: parallel branches can't collide.
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/local_db/migrations");
     let mut stamps: Vec<i64> = std::fs::read_dir(&dir)
       .expect("migrations dir")

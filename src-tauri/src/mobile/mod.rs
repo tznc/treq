@@ -100,8 +100,7 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
   let app = builder
     .setup(|app| {
       let data_dir = app.path().app_data_dir()?;
-      // The app shares `com.treq` with the desktop app, so a desktop run
-      // keeps its own settings database instead of opening the real one.
+      // Sharing `com.treq` with the desktop app, a desktop run keeps its own settings database.
       #[cfg(desktop)]
       let data_dir = data_dir.join("mobile-gpui");
       let events = backend::init(app.handle().clone(), data_dir)?;
@@ -117,9 +116,7 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
         }),
       )?;
       let window = tauri::WindowBuilder::new(app, "main").title("Treq");
-      // A phone-sized window for desktop runs only. On iOS tao takes
-      // `inner_size` as the UIWindow frame, so the app drew in a 420x860pt
-      // box with the rest of the screen black; mobile fills the screen.
+      // Desktop only: iOS tao takes `inner_size` as the UIWindow frame, leaving the rest black.
       #[cfg(desktop)]
       let window = window.inner_size(420., 860.);
       let window = window.build()?;

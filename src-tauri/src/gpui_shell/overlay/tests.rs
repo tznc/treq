@@ -733,8 +733,7 @@ mod testing_library {
     expect(screen.get_by_role(by::role(Role::Dialog))).to_be_visible();
     let search = screen.get_by_role(option("Go to file"));
     expect(&search).to_be_visible();
-    // gpui-testing-library 0.1 does not read gpui-kit's descriptions yet;
-    // the e2e suite checks the description text.
+    // gpui-testing-library 0.1 can't read gpui-kit descriptions yet: the e2e suite checks them.
   }
 
   #[gpui::test]

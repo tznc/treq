@@ -26,7 +26,7 @@
 // handling and is left for a follow-up rather than faked here.
 
 import { SshReader, SshWriter } from "./ssh-wire.ts";
-import { base64Decode, base64Encode } from "./ssh-wire.ts";
+import { base64Decode, base64Encode, sshFingerprintSha256 } from "./ssh-wire.ts";
 
 const CERT_TYPE_ED25519 = "ssh-ed25519-cert-v01@openssh.com";
 const CA_KEY_TYPE_ED25519 = "ssh-ed25519";
@@ -70,6 +70,34 @@ export function caKeyMaterialFromEnv(): CaKeyMaterial {
   return { privateSeed, publicKey };
 }
 
+// The CA public keys machines trust: the signing CA alone, or during a CA
+// roll the comma-separated base64 raw 32-byte keys in
+// REMOTE_SSH_CA_TRUSTED_PUBLIC_KEYS_BASE64. The list must hold the signing
+// CA, or every new certificate would be refused.
+export function trustedCaKeysFromEnv(): Uint8Array[] {
+  const signing = caKeyMaterialFromEnv().publicKey;
+  const list = Deno.env.get("REMOTE_SSH_CA_TRUSTED_PUBLIC_KEYS_BASE64")?.trim();
+  if (!list) return [signing];
+  const keys = list.split(",").map((entry) => base64Decode(entry.trim()));
+  if (keys.some((k) => k.length !== 32)) {
+    throw new Error("REMOTE_SSH_CA_TRUSTED_PUBLIC_KEYS_BASE64 entries must be raw 32-byte ed25519 keys");
+  }
+  if (!keys.some((k) => k.every((byte, i) => byte === signing[i]))) {
+    throw new Error("REMOTE_SSH_CA_TRUSTED_PUBLIC_KEYS_BASE64 must include the signing CA's public key");
+  }
+  return keys;
+}
+
+// One `TrustedUserCAKeys` line per trusted CA.
+export function caTrustLines(keys: readonly Uint8Array[]): string[] {
+  return keys.map((publicKey) => caPublicKeyLine({ publicKey }));
+}
+
+// The OpenSSH SHA256 fingerprint of a CA public key, as audit events record it.
+export async function caFingerprint(publicKey: Uint8Array): Promise<string> {
+  return await sshFingerprintSha256(ed25519PublicKeyBlob(publicKey));
+}
+
 // SSH-wire-format blob for an ssh-ed25519 public key: string "ssh-ed25519",
 // string <32 bytes>.
 export function ed25519PublicKeyBlob(rawPublicKey: Uint8Array): Uint8Array {
@@ -78,7 +106,7 @@ export function ed25519PublicKeyBlob(rawPublicKey: Uint8Array): Uint8Array {
 
 // The OpenSSH `authorized_keys`/`TrustedUserCAKeys`-format public key line
 // for the CA, e.g. "ssh-ed25519 AAAA... treq-ssh-ca".
-export function caPublicKeyLine(ca: CaKeyMaterial, comment = "treq-ssh-ca"): string {
+export function caPublicKeyLine(ca: Pick<CaKeyMaterial, "publicKey">, comment = "treq-ssh-ca"): string {
   const blob = ed25519PublicKeyBlob(ca.publicKey);
   return `${CA_KEY_TYPE_ED25519} ${base64Encode(blob)} ${comment}`;
 }
@@ -126,10 +154,9 @@ export interface IssuedCertificate {
 
 export function randomSerial(): bigint {
   const bytes = crypto.getRandomValues(new Uint8Array(8));
-  bytes[0] &= 0x7f; // keep it a positive int64 for readability in logs
   let value = 0n;
   for (const byte of bytes) value = (value << 8n) | BigInt(byte);
-  return value;
+  return value & 0x7fff_ffff_ffff_ffffn; // keep it a positive int64 for readability in logs
 }
 
 export async function issueEd25519UserCertificate(params: IssueCertificateParams): Promise<IssuedCertificate> {
@@ -186,6 +213,7 @@ export function decodeCertificateForTests(certificateLine: string): {
   validBefore: bigint;
 } {
   const [, encoded] = certificateLine.split(" ");
+  if (encoded === undefined) throw new Error("certificate line has no base64 field");
   const bytes = base64Decode(encoded);
   const reader = new SshReader(bytes);
   reader.readUtf8String(); // cert type

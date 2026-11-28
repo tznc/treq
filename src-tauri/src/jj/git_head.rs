@@ -98,8 +98,7 @@ pub(super) fn sync_home_git_head_to_wc_parent_inner(
     .and_then(|repo| repo.head_id().ok().map(|id| id.to_hex().to_string()));
   let recorded_head = loaded.repo.view().git_head().as_normal().map(|id| id.hex());
   if head_before.is_some() && recorded_head.is_some() && head_before != recorded_head {
-    // Git moved HEAD since jj last read it (a terminal `git switch`/`commit`).
-    // That move wins; the next read reconciles `@` onto it.
+    // Git moved HEAD since jj read it: that move wins, and the next read reconciles `@` onto it.
     return Ok(());
   }
 
@@ -117,9 +116,7 @@ pub(super) fn sync_home_git_head_to_wc_parent_inner(
       })
       .map(|branch| branch.to_string())
   };
-  // `@` can be the branch commit itself (a working copy synced by editing the
-  // bookmark). HEAD then goes on that branch; the next read starts a fresh `@`
-  // on top of it without touching disk.
+  // `@` may be the branch commit: HEAD then takes the branch, and the next read stacks a new `@`.
   let (branch, head_hex) = match known_branch_at(&parent_hex) {
     Some(branch) => (Some(branch), &parent_hex),
     None => match known_branch_at(&wc_hex) {
@@ -141,8 +138,7 @@ pub(super) fn sync_home_git_head_to_wc_parent_inner(
     reset_git_index_to_head_with_gix(repo_path)?;
   }
 
-  // Record the new HEAD in the same operation, so the next read has nothing
-  // to import and an Undo of the rewrite still sees it as the latest action.
+  // The same operation records HEAD, so the next read imports nothing and Undo sees the rewrite.
   block_on(git::import_head(tx.repo_mut())).map_err(|e| format!("Failed to import HEAD: {e}"))?;
   if tx.repo().has_changes() {
     block_on(tx.commit(GIT_REFS_EXPORT_OPERATION))

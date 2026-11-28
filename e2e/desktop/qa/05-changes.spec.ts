@@ -359,3 +359,20 @@ test("changes: empty state wraps inside the file list", async ({ page }) => {
     ],
   });
 });
+
+test("changes: a scrolled file's header stays pinned", async ({ page }) => {
+  await openWorkspace(page, "feat/empty-event-message");
+  await openTab(page, "Changes");
+  await settle(page, 1500);
+  await page.mouse.move(900, 600);
+  await page.mouse.wheel(0, 250);
+  await settle(page, 800);
+  await capture(page, {
+    name: "05-changes-pinned-header",
+    title: "Changes tab: a file's header pinned while its diff scrolls",
+    expectations: [
+      "The scrolled file's header (path, Viewed, +/- counts) sits at the top of the diff",
+      "Diff lines pass under the header, not over it",
+    ],
+  });
+});

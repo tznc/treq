@@ -130,7 +130,7 @@ test("dialogs: delete workspace", async ({ page }) => {
   });
   // Picking asks first, in the in-app confirmation: the question names
   // the workspace, and the buttons are Cancel and "Delete workspace".
-  await dialog.keyboard.press("Enter").catch(() => {});
+  await dialog.keyboard.press("Enter");
   const question = page.getByRole("dialog", { name: /^Delete .*qa-scratch.*\?$/ });
   const remove = page.getByTestId("confirm-confirm");
   await expect(question).toBeVisible();

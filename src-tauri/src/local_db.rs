@@ -274,8 +274,7 @@ pub fn init_local_db(repo_path: &str) -> Result<PathBuf, String> {
 
   let conn = Connection::open(&db_path).map_err(|e| format!("Failed to open local db: {}", e))?;
 
-  // Every remote request cold-starts `treq` and lands here, so the common
-  // case (schema already current) must cost one pragma read, not ~70 statements.
+  // Each remote request cold-starts `treq`, so a current schema must cost one pragma read.
   if migrations::is_current(&conn, migrations::MIGRATIONS)? {
     return Ok(db_path);
   }
@@ -320,16 +319,11 @@ fn open_connection(repo_path: &str, db_path: &Path) -> Result<Connection, String
   conn
     .pragma_update(None, "foreign_keys", enforce_foreign_keys)
     .map_err(|e| format!("Failed to enable foreign key enforcement: {}", e))?;
-  // Multiple treq instances/windows can share this db file (see
-  // `upsert_instance_registry`). WAL lets readers and a writer proceed
-  // concurrently instead of blocking, and busy_timeout makes a genuine
-  // writer-writer conflict retry for a bit instead of immediately failing
-  // with "database is locked".
+  // Shared by instances: WAL lets reads run beside a writer, busy_timeout retries writer clashes.
   conn
     .pragma_update(None, "journal_mode", "WAL")
     .map_err(|e| format!("Failed to enable WAL mode: {}", e))?;
-  // NORMAL is crash-safe under WAL (it can lose the last commits on power
-  // loss, never corrupt) and avoids an fsync per commit.
+  // Under WAL, NORMAL can lose recent commits on power loss but never corrupts, and saves fsyncs.
   conn
     .pragma_update(None, "synchronous", "NORMAL")
     .map_err(|e| format!("Failed to set synchronous mode: {}", e))?;
@@ -738,7 +732,7 @@ pub fn init_new_workspace_state(
     )
     .map_err(|e| format!("Failed to update workspace title: {}", e))?;
   }
-  set_last_rebased_commit(&tx, id, "")?;
+  set_last_rebased_commit(&tx, id, "", None)?;
   let workspace = workspace_by_id(&tx, repo_path, id)?;
   tx.commit()
     .map_err(|e| format!("Failed to commit workspace update: {}", e))?;
@@ -1173,7 +1167,8 @@ pub fn upsert_workspace_discovery(
 /// Upserts discovered workspaces and returns the persisted rows. A row is
 /// written only when discovery changed it (or it was never refreshed), so the
 /// periodic poll commits nothing in the steady state; `refreshed_at` is the
-/// time of the last such change.
+/// time of the last such change. Discovery falls back to the directory name when no
+/// bookmark matches, as after every rename, so that fallback never replaces a known name.
 pub fn sync_discovered_workspaces(
   repo_path: &str,
   discovered: &[DiscoveredWorkspace],
@@ -1188,17 +1183,12 @@ pub fn sync_discovered_workspaces(
     .transaction()
     .map_err(|e| format!("Failed to start discovery transaction: {}", e))?;
   for workspace in discovered {
-    // Prefer a discovered canonical bookmark (e.g. feat/foo) over a prior
-    // sanitized fallback (feat-foo), even while the bookmark is conflicted.
-    // Never replace a known name with the sanitized fallback: discovery falls
-    // back to the directory name whenever no bookmark matches it, which is
-    // always the case after a rename (the directory keeps its old name).
+    // A canonical bookmark (feat/foo) beats a sanitized fallback (feat-foo), even while conflicted.
     let discovered_has_canonical_bookmark = workspace.branch_name != workspace.workspace_name;
     let update_branch_name = discovered_has_canonical_bookmark;
     let update_workspace_name = !workspace.has_conflicts;
     release_archived_workspace_path(&tx, &workspace.workspace_path)?;
-    // Prepared once per sync rather than once per workspace, which was
-    // half of a poll's cost.
+    // Prepared once per sync rather than once per workspace, which was half of a poll's cost.
     tx.prepare_cached(
             "INSERT INTO workspaces (workspace_name, workspace_path, branch_name, created_at, refreshed_at)
              VALUES (?1, ?2, ?3, ?4, ?5)
@@ -1334,12 +1324,12 @@ pub fn update_workspace_last_rebased_commit(
   commit_id: &str,
 ) -> Result<(), String> {
   let conn = get_connection(repo_path)?;
-  set_last_rebased_commit(&conn, id, commit_id)
+  set_last_rebased_commit(&conn, id, commit_id, None)
 }
 
-/// Records the same rebased target commit for several workspaces in one
-/// transaction (one commit instead of one per workspace).
-pub fn update_workspaces_last_rebased_commit(
+/// Records that several workspaces were rebased onto `commit_id` just now, in
+/// one transaction (one commit instead of one per workspace).
+pub fn record_workspaces_rebased(
   repo_path: &str,
   ids: &[i64],
   commit_id: &str,
@@ -1350,14 +1340,21 @@ pub fn update_workspaces_last_rebased_commit(
   let conn = get_connection(repo_path)?;
   let tx =
     write_transaction(&conn).map_err(|e| format!("Failed to start rebase bookkeeping: {}", e))?;
+  let now = Utc::now().to_rfc3339();
   for id in ids {
-    set_last_rebased_commit(&tx, *id, commit_id)?;
+    set_last_rebased_commit(&tx, *id, commit_id, Some(&now))?;
   }
   tx.commit()
     .map_err(|e| format!("Failed to commit rebase bookkeeping: {}", e))
 }
 
-fn set_last_rebased_commit(conn: &Connection, id: i64, commit_id: &str) -> Result<(), String> {
+/// `rebased_at` stamps when the rebase ran; `None` keeps the last stamp.
+fn set_last_rebased_commit(
+  conn: &Connection,
+  id: i64,
+  commit_id: &str,
+  rebased_at: Option<&str>,
+) -> Result<(), String> {
   let current_metadata: Option<String> = conn
     .query_row(
       "SELECT metadata FROM workspaces WHERE id = ?1",
@@ -1371,6 +1368,9 @@ fn set_last_rebased_commit(conn: &Connection, id: i64, commit_id: &str) -> Resul
     .unwrap_or(serde_json::json!({}));
 
   meta["last_rebased_target_commit"] = serde_json::Value::String(commit_id.to_string());
+  if let Some(at) = rebased_at {
+    meta["last_rebased_at"] = serde_json::Value::String(at.to_string());
+  }
 
   let new_metadata =
     serde_json::to_string(&meta).map_err(|e| format!("Failed to serialize metadata: {}", e))?;
@@ -1865,7 +1865,10 @@ pub fn create_agent_review_comment(
     )
     .map_err(|e| format!("Failed to insert agent review comment: {}", e))?;
 
-  if is_code_review_target(&comment.target_type) {
+  // A sent review is already in the history as one `user_review` row.
+  if is_code_review_target(&comment.target_type)
+    && comment.source != crate::core::agent_review::SENT_REVIEW_SOURCE
+  {
     conn
       .execute(
         "INSERT INTO review_history (kind, comment_id, source, target_type, target_id, file_path, start_line, end_line, body, suggestion, quoted_text, outcome, created_at)
@@ -2915,8 +2918,7 @@ mod tests {
 
   #[test]
   fn fresh_schema_matches_the_snapshot() {
-    // A change here is a schema change: it needs a migration for existing
-    // databases. Update `local_db/schema.snapshot` alongside the migration.
+    // A change here is a schema change: add a migration and update `local_db/schema.snapshot`.
     assert_eq!(
       fresh_schema_shape(),
       include_str!("local_db/schema.snapshot")
@@ -2955,8 +2957,7 @@ mod tests {
       .expect("user_version")
   }
 
-  // Windows and background tasks open a repo's db at the same time; each
-  // migration checks for its column, then adds it.
+  // Windows and background tasks open a repo's db at once, and each migration checks then adds.
   #[test]
   fn concurrent_inits_of_an_old_db_all_succeed() {
     for _ in 0..200 {
@@ -3647,6 +3648,68 @@ mod tests {
       .expect("init state")
       .expect("row");
     assert_eq!(untitled.title, "A title", "no title leaves the title alone");
+  }
+
+  #[test]
+  fn record_workspaces_rebased_stamps_the_rebase_time() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+    init_local_db(repo_path).expect("initialize database");
+    let id = add_workspace(
+      repo_path,
+      "feat-r".to_string(),
+      "feat-r".to_string(),
+      "feat/r".to_string(),
+      None,
+      None,
+      None,
+    )
+    .expect("register workspace");
+
+    record_workspaces_rebased(repo_path, &[id], "abc").expect("record rebase");
+
+    let workspace = get_workspace_by_id(repo_path, id)
+      .expect("read")
+      .expect("row");
+    assert_eq!(last_rebased_commit_of(&workspace).as_deref(), Some("abc"));
+    let at = rebased_at(&workspace).expect("rebase time");
+    assert!(chrono::DateTime::parse_from_rfc3339(&at).is_ok(), "{at}");
+  }
+
+  /// A commit records the branch's new tip without rebasing it.
+  #[test]
+  fn update_workspace_last_rebased_commit_keeps_the_rebase_time() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo_path = temp.path().to_str().expect("utf8 path");
+    init_local_db(repo_path).expect("initialize database");
+    let id = add_workspace(
+      repo_path,
+      "feat-s".to_string(),
+      "feat-s".to_string(),
+      "feat/s".to_string(),
+      None,
+      None,
+      None,
+    )
+    .expect("register workspace");
+    record_workspaces_rebased(repo_path, &[id], "abc").expect("record rebase");
+    let read = || {
+      get_workspace_by_id(repo_path, id)
+        .expect("read")
+        .expect("row")
+    };
+    let before = rebased_at(&read());
+
+    update_workspace_last_rebased_commit(repo_path, id, "def").expect("update");
+
+    assert_eq!(last_rebased_commit_of(&read()).as_deref(), Some("def"));
+    assert_eq!(rebased_at(&read()), before);
+  }
+
+  fn rebased_at(workspace: &Workspace) -> Option<String> {
+    let metadata: serde_json::Value =
+      serde_json::from_str(workspace.metadata.as_deref()?).expect("json");
+    metadata["last_rebased_at"].as_str().map(str::to_string)
   }
 
   /// Another writer commits between the read and the write of a new

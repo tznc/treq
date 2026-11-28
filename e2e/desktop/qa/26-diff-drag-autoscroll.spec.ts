@@ -1,6 +1,6 @@
 // A drag held past the diff's bottom edge scrolls it and keeps selecting.
 // Uses the alerting workspace's committed 642-line events.json (qa/launch.ts).
-import { test } from "@playwright/test";
+import { errors, test } from "@playwright/test";
 import { capture } from "./capture.ts";
 import { openTab, openWorkspace, settle } from "./helpers.ts";
 
@@ -12,7 +12,15 @@ test("diff drag autoscroll", async ({ page }) => {
   await settle(page, 1500);
   await page.getByRole("button", { name: "View changes" }).click();
   await settle(page, 1500);
-  const row = await page.locator('[data-debug-selector^="gutter-fixtures/events.json-0-"]').first().boundingBox().catch(() => null);
+  const row = await page
+    .locator('[data-debug-selector^="gutter-fixtures/events.json-0-"]')
+    .first()
+    .boundingBox()
+    .catch((err: unknown) => {
+      // No gutter row rendered: drag from the fixed fallback height below.
+      if (err instanceof errors.TimeoutError) return null;
+      throw err;
+    });
   const y0 = row ? row.y + row.height / 2 : 800;
   await page.mouse.move(GUTTER_X, y0);
   await page.mouse.down();

@@ -40,4 +40,5 @@ export interface SkillPageProps {
   trigger: string | null;
   install: { folder: string; claudeCode: string; codex: string } | null;
   related: RelatedSkill[];
+  noindex: boolean;
 }

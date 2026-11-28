@@ -18,6 +18,7 @@ use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
+use gpui_kit::base::ObservedElement;
 use std::{
   cell::RefCell,
   collections::{HashMap, HashSet},
@@ -25,6 +26,7 @@ use std::{
   sync::Arc,
   time::{Duration, Instant},
 };
+use treq_ui::SelectorExt as _;
 
 /// Prefix of a viewed hash taken from a file's content id, for files with
 /// no diff lines to hash (binary, empty, mode-only, or not yet loaded).
@@ -197,6 +199,8 @@ pub struct ChangesView {
   committed_collapsed: bool,
   pub(super) collapsed_files: HashSet<String>,
   pub(super) expanded_large: HashSet<String>,
+  /// Committed hunks opened while Committed is hidden, by path and header.
+  pub(super) opened_hunks: HashSet<(String, String)>,
   /// Generated files whose diff "Load diff" read.
   pub(super) loaded_generated: HashSet<String>,
   /// The file list's filter: generated files left out of the list and diff.
@@ -308,6 +312,7 @@ impl ChangesView {
       committed_collapsed: false,
       collapsed_files: HashSet::new(),
       expanded_large: HashSet::new(),
+      opened_hunks: HashSet::new(),
       loaded_generated: HashSet::new(),
       hide_generated: false,
       changeset_expanded: false,
@@ -359,12 +364,14 @@ impl ChangesView {
       return;
     }
     let moved = self.parent.key() != parent.key();
-    // Not on `parent.revision`: React bumps that after every read this tab
-    // reports (`handleRefreshingChange` invalidates the commit caches), so
-    // it would read forever. Its own `options.revision` covers file changes.
+    // Not on `parent.revision`, which React bumps after every read here: it would loop forever.
     let reread = moved
       || self.options.revision != options.revision
       || self.options.show_committed != options.show_committed;
+    // Hiding Committed shuts every committed hunk again.
+    if moved || self.options.show_committed != options.show_committed {
+      self.opened_hunks.clear();
+    }
     // The status's conflicts stand in until the diff lists its own.
     if moved || self.parent.conflicted_files != parent.conflicted_files {
       self.layout_gen += 1;
@@ -614,7 +621,7 @@ impl ChangesView {
       return;
     }
     self.loading = true;
-    let show = self.show_committed();
+    let show = self.options.show_committed;
     // What shows now, so the read compares against it off the main thread.
     let shown = self.snapshot.clone();
     self.run_changed(
@@ -646,13 +653,13 @@ impl ChangesView {
             true
           }
           Ok(snapshot) if view.park(&snapshot) => true,
-          // The reviewed hunks were read from this same diff.
+          // The reviewed hunks were read from this same diff: only the committed side can differ.
           Ok(snapshot)
             if view.in_review()
               && snapshot.token.is_some()
               && snapshot.token == view.hunks_token =>
           {
-            false
+            view.apply(snapshot, cx)
           }
           Ok(snapshot) if view.in_review() && view.snapshot.is_some() => {
             view.recheck(snapshot, cx);
@@ -696,8 +703,7 @@ impl ChangesView {
       .map(|f| f.path.clone())
       .filter(|p| !snapshot.generated.contains(p) || self.loaded_generated.contains(p))
       .collect();
-    // A refresh of an unchanged working copy (window focus, a watcher event
-    // for an ignored write) has no hunk to read again.
+    // A refresh of an unchanged working copy (focus, an ignored write) has no hunk to read again.
     let current = snapshot.token.is_some()
       && snapshot.token == self.hunks_token
       && paths.len() == self.hunks.len()
@@ -708,8 +714,7 @@ impl ChangesView {
           .is_some_and(|d| !d.loading && d.error.is_none())
       });
     let token = snapshot.token.clone();
-    // A refresh that finds the same files keeps the snapshot, and with it
-    // the committed hunks the rows were laid out from.
+    // The same files keep the snapshot, and with it the committed hunks the rows came from.
     if self.snapshot.as_ref() != Some(&snapshot) {
       self.snapshot = Some(snapshot);
       self.layout_gen += 1;
@@ -815,8 +820,7 @@ impl ChangesView {
       }
       None => (None, HashMap::new()),
     };
-    // What the batch's files show now, so the read compares against it off
-    // the main thread.
+    // What the batch's files show now, for the off-main-thread read to compare against.
     let shown: HashMap<String, (Arc<Vec<JjDiffHunk>>, Option<String>)> = batch
       .iter()
       .filter_map(|path| {
@@ -833,8 +837,7 @@ impl ChangesView {
           batch,
           read_from.as_deref(),
         )?;
-        // A refresh reads every file again; one that reads the same keeps
-        // its hunks, so its rows and marks are not redone.
+        // A file that reads the same keeps its hunks, so its rows and marks are not redone.
         let files: Vec<_> = read
           .files
           .into_iter()
@@ -1122,6 +1125,18 @@ impl ChangesView {
     cx.notify();
   }
 
+  /// A click outside the file list drops its selection and highlight.
+  fn click_away(&mut self, cx: &mut Context<Self>) {
+    let s = &mut self.staging;
+    if self.active.is_none() && s.selected.is_empty() && s.selected_staged.is_empty() {
+      return;
+    }
+    self.active = None;
+    s.selected.clear();
+    s.selected_staged.clear();
+    cx.notify();
+  }
+
   fn stage(&mut self, path: &str, cx: &mut Context<Self>) {
     self.staging.stage(path);
     cx.notify();
@@ -1328,8 +1343,7 @@ impl ChangesView {
     let split = !staged.is_empty();
     let (host, parent) = (self.host.clone(), self.parent.clone());
     let key = parent.key();
-    // The commit is reported as soon as it lands; the push is a second stage
-    // with its own feedback, and runs even if the tab moved on meanwhile.
+    // The commit reports on landing. The push follows with its own feedback, even if the tab moved.
     cx.spawn(async move |this, cx| {
       let (work_host, work_parent) = (host.clone(), parent.clone());
       let committed = cx
@@ -1362,6 +1376,8 @@ impl ChangesView {
                   .into(),
               );
               view.committed_collapsed = true;
+              // Its own write: the read after it is not stale.
+              view.review.apply_next = true;
               if action == CommitAction::Pr {
                 view.send_react(
                   ScreenAction::Press {
@@ -1429,8 +1445,7 @@ impl ChangesView {
         if let InputEvent::Change = event {
           let was_empty = view.message.trim().is_empty();
           view.message = state.read(cx).value().to_string();
-          // The view draws only whether the message is empty, and the
-          // error a keystroke clears; the box redraws itself.
+          // Redraws only for emptiness or a cleared error: the input box redraws itself.
           if view.message_error.take().is_some() || was_empty != view.message.trim().is_empty() {
             cx.notify();
           }
@@ -1551,8 +1566,7 @@ impl ChangesView {
 
   /// `handleExpandContext`; `all` reads the whole gap ("Expand all").
   fn expand_context(&mut self, path: &str, h: usize, dir: Dir, all: bool, cx: &mut Context<Self>) {
-    // A committed card's lines are read from the working copy, which only
-    // matches the branch head while the file has no uncommitted edits.
+    // Committed lines come from the working copy, which matches the head only without edits.
     if !self.hunks.contains_key(path)
       && self
         .snapshot
@@ -1890,12 +1904,10 @@ fn header_button(
   label: impl Into<SharedString>,
   fg: Hsla,
   p: &Palette,
-) -> Stateful<Div> {
+) -> ObservedElement<Stateful<Div>> {
   let id: SharedString = id.into();
-  let selector = id.to_string();
   div()
-    .id(id)
-    .debug_selector(move || selector)
+    .selector(id)
     .role(gpui::Role::Button)
     .aria_label(label.into())
     .p_1()
@@ -1922,8 +1934,7 @@ impl Render for ChangesView {
     self.place_threads();
     self.index_matches();
     self.reveal_match(window, cx);
-    // Drawn lines record their layouts afresh each frame; a scrolled-off
-    // line must not be found under the pointer.
+    // Lines record layouts each frame, so a scrolled-off line is never found under the pointer.
     self.review.layouts.borrow_mut().clear();
     self.reveal_line(window, cx);
     self.scroll_to_file(window, cx);
@@ -1932,8 +1943,7 @@ impl Render for ChangesView {
     }
     let p = theme::palette(self.dark);
     let root = ui::text(div(), TextSize::Sm)
-      .id("changes-diff-viewer")
-      .debug_selector(|| "changes-diff-viewer".into())
+      .selector("changes-diff-viewer")
       .role(gpui::Role::Group)
       .aria_label("Changes")
       .size_full()
@@ -2164,8 +2174,7 @@ impl ChangesView {
     let primary = p.primary;
     let palette = *p;
     let handle = div()
-      .id("changes-file-list-resize")
-      .debug_selector(|| "changes-file-list-resize".into())
+      .selector("changes-file-list-resize")
       .absolute()
       .top_0()
       .bottom_0()
@@ -2184,7 +2193,7 @@ impl ChangesView {
         }
       }));
     div()
-      .debug_selector(|| "changes-file-list".into())
+      .selector("changes-file-list")
       .relative()
       .w(zpx(self.side_width))
       .flex_none()
@@ -2208,6 +2217,7 @@ impl ChangesView {
           }
         }),
       )
+      .on_mouse_down_out(cx.listener(|this, _, _, cx| this.click_away(cx)))
       .on_mouse_up_out(
         MouseButton::Left,
         cx.listener(|this, _, _, cx| {
@@ -2285,8 +2295,7 @@ impl ChangesView {
         .justify_between()
         .child(
           ui::text(div(), TextSize::Sm)
-            .id("changes-nothing-to-commit")
-            .debug_selector(|| "changes-nothing-to-commit".into())
+            .selector("changes-nothing-to-commit")
             .role(gpui::Role::Status)
             .aria_label("Nothing to commit")
             .test_support()
@@ -2458,7 +2467,7 @@ impl ChangesView {
       }))
       .child(
         div()
-          .debug_selector(|| "commit-message".into())
+          .selector("commit-message")
           .when(error.is_some(), |this| {
             this
               .rounded(radius::MD)
@@ -2470,8 +2479,7 @@ impl ChangesView {
       .when_some(error, |this, err| {
         this.child(
           div()
-            .id("commit-message-error")
-            .debug_selector(|| "commit-message-error".into())
+            .selector("commit-message-error")
             .role(gpui::Role::Alert)
             .aria_label(err)
             .text_color(p.destructive)
@@ -2907,20 +2915,11 @@ impl ChangesView {
     };
     let red = Tone::Danger.text(p);
     let status_color = p.muted_foreground;
-    let mut actions = div()
-      .flex()
-      .items_center()
-      .gap_1()
-      .flex_none()
-      .child(self.status_letter(
-        format!("{list:?}-{}", file.path),
-        &file.status,
-        status_color,
-        cx,
-      ));
+    // The selection's last row keeps its buttons; the others show them on hover.
+    let shown = selected && (staged || last);
+    let hidden = !shown;
+    let mut actions = div().flex().items_center().gap_1().flex_none();
     if !staged {
-      // The selection's last row keeps its buttons; the others show them on hover.
-      let hidden = !(last && selected);
       let target = path.clone();
       let tip_key = format!("discard-tip-{}", file.path);
       let el = small(
@@ -2960,7 +2959,7 @@ impl ChangesView {
         format!("Unstage {}", file.path),
         theme::ICON_MINUS,
         name_color,
-        !selected,
+        hidden,
       )
       .on_click(cx.listener(move |view, _, _, cx| {
         cx.stop_propagation();
@@ -2969,6 +2968,26 @@ impl ChangesView {
       .test_support();
       actions = actions.child(self.tip(tip_key, "Unstage file", el, cx));
     }
+    // Over the last button, at the committed rows' right edge, and hidden
+    // while the buttons show. Visibility, not display: a hover that changes
+    // layout can skip a child's prepaint and then panic in paint.
+    let letter = div()
+      .absolute()
+      .top_0()
+      .bottom_0()
+      .right_0()
+      .flex()
+      .items_center()
+      .child(self.status_letter(
+        format!("{list:?}-{}", file.path),
+        &file.status,
+        status_color,
+        cx,
+      ));
+    actions = actions.relative().child(match shown {
+      true => letter.invisible(),
+      false => letter.group_hover("file-row", |s| s.invisible()),
+    });
     let (click, menu) = (path.clone(), path);
     ui::Row::new(
       SharedString::from(format!(
@@ -2989,6 +3008,8 @@ impl ChangesView {
     .min_w_0()
     .gap_1()
     .px_0()
+    // The committed rows' right inset.
+    .pr_1p5()
     .rounded_none()
     .border_l_2()
     .border_color(gpui::transparent_black())
@@ -3068,8 +3089,7 @@ impl ChangesView {
     if let Some(err) = self.pr.as_ref().and_then(|pr| pr.error.clone()) {
       return area.child(
         ui::text(div(), TextSize::Sm)
-          .id("pr-diff-error")
-          .debug_selector(|| "pr-diff-error".into())
+          .selector("pr-diff-error")
           .role(gpui::Role::Alert)
           .aria_label(format!("Failed to load the PR diff: {err}"))
           .test_support()
@@ -3094,7 +3114,7 @@ impl ChangesView {
       };
       return area.child(
         div()
-          .debug_selector(|| "changes-loading-skeleton".into())
+          .selector("changes-loading-skeleton")
           .size_full()
           .p_4()
           .flex()
@@ -3185,36 +3205,31 @@ impl ChangesView {
 
   /// A card's header and file comments, then the threads and comments with
   /// no line above its hunks, or what it shows in their place.
-  fn card_head(&mut self, c: usize, p: &Palette, cx: &mut Context<Self>) -> gpui::AnyElement {
+  /// `pinned`: its header is drawn pinned over the list, which covers this
+  /// one, so it is hidden.
+  fn card_head(
+    &mut self,
+    c: usize,
+    pinned: bool,
+    p: &Palette,
+    cx: &mut Context<Self>,
+  ) -> gpui::AnyElement {
     let card = &self.diff.cards[c];
-    let (path, status, old_path) = (
-      card.path.clone(),
-      card.status.clone(),
-      card.old_path.clone(),
-    );
-    let (committed, shut, kind, conflicted_file) =
-      (card.committed, card.shut, card.body, card.conflicted);
-    let counts = self.card_counts(c);
-    let header = self.file_header(
-      &path,
-      &status,
-      old_path.as_deref(),
-      committed,
-      shut,
-      counts,
-      p,
-      cx,
-    );
+    let (path, kind, conflicted_file) = (card.path.clone(), card.body, card.conflicted);
+    let header = self.card_header(c, p, cx);
     let card = div()
-      .child(header)
+      .child(div().when(pinned, |this| this.invisible()).child(header))
       .children(self.file_comments(&path, p, cx));
     let muted = p.muted_foreground;
-    let placeholder = |el: Div| div().font_family(theme::MONO_FONT).child(el);
+    let placeholder =
+      |el: ObservedElement<gpui::Stateful<Div>>| div().font_family(theme::MONO_FONT).child(el);
     match kind {
       Body::Binary | Body::Deleted => card.child(placeholder(
         div()
-          .when(kind == Body::Deleted, |this| {
-            this.debug_selector(|| "deleted-file-placeholder".into())
+          .selector(if kind == Body::Deleted {
+            "deleted-file-placeholder"
+          } else {
+            "binary-file-placeholder"
           })
           .flex()
           .items_center()
@@ -3251,26 +3266,24 @@ impl ChangesView {
             .unwrap_or_default(),
         ),
       ),
-      Body::Empty => card.child(
-        div()
-          .debug_selector(|| "empty-diff-placeholder".into())
-          .child(if conflicted_file {
-            ui::EmptyState::new(
-              "empty-diff-conflicted",
-              "No diff for this conflicted file",
-              p,
-            )
-            .message("The file may have been deleted on one side of the conflict.")
-          } else {
-            ui::EmptyState::new("empty-diff-none", "No diff hunks", p)
-              .message("This change has no text lines to show, such as a mode change.")
-          }),
-      ),
+      Body::Empty => card.child(div().selector("empty-diff-placeholder").child(
+        if conflicted_file {
+          ui::EmptyState::new(
+            "empty-diff-conflicted",
+            "No diff for this conflicted file",
+            p,
+          )
+          .message("The file may have been deleted on one side of the conflict.")
+        } else {
+          ui::EmptyState::new("empty-diff-none", "No diff hunks", p)
+            .message("This change has no text lines to show, such as a mode change.")
+        },
+      )),
       Body::Generated => {
         let file = path.clone();
         card.child(
           div()
-            .debug_selector(|| "generated-file-placeholder".into())
+            .selector("generated-file-placeholder")
             .py_6()
             .flex()
             .flex_col()
@@ -3315,6 +3328,28 @@ impl ChangesView {
       Body::Collapsed => card,
     }
     .into_any_element()
+  }
+
+  /// A card's file header: its path, actions and counts.
+  fn card_header(&mut self, c: usize, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    let card = &self.diff.cards[c];
+    let (path, status, old_path) = (
+      card.path.clone(),
+      card.status.clone(),
+      card.old_path.clone(),
+    );
+    let (committed, shut) = (card.committed, card.shut);
+    let counts = self.card_counts(c);
+    self.file_header(
+      &path,
+      &status,
+      old_path.as_deref(),
+      committed,
+      shut,
+      counts,
+      p,
+      cx,
+    )
   }
 
   #[expect(
@@ -3436,10 +3471,9 @@ impl ChangesView {
           format!("add-file-comment-tip-{path}"),
           "Add file comment",
           div()
-            .id(SharedString::from(format!("add-file-comment-{path}")))
+            .selector(SharedString::from(format!("add-file-comment-{path}")))
             .role(gpui::Role::Button)
             .aria_label(format!("Add file comment on {path}"))
-            .debug_selector(|| "add-file-comment-button".into())
             .p_1()
             .rounded(radius::SM)
             .cursor_pointer()
@@ -3466,6 +3500,7 @@ impl ChangesView {
         ui::Checkbox::new(format!("viewed-{path}"), p)
           .checked(viewed)
           .label("Viewed")
+          .name(format!("Viewed {path}"))
           .gap_1()
           .px_2()
           .py_0p5()
@@ -3486,7 +3521,7 @@ impl ChangesView {
     if deleted {
       right = right.child(
         div()
-          .debug_selector(|| "deleted-file-badge".into())
+          .selector("deleted-file-badge")
           .child(badge("Deleted", Tone::Danger)),
       );
     }
@@ -3619,10 +3654,9 @@ impl ChangesView {
           "Base" => Tone::Warning,
           _ => Tone::DiffAdded,
         };
-        // Short label (['badge']): 11px is fine.
-        // ast-grep-ignore: gpui-text-xs-short-label-only
+        // Short label (badge). ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
-          .debug_selector(move || format!("conflict-label-{label}"))
+          .selector(format!("conflict-label-{label}"))
           .mr_2()
           .px_1p5()
           .py_0p5()
@@ -3636,7 +3670,7 @@ impl ChangesView {
       let line_id = format!("conflict-line-{}-{i}-{side:?}", conflict.id);
       pre = pre.child(
         div()
-          .debug_selector(move || line_id)
+          .selector(line_id)
           .flex()
           .when_some(bg, |this, bg| this.bg(bg))
           .when(kind == ConflictLineKind::Marker, |this| {
@@ -3653,8 +3687,7 @@ impl ChangesView {
       );
       let deleted_notice = |side: &'static str, tone: Tone| {
         div()
-          .id("conflict-deleted-side")
-          .debug_selector(|| "conflict-deleted-side".into())
+          .selector("conflict-deleted-side")
           .role(gpui::Role::Label)
           .aria_label(format!("{side} deleted this file"))
           .my_1()
@@ -3683,8 +3716,7 @@ impl ChangesView {
     };
     let card = format!("conflict-card-{}", conflict.id);
     div()
-      .id(SharedString::from(card.clone()))
-      .debug_selector(move || card)
+      .selector(SharedString::from(card))
       .role(gpui::Role::Group)
       .aria_label(number.clone())
       .bg(p.destructive.opacity(0.1))
@@ -3697,8 +3729,7 @@ impl ChangesView {
       .gap_2()
       .font_family(theme::SANS_FONT)
       .child(
-        // Short label (['line-range meta']): 11px is fine.
-        // ast-grep-ignore: gpui-text-xs-short-label-only
+        // Short label (line-range meta). ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
           .flex()
           .items_center()
@@ -3775,11 +3806,9 @@ fn file_action(
   fg: Hsla,
   hidden: bool,
   p: &Palette,
-) -> Stateful<Div> {
-  let selector = id.clone();
+) -> ObservedElement<Stateful<Div>> {
   div()
-    .id(SharedString::from(id))
-    .debug_selector(move || selector)
+    .selector(SharedString::from(id))
     .role(gpui::Role::Button)
     .aria_label(name)
     .p_0p5()
@@ -3820,7 +3849,7 @@ fn context_row(
         .child(div().w_10().mr_1().flex().justify_end().child(number(old)))
         .child(
           div()
-            .debug_selector(move || selector)
+            .selector(selector)
             .w_10()
             .flex()
             .justify_end()

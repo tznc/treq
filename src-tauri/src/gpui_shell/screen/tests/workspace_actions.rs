@@ -107,6 +107,24 @@ fn creates_a_pull_request_pushing_first(cx: &mut TestAppContext) {
   );
 }
 
+/// GitHub starts the pushed commit's checks a moment after the PR is made:
+/// the poller reads the PR again then, not on its next round.
+#[gpui::test]
+fn reads_checks_again_a_moment_after_creating_a_pull_request(cx: &mut TestAppContext) {
+  let (mut h, host) = workspace_harness(cx, no_pr_host(), workspace_route());
+  h.click("workspace-create-pr");
+  h.cx.run_until_parked();
+  assert_eq!(calls_starting(&host, &["refresh pr"]).len(), 1);
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_secs(5));
+  h.cx.run_until_parked();
+  assert_eq!(
+    calls_starting(&host, &["refresh pr"]),
+    ["refresh pr status feature/login"; 2]
+  );
+}
+
 #[gpui::test]
 fn creates_a_draft_or_manual_pull_request_from_the_menu(cx: &mut TestAppContext) {
   let (mut h, host) = workspace_harness(cx, no_pr_host(), workspace_route());

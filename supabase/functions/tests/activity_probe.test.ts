@@ -12,6 +12,7 @@ import {
   probeCommand,
   summarizeProbe,
 } from "../_shared/remote/activity-probe.ts";
+import { defined } from "./helpers/remote_fakes.ts";
 
 const NOW = 1_800_000_000; // seconds
 const now = new Date(NOW * 1000);
@@ -87,7 +88,7 @@ Deno.test("summary classifies processes by origin and hides the probe and system
     assert(!byPid.has(hidden), `pid ${hidden} is hidden`);
   }
   // Busiest first.
-  assertEquals(s.processes[0].pid, 500);
+  assertEquals(s.processes[0]?.pid, 500);
 });
 
 Deno.test("ssh sessions, recent agent turns and recent terminals are activity", () => {
@@ -189,7 +190,7 @@ Deno.test("expired pins, pins on gone processes and pid pins on a recycled pid d
   const s = summarizeProbe(raw, pins, { now, recentSec: 900 });
   assertEquals(s.active, false);
   assertEquals(s.live_pins, []);
-  assertEquals(s.processes[0].pinned, false);
+  assertEquals(s.processes[0]?.pinned, false);
 });
 
 Deno.test("a pid pin matches when the command is unchanged", () => {
@@ -208,5 +209,5 @@ Deno.test("long commands are truncated and the list is capped", () => {
   for (let i = 0; i < 150; i++) ps.push([1000 + i, 1, 1000, i, "?", "x".repeat(400)]);
   const s = summarizeProbe(parseProbeOutput(sample({ ps, agents: [], ttys: [] })), [], { now, recentSec: 900 });
   assertEquals(s.processes.length, 100);
-  assert(s.processes[0].command.length <= 200);
+  assert(defined(s.processes[0]).command.length <= 200);
 });

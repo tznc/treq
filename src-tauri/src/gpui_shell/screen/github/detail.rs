@@ -9,6 +9,7 @@ use tauri_plugin_gpui::gpui::{
   self, deferred, div, prelude::*, Context, Div, FontWeight, KeyDownEvent, MouseButton,
   SharedString, Window,
 };
+use treq_ui::SelectorExt as _;
 
 use super::{
   parts::{self, named},
@@ -1028,8 +1029,7 @@ impl GithubView {
         .when(!shown.is_empty(), |d| {
           d.child(
             div()
-              .id("github-checks-list")
-              .debug_selector(|| "github-checks-list".into())
+              .selector("github-checks-list")
               .max_h(zpx(data::CHECKS_MAX_HEIGHT))
               .overflow_y_scroll()
               .border_1()

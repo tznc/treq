@@ -114,9 +114,7 @@ pub struct CommitsScreen {
 
 impl CommitsScreen {
   pub fn new(target: Target, cx: &mut Context<Self>) -> Self {
-    // Its workspace screen reloads it (on a new epoch too), so it doesn't
-    // watch the epoch itself. The log is usually prefetched (see
-    // [`prefetch`]), or shown from the last visit.
+    // Its workspace screen reloads it on new epochs. The log is prefetched or from the last visit.
     let log = remote::last(&request(&target)).map_or(Load::Idle, Load::Ready);
     let mut this = Self {
       target,
@@ -201,8 +199,7 @@ impl CommitsScreen {
     if description == commit.description {
       return;
     }
-    // The row shows the new description at once; a failure puts the old
-    // one back.
+    // The row shows the new description at once, and a failure puts the old one back.
     let before = self.set_description(&commit.change_id, &description);
     let request = TreqCommandRequest::DescribeCommit {
       repo: self.target.repo.clone(),
@@ -425,8 +422,7 @@ impl Render for CommitsScreen {
         .gap_3()
         .items_center()
         .justify_between()
-        // Takes the row's free width and wraps, so a long error stays on
-        // screen.
+        // Takes the row's free width and wraps, so a long error stays on screen.
         .child(
           if notice.ok {
             widgets::muted(notice.text, cx)

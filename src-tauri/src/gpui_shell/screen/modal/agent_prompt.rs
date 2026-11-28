@@ -8,6 +8,8 @@ use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
 use crate::result_ext::ResultExt;
+use gpui_kit::base::ObservedElement;
+use treq_ui::SelectorExt as _;
 
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::{
@@ -770,6 +772,7 @@ impl AgentPromptView {
       agent: agent.id().into(),
       mode: "acceptEdits".into(),
       save_as_repo_default: self.save_default && agent != configured,
+      profile: None,
     };
     read!(
       self,
@@ -802,10 +805,9 @@ impl AgentPromptView {
       };
       let note = format!("Opens a workspace for {}{noun}", issue.key);
       return ui::text(div(), TextSize::Sm)
-        .id("agent-prompt-issue-note")
+        .selector("agent-prompt-issue-note")
         .role(gpui::Role::Paragraph)
         .aria_label(note.clone())
-        .debug_selector(|| "agent-prompt-issue-note".into())
         .flex()
         .items_center()
         .gap_2()
@@ -851,10 +853,9 @@ impl AgentPromptView {
             let chosen = self.selected == id;
             let selector = SharedString::from(format!("agent-prompt-workspace-{}", label));
             ui::text(div(), TextSize::Sm)
-              .id(selector.clone())
+              .selector(selector)
               .role(gpui::Role::MenuItemCheckBox)
               .aria_label(label.clone())
-              .debug_selector(move || selector.to_string())
               .flex()
               .items_center()
               .gap_2()
@@ -880,10 +881,9 @@ impl AgentPromptView {
       };
       deferred(
         div()
-          .id("agent-prompt-workspace-popover")
+          .selector("agent-prompt-workspace-popover")
           .role(gpui::Role::Dialog)
           .aria_label("Choose a workspace")
-          .debug_selector(|| "agent-prompt-workspace-popover".into())
           .absolute()
           .top(zpx(44.))
           .left_0()
@@ -962,10 +962,9 @@ impl AgentPromptView {
         // Short label (['chip']): 11px is fine.
         // ast-grep-ignore: gpui-text-xs-short-label-only
         ui::text(div(), TextSize::Xs)
-          .id("issue-chip")
+          .selector("issue-chip")
           .role(gpui::Role::Group)
           .aria_label(format!("{} {}", issue.source.label(), issue.key))
-          .debug_selector(|| "issue-chip".into())
           .flex()
           .items_center()
           .gap_1()
@@ -983,10 +982,9 @@ impl AgentPromptView {
           )))
           .child(
             div()
-              .id("issue-chip-remove")
+              .selector("issue-chip-remove")
               .role(gpui::Role::Button)
               .aria_label("Remove issue")
-              .debug_selector(|| "issue-chip-remove".into())
               .ml_0p5()
               .p_0p5()
               .rounded(radius::SM)
@@ -1015,81 +1013,78 @@ impl AgentPromptView {
     let border = if self.focused { p.primary } else { p.border };
     let mention = self.mention.clone().filter(|m| !m.results.is_empty());
     let issue = self.issue.clone();
-    div()
-      .debug_selector(|| "agent-task-input".into())
-      .w_full()
-      .child(
-        div()
-          .id("task-card")
-          .min_h(zpx(112.))
-          .rounded(radius::LG)
-          .border_1()
-          .border_color(border)
-          .bg(p.background)
-          .text_color(p.foreground)
-          .relative()
-          .flex()
-          .flex_col()
-          .capture_action(cx.listener(|view, _: &MoveDown, _, cx| {
-            if view.mention_open() {
-              view.step_mention(1, cx);
-              cx.stop_propagation();
-            }
-          }))
-          .capture_action(cx.listener(|view, _: &MoveUp, _, cx| {
-            if view.mention_open() {
-              view.step_mention(-1, cx);
-              cx.stop_propagation();
-            }
-          }))
-          .capture_action(cx.listener(|view, action: &Enter, window, cx| {
-            if view.mention_open() && !action.secondary {
-              let index = view.mention.as_ref().map_or(0, |m| m.index);
-              view.select_mention(index, window, cx);
-              cx.stop_propagation();
-            }
-          }))
-          // ⌘/Ctrl+Enter is unbound in inputs (treq-ui `init`), so it
-          // arrives as a key, not an `Enter` action.
-          .capture_key_down(cx.listener(|view, e: &gpui::KeyDownEvent, _, cx| {
-            let k = &e.keystroke;
-            let held = crate::gpui_shell::keys::held(k.modifiers);
-            if k.key == "enter" && (held.platform || held.control) && !held.shift {
-              view.submit(cx);
-              cx.stop_propagation();
-            }
-          }))
-          .capture_action(cx.listener(|view, _: &Escape, _, cx| {
-            if view.mention.take().is_some() {
-              cx.notify();
-            }
-          }))
-          .capture_action(cx.listener(|view, _: &IndentInline, _, cx| {
-            if view.mention.take().is_some() {
-              cx.notify();
-            }
-          }))
-          .children(issue.map(|issue| self.issue_chip(&issue, p, cx)))
-          .child(
-            ui::text(div(), TextSize::Sm)
-              .debug_selector(|| "task-input".into())
-              // The textarea's own 4px inset makes up React's `px-4`.
-              .px_3()
-              .pt_3()
-              .pb_1()
-              .min_h(zpx(44.))
-              .max_h(zpx(200.))
-              .child(ui::text(
-                Textarea::new(&task)
-                  .appearance(false)
-                  .bordered(false)
-                  .xsmall(),
-                TextSize::Sm,
-              )),
-          )
-          .children(mention.map(|m| self.mention_dropdown(&m, p, cx)))
-          .child(div().mt_auto().child(self.toolbar(p, cx))),
-      )
+    div().selector("agent-task-input").w_full().child(
+      div()
+        .id("task-card")
+        .min_h(zpx(112.))
+        .rounded(radius::LG)
+        .border_1()
+        .border_color(border)
+        .bg(p.background)
+        .text_color(p.foreground)
+        .relative()
+        .flex()
+        .flex_col()
+        .capture_action(cx.listener(|view, _: &MoveDown, _, cx| {
+          if view.mention_open() {
+            view.step_mention(1, cx);
+            cx.stop_propagation();
+          }
+        }))
+        .capture_action(cx.listener(|view, _: &MoveUp, _, cx| {
+          if view.mention_open() {
+            view.step_mention(-1, cx);
+            cx.stop_propagation();
+          }
+        }))
+        .capture_action(cx.listener(|view, action: &Enter, window, cx| {
+          if view.mention_open() && !action.secondary {
+            let index = view.mention.as_ref().map_or(0, |m| m.index);
+            view.select_mention(index, window, cx);
+            cx.stop_propagation();
+          }
+        }))
+        // ⌘/Ctrl+Enter is unbound in inputs (treq-ui `init`), so it
+        // arrives as a key, not an `Enter` action.
+        .capture_key_down(cx.listener(|view, e: &gpui::KeyDownEvent, _, cx| {
+          let k = &e.keystroke;
+          let held = crate::gpui_shell::keys::held(k.modifiers);
+          if k.key == "enter" && (held.platform || held.control) && !held.shift {
+            view.submit(cx);
+            cx.stop_propagation();
+          }
+        }))
+        .capture_action(cx.listener(|view, _: &Escape, _, cx| {
+          if view.mention.take().is_some() {
+            cx.notify();
+          }
+        }))
+        .capture_action(cx.listener(|view, _: &IndentInline, _, cx| {
+          if view.mention.take().is_some() {
+            cx.notify();
+          }
+        }))
+        .children(issue.map(|issue| self.issue_chip(&issue, p, cx)))
+        .child(
+          ui::text(div(), TextSize::Sm)
+            .selector("task-input")
+            // The textarea's own 4px inset makes up React's `px-4`.
+            .px_3()
+            .pt_3()
+            .pb_1()
+            .min_h(zpx(44.))
+            .max_h(zpx(200.))
+            .child(ui::text(
+              Textarea::new(&task)
+                .appearance(false)
+                .bordered(false)
+                .xsmall(),
+              TextSize::Sm,
+            )),
+        )
+        .children(mention.map(|m| self.mention_dropdown(&m, p, cx)))
+        .child(div().mt_auto().child(self.toolbar(p, cx))),
+    )
   }
 
   fn mention_dropdown(
@@ -1099,7 +1094,7 @@ impl AgentPromptView {
     cx: &mut Context<Self>,
   ) -> impl IntoElement {
     div()
-      .debug_selector(|| "task-mentions".into())
+      .selector("task-mentions")
       .mx_2()
       .mb_1()
       .rounded(radius::LG)
@@ -1223,8 +1218,7 @@ impl AgentPromptView {
           // The wrapper keeps the combobox name, value and click; the
           // picker inside draws it.
           div()
-            .id("task-agent")
-            .debug_selector(|| "task-agent".into())
+            .selector("task-agent")
             .role(gpui::Role::ComboBox)
             .aria_label("Agent")
             .aria_value(agent.label())
@@ -1277,9 +1271,9 @@ impl AgentPromptView {
 
   fn close_menu_on_outside(
     &self,
-    panel: Stateful<gpui::Div>,
+    panel: ObservedElement<Stateful<gpui::Div>>,
     cx: &mut Context<Self>,
-  ) -> Stateful<gpui::Div> {
+  ) -> ObservedElement<Stateful<gpui::Div>> {
     panel.on_mouse_down_out(cx.listener(|view, _, _, cx| {
       if view.menu.take().is_some() {
         cx.notify();

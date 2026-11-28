@@ -248,16 +248,14 @@ impl Render for Popover {
       Content::Checks(_) => (checks::WIDTH, self.render_checks(&p, cx).into_any_element()),
     };
     let origin = self.origin(width, viewport);
-    // A press anywhere outside the popover, its own button included,
-    // only closes it.
+    // A press outside the popover, its own button included, only closes it.
     let close =
       |this: &mut Self, _: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>| this.close(cx);
     div()
       .selector("header-popover-backdrop")
       // A dismiss target, not a control.
       .cursor_default()
-      // The workspace view places it at the window's origin; it covers the
-      // window.
+      // The workspace view places it at the window's origin, so it covers the window.
       .w(viewport.width)
       .h(viewport.height)
       // What lies under the backdrop gets no press while the popover shows.
