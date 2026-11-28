@@ -1691,6 +1691,40 @@ fn changes_tab_quotes_a_review_thread(cx: &mut TestAppContext) {
   assert_eq!(saved[0]["start_line"], 2);
 }
 
+/// Clicks the first comment's Quote, then says whether the comment box sits
+/// between the first and the second comment.
+fn quote_box_follows_the_first_thread(h: &mut Harness) -> bool {
+  use gpui_testing_library::prelude::*;
+  let screen = a11y_screen(h);
+  let quotes = screen.get_all_by_role(by::role(gpui::Role::Button).name("Quote"));
+  screen.user().click(&quotes[0]);
+  let comments =
+    screen.get_all_by_role(by::role(gpui::Role::Group).name(TextMatch::regex("^Comment by ")));
+  let input = screen.get_by_role(by::role(gpui::Role::MultilineTextInput).name("Add a comment…"));
+  let (first, second, input) = (comments[0].bounds(), comments[1].bounds(), input.bounds());
+  input.top() >= first.bottom() && input.bottom() <= second.top()
+}
+
+/// Quote opens the comment box under the thread it quotes, not under the
+/// last thread on its line, where it can be off screen.
+#[gpui::test]
+fn quote_opens_the_comment_box_under_the_quoted_thread(cx: &mut TestAppContext) {
+  let mut host = changes_host();
+  host.threads = vec![gh_thread("t1", 2, false), gh_thread("t2", 2, false)];
+  let (mut h, _) = workspace_harness(cx, host, changes_route());
+  assert!(quote_box_follows_the_first_thread(&mut h));
+}
+
+/// The same for threads above the file, whose line is not in the diff.
+#[gpui::test]
+fn quote_opens_the_comment_box_under_a_quoted_thread_above_the_file(cx: &mut TestAppContext) {
+  let mut host = changes_host();
+  host.threads = vec![gh_thread("t1", 40, false), gh_thread("t2", 50, false)];
+  let (mut h, _) = workspace_harness(cx, host, changes_route());
+  assert!(h.shows(gpui::Role::Group, "Outdated threads on a.rs"));
+  assert!(quote_box_follows_the_first_thread(&mut h));
+}
+
 #[gpui::test]
 fn changes_tab_draws_a_github_suggestion_as_a_diff(cx: &mut TestAppContext) {
   let mut host = changes_host();
