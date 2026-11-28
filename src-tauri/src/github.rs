@@ -2137,6 +2137,10 @@ pub struct GhReviewComment {
   pub diff_hunk: String,
   pub url: String,
   pub reactions: Vec<GhReactionGroup>,
+  /// The author's GitHub user id, for a co-author trailer; `None` for bots
+  /// and deleted users.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub author_id: Option<u64>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq)]
@@ -2173,7 +2177,7 @@ pub(crate) const REVIEW_THREADS_QUERY: &str = r#"query($owner: String!, $repo: S
               createdAt
               url
               diffHunk
-              author { login avatarUrl }
+              author { login avatarUrl ... on User { databaseId } }
               reactionGroups { content viewerHasReacted reactors { totalCount } }
             }
           }
@@ -2264,6 +2268,8 @@ struct GqlAuthor {
   login: String,
   #[serde(rename = "avatarUrl")]
   avatar_url: Option<String>,
+  #[serde(rename = "databaseId", default)]
+  database_id: Option<u64>,
 }
 
 impl GqlResponse {
@@ -2290,6 +2296,7 @@ impl GqlResponse {
           .nodes
           .into_iter()
           .map(|c| GhReviewComment {
+            author_id: c.author.as_ref().and_then(|a| a.database_id),
             id: c.id,
             body: c.body,
             author: c
@@ -2375,6 +2382,38 @@ pub fn gh_list_pr_review_threads_impl(
   }
 
   Ok(threads)
+}
+
+pub(crate) const RESOLVE_REVIEW_THREAD_MUTATION: &str =
+  "mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { clientMutationId } }";
+
+/// Marks a PR review thread resolved.
+pub fn gh_resolve_review_thread_impl(
+  gh_path: &str,
+  thread_id: &str,
+  extended_path: &str,
+) -> Result<(), String> {
+  let input = serde_json::json!({
+    "query": RESOLVE_REVIEW_THREAD_MUTATION,
+    "variables": { "id": thread_id },
+  });
+  let out = run_gh_with_stdin(
+    gh_path,
+    &["api", "graphql", "--input", "-"],
+    &input.to_string(),
+    extended_path,
+  )?;
+  check_graphql_errors(&check_gh_output(out)?)
+}
+
+/// The message for a commit that applies a reviewer's suggestion, crediting
+/// them the way GitHub's own "Commit suggestion" does.
+pub fn suggestion_commit_message(login: &str, user_id: Option<u64>) -> String {
+  let email = match user_id {
+    Some(id) => format!("{id}+{login}@users.noreply.github.com"),
+    None => format!("{login}@users.noreply.github.com"),
+  };
+  format!("Apply suggestion from @{login}\n\nCo-authored-by: {login} <{email}>")
 }
 
 #[cfg(test)]
@@ -2675,6 +2714,7 @@ mod tests {
       start_line: None,
       diff_side: "RIGHT".into(),
       comments: vec![GhReviewComment {
+        author_id: None,
         id: "r1".into(),
         body: "b".into(),
         author,
@@ -4111,6 +4151,62 @@ esac
     let result = gh_list_pr_review_threads_impl(&gh_path, "owner", "repo", 1, "/usr/bin:/bin");
 
     assert!(result.is_err());
+  }
+
+  #[test]
+  #[cfg(unix)]
+  fn test_gh_list_pr_review_threads_reads_start_line_and_author_id() {
+    let bin_dir = TempDir::new().unwrap();
+    let response = serde_json::json!({
+        "data": {"repository": {"pullRequest": {"reviewThreads": {
+            "pageInfo": {"hasNextPage": false, "endCursor": null},
+            "nodes": [{
+                "id": "T1", "isResolved": false, "isOutdated": false,
+                "path": "a.rs", "line": 9, "startLine": 7, "diffSide": "RIGHT",
+                "comments": {"nodes": [{
+                    "id": "C1", "body": "x", "createdAt": "2026-01-01T00:00:00Z",
+                    "url": "u", "diffHunk": "",
+                    "author": {"login": "zoe", "avatarUrl": null, "databaseId": 42}
+                }]}
+            }]
+        }}}}
+    });
+    let gh_path = write_fake_gh(&bin_dir, &format!("cat <<'EOF'\n{response}\nEOF\n"));
+
+    let threads =
+      gh_list_pr_review_threads_impl(&gh_path, "owner", "repo", 1, "/usr/bin:/bin").unwrap();
+
+    assert_eq!(threads[0].start_line, Some(7));
+    assert_eq!(threads[0].comments[0].author_id, Some(42));
+  }
+
+  #[test]
+  #[cfg(unix)]
+  fn test_gh_resolve_review_thread_sends_mutation() {
+    let bin_dir = TempDir::new().unwrap();
+    let gh_path = write_stdin_recording_gh(&bin_dir, r#"{"data":{}}"#);
+
+    gh_resolve_review_thread_impl(&gh_path, "PRRT_1", "/usr/bin:/bin").unwrap();
+
+    let stdin: serde_json::Value =
+      serde_json::from_str(&fs::read_to_string(bin_dir.path().join("stdin")).unwrap()).unwrap();
+    assert!(stdin["query"]
+      .as_str()
+      .unwrap()
+      .contains("resolveReviewThread"));
+    assert_eq!(stdin["variables"]["id"], "PRRT_1");
+  }
+
+  #[test]
+  fn suggestion_commit_message_credits_the_reviewer() {
+    assert_eq!(
+      suggestion_commit_message("zoe", Some(42)),
+      "Apply suggestion from @zoe\n\nCo-authored-by: zoe <42+zoe@users.noreply.github.com>"
+    );
+    assert_eq!(
+      suggestion_commit_message("zoe", None),
+      "Apply suggestion from @zoe\n\nCo-authored-by: zoe <zoe@users.noreply.github.com>"
+    );
   }
 
   // ── PR review (diff, thread reply, submit) ───────────────────────────────

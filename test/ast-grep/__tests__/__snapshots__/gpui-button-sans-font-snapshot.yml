@@ -1,0 +1,84 @@
+id: gpui-button-sans-font
+snapshots:
+  ? |
+    fn f(p: &Palette) {
+      Button::new("resolve", p).label("Resolve").font_family(theme::MONO_FONT);
+    }
+  : labels:
+    - source: Button::new("resolve", p).label("Resolve").font_family(theme::MONO_FONT)
+      style: primary
+      start: 22
+      end: 94
+    - source: Button::new("resolve", p).label("Resolve")
+      style: secondary
+      start: 22
+      end: 64
+    - source: Button::new("resolve", p).label("Resolve")
+      style: secondary
+      start: 22
+      end: 64
+  ? |
+    fn f(p: &Palette) {
+      ui::IconButton::new("copy", theme::ICON_COPY, "Copy", p).font_family(theme::SANS_FONT);
+    }
+  : labels:
+    - source: ui::IconButton::new("copy", theme::ICON_COPY, "Copy", p).font_family(theme::SANS_FONT)
+      style: primary
+      start: 22
+      end: 108
+    - source: ui::IconButton::new("copy", theme::ICON_COPY, "Copy", p)
+      style: secondary
+      start: 22
+      end: 78
+    - source: ui::IconButton::new("copy", theme::ICON_COPY, "Copy", p)
+      style: secondary
+      start: 22
+      end: 78
+  ? |
+    impl RenderOnce for Button {
+      fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        Base::new(self.id).font_family(theme::MONO_FONT)
+      }
+    }
+  : labels:
+    - source: |-
+        impl RenderOnce for Button {
+          fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+            Base::new(self.id).font_family(theme::MONO_FONT)
+          }
+        }
+      style: primary
+      start: 0
+      end: 156
+    - source: RenderOnce
+      style: secondary
+      start: 5
+      end: 15
+    - source: Button
+      style: secondary
+      start: 20
+      end: 26
+  ? |
+    impl RenderOnce for Button {
+      fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        Base::new(self.id).font_weight(FontWeight::MEDIUM)
+      }
+    }
+  : labels:
+    - source: |-
+        impl RenderOnce for Button {
+          fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+            Base::new(self.id).font_weight(FontWeight::MEDIUM)
+          }
+        }
+      style: primary
+      start: 0
+      end: 158
+    - source: RenderOnce
+      style: secondary
+      start: 5
+      end: 15
+    - source: Button
+      style: secondary
+      start: 20
+      end: 26

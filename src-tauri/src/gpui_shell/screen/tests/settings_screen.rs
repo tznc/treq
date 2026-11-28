@@ -188,12 +188,76 @@ fn settings_saves_the_application_itself(cx: &mut TestAppContext) {
     [
       "set theme=dark",
       "notify settingsChanged",
-      "set default_model= default_agent= conflict_marker_style=git notify_agent_finished=true agent_instructions= terminal_font_size=16 ui_zoom=120",
+      "set default_model= default_agent= conflict_marker_style=git notify_agent_finished=true agent_instructions= terminal_font_size=16 ui_zoom=120 agent_profiles=[] default_profile_claude= default_profile_codex=",
       "notify settingsChanged",
-      "set default_model= default_agent=codex conflict_marker_style=git notify_agent_finished=true agent_instructions= terminal_font_size=16 ui_zoom=120",
+      "set default_model= default_agent=codex conflict_marker_style=git notify_agent_finished=true agent_instructions= terminal_font_size=16 ui_zoom=120 agent_profiles=[] default_profile_claude= default_profile_codex=",
       "notify settingsChanged",
     ]
   );
+}
+
+#[gpui::test]
+fn settings_manages_agent_account_profiles(cx: &mut TestAppContext) {
+  let host = Arc::new(FakeHost::with_settings(&[
+    (
+      "agent_profiles",
+      r#"[{"agent":"claude","name":"work"},{"agent":"codex","name":"work"}]"#,
+    ),
+    ("default_profile_claude", "work"),
+  ]));
+  let mut h = Harness::with_host(cx, settings_route("application"), host.clone());
+  let app = drawn_settings(&mut h).application.expect("application tab");
+  let labels: Vec<_> = app.profiles.iter().map(|p| p.label.as_str()).collect();
+  assert_eq!(labels, ["Claude · work", "Codex · work"]);
+  let claude = &app.default_profiles[0];
+  assert_eq!(
+    (claude.agent.as_str(), claude.value.as_str()),
+    ("claude", "work")
+  );
+  let values: Vec<_> = claude.options.iter().map(|o| o.value.as_str()).collect();
+  assert_eq!(values, ["", "work"]);
+
+  let view = h
+    .screen
+    .read_with(&h.cx, |s, _| s.settings.clone().expect("drawn"));
+  let send = |h: &mut Harness, action: ScreenAction| {
+    view.update(&mut h.cx, |view, cx| view.handle(action, cx));
+    h.cx.run_until_parked();
+  };
+  let press = |id: &str| ScreenAction::Press { id: id.into() };
+  // A bad name is refused where it was typed, and nothing is saved.
+  send(&mut h, field("app.newProfileName", "My Work".into()));
+  send(&mut h, press("app.addProfile"));
+  let app = drawn_settings(&mut h).application.expect("drawn");
+  assert!(app.profile_error.is_some());
+  assert!(host.writes().is_empty(), "{:?}", host.writes());
+
+  send(&mut h, field("app.newProfileAgent", "claude".into()));
+  send(&mut h, field("app.newProfileName", "personal".into()));
+  send(&mut h, press("app.addProfile"));
+  let app = drawn_settings(&mut h).application.expect("drawn");
+  assert_eq!(app.profile_error, None);
+  assert_eq!(app.new_profile_name, "");
+  assert_eq!(app.profiles.len(), 3);
+  assert_eq!(
+    crate::core::agent_profiles::parse(host.setting("agent_profiles").as_deref()).len(),
+    3
+  );
+
+  send(
+    &mut h,
+    field("app.defaultProfile.claude", "personal".into()),
+  );
+  assert_eq!(
+    host.setting("default_profile_claude").as_deref(),
+    Some("personal")
+  );
+
+  // Removing the default profile clears the default too.
+  send(&mut h, press("app.removeProfile:claude/personal"));
+  let app = drawn_settings(&mut h).application.expect("drawn");
+  assert_eq!(app.profiles.len(), 2);
+  assert_eq!(host.setting("default_profile_claude").as_deref(), Some(""));
 }
 
 #[gpui::test]
@@ -316,7 +380,10 @@ fn settings_reviews_proposed_prompt_edits_with_the_review_cards(cx: &mut TestApp
     .cx
     .debug_bounds("prompt-edit-apply-e1")
     .expect("apply drawn");
-  let card = h.cx.debug_bounds("prompt-edit-card").expect("card drawn");
+  let card = h
+    .cx
+    .debug_bounds("prompt-edit-card-e1")
+    .expect("card drawn");
   assert!(
     dismiss.right() <= apply.left(),
     "{dismiss:?} then {apply:?}"
@@ -369,7 +436,10 @@ fn settings_dismisses_every_proposed_prompt_edit_at_once(cx: &mut TestAppContext
     .cx
     .debug_bounds("prompt-edits-header")
     .expect("header drawn");
-  let card = h.cx.debug_bounds("prompt-edit-card").expect("card drawn");
+  let card = h
+    .cx
+    .debug_bounds("prompt-edit-card-e1")
+    .expect("card drawn");
   assert!(header.contains(&all.center()), "{all:?} in {header:?}");
   assert!(
     (card.right() - all.right()).abs() < gpui::px(1.),

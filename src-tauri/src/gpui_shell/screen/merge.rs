@@ -8,13 +8,13 @@
 use crate::gpui_shell::native::Toast;
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::{zpx, DismissExt as _};
-use gpui_kit::base::TestSupportExt as _;
 use std::{
   collections::HashSet,
   rc::Rc,
   sync::Arc,
   time::{Duration, Instant},
 };
+use treq_ui::SelectorExt as _;
 
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
@@ -830,18 +830,13 @@ impl Render for MergeView {
       );
 
     self.sync_rows(&preview, window);
-    let content = div()
-      .id("merge-scroll")
-      .debug_selector(|| "merge-scroll".into())
-      .flex_1()
-      .min_h_0()
-      .child(
-        gpui::list(
-          self.rows.list.clone(),
-          cx.processor(|view, ix, window, cx| view.row(ix, window, cx)),
-        )
-        .size_full(),
-      );
+    let content = div().selector("merge-scroll").flex_1().min_h_0().child(
+      gpui::list(
+        self.rows.list.clone(),
+        cx.processor(|view, ix, window, cx| view.row(ix, window, cx)),
+      )
+      .size_full(),
+    );
 
     div()
       .size_full()
@@ -941,8 +936,7 @@ impl MergeView {
         .children(self.warnings().into_iter().enumerate().map(|(i, warning)| {
           let selector = format!("merge-warning-{i}");
           ui::text(div(), TextSize::Sm)
-            .id(SharedString::from(selector.clone()))
-            .debug_selector(move || selector)
+            .selector(SharedString::from(selector))
             .role(gpui::Role::Alert)
             .aria_label(warning.clone())
             .flex()
@@ -959,7 +953,6 @@ impl MergeView {
               Tone::Warning.color(p),
             ))
             .child(warning)
-            .test_support()
         }))
         .child(
           div()
@@ -971,13 +964,8 @@ impl MergeView {
               "Merge commit message"
             }))
             .child(
-              ui::text(
-                div()
-                  .id("merge-message")
-                  .debug_selector(|| "merge-message".into()),
-                TextSize::Sm,
-              )
-              .child(form::textarea_field(&textarea, true, rebase)),
+              ui::text(div().selector("merge-message"), TextSize::Sm)
+                .child(form::textarea_field(&textarea, true, rebase)),
             )
             .when(rebase, |this| {
               this.child(
@@ -1121,7 +1109,7 @@ impl MergeView {
           )))
           .child(
             div()
-              .debug_selector(|| "merge-landing".into())
+              .selector("merge-landing")
               .border_1()
               .border_color(p.border)
               .rounded(radius::LG)
@@ -1218,8 +1206,7 @@ impl MergeView {
     let allowed = self.strategies();
     deferred(
       div()
-        .id("merge-strategy-menu")
-        .debug_selector(|| "merge-strategy-menu".into())
+        .selector("merge-strategy-menu")
         .absolute()
         .top(zpx(44.))
         .right_0()
@@ -1249,12 +1236,10 @@ impl MergeView {
             .filter(|(strategy, ..)| allowed.contains(strategy))
             .map(|(strategy, icon, title, detail)| {
               let id = SharedString::from(format!("merge-strategy-{}", strategy.value()));
-              let selector = id.to_string();
               ui::text(div(), TextSize::Sm)
-                .id(id)
+                .selector(id)
                 .role(gpui::Role::RadioButton)
                 .aria_label(title)
-                .debug_selector(move || selector)
                 .relative()
                 .flex()
                 .flex_col()
@@ -1295,7 +1280,6 @@ impl MergeView {
                     .child(detail),
                 )
                 .on_click(self.press(format!("merge.strategy:{}", strategy.value())))
-                .test_support()
             }),
         ),
     )
@@ -1387,8 +1371,7 @@ impl MergeView {
         let path = files.get(i).map(|f| f.path.clone()).unwrap_or_default();
         let id = format!("merge-hunk-{i}-{h}");
         ui::text(div(), TextSize::Sm)
-          .id(SharedString::from(id.clone()))
-          .debug_selector(move || id)
+          .selector(SharedString::from(id))
           .role(gpui::Role::Heading)
           .aria_label(format!("{path} {header}"))
           .when(h == 0, |this| this.border_t_1().border_color(p.border))
@@ -1399,7 +1382,6 @@ impl MergeView {
           .font_family(theme::MONO_FONT)
           .text_color(p.muted_foreground)
           .child(header)
-          .test_support()
           .into_any_element()
       }
       Row::Line(i, h, l) => {

@@ -139,7 +139,7 @@ impl Tooltips {
 /// Marks `key` pending on hover-enter. Returns `false` when `key` is already
 /// pending or shown: a repeat enter (as the popup window opening sends) must
 /// not reset a shown tooltip, which hides and re-shows it in a loop.
-fn enter(current: &mut Option<(SharedString, bool)>, key: &SharedString) -> bool {
+pub(crate) fn enter(current: &mut Option<(SharedString, bool)>, key: &SharedString) -> bool {
   if current.as_ref().is_some_and(|(k, _)| k == key) {
     return false;
   }
