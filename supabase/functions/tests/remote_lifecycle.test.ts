@@ -27,7 +27,11 @@ class FakeProvider implements SandboxProvider {
   kind = "daytona" as const;
   createInstance = unexpectedCall("createInstance");
   replaceInstance = unexpectedCall("replaceInstance");
-  execOnMachine = unexpectedCall("execOnMachine");
+  // A wake writes the trusted CAs.
+  execOnMachine(id: string) {
+    this.calls.push(`exec:${id}`);
+    return Promise.resolve({ exitCode: 0, stdout: "", stderr: "" });
+  }
   gatewayEndpoint = unexpectedCall("gatewayEndpoint");
   capabilities() {
     return { ...DAYTONA_CAPABILITIES, serviceSupervisor: false };
@@ -64,6 +68,9 @@ const asProvider = (p: FakeProvider): SandboxProvider => p;
 // ── Recorded wakes ──────────────────────────────────────────────────────
 
 Deno.test("a recorded wake marks the placement waking, restarts services, then ready", async () => {
+  Deno.env.set("REMOTE_SSH_CA_ED25519_SEED_BASE64", btoa("s".repeat(32)));
+  Deno.env.set("REMOTE_SSH_CA_ED25519_PUBLIC_KEY_BASE64", btoa("p".repeat(32)));
+  Deno.env.delete("REMOTE_SSH_CA_TRUSTED_PUBLIC_KEYS_BASE64");
   const p = new FakeProvider();
   p.machines.set("m1", "suspended");
   const states: Array<[string, string]> = [];
