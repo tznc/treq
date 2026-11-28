@@ -376,9 +376,7 @@ pub(crate) fn fingerprint_of(key: &russh::keys::PublicKeyOrCertificate) -> Optio
     russh::keys::PublicKeyOrCertificate::PublicKey { key, .. } => {
       Some(key.fingerprint(russh::keys::HashAlg::Sha256).to_string())
     }
-    // Server host certificates are not part of the Phase 3 trust model
-    // (`TrustedHostKey` pins bare host keys); rejecting them is the strict,
-    // never-bypass default rather than silently trusting an unpinned CA.
+    // Host certs aren't in the Phase 3 trust model, which pins bare keys, so they're rejected.
     russh::keys::PublicKeyOrCertificate::Certificate(_) => None,
   }
 }
@@ -456,18 +454,13 @@ impl ClientHandlerTrait for TreqSshClientHandler {
           .metrics
           .host_key_mismatch_count
           .fetch_add(1, Ordering::Relaxed);
-        // Redaction: log only the endpoint id and fingerprint (public,
-        // non-sensitive values), never key material.
+        // Log only the endpoint id and public fingerprint, never key material.
         tracing::warn!(
           endpoint_id = %self.verifier.endpoint_id,
           error = %error,
           "ssh host key verification failed"
         );
-        // Returning Ok(false) lets russh reject the connection cleanly
-        // instead of propagating an error that could look like a transport
-        // fault. The `connect()` caller then sees `ConnectionFailed`
-        // ("Disconnected"), so host-key mismatch tests accept that error
-        // as well as `HostKeyMismatch`.
+        // Ok(false) lets russh reject cleanly, so callers see `ConnectionFailed` ("Disconnected").
         Ok(false)
       }
     }
@@ -986,8 +979,7 @@ impl SshConnectionPool {
   async fn reuse(&self, key: &PoolKey) -> Option<Arc<Handle<TreqSshClientHandler>>> {
     let mut connections = self.connections.lock().await;
     let existing = connections.get_mut(key)?;
-    // A session that ended (peer closed, relay worker recycled) is known
-    // closed before any command fails on it.
+    // Catches a session that ended (peer closed, relay recycled) before a command fails on it.
     if existing.handle.is_closed() {
       existing.alive.store(false, Ordering::SeqCst);
     }
@@ -1017,8 +1009,7 @@ impl SshConnectionPool {
     let config = russh::client::Config {
       keepalive_interval: Some(self.keepalive_interval),
       keepalive_max: 3,
-      // Nagle plus delayed ACK stalls the small kex/auth writes by ~40 ms and
-      // delays terminal echo; the relay stream already disables it.
+      // Nagle plus delayed ACK stalls small kex/auth writes by ~40 ms and delays terminal echo.
       nodelay: true,
       ..Default::default()
     };
@@ -1056,10 +1047,7 @@ impl SshConnectionPool {
           self.connect_timeout.as_secs()
         ))
       })??;
-    // "DNS and TCP connection duration": the interval up to a successfully
-    // opened (pre-auth) transport, since `russh::client::connect` does DNS
-    // resolution and the TCP dial internally and does not expose a
-    // narrower hook between the two.
+    // "DNS and TCP" covers up to the pre-auth transport. russh exposes no hook between the two.
     self.metrics.dns_tcp_connect.record(dial_started.elapsed());
 
     let auth_started = Instant::now();
@@ -1079,10 +1067,7 @@ impl SshConnectionPool {
         self.connect_timeout.as_secs()
       ))
     })??;
-    // "SSH negotiation and authentication duration": key exchange already
-    // happened inside `connect()` above, but the negotiated session is not
-    // usable until authentication completes, so this is the duration a
-    // caller actually waits on before the connection is usable.
+    // "SSH negotiation and authentication": kex ran in `connect()`, but only auth makes it usable.
     self
       .metrics
       .ssh_negotiation_and_auth
@@ -1139,8 +1124,7 @@ impl SshConnectionPool {
   /// task; exposed here as a plain method so callers control scheduling.
   pub async fn sweep_idle(&self) {
     let now = Instant::now();
-    // Take the stale connections out under the lock, then disconnect without
-    // it: a slow disconnect must not block every other pool user.
+    // Disconnect stale entries outside the lock so a slow disconnect never blocks other pool users.
     let stale: Vec<PooledConnection> = {
       let mut connections = self.connections.lock().await;
       let keys: Vec<PoolKey> = connections
@@ -1276,15 +1260,11 @@ pub async fn exec_command(
   let handle = pool.get_or_connect(endpoint).await?;
 
   let run = async {
-    // `Handle` methods take `&self`, so concurrent callers open their channels
-    // in parallel instead of queueing one round trip each behind a lock.
+    // `Handle` takes `&self`, so concurrent callers open channels in parallel, not behind a lock.
     let mut channel = open_session(&handle, pool.channel_open_timeout).await?;
 
     let command = build_remote_command_line(args);
-    // The command line is assembled from separate typed arguments (see
-    // `TreqCommandRequest::cli_args`) and passed as a single exec string per
-    // the SSH exec protocol; no frontend text is interpolated as shell here
-    // beyond the same argument-vector quoting the CLI already validates.
+    // Built from typed `cli_args` with argv quoting, so no frontend text is interpolated as shell.
     channel
       .exec(true, command)
       .await
@@ -1310,14 +1290,7 @@ pub async fn exec_command(
         } => {
           exit_status = Some(status);
         }
-        // `Eof` only signals the stdout/stderr streams are done; a real
-        // server (unlike the in-process mock this file's unit tests use)
-        // commonly sends it *before* the `ExitStatus` channel request, not
-        // after. Breaking here discarded that still-incoming exit status,
-        // intermittently reporting `exit_status: None` for a command that
-        // exited normally - caught by remote_ssh_server_it.rs's real-sshd
-        // tests, not by the mock server below. `Close` is the one message
-        // guaranteed to be last, so only it ends the loop.
+        // Real servers send `Eof` before `ExitStatus`, so only `Close`, always last, ends the loop.
         ChannelMsg::Eof => {}
         ChannelMsg::Close => {
           break;
@@ -1345,12 +1318,7 @@ pub async fn exec_command(
     },
   };
 
-  // A deadline blows past the connection's usability the same way a raw
-  // I/O error does: the client cannot tell whether the still-open channel
-  // will ever produce the rest of the response, so the next command must
-  // not gamble on multiplexing a fresh channel onto it. Reconnecting is
-  // exactly the reconnect-before-verify step the PRD's "Retrying after
-  // network loss" section describes.
+  // A deadline leaves the channel as unknown as an I/O error does, so reconnect before verifying.
   if let Err(SshTransportError::ChannelError(_) | SshTransportError::DeadlineExceeded) = &outcome {
     pool.mark_dead(endpoint).await
   }
@@ -1392,16 +1360,13 @@ fn build_remote_command_line(args: &[String]) -> String {
 /// [`crate::pty::PtySession`] so a later (Phase 6) consumer that already
 /// knows the local PTY API is not learning a second vocabulary, even though
 /// the two are separate transports.
+///
+/// The channel is split into read and write halves, not one `AsyncMutex<Channel>`.
+/// The read half's `wait()` needs `&mut self` and blocks until a message arrives, so
+/// one lock around the whole channel would let a streaming read loop deadlock `write`,
+/// `resize` and `close`. Write-half operations only need `&self`, so they never wait on
+/// the read lock.
 pub struct RemotePtyChannel {
-  // Split into read/write halves rather than one `AsyncMutex<Channel>`: the
-  // read half's `wait()` needs `&mut self` and blocks for as long as no new
-  // message has arrived, so a single shared lock around the whole channel
-  // would let a concurrent read loop hold that lock indefinitely and
-  // deadlock any caller of `write`/`resize`/`close` that runs while a read
-  // is in flight — exactly the pattern a streaming consumer (read output in
-  // a background task while writes/closes happen from elsewhere) needs.
-  // `ChannelWriteHalf`'s operations only need `&self` (they just enqueue a
-  // message), so they never contend with the read half's mutex at all.
   read_half: AsyncMutex<russh::ChannelReadHalf>,
   write_half: russh::ChannelWriteHalf<russh::client::Msg>,
   metrics: Arc<SshTransportMetrics>,
@@ -1508,8 +1473,7 @@ impl RemotePtyChannel {
         Some(ChannelMsg::ExitStatus { exit_status }) => {
           return Ok(PtyReadEvent::ExitStatus(exit_status))
         }
-        // Servers send `Eof` before the `ExitStatus` request (see
-        // `exec_command`), so only `Close` ends the channel.
+        // `Eof` precedes `ExitStatus` from real servers, so only `Close` ends the channel.
         Some(ChannelMsg::Eof) => continue,
         Some(ChannelMsg::Close) | None => return Ok(PtyReadEvent::Closed),
         Some(_) => continue,
@@ -1635,8 +1599,7 @@ mod tests {
       hash_alg: None,
     };
 
-    // No bypass flag exists: an endpoint with zero trusted keys rejects
-    // every presented key rather than accepting on first use.
+    // No bypass: zero trusted keys rejects every key rather than trusting on first use.
     assert!(verifier.verify(&presented).is_err());
   }
 
@@ -1700,8 +1663,7 @@ mod tests {
     let token = CancellationToken::new();
     token.cancel();
     assert!(token.is_cancelled());
-    // `cancelled()` must resolve immediately rather than hang, even though
-    // `cancel()` happened before anyone called `cancelled()`.
+    // `cancelled()` must resolve at once even when `cancel()` ran before anyone awaited it.
     tokio::time::timeout(Duration::from_millis(50), token.cancelled())
       .await
       .expect("cancelled() should resolve without waiting for a fresh notify");
@@ -1729,6 +1691,13 @@ mod tests {
   }
 
   struct MockHandler {
+    /// Modes 4 and 5 model verify-before-retry.
+    ///
+    /// The first exec, the mutation, never replies, so the client's deadline runs out and it
+    /// sees a transport failure and marks the connection dead. Later execs arrive on a
+    /// fresh connection that shares `call_count`, and answer at once. In mode 4 the
+    /// verification read shows the mutation applied. In mode 5 it shows the mutation
+    /// absent, and the retry succeeds.
     mode: Arc<AtomicUsize>,
     /// Shared across every exec on the pooled connection (mode 4/5 only): a
     /// real client reuses one authenticated connection for the mutation, the
@@ -1824,39 +1793,19 @@ mod tests {
           session.exit_status_request(channel, 0)?;
         }
         3 => {
-          // Structured-failure path: a non-zero exit whose stdout still
-          // carries the CLI's own `{"error":{code,message}}` body, the way
-          // the real `treq` binary reports a failed command.
+          // Non-zero exit with a `{"error":{code,message}}` stdout body, as the real CLI reports.
           let body = "{\"error\":{\"code\":\"workspace_not_found\",\"message\":\"Workspace 42 was not found\"}}";
           session.data(channel, bytes::Bytes::from(body.as_bytes().to_vec()))?;
           session.exit_status_request(channel, 1)?;
         }
         4 | 5 => {
-          // Verify-before-retry path: the *first* exec against this server
-          // (the mutation itself, e.g. `workspace create`) never replies, so
-          // the client's deadline runs out and it observes a genuine
-          // transport-layer failure - never able to tell whether the
-          // mutation reached the VM. `exec_command` treats a deadline the
-          // same as a channel I/O error and marks the pooled connection
-          // dead, so every later exec (the verification read, and in mode 5
-          // the retried mutation) arrives on a *fresh* connection - a new
-          // `MockHandler`, but sharing this `MockServer`'s `call_count` - and
-          // answers immediately, modeling reconnecting after a real network
-          // failure rather than multiplexing a new channel onto the same
-          // still-hung connection.
-          //
-          // Mode 4: verification read reports the mutation's effect is
-          // already observable (`AlreadyApplied`).
-          // Mode 5: verification read reports it is not yet observable
-          // (`NotApplied`), and a subsequent retry of the same mutation
-          // succeeds normally.
+          // Verify-before-retry: the first exec never replies, then fresh connections answer at once.
           let call_index = self.call_count.fetch_add(1, Ordering::SeqCst);
           if call_index == 0 {
             std::future::pending::<()>().await;
           } else if command.contains("workspace") && command.contains("list") {
             let body = if self.mode.load(Ordering::SeqCst) == 4 {
-              // AlreadyApplied: the branch this test's mutation asked to
-              // create is already present in the read-back state.
+              // AlreadyApplied: the branch the mutation asked for already shows in the read-back.
               "[{\"id\":1,\"branch_name\":\"feature-retry-test\"}]"
             } else {
               // NotApplied: it is not present yet.
@@ -1872,8 +1821,7 @@ mod tests {
           }
         }
         6 => {
-          // A real sshd's order for a process that exits: output, `Eof`,
-          // then the exit status.
+          // A real sshd's order for an exiting process: output, `Eof`, then the exit status.
           session.data(channel, bytes::Bytes::from_static(b"bye"))?;
           session.eof(channel)?;
           session.exit_status_request(channel, 7)?;
@@ -2061,8 +2009,7 @@ mod tests {
     assert!(output.success());
     assert!(String::from_utf8_lossy(&output.stdout).contains("echo"));
 
-    // A second call against the same endpoint must reuse the pooled
-    // connection rather than opening a new one.
+    // A second call to the same endpoint must reuse the pooled connection.
     exec_command(
       &pool,
       &endpoint,
@@ -2099,8 +2046,7 @@ mod tests {
     .await
     .unwrap_err();
 
-    // The CLI's own `workspace_not_found` code must reach the caller intact
-    // rather than collapsing to a generic transport-failure string.
+    // The CLI's `workspace_not_found` code must reach the caller, not a generic transport error.
     match error {
       crate::core::remote::RemoteCommandError::Command { code, message } => {
         assert_eq!(code, "workspace_not_found");
@@ -2195,8 +2141,7 @@ mod tests {
     let temp_dir = tempfile::tempdir().unwrap();
     let key_reference = write_client_key(temp_dir.path(), &client_key);
     let mut endpoint = test_endpoint(addr, &host_key, key_reference);
-    // Corrupt the trusted fingerprint so it no longer matches the server's
-    // real host key.
+    // A wrong trusted fingerprint forces a host-key mismatch.
     endpoint.host_keys[0].fingerprint_sha256 = "SHA256:not-the-real-key".to_string();
 
     let pool = SshConnectionPool::new();
@@ -2297,8 +2242,7 @@ mod tests {
     let client_key = test_host_key();
     let ca_key = test_host_key();
     let temp_dir = tempfile::tempdir().unwrap();
-    // The desktop identity picker hands out the `.pub` path; no
-    // `-cert.pub` file exists, so the inline certificate must be used.
+    // The picker gives the `.pub` path and no `-cert.pub` exists, so the inline cert is used.
     let key_reference = format!("{}.pub", write_client_key(temp_dir.path(), &client_key));
     let certificate = issue_test_certificate(&client_key, &ca_key, "inline-cert");
     let endpoint = certificate_endpoint(addr, &host_key, key_reference, Some(certificate));
@@ -2474,13 +2418,11 @@ mod tests {
     let pool = SshConnectionPool::new();
 
     inspect(&pool, &first).await.unwrap();
-    // The open connection keeps running on the certificate it was
-    // authenticated with; renewal must not force a reconnect.
+    // The open connection keeps its original certificate. Renewal must not force a reconnect.
     inspect(&pool, &renewed).await.unwrap();
     assert_eq!(*certificate_log.lock().unwrap(), vec!["first"]);
 
-    // Once that connection goes away, the next one presents the renewed
-    // certificate the caller passed in.
+    // Once that connection is gone, the next one presents the renewed certificate.
     pool.mark_dead(&renewed).await;
     inspect(&pool, &renewed).await.unwrap();
     assert_eq!(*certificate_log.lock().unwrap(), vec!["first", "renewed"]);
@@ -2584,8 +2526,7 @@ mod tests {
     let snapshot = pool.metrics_snapshot();
     assert_eq!(snapshot.exec_success_count, 1);
     assert_eq!(snapshot.exec_channel_duration.count, 1);
-    // A second call against the same endpoint reuses the pooled connection
-    // rather than reconnecting.
+    // A second call to the same endpoint reuses the pooled connection.
     exec_command(
       &pool,
       &endpoint,
@@ -2748,15 +2689,7 @@ mod tests {
     assert_eq!(snapshot.pty_exit_count, 1);
   }
 
-  // -- Client restart and reconnection (Phase 8 ungated coverage) -------------
-  //
-  // "Client restart and reconnection" from Phase 8's coverage list does not
-  // require a real Fly VM - only a real SSH server that can go away and come
-  // back, which the in-process mock server here already models. This
-  // exercises the same path a desktop client takes after its own process
-  // restart: the pool holds no live connection for the endpoint, so the next
-  // command must open a fresh one and record it as a reconnect once a
-  // previously-live connection is known to be dead.
+  // Phase 8 "Client restart and reconnection" coverage needs only an SSH server that can go away.
 
   #[tokio::test]
   async fn exec_command_reconnects_after_pooled_connection_is_marked_dead() {
@@ -2769,8 +2702,7 @@ mod tests {
     let pool = SshConnectionPool::new();
     let cancellation = CancellationToken::new();
 
-    // First command establishes and pools a connection - not a reconnect,
-    // since there was nothing to reconnect to.
+    // The first command pools a connection, which is not a reconnect.
     exec_command(
       &pool,
       &endpoint,
@@ -2783,22 +2715,12 @@ mod tests {
     assert_eq!(pool.pooled_connection_count().await, 1);
     assert_eq!(pool.metrics_snapshot().reconnect_attempts, 0);
 
-    // Simulate the server side of that connection going away (mirrors a
-    // client process restart just as plausibly as a server restart: either
-    // way, the pool's cached session is no longer usable and must not be
-    // reused blindly). Same effect as the client itself having just
-    // restarted with an empty in-memory pool for this endpoint, then
-    // discovering the old session is gone.
+    // Simulates the old session going away, as after a server or client restart.
     pool.mark_dead(&endpoint).await;
-    // `mark_dead` only flips the liveness flag; the stale entry is not
-    // evicted from the map until the next `get_or_connect` call replaces
-    // it, so the count is unchanged here.
+    // `mark_dead` only flips liveness. The entry stays until the next `get_or_connect` replaces it.
     assert_eq!(pool.pooled_connection_count().await, 1);
 
-    // The server is still listening (mock server accepts new TCP
-    // connections indefinitely), so the next command must transparently
-    // open a fresh connection to the same endpoint and record it as a
-    // reconnect attempt rather than failing the caller.
+    // The server still listens, so the next command must reconnect transparently and count it.
     let output = exec_command(
       &pool,
       &endpoint,
@@ -3287,8 +3209,7 @@ mod tests {
     let pool = SshConnectionPool::new();
     let cancellation = CancellationToken::new();
 
-    // Establish an open connection first, mirroring an in-flight session at
-    // the moment revocation happens.
+    // Opens a connection first, like a session in flight when revocation happens.
     exec_command(
       &pool,
       &endpoint,
@@ -3305,17 +3226,14 @@ mod tests {
       .force_cutoff(&endpoint.id, CutoffReason::KeyRevoked)
       .await;
 
-    // "open exec and PTY channels to that instance are torn down": the
-    // pooled connection is dropped, not merely marked dead.
+    // "open exec and PTY channels ... torn down": dropped from the pool, not just marked dead.
     assert_eq!(pool.pooled_connection_count().await, 0);
     assert_eq!(
       pool.cutoff_reason(&endpoint.id).await,
       Some(CutoffReason::KeyRevoked)
     );
 
-    // "no further structured commands... are sent over the stale
-    // credential": a fresh attempt against the same (still up) server must
-    // be refused locally rather than reaching the network.
+    // "no further structured commands... over the stale credential": refused before the network.
     let result = exec_command(
       &pool,
       &endpoint,
@@ -3359,9 +3277,7 @@ mod tests {
     .await
     .is_err());
 
-    // "The user regains access only by reauthenticating and obtaining a new
-    // certificate": once that happens the caller clears the cutoff and
-    // normal command dispatch resumes.
+    // "regains access only by reauthenticating": clearing the cutoff resumes normal dispatch.
     pool.clear_cutoff(&endpoint.id).await;
     assert_eq!(pool.cutoff_reason(&endpoint.id).await, None);
 
@@ -3417,8 +3333,7 @@ mod tests {
     ));
     assert!(run(&user_endpoint).await.is_ok());
 
-    // Signing in again lifts the blanket block; the torn-down endpoint
-    // still waits for its own reauthentication.
+    // Signing in again lifts the blanket block, but the torn-down endpoint needs its own reauth.
     let fresh = SshEndpoint {
       id: "other-managed".to_string(),
       ..managed.clone()
@@ -3429,14 +3344,11 @@ mod tests {
     assert!(run(&managed).await.is_err());
   }
 
-  // -- Retrying after network loss (PRD "Structured command protocol" >
-  // "Retrying after network loss") ---------------------------------------
+  // PRD "Structured command protocol" > "Retrying after network loss"
 
   #[tokio::test]
   async fn retry_after_reconnect_treats_mutation_as_complete_when_state_already_shows_it_applied() {
-    // Mode 4: the mutation's own exec never replies before the deadline (a genuine
-    // transport failure - the client cannot tell whether it landed), and the
-    // verification read that follows reports the branch already exists.
+    // Mode 4: the mutation never replies (could have landed) and verification finds the branch exists.
     let (addr, host_key) = start_mock_server(4).await;
     let client_key = test_host_key();
     let temp_dir = tempfile::tempdir().unwrap();
@@ -3481,9 +3393,7 @@ mod tests {
   #[tokio::test]
   async fn retry_after_reconnect_retries_with_the_same_idempotency_key_when_state_shows_not_applied(
   ) {
-    // Mode 5: same deadline-triggering first exec, but the verification read
-    // reports the branch is absent, so the mutation must be retried - and
-    // the retry (the mock's third exec) succeeds.
+    // Mode 5: same timeout, but the branch is absent, so the mutation is retried and succeeds.
     let (addr, host_key) = start_mock_server(5).await;
     let client_key = test_host_key();
     let temp_dir = tempfile::tempdir().unwrap();
@@ -3529,9 +3439,7 @@ mod tests {
 
   #[tokio::test]
   async fn retry_after_reconnect_surfaces_ambiguity_when_no_verification_recipe_exists() {
-    // `RestoreFile` has no `verification_for` recipe (see its module doc):
-    // even a genuine transport failure must surface as ambiguous rather than
-    // silently guessing complete or not.
+    // `RestoreFile` has no verification recipe, so a transport failure must stay ambiguous.
     let (addr, host_key) = start_mock_server(1).await;
     let client_key = test_host_key();
     let temp_dir = tempfile::tempdir().unwrap();
@@ -3575,10 +3483,7 @@ mod tests {
 
   #[tokio::test]
   async fn retry_after_reconnect_never_verifies_a_structured_application_level_error() {
-    // Mode 3: the CLI reaches the VM and returns a structured
-    // `workspace_not_found` error. That is not "did it land?" uncertainty -
-    // the CLI plainly said it did not run - so no verification read should
-    // ever be issued, and the structured error must pass straight through.
+    // Mode 3: a structured CLI error means it didn't run, so it passes through unverified.
     let (addr, host_key) = start_mock_server(3).await;
     let client_key = test_host_key();
     let temp_dir = tempfile::tempdir().unwrap();

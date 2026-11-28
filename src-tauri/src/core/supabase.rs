@@ -272,8 +272,7 @@ pub struct Supabase {
 
 impl Supabase {
   pub fn new(env: &SupabaseEnv, store: Arc<dyn SessionStore>) -> Self {
-    // The overall timeout sits above the Edge Function wall-clock limit
-    // (150 s), so it never cuts a call the server would still finish.
+    // The overall timeout exceeds the 150 s Edge Function limit, so it never cuts a live call.
     let http = reqwest::Client::builder()
       .user_agent(concat!("treq/", env!("CARGO_PKG_VERSION")))
       .connect_timeout(std::time::Duration::from_secs(10))

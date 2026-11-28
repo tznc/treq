@@ -482,9 +482,7 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<(), String> {
       .map_err(|e| format!("Failed to read skill pack: {e}"))?;
     let target = dest.join(entry.file_name());
     if ty.is_symlink() {
-      // Never follow a link out of the pack. A link to a file that resolves
-      // inside `src` is copied as that file; directory links are skipped (they
-      // could loop back into the tree).
+      // Copy only file links that resolve inside `src`. Dir links could loop back, so skip them.
       let inside = fs::canonicalize(entry.path())
         .ok()
         .zip(fs::canonicalize(src).ok())
@@ -689,8 +687,7 @@ fn custom_skills_in(root: &Path, level: CustomSkillLevel) -> Vec<CustomSkill> {
       let Some(name) = dir.file_name().map(|n| n.to_string_lossy().into_owned()) else {
         continue;
       };
-      // Repository copies are named relative to it, so prompts never carry
-      // an absolute path; a global skill keeps its full path to copy from.
+      // Repo skills get relative paths so prompts hold no absolute path. Globals keep full paths.
       let path = match level {
         CustomSkillLevel::Repo => format!("{parent}/{name}"),
         CustomSkillLevel::Global => dir.to_string_lossy().into_owned(),
