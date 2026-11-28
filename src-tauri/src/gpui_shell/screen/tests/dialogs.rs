@@ -271,6 +271,24 @@ fn agent_prompt_starts_with_what_react_sent(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn agent_prompt_send_shows_its_shortcut_above_it(cx: &mut TestAppContext) {
+  use crate::gpui_shell::popup::{PopupRequest, Side, TooltipContent};
+  let (mut h, _) = modal_harness(cx, FakeHost::default(), agent_modal());
+  let at = h.cx.debug_bounds("task-submit").expect("send").center();
+  h.cx.simulate_mouse_move(at, None, gpui::Modifiers::none());
+  h.cx
+    .executor()
+    .advance_clock(std::time::Duration::from_millis(300));
+  h.cx.run_until_parked();
+  let hint = crate::gpui_shell::keys::hint("⌘ + Enter");
+  let shown = h.popups.borrow().iter().any(|p| {
+    matches!(p, PopupRequest::ShowTooltip { side: Side::Top, content: TooltipContent::Text(text), .. }
+      if *text == hint)
+  });
+  assert!(shown, "{:?}", h.popups.borrow());
+}
+
+#[gpui::test]
 fn agent_prompt_starts_the_session_in_the_backend(cx: &mut TestAppContext) {
   let (mut h, host) = modal_harness(cx, FakeHost::default(), agent_modal());
   h.click("task-submit");

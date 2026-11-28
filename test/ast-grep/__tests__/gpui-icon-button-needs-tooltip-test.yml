@@ -23,11 +23,15 @@ valid:
     fn labelled(p: &Palette) -> impl IntoElement {
       Button::new("save", p).icon(theme::ICON_CHECK, 14.).label("Save")
     }
-invalid:
+  - |
+    fn tooltip(p: &Palette) -> impl IntoElement {
+      Button::new("edit", p).size(Size::Icon).tooltip("Edit title").child(ui::icon(theme::ICON_PENCIL, 14., c))
+    }
   - |
     fn icon_button(p: &Palette) -> impl IntoElement {
       div().child(ui::IconButton::new("back", theme::ICON_ARROW_LEFT, "Back", p).on_click(f))
     }
+invalid:
   - |
     fn icon_only(p: &Palette) -> impl IntoElement {
       div().child(Button::new("more", p).variant(Variant::Ghost).icon(theme::ICON_MORE, 16.).on_click(f))

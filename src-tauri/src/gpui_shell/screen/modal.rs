@@ -16,10 +16,7 @@ use tauri_plugin_gpui::gpui::App;
 
 use super::{code_data::CodeHost, ActionSink, ScreenAction};
 use crate::{
-  gpui_shell::{
-    native::{Backend, NativeEvent},
-    popup::PopupSink,
-  },
+  gpui_shell::native::{Backend, NativeEvent},
   jj::JjRevisionDiff,
   local_db::{PromptHistoryEntry, StashEntry},
 };
@@ -107,8 +104,6 @@ pub struct Env {
   pub host: Arc<dyn ModalsHost>,
   /// Where actions for React go.
   pub react: ActionSink,
-  /// Where tooltips go.
-  pub popups: PopupSink,
 }
 
 impl Env {
