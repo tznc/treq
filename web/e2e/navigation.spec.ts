@@ -89,10 +89,10 @@ test.describe('Navbar navigation', () => {
     await expect(page.getByRole('heading', { name: 'Treq', level: 1 })).toBeVisible();
   });
 
-  test('Download button links to the latest release when signed out', async ({ page }) => {
+  test('Download button links to the download page when signed out', async ({ page }) => {
     await page.goto('/');
     await expect(nav(page).getByRole('link', { name: 'Download', exact: true }))
-      .toHaveAttribute('href', /^https:\/\/github\.com\/tznc\/treq\/releases\//);
+      .toHaveAttribute('href', '/download/');
   });
 
   test('installation lists each release target', async ({ page }) => {

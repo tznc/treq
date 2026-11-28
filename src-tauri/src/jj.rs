@@ -5368,6 +5368,34 @@ mod tests {
   }
 
   #[test]
+  fn fetch_moves_a_clean_home_along_with_its_checked_out_branch() {
+    let (origin, home) = origin_and_home_clone();
+    let home_path = home.path().to_str().unwrap();
+    assert_eq!(read_git_head_branch(home_path).unwrap(), "main");
+    let tip = advance_origin_main(&origin);
+    jj_git_fetch(home_path).expect("fetch");
+    assert_eq!(read_git_head_branch(home_path).unwrap(), "main");
+    assert_eq!(git(home.path(), &["rev-parse", "HEAD"]), tip);
+    assert!(home.path().join("next-1.txt").exists(), "files follow main");
+  }
+
+  #[test]
+  fn fetch_leaves_a_home_with_uncommitted_changes_where_it_is() {
+    let (origin, home) = origin_and_home_clone();
+    let home_path = home.path().to_str().unwrap();
+    let base = git(home.path(), &["rev-parse", "HEAD"]);
+    fs::write(home.path().join("base.txt"), "edited\n").expect("write");
+    advance_origin_main(&origin);
+    jj_git_fetch(home_path).expect("fetch");
+    assert_eq!(git(home.path(), &["rev-parse", "HEAD"]), base);
+    assert!(!home.path().join("next-1.txt").exists());
+    assert_eq!(
+      fs::read_to_string(home.path().join("base.txt")).unwrap(),
+      "edited\n"
+    );
+  }
+
+  #[test]
   fn fetch_resets_conflicted_trunk_when_origin_has_every_side() {
     let (origin, home) = origin_and_home_clone();
     let home_path = home.path().to_str().unwrap();

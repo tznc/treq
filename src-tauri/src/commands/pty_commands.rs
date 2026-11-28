@@ -33,7 +33,7 @@ fn resolve_local_working_dir(
 /// The repository and working directory for a PTY that should run in the
 /// repository's devcontainer, or `None` to run it on the host. The repo's
 /// `environment` setting decides, and only while the preview is on.
-fn devcontainer_repo(
+pub(crate) fn devcontainer_repo(
   state: &AppState,
   repo_path: Option<&str>,
   working_dir: Option<&str>,

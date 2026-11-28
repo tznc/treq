@@ -3243,5 +3243,6 @@ pub(super) fn review_launch(
     session_name: Some("AI Review".into()),
     link,
     review: false,
+    profile: None,
   }
 }

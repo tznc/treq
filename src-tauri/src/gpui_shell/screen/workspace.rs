@@ -183,10 +183,26 @@ pub(super) fn stack_label(home: bool) -> &'static str {
 
 fn sync_state(sync: &Sync) -> String {
   match (sync.ahead, sync.behind) {
+    _ if sync.not_on_remote => "Not on remote".into(),
+    (0, 0) => "Up to date".into(),
     (a, 0) => format!("{a} to push"),
     (0, b) => format!("{b} to pull"),
     (a, b) => format!("{a} to push, {b} to pull"),
   }
+}
+
+fn sync_tooltip(sync: &Sync, now: chrono::DateTime<chrono::FixedOffset>) -> String {
+  let rebased = sync.rebased.as_ref().map_or(String::new(), |r| {
+    format!(
+      " Last rebased on {} {}.",
+      r.target,
+      crate::gpui_shell::time::relative_at(&r.at, now)
+    )
+  });
+  format!(
+    "{}.{rebased} Sync with remote (fetch and push)",
+    sync_state(sync)
+  )
 }
 
 fn view_pr_name(pr: &ViewPr) -> String {
@@ -216,8 +232,22 @@ pub struct CreatePr {
 pub struct Sync {
   pub ahead: u32,
   pub behind: u32,
+  /// The branch has never been pushed.
+  #[serde(default)]
+  pub not_on_remote: bool,
+  /// When the branch was last rebased onto its target; `None` until a
+  /// rebase is recorded.
+  #[serde(default)]
+  pub rebased: Option<Rebased>,
   pub disabled: bool,
   pub spinning: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct Rebased {
+  pub target: String,
+  /// RFC 3339.
+  pub at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -297,6 +327,10 @@ pub struct TabRow {
 /// How often the branch's pull request is re-read from the PR poller's
 /// cache, which the poller itself refreshes.
 const PR_POLL: Duration = Duration::from_secs(5);
+
+/// How long after a sync or a new pull request the branch's pull request is
+/// read again: GitHub starts the pushed commit's checks a moment after.
+const CHECKS_AFTER_PUSH: Duration = Duration::from_secs(5);
 
 /// The header and tab row, drawn from what they read from the backend.
 pub struct WorkspaceView {
@@ -989,11 +1023,15 @@ impl WorkspaceView {
     self.rebuild(cx);
     let host = self.host.clone();
     let repo_path = self.route.repo_path.clone();
+    let key = self.route.key();
     cx.spawn(async move |this, cx| {
       let outcome = cx.background_spawn(async move { work(&*host) }).await;
       this
         .update(cx, |view, cx| {
           view.pending = Pending::None;
+          if pending == Pending::Sync && outcome.ok && view.route.key() == key {
+            view.refresh_checks_later(cx);
+          }
           view.host.notify(NativeEvent::from(Toast::new(
             match (outcome.ok, outcome.warning) {
               (false, _) => ToastTone::Error,
@@ -1011,6 +1049,25 @@ impl WorkspaceView {
           view.rebuild(cx);
         })
         .ignore_closed();
+    })
+    .detach();
+  }
+
+  /// Has the poller read the branch's pull request again once GitHub has
+  /// started the checks of a sync or a new pull request, rather than draw
+  /// the old ones until its next round.
+  fn refresh_checks_later(&self, cx: &mut Context<Self>) {
+    let repo = self.route.repo_path.clone();
+    let Some(branch) = self
+      .pr_branch()
+      .filter(|_| self.actions.acts_locally(&repo))
+    else {
+      return;
+    };
+    let (host, executor) = (self.actions.clone(), cx.background_executor().clone());
+    cx.background_spawn(async move {
+      executor.timer(CHECKS_AFTER_PUSH).await;
+      host.refresh_pr_status(&repo, &branch);
     })
     .detach();
   }
@@ -1078,7 +1135,8 @@ impl WorkspaceView {
       }
       _ => {
         let host: Arc<dyn super::code_data::CodeHost> = self.code_host.clone();
-        self.title = Some(cx.new(|_| TitleEditor::new(host, repo, id, title, dark)));
+        let popups = self.popups.clone();
+        self.title = Some(cx.new(|cx| TitleEditor::new(host, repo, id, title, dark, popups, cx)));
       }
     }
   }
@@ -1097,7 +1155,17 @@ impl WorkspaceView {
     .size_full()
   }
 
-  fn hover_tooltip(&mut self, key: SharedString, hovered: bool, cx: &mut Context<Self>) {
+  /// The element whose tooltip shows.
+  #[cfg(test)]
+  pub(crate) fn shown_tooltip(&self) -> Option<SharedString> {
+    self
+      .tooltip
+      .clone()
+      .filter(|(_, shown)| *shown)
+      .map(|(k, _)| k)
+  }
+
+  pub(crate) fn hover_tooltip(&mut self, key: SharedString, hovered: bool, cx: &mut Context<Self>) {
     if !hovered {
       if self.tooltip.as_ref().is_some_and(|(k, _)| *k == key) {
         self.tooltip = None;
@@ -1105,10 +1173,9 @@ impl WorkspaceView {
       }
       return;
     }
-    if self.popover.is_some() {
+    if self.popover.is_some() || !crate::gpui_shell::tooltips::enter(&mut self.tooltip, &key) {
       return;
     }
-    self.tooltip = Some((key.clone(), false));
     cx.spawn(async move |this, cx| {
       cx.background_executor().timer(TOOLTIP_DELAY).await;
       this
@@ -1377,6 +1444,9 @@ impl WorkspaceView {
           .on_click(move |_, _, cx| sink(ScreenAction::OpenUrl { url: url.clone() }, cx)),
       );
     }
+    if let Some(sync) = &h.sync {
+      right = right.child(self.sync(sync, p, cx));
+    }
     if let Some(checks) = &h.checks {
       right = right.child(
         div()
@@ -1391,9 +1461,6 @@ impl WorkspaceView {
     }
     if let Some(create) = &h.create_pr {
       right = right.child(self.create_pr(create, p, cx));
-    }
-    if let Some(sync) = &h.sync {
-      right = right.child(self.sync(sync, p, cx));
     }
     let merged = h
       .view_pr
@@ -1571,8 +1638,8 @@ impl WorkspaceView {
   }
 
   fn sync(&self, sync: &Sync, p: &Palette, cx: &mut Context<Self>) -> Stateful<Div> {
-    // The header only draws sync while the branch and its remote differ;
-    // the pip says so at a glance, and the tooltip says by how much.
+    // The pip says at a glance that the branch and its remote differ, and
+    // the tooltip says by how much.
     let state = sync_state(sync);
     let button = Button::new("workspace-sync", p)
       .aria_label(format!("Sync with remote: {state}"))
@@ -1586,8 +1653,6 @@ impl WorkspaceView {
       .px_2()
       .text_color(p.muted_foreground)
       .disabled(sync.disabled)
-      .when(sync.behind > 0, |b| b.child(format!("↓{}", sync.behind)))
-      .when(sync.ahead > 0, |b| b.child(format!("↑{}", sync.ahead)))
       .map(|b| {
         let icon = ui::icon(theme::ICON_REFRESH, 16., p.muted_foreground);
         if sync.spinning {
@@ -1596,30 +1661,34 @@ impl WorkspaceView {
           b.child(icon)
         }
       })
+      .when(sync.behind > 0, |b| b.child(format!("↓{}", sync.behind)))
+      .when(sync.ahead > 0, |b| b.child(format!("↑{}", sync.ahead)))
       .on_click(self.press("workspace.sync"));
     self
       .with_tooltip(
         "workspace-sync",
         Some(TooltipContent::Text(
-          format!("{state}. Sync with remote (fetch and push)").into(),
+          sync_tooltip(sync, chrono::Local::now().fixed_offset()).into(),
         )),
         button,
         cx,
       )
-      .child(
-        // Solid status colour, ringed in the background so it reads against
-        // the button's border in both themes; inset so nothing clips it.
-        div()
-          .selector("workspace-sync-pip")
-          .absolute()
-          .top(zpx(-4.))
-          .right(zpx(-4.))
-          .size(zpx(10.))
-          .rounded_full()
-          .border(zpx(1.5))
-          .border_color(p.background)
-          .bg(ui::Tone::Warning.color(p)),
-      )
+      .when(sync.ahead > 0 || sync.behind > 0, |d| {
+        d.child(
+          // Solid status colour, ringed in the background so it reads against
+          // the button's border in both themes; inset so nothing clips it.
+          div()
+            .selector("workspace-sync-pip")
+            .absolute()
+            .top(zpx(-4.))
+            .right(zpx(-4.))
+            .size(zpx(10.))
+            .rounded_full()
+            .border(zpx(1.5))
+            .border_color(p.background)
+            .bg(ui::Tone::Warning.color(p)),
+        )
+      })
   }
 
   fn checks(&self, checks: &Checks, p: &Palette) -> Button {
@@ -1881,6 +1950,7 @@ impl WorkspaceView {
         session_name: Some(name.into()),
         link: None,
         review: false,
+        profile: None,
       }
     };
     let text = |key: &str| value[key].as_str().unwrap_or_default().to_string();
@@ -2598,9 +2668,36 @@ mod sync_state_tests {
     Sync {
       ahead,
       behind,
+      not_on_remote: false,
+      rebased: None,
       disabled: false,
       spinning: false,
     }
+  }
+
+  #[test]
+  fn tooltip_says_when_the_branch_was_last_rebased() {
+    let now = chrono::DateTime::parse_from_rfc3339("2026-11-27T12:00:00Z").expect("now");
+    let sync = Sync {
+      rebased: Some(Rebased {
+        target: "main".into(),
+        at: "2026-11-27T09:00:00Z".into(),
+      }),
+      ..sync(38, 0)
+    };
+    assert_eq!(
+      sync_tooltip(&sync, now),
+      "38 to push. Last rebased on main 3 hours ago. Sync with remote (fetch and push)"
+    );
+  }
+
+  #[test]
+  fn tooltip_leaves_out_a_rebase_never_recorded() {
+    let now = chrono::DateTime::parse_from_rfc3339("2026-11-27T12:00:00Z").expect("now");
+    assert_eq!(
+      sync_tooltip(&sync(38, 0), now),
+      "38 to push. Sync with remote (fetch and push)"
+    );
   }
 
   #[test]
@@ -2608,5 +2705,19 @@ mod sync_state_tests {
     assert_eq!(sync_state(&sync(2, 0)), "2 to push");
     assert_eq!(sync_state(&sync(0, 3)), "3 to pull");
     assert_eq!(sync_state(&sync(2, 3)), "2 to push, 3 to pull");
+  }
+
+  #[test]
+  fn names_a_branch_that_matches_its_remote() {
+    assert_eq!(sync_state(&sync(0, 0)), "Up to date");
+  }
+
+  #[test]
+  fn names_a_branch_not_on_the_remote() {
+    let sync = Sync {
+      not_on_remote: true,
+      ..sync(0, 0)
+    };
+    assert_eq!(sync_state(&sync), "Not on remote");
   }
 }

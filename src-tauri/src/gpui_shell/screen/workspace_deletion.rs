@@ -4,13 +4,13 @@
 
 use crate::gpui_shell::ui::radius;
 use crate::gpui_shell::ui::zpx;
-use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::input::{Escape, InputEvent, InputState, MoveDown, MoveUp};
 use serde::Deserialize;
 use tauri_plugin_gpui::gpui::{
   anchored, deferred, div, point, prelude::*, px, Context, Entity, FontWeight, MouseButton,
   SharedString, Subscription, Window,
 };
+use treq_ui::SelectorExt as _;
 
 use super::{workspace_modal::press, ActionSink, ScreenAction};
 use crate::gpui_shell::{
@@ -249,14 +249,11 @@ impl Render for WorkspaceDeletion {
       div()
         .children(rows.iter().enumerate().map(|(i, row)| {
           let id = SharedString::from(format!("workspace-deletion-item-{i}"));
-          let selector = id.to_string();
           let value = row.value.clone();
           div()
-            .id(id)
+            .selector(id)
             .role(tauri_plugin_gpui::gpui::Role::ListBoxOption)
             .aria_label(row.workspace.branch_name.clone())
-            .debug_selector(move || selector)
-            .test_support()
             .px_3()
             .py_1p5()
             .mx_2()
@@ -307,8 +304,7 @@ impl Render for WorkspaceDeletion {
         .into_any_element()
     };
     let dialog = div()
-      .id("workspace-deletion")
-      .debug_selector(|| "workspace-deletion".into())
+      .selector("workspace-deletion")
       .w(viewport.width * 0.4)
       .map(|el| ui::floating(el, &p))
       .bg(p.background)
@@ -399,11 +395,9 @@ impl Render for WorkspaceDeletion {
       .when(no_deletable, |this| {
         this.child(
           ui::text(div(), TextSize::Sm)
-            .id("workspace-deletion-home")
-            .debug_selector(|| "workspace-deletion-home".into())
+            .selector("workspace-deletion-home")
             .role(tauri_plugin_gpui::gpui::Role::Status)
             .aria_label("Home repository cannot be deleted")
-            .test_support()
             .px_4()
             .py_3()
             .border_t_1()

@@ -13,6 +13,7 @@ use std::{
   collections::{HashMap, HashSet},
   sync::Arc,
 };
+use treq_ui::SelectorExt as _;
 
 use chrono::{Datelike, Duration, Local, NaiveDate};
 use gpui_kit::base::TestSupportExt as _;
@@ -317,11 +318,7 @@ impl ProjectHomeView {
       format!("Open {}", repo.label)
     };
     div()
-      .id(("project-home-card", i))
-      .debug_selector({
-        let id = format!("project-home-card-{i}");
-        move || id
-      })
+      .selector(format!("project-home-card-{i}"))
       .role(gpui::Role::Button)
       .aria_label(SharedString::from(name))
       .test_support()
@@ -443,11 +440,7 @@ impl ProjectHomeView {
       }
       groups.push(
         div()
-          .id(("project-home-changes", i))
-          .debug_selector({
-            let id = format!("project-home-changes-{i}");
-            move || id
-          })
+          .selector(format!("project-home-changes-{i}"))
           .flex()
           .flex_col()
           .rounded_lg()
@@ -706,8 +699,7 @@ impl ProjectHomeView {
       })
       .collect();
     div()
-      .id("project-home-commits")
-      .debug_selector(|| "project-home-commits".into())
+      .selector("project-home-commits")
       .overflow_x_scroll()
       .child(
         div()
@@ -802,7 +794,7 @@ fn stats_block(repo: &RepoCard, stats: &RepoStats, p: &theme::Palette) -> impl I
 fn activity_chart(counts: Vec<u32>, line: gpui::Hsla, base: gpui::Hsla) -> impl IntoElement {
   let max = counts.iter().copied().max().unwrap_or(0).max(1) as f32;
   div()
-    .debug_selector(|| "project-home-activity".into())
+    .selector("project-home-activity")
     .flex_1()
     .h(zpx(36.))
     .child(
@@ -891,8 +883,7 @@ impl Render for ProjectHomeView {
       HomeTab::Commits => self.commits_tab(&p),
     };
     div()
-      .id("project-home")
-      .debug_selector(|| "project-home".into())
+      .selector("project-home")
       .size_full()
       .overflow_y_scroll()
       .bg(p.background)

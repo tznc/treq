@@ -737,7 +737,7 @@ impl PrReviewView {
     }
     let anchor = (*self.anchor.borrow())?;
     let width = 384.;
-    let at = point(anchor.right() - px(width), anchor.bottom() + px(4.));
+    let at = point(anchor.right(), anchor.bottom() + px(4.));
     let (postable, outdated) = self.drafts(cx);
     let own = self.own_pr();
     let mut radios = div().selector("pr-review-events").flex().flex_col().gap_2();
@@ -860,6 +860,14 @@ impl PrReviewView {
             .on_click(cx.listener(|view, _, _, cx| view.submit(cx))),
         ),
       );
-    Some(deferred(anchored().position(at).child(panel)).with_priority(1))
+    Some(
+      deferred(
+        anchored()
+          .anchor(gpui::Anchor::TopRight)
+          .position(at)
+          .child(panel),
+      )
+      .with_priority(1),
+    )
   }
 }

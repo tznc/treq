@@ -118,6 +118,8 @@ pub struct SessionStart {
   pub agent: Option<String>,
   /// An AI review, whose agent loads the treq-review skill.
   pub review: bool,
+  /// The agent's account profile; `None` uses the default.
+  pub profile: Option<String>,
 }
 
 impl SessionStart {
@@ -128,6 +130,7 @@ impl SessionStart {
       agent: self.agent.clone(),
       workspace_path: self.workspace_path.clone(),
       review: self.review,
+      profile: self.profile.clone(),
     }
   }
 }
@@ -142,6 +145,7 @@ pub struct PendingSession {
   pub workspace_path: Option<String>,
   /// An AI review, whose agent loads the treq-review skill.
   pub review: bool,
+  pub profile: Option<String>,
 }
 
 impl PendingSession {
@@ -281,6 +285,7 @@ pub struct TaskRequest {
   pub agent: String,
   pub mode: String,
   pub save_as_repo_default: bool,
+  pub profile: Option<String>,
 }
 
 /// `startAgentTask`: saves the agent as the repository's default when
@@ -290,7 +295,16 @@ pub fn start_agent_task(
   store: &dyn LaunchStore,
   task: &TaskRequest,
 ) -> Result<Option<(SessionStart, Vec<Toast>)>, String> {
-  let trimmed = task.text.trim();
+  let profiles = super::agent_profiles::parse(
+    store
+      .app_setting(super::agent_profiles::PROFILES_SETTING)
+      .as_deref(),
+  );
+  let (agent, profile, trimmed) =
+    match super::agent_profiles::mention(&profiles, &task.agent, &task.text) {
+      Some((p, target, rest)) => (p.agent, Some(target), rest.trim()),
+      None => (task.agent.clone(), task.profile.clone(), task.text.trim()),
+    };
   if trimmed.is_empty() && task.issue.is_none() {
     return Ok(None);
   }
@@ -319,7 +333,8 @@ pub fn start_agent_task(
       repo_path: task.repo_path.clone(),
       pending_prompt: Some(prompt),
       permission_mode: Some(task.mode.clone()),
-      agent: Some(task.agent.clone()),
+      agent: Some(agent),
+      profile,
       review: false,
     },
     toasts,
@@ -342,6 +357,7 @@ pub struct LaunchRequest {
   pub link: Option<String>,
   /// An AI review, whose agent loads the treq-review skill.
   pub review: bool,
+  pub profile: Option<String>,
 }
 
 /// Creates the session `request` asks for.
@@ -376,6 +392,7 @@ pub fn launch_session(
     permission_mode: request.mode.clone(),
     agent: request.agent.clone(),
     review: request.review,
+    profile: request.profile.clone(),
   })
 }
 
@@ -1049,6 +1066,80 @@ mod tests {
     assert_eq!(start.permission_mode.as_deref(), Some("plan"));
     assert_eq!(start.agent.as_deref(), Some("codex"));
     assert_eq!(start.workspace_id, Some(3));
+  }
+
+  #[test]
+  fn carries_the_chosen_profile_to_the_terminal() {
+    let store = FakeStore::default();
+    let task = TaskRequest {
+      repo_path: "/repo".into(),
+      text: "fix it".into(),
+      agent: "claude".into(),
+      profile: Some("work".into()),
+      ..Default::default()
+    };
+    let (start, _) = start_agent_task(&store, &task).unwrap().unwrap();
+    assert_eq!(start.pending().profile.as_deref(), Some("work"));
+    let request = LaunchRequest {
+      repo_path: "/repo".into(),
+      profile: Some("personal".into()),
+      ..Default::default()
+    };
+    let launched = launch_session(&store, &request).unwrap();
+    assert_eq!(launched.pending().profile.as_deref(), Some("personal"));
+  }
+
+  #[test]
+  fn start_agent_task_routes_an_at_mention_to_its_profile() {
+    let store = FakeStore {
+      settings: HashMap::from([(
+        "agent_profiles".to_string(),
+        r#"[{"agent":"codex","name":"work"}]"#.to_string(),
+      )]),
+      ..Default::default()
+    };
+    let task = TaskRequest {
+      repo_path: "/repo".into(),
+      text: "@work fix it".into(),
+      agent: "claude".into(),
+      save_as_repo_default: true,
+      ..Default::default()
+    };
+    let (start, _) = start_agent_task(&store, &task).unwrap().unwrap();
+    assert_eq!(start.pending_prompt.as_deref(), Some("fix it"));
+    assert_eq!(start.agent.as_deref(), Some("codex"));
+    assert_eq!(start.profile.as_deref(), Some("work"));
+    // The dialog's own choice is still what becomes the default.
+    assert!(store
+      .calls
+      .borrow()
+      .contains(&"set default_agent=claude".to_string()));
+    // A bare mention has nothing to send.
+    let bare = TaskRequest {
+      text: "@work".into(),
+      ..task
+    };
+    assert!(start_agent_task(&store, &bare).unwrap().is_none());
+  }
+
+  #[test]
+  fn start_agent_task_routes_an_at_mention_to_a_profile_mode() {
+    let store = FakeStore {
+      settings: HashMap::from([(
+        "agent_profiles".to_string(),
+        r#"[{"agent":"claude","name":"work"}]"#.to_string(),
+      )]),
+      ..Default::default()
+    };
+    let task = TaskRequest {
+      repo_path: "/repo".into(),
+      text: "@work/deep fix it".into(),
+      agent: "claude".into(),
+      ..Default::default()
+    };
+    let (start, _) = start_agent_task(&store, &task).unwrap().unwrap();
+    assert_eq!(start.pending_prompt.as_deref(), Some("fix it"));
+    assert_eq!(start.profile.as_deref(), Some("work/deep"));
   }
 
   #[test]
