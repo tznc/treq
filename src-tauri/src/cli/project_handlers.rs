@@ -44,7 +44,7 @@ pub(super) fn handle_project_command(
     &action,
     value.as_deref(),
     format,
-    &projects::clones_root(),
+    &projects::clone_dir(&db),
     &mut out,
   )
 }
@@ -73,14 +73,14 @@ fn write_json<T: serde::Serialize>(out: &mut dyn Write, value: &T) -> Result<(),
 }
 
 /// `treq project <action>` for the repository at `repo_path`, printing to
-/// `out`. Clones land under `clones_root`.
+/// `out`. Clones land in folder `clone_dir`.
 fn run(
   db: &Database,
   repo_path: &str,
   action: &str,
   value: Option<&str>,
   format: OutputFormat,
-  clones_root: &std::path::Path,
+  clone_dir: &str,
   out: &mut dyn Write,
 ) -> Result<(), String> {
   let line = |out: &mut dyn Write, text: String| writeln!(out, "{text}").map_err(|e| e.to_string());
@@ -141,7 +141,7 @@ fn run(
       })?;
       let project = current_project(db, repo_path)?;
       let (path, cloned) =
-        projects::ensure_repo(spec, clones_root, &projects::all_repos(db.conn())?)?;
+        projects::ensure_repo(spec, clone_dir, &projects::all_repos(db.conn())?)?;
       core::init(&path).map_err(|e| e.to_string())?;
       let added = projects::add_repo(db.conn(), &project.id, &path)?;
       match format {
@@ -204,7 +204,7 @@ mod tests {
         action,
         value,
         format,
-        self.clones.path(),
+        &self.clones.path().display().to_string(),
         &mut out,
       )?;
       Ok(String::from_utf8(out).unwrap())

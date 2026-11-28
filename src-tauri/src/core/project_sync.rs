@@ -218,11 +218,11 @@ impl ProjectTransport for SupabaseTransport {
   }
 }
 
-/// Maps through each clone's GitHub `origin` and Treq's managed clones root.
+/// Maps through each clone's GitHub `origin` and Treq's clone folder.
 pub struct GitMapper {
   /// Local repos already known, checked first so an existing clone is reused.
   pub known: Vec<String>,
-  pub clones_root: std::path::PathBuf,
+  pub clone_dir: String,
 }
 
 impl RepoMapper for GitMapper {
@@ -240,8 +240,7 @@ impl RepoMapper for GitMapper {
       .find(|l| self.to_remote(l).as_deref() == Some(remote))
       .cloned()
       .or_else(|| {
-        projects::managed_clone_path(&self.clones_root, remote)
-          .map(|p| p.to_string_lossy().to_string())
+        projects::clone_path(&self.clone_dir, remote).map(|p| p.to_string_lossy().to_string())
       })
   }
 }

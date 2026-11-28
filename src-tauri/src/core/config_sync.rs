@@ -65,12 +65,22 @@ const PREVIEW_FEATURES: [PreviewFeature; 4] = [
   PreviewFeature::Devcontainers,
 ];
 
-/// Every settings key that is synced.
+/// Settings that describe this machine, such as folders on its disk: they
+/// stay on it and are never synced to another.
+const LOCAL_ONLY_SETTING_KEYS: &[&str] = &[super::projects::CLONE_DIRECTORY_SETTING];
+
+/// Whether settings key `key` is local only, never synced.
+pub fn is_local_only_setting(key: &str) -> bool {
+  LOCAL_ONLY_SETTING_KEYS.contains(&key)
+}
+
+/// Every settings key that is synced; never a local-only one.
 pub fn synced_setting_keys() -> Vec<String> {
   APP_SETTING_KEYS
     .iter()
     .map(|k| k.to_string())
     .chain(PREVIEW_FEATURES.iter().map(|f| f.setting_key()))
+    .filter(|k| !is_local_only_setting(k))
     .collect()
 }
 
@@ -746,6 +756,36 @@ mod tests {
     assert_eq!(synced["app_setup_script"], "brew install jq");
     assert_eq!(synced["feature_preview.remoteSsh"], "true");
     assert_eq!(synced.len(), 3);
+  }
+
+  #[test]
+  fn the_clone_directory_is_local_only_and_never_synced() {
+    let key = crate::core::projects::CLONE_DIRECTORY_SETTING;
+    assert!(is_local_only_setting(key));
+    assert!(!synced_setting_keys().contains(&key.to_string()));
+    let dir = tempfile::tempdir().unwrap();
+    let settings: BTreeMap<String, String> = [("theme", "dark"), (key, "/home/me/code")]
+      .into_iter()
+      .map(|(k, v)| (k.to_string(), v.to_string()))
+      .collect();
+    let files = collect_app(dir.path(), &settings);
+    let exported = String::from_utf8(files["settings.json"].clone()).unwrap();
+    assert!(!exported.contains("/home/me/code"), "{exported}");
+    // A snapshot from another machine cannot set it here either.
+    let pulled: Files = [(
+      SETTINGS_FILE.to_string(),
+      format!("{{\"{key}\": \"/other/machine\"}}").into_bytes(),
+    )]
+    .into_iter()
+    .collect();
+    assert!(settings_of(&pulled).is_empty());
+  }
+
+  #[test]
+  fn no_synced_setting_is_local_only() {
+    for key in synced_setting_keys() {
+      assert!(!is_local_only_setting(&key), "{key}");
+    }
   }
 
   #[test]
