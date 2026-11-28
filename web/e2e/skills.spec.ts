@@ -1,14 +1,17 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
+
+async function openSkillsFromNav(page: Page) {
+  await page.goto("/");
+  const nav = page.getByRole("navigation", { name: "Main" });
+  await nav.getByRole("button", { name: "Discover" }).hover();
+  await nav.getByRole("link", { name: "Skills", exact: true }).click();
+}
 
 // ── Skills Library (/skills) ────────────────────────────────────────────────
 
 test.describe("Skills Library (/skills)", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/");
-    await page
-      .getByRole("navigation")
-      .getByRole("link", { name: "Skills" })
-      .click();
+    await openSkillsFromNav(page);
   });
 
   test("renders page heading", async ({ page }) => {
@@ -70,11 +73,7 @@ test.describe("Skills Library (/skills)", () => {
 
 test.describe("Source repos aside", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/");
-    await page
-      .getByRole("navigation")
-      .getByRole("link", { name: "Skills" })
-      .click();
+    await openSkillsFromNav(page);
   });
 
   test("lists source repos ranked by stars", async ({ page }) => {
@@ -110,11 +109,7 @@ test.describe("Source repos aside", () => {
 
 test.describe("Skill detail page", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/");
-    await page
-      .getByRole("navigation")
-      .getByRole("link", { name: "Skills" })
-      .click();
+    await openSkillsFromNav(page);
     await page
       .getByRole("link", { name: /^mcp-builder/ })
       .first()
@@ -237,11 +232,7 @@ test.describe("Skill detail page", () => {
 
 test.describe("Relicensed skill detail page", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/");
-    await page
-      .getByRole("navigation")
-      .getByRole("link", { name: "Skills" })
-      .click();
+    await openSkillsFromNav(page);
     await page.getByRole("link", { name: /^pdf/ }).first().click();
   });
 
@@ -270,8 +261,9 @@ test.describe("Skill detail page on mobile", () => {
     await page.goto("/");
     // The navbar collapses to a hamburger at this width.
     await page.getByLabel("Toggle navigation bar").click();
-    await page
-      .getByRole("navigation", { name: "Main" })
+    const nav = page.getByRole("navigation", { name: "Main" });
+    await nav.getByRole("button", { name: "Discover" }).filter({ visible: true }).click();
+    await nav
       .getByRole("link", { name: "Skills", exact: true })
       .filter({ visible: true })
       .click();
