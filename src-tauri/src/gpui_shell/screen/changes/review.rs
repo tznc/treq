@@ -2073,7 +2073,6 @@ impl ChangesView {
   /// Finish review.
   pub(super) fn review_bar(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
     let conflicts = !self.conflicted().is_empty();
-    let total = self.review.comments.len() + self.review.notes.len();
     let send_bg = if conflicts { p.destructive } else { p.primary };
     div()
       .selector("review-action-bar")
@@ -2092,17 +2091,7 @@ impl ChangesView {
           .flex()
           .items_center()
           .gap_2()
-          .child(ui::icon(
-            theme::ICON_MESSAGE,
-            16.,
-            if conflicts { p.destructive } else { p.primary },
-          ))
-          .child(
-            div()
-              .text_color(p.muted_foreground)
-              .child(format!("{} pending", count_label(total, "comment"))),
-          )
-          .children(self.agent_count(p)),
+          .children(self.comment_count(true, p, cx)),
       )
       .child(
         div()

@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use super::{
-  changes_review::{number_and_side, Side},
+  changes_review::{count_label, number_and_side, Side},
   commits_data::{line_numbers, numbered},
 };
 use crate::{github::GhReviewThread, jj::JjDiffHunk, local_db::AgentReviewComment};
@@ -364,6 +364,30 @@ pub fn preview(body: &str) -> String {
     .join(" ")
 }
 
+/// The action bar's count of pending and open comments, and its breakdown
+/// by source for the tooltip: `("3 comments", "1 pending · 2 GitHub")`. Comments on resolved GitHub threads are left out.
+pub fn comment_summary(
+  pending: usize,
+  github: &[GhReviewThread],
+  agent: &[AgentReviewComment],
+) -> Option<(String, String)> {
+  let github = github
+    .iter()
+    .filter(|t| !t.is_resolved)
+    .map(|t| t.comments.len())
+    .sum::<usize>();
+  let local = agent.iter().filter(|c| c.status != "resolved").count();
+  let total = pending + github + local;
+  (total > 0).then(|| {
+    let sources: Vec<String> = [(pending, "pending"), (github, "GitHub"), (local, "local")]
+      .into_iter()
+      .filter(|&(n, _)| n > 0)
+      .map(|(n, source)| format!("{n} {source}"))
+      .collect();
+    (count_label(total, "comment"), sources.join(" · "))
+  })
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -584,5 +608,35 @@ mod tests {
     assert_eq!(comment_date("2026-03-04T10:00:00Z", 2026), "Mar 4");
     assert_eq!(comment_date("2025-12-31T10:00:00Z", 2026), "Dec 31, 2025");
     assert_eq!(preview(" a\n  b "), "a b");
+  }
+
+  #[test]
+  fn counts_open_comments_by_source() {
+    let mut resolved = thread("a.rs", Some(1), "RIGHT");
+    resolved.is_resolved = true;
+    let mut replied = thread("a.rs", Some(2), "RIGHT");
+    replied.comments.push(replied.comments[0].clone());
+    let agents = [
+      agent("a.rs", 1, 1, None, "open"),
+      agent("b.rs", 1, 1, None, "resolved"),
+    ];
+    assert_eq!(
+      comment_summary(1, &[resolved, replied], &agents),
+      Some(("4 comments".into(), "1 pending · 2 GitHub · 1 local".into()))
+    );
+  }
+
+  #[test]
+  fn lists_only_sources_with_open_comments() {
+    let github = [thread("a.rs", Some(1), "RIGHT")];
+    assert_eq!(
+      comment_summary(0, &github, &[]),
+      Some(("1 comment".into(), "1 GitHub".into()))
+    );
+    assert_eq!(
+      comment_summary(2, &[], &[]),
+      Some(("2 comments".into(), "2 pending".into()))
+    );
+    assert_eq!(comment_summary(0, &[], &[]), None);
   }
 }
