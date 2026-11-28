@@ -1,0 +1,15 @@
+id: no-as-unknown-as-tsx
+language: tsx
+severity: error
+message: >
+  `x as unknown as T` (or `as any as T`) turns off type checking for x. Give
+  x its real type instead: fix the declared types, use `satisfies`, narrow
+  with a type guard, or use a typed fake or fixture builder that implements
+  the interface.
+files: ["**/*.tsx"]
+rule:
+  any:
+    - pattern: $X as unknown as $T
+    - pattern: ($X as unknown) as $T
+    - pattern: $X as any as $T
+    - pattern: ($X as any) as $T
