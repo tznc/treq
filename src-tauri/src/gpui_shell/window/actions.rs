@@ -213,6 +213,14 @@ impl Model {
         self.open_linear();
         done()
       }
+      SidebarAction::Back => {
+        self.go(true);
+        done()
+      }
+      SidebarAction::Forward => {
+        self.go(false);
+        done()
+      }
       SidebarAction::StartAgent { id } => {
         if id.is_some() && find(*id).is_none() {
           return done();

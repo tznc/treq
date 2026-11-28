@@ -97,6 +97,8 @@ fn snapshot(workspaces: Vec<SidebarRow>) -> SidebarSnapshot {
     project: None,
     project_home: None,
     modal: None,
+    can_back: false,
+    can_forward: false,
   }
 }
 
@@ -359,6 +361,25 @@ fn nav_rows_open_github_and_linear(cx: &mut TestAppContext) {
     h.sent(),
     vec![SidebarAction::OpenGithub, SidebarAction::OpenLinear]
   );
+}
+
+#[gpui::test]
+fn the_title_bar_arrows_go_back_and_forward(cx: &mut TestAppContext) {
+  let mut s = snapshot(vec![]);
+  s.can_back = true;
+  s.can_forward = true;
+  let mut h = Harness::new(cx, s);
+  h.click("nav-back");
+  h.click("nav-forward");
+  assert_eq!(h.sent(), vec![SidebarAction::Back, SidebarAction::Forward]);
+}
+
+#[gpui::test]
+fn the_title_bar_arrows_do_nothing_with_nowhere_to_go(cx: &mut TestAppContext) {
+  let mut h = Harness::new(cx, snapshot(vec![]));
+  h.click("nav-back");
+  h.click("nav-forward");
+  assert_eq!(h.sent(), vec![]);
 }
 
 #[gpui::test]
