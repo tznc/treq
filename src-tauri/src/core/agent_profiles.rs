@@ -23,6 +23,8 @@ fn config_dir_var(agent: &str) -> Option<&'static str> {
   match agent {
     "claude" => Some("CLAUDE_CONFIG_DIR"),
     "codex" => Some("CODEX_HOME"),
+    // Gemini keeps its sign-in in a file under this home by default.
+    "gemini" => Some("GEMINI_CLI_HOME"),
     _ => None,
   }
 }
@@ -193,10 +195,25 @@ mod tests {
   }
 
   #[test]
-  fn only_claude_and_codex_support_profiles() {
+  fn agents_with_a_movable_sign_in_support_profiles() {
     assert!(supports_profiles("claude"));
     assert!(supports_profiles("codex"));
-    assert!(!supports_profiles("cursor"));
+    assert!(supports_profiles("gemini"));
+    // Their sign-in can't be moved per profile.
+    for agent in ["cursor", "copilot", "devin"] {
+      assert!(!supports_profiles(agent), "{agent}");
+    }
+  }
+
+  #[test]
+  fn gemini_profiles_move_gemini_cli_home() {
+    assert_eq!(
+      env(Path::new("/data"), &profile("gemini", "work")),
+      vec![(
+        "GEMINI_CLI_HOME".to_string(),
+        "/data/agent-profiles/gemini/work".to_string()
+      )]
+    );
   }
 
   #[test]
