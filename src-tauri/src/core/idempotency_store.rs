@@ -181,11 +181,7 @@ impl IdempotencyStore {
   fn connection(&self) -> Result<Connection, String> {
     let conn = Connection::open(&self.db_path)
       .map_err(|e| format!("filesystem_error: Failed to open idempotency store: {e}"))?;
-    // A cross-process claim race is exactly the case this store exists to
-    // handle safely: two `treq` CLI processes (two exec channels) opening
-    // this file at once must not fail outright on SQLITE_BUSY. A bounded
-    // busy timeout lets SQLite's own file locking serialize the competing
-    // writers instead.
+    // Two `treq` processes may open this at once, so a busy timeout serializes them on SQLITE_BUSY.
     conn
       .busy_timeout(Duration::from_secs(5))
       .map_err(|e| format!("filesystem_error: Failed to set busy timeout: {e}"))?;
@@ -314,8 +310,7 @@ impl IdempotencyStore {
       return Ok(ClaimOutcome::Replay(value));
     }
 
-    // Pending: fresh (likely still executing elsewhere) or stale (its
-    // claimant is presumed gone).
+    // Pending: fresh (likely still running elsewhere) or stale (its claimant presumed gone).
     let claimed_at = chrono::DateTime::parse_from_rfc3339(&claimed_at)
       .map(|dt| dt.with_timezone(&chrono::Utc))
       .unwrap_or(now);
@@ -476,8 +471,7 @@ impl IdempotencyStore {
             }
             RecoveryDecision::VerifiedNotApplied => {
               let Some(previous_claimed_at) = self.claimed_at(operation, key)? else {
-                // Someone else already resolved it between our Stale read and
-                // now; loop back and re-observe its current state.
+                // Resolved by someone else since our Stale read, so re-observe its state.
                 continue;
               };
               if self.reclaim_stale(operation, key, &previous_claimed_at)? {
@@ -528,8 +522,7 @@ mod tests {
       .unwrap();
     drop(first);
 
-    // Simulates a fresh `treq` CLI process (a new SSH exec channel) opening
-    // the same repo-local database.
+    // Simulates a fresh `treq` process (a new SSH exec channel) opening the same database.
     let second = IdempotencyStore::open_at(&db_path).unwrap();
     let replay = second
       .claim_or_replay(
@@ -669,8 +662,7 @@ mod tests {
       Some(serde_json::json!({"branch_name": "feature-1"}))
     );
 
-    // A further replay after recovery returns the verification-derived
-    // value without invoking recovery again.
+    // A further replay returns the verification-derived value without recovering again.
     let replay = store
       .claim_or_replay("workspace.create", "key-1", "fp-1", Duration::ZERO, || {
         panic!("already resolved as completed; no recovery expected")
@@ -732,8 +724,7 @@ mod tests {
       .unwrap_err();
     assert!(error.starts_with("idempotency_ambiguous:"), "{error}");
 
-    // Left pending, so a later attempt still has to reason about staleness
-    // rather than silently treating the record as resolved.
+    // Left pending, so a later attempt must still reason about staleness, not treat it as resolved.
     let error_again = store
       .claim_or_replay("file.patch", "key-1", "fp-1", Duration::ZERO, || {
         Ok(RecoveryDecision::Ambiguous)
@@ -758,9 +749,7 @@ mod tests {
       .unwrap();
     drop(before_restart);
 
-    // A second attempt with the same key/fingerprint, from a "restarted"
-    // store instance, must see the still-pending, still-fresh claim rather
-    // than a clean slate.
+    // A same-key retry from a "restarted" store must see the still-fresh pending claim.
     let after_restart = IdempotencyStore::open_at(&db_path).unwrap();
     let outcome = after_restart
       .try_claim("agent.start", "key-1", "fp-1", DEFAULT_STALE_AFTER)
@@ -835,8 +824,7 @@ mod tests {
       .unwrap();
     assert_eq!(replay, Some(serde_json::json!({"id": 2})));
 
-    // The old, cleaned-up record's key is free to be reused as a brand new
-    // claim.
+    // The cleaned-up record's key is free for a brand new claim.
     let reused = store
       .claim_or_replay(
         "workspace.create",
@@ -848,8 +836,7 @@ mod tests {
       .unwrap();
     assert_eq!(reused, None);
 
-    // The still-pending record survives cleanup regardless of age: cleanup
-    // only ever removes completed records.
+    // Cleanup only removes completed records, so the pending one survives regardless of age.
     let outcome = store
       .try_claim(
         "workspace.create",

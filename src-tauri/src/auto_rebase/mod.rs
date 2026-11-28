@@ -398,8 +398,7 @@ pub fn rebase_single_workspace(
   if !passes_guard(repo_path, &workspace, &sync) {
     return Ok(None);
   }
-  // A squash-merged stack lands upstream under new hashes; rebasing it would
-  // conflict every commit. Leave it alone when the target already has its changes.
+  // A squash-merged stack lands under new hashes, so rebasing it would conflict on every commit.
   if jj::jj_branch_changes_landed_on_target(&full_path, &workspace.branch_name, &target_branch)
     .unwrap_or(false)
   {

@@ -97,9 +97,7 @@ impl Coordinator<'_> {
   /// Every agent this instance and its peers run.
   pub fn peers(&self, repo: Option<&str>) -> Vec<Peer> {
     let local = self.hub.sessions();
-    // Other instances are found by repository: look in every repository of
-    // each local agent's project too, so a window on another project repo
-    // is found before any agent here works in it.
+    // Search every repo of each local agent's project too, to find windows on other project repos.
     let mut repos: Vec<String> = local
       .iter()
       .flat_map(|session| std::iter::once(&session.repo).chain(&session.project))

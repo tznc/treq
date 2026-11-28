@@ -98,15 +98,12 @@ where
       Ok(result)
     }
     Err(error) => {
-      // A structured failure, not a "did it land?" ambiguity: free the key
-      // for reuse rather than leaving a pending claim behind forever.
+      // A structured failure isn't ambiguous, so free the key instead of leaving a pending claim.
       store.abandon(operation, key)?;
       Err(error)
     }
   };
-  // Best-effort, bounded retention: opportunistically sweep old completed
-  // records on the same connection rather than running a separate cleanup
-  // process. A failure here must never mask the mutation's own outcome.
+  // Best-effort retention sweep on this connection. A failure must never mask the mutation result.
   store
     .cleanup(crate::core::idempotency_store::DEFAULT_RETENTION)
     .warn_on_err("cleanup");
@@ -169,8 +166,7 @@ pub(super) fn workspace_id(value: Option<&String>) -> Result<Option<i64>, String
 pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::Value, String> {
   request.cli_args()?;
   reject_unsupported(&request)?;
-  // The idempotency store fingerprints the whole request and, on a stale
-  // claim, hands it to `verification_for`.
+  // The store fingerprints the whole request and hands a stale claim to `verification_for`.
   match idempotency(&request) {
     Some((scope, operation, key)) => {
       with_idempotency_key(scope, operation, key, &request, || execute(&request))
@@ -183,8 +179,7 @@ pub fn execute_local_request(request: TreqCommandRequest) -> Result<serde_json::
 /// records a claim for them.
 fn reject_unsupported(request: &TreqCommandRequest) -> Result<(), String> {
   match request {
-    // The underlying split works on whole files of the working copy. Hunk
-    // selections would silently become whole-file splits.
+    // The split works on whole files, so hunk selections would silently become whole-file splits.
     TreqCommandRequest::SplitCommit { hunks, .. } if !hunks.is_empty() => Err(
       "unsupported: SplitCommit does not support hunk selections yet; select whole files"
         .to_string(),
@@ -209,12 +204,7 @@ pub(crate) fn idempotency(
       idempotency_key,
       ..
     } => Some((
-      // `destination` does not exist yet — cloning is the whole point —
-      // so the idempotency store (which eagerly creates `<repo>/.treq/`
-      // when opened) must not be scoped there or `git clone` will refuse
-      // to write into an already-non-empty destination. Its parent
-      // directory is guaranteed to exist since the caller chose a path
-      // under it.
+      // The store creates `.treq/`, which would block `git clone`, so it lives in the parent.
       Path::new(destination)
         .parent()
         .and_then(|parent| parent.to_str())
@@ -447,8 +437,7 @@ fn execute(request: &TreqCommandRequest) -> Result<serde_json::Value, String> {
     }
     TreqCommandRequest::WorkspaceDiff { repo, workspace } => {
       let id = workspace_id(Some(workspace))?.ok_or("invalid_arguments: workspace is required")?;
-      // A host has no app settings database, so the diff takes the default
-      // conflict marker style, as `treq changes workspace-diff` does.
+      // A host has no app settings DB, so the diff uses the default conflict marker style.
       json(crate::core::workspaces::workspace_cli_diff(repo, id))
     }
     TreqCommandRequest::CommitDiff {
@@ -602,8 +591,7 @@ fn execute(request: &TreqCommandRequest) -> Result<serde_json::Value, String> {
       ..
     } => {
       let id = workspace_id(Some(workspace))?.ok_or("invalid_arguments: workspace is required")?;
-      // Stack planning needs the repository's real default branch; a
-      // hardcoded "main" misplans retargets in repos that use another name.
+      // Stack planning needs the real default branch. A hardcoded "main" misplans other repos.
       let default_branch = crate::jj::get_default_branch(repo)
         .map_err(|error| format!("jj_command_failed: {error}"))?;
       json(crate::core::workspaces::retarget_workspace(
@@ -687,8 +675,7 @@ fn execute(request: &TreqCommandRequest) -> Result<serde_json::Value, String> {
       message,
     } => {
       let id = workspace_id(Some(workspace))?.ok_or("invalid_arguments: workspace is required")?;
-      // Naturally idempotent: it overwrites the description each call, so no
-      // idempotency key is needed or accepted.
+      // Overwriting the description is naturally idempotent, so no key is needed or accepted.
       json(crate::core::commits::describe_commit(
         repo,
         Some(id),
@@ -787,8 +774,7 @@ fn execute(request: &TreqCommandRequest) -> Result<serde_json::Value, String> {
         repo, revision, &sides, None,
       ))
     }
-    // The desktop conflict-marker setting lives in the client's app
-    // database, which the VM does not have, so pulls use the default style.
+    // The conflict-marker setting lives in the desktop's app DB, so VM pulls use the default style.
     TreqCommandRequest::PullWorkspace { repo, workspace } => {
       json(crate::core::workspaces::pull_workspace_from_remote(
         repo,
@@ -808,8 +794,7 @@ fn execute(request: &TreqCommandRequest) -> Result<serde_json::Value, String> {
       bookmark,
       remote_name,
     } => {
-      // Tracking an already-tracked bookmark is a no-op in jj, so this is
-      // naturally idempotent and does not need a key.
+      // Tracking an already-tracked bookmark is a jj no-op, so this needs no idempotency key.
       json(
         crate::jj::jj_bookmark_track(repo, bookmark, remote_name)
           .map_err(|error| format!("jj_command_failed: {error}")),

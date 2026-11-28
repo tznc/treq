@@ -679,8 +679,7 @@ mod tests {
       .expect(1)
       .mount(&server)
       .await;
-    // `gh pr list` gives no total, so the host counts the filter with the
-    // search API on the first page.
+    // `gh pr list` gives no total, so the host counts the filter via search on the first page.
     Mock::given(method("POST"))
       .and(path("/graphql"))
       .and(body_string_contains("issueCount"))

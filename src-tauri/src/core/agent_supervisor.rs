@@ -94,9 +94,7 @@ fn remove_record(repo_path: &str, workspace: &str) {
 /// A process is considered alive when signal 0 can be delivered to its pid.
 #[cfg(unix)]
 fn process_is_alive(pid: u32) -> bool {
-  // SAFETY: kill(pid, 0) only probes for existence/permission; it never
-  // sends a real signal, so this cannot terminate or otherwise disturb the
-  // target process.
+  // SAFETY: kill(pid, 0) only probes existence and permission, never sending a real signal.
   unsafe { libc::kill(pid as i32, 0) == 0 }
 }
 
@@ -118,9 +116,7 @@ fn process_is_alive(pid: u32) -> bool {
 #[cfg(target_os = "linux")]
 fn process_start_token(pid: u32) -> Option<String> {
   let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-  // The command name (field 2) may contain spaces and parentheses, so
-  // fields are counted from the last ')'. `starttime` is field 22, which is
-  // index 19 once pid and comm are cut off.
+  // comm may hold spaces and ')', so count from the last ')'. Field 22, `starttime`, is index 19.
   let after_comm = stat.get(stat.rfind(')')? + 1..)?;
   after_comm.split_whitespace().nth(19).map(str::to_owned)
 }
@@ -129,8 +125,7 @@ fn process_start_token(pid: u32) -> Option<String> {
 fn process_start_token(pid: u32) -> Option<String> {
   let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
   let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
-  // SAFETY: `info` is a writable buffer of exactly `size` bytes; the kernel
-  // fills it and returns the number of bytes written (<= 0 on failure).
+  // SAFETY: `info` is a writable buffer of exactly `size` bytes, which the kernel fills.
   let written = unsafe {
     libc::proc_pidinfo(
       pid as libc::c_int,
@@ -171,8 +166,7 @@ fn kill_process(pid: u32, start: Option<&str>) {
     return;
   }
   #[cfg(unix)]
-  // SAFETY: `kill` takes plain integers and touches no Rust memory; a stale or
-  // invalid pid only makes it return an error, which is ignored.
+  // SAFETY: `kill` takes plain ints and touches no Rust memory. A stale pid only errors.
   unsafe {
     libc::kill(pid as i32, libc::SIGTERM);
   }
@@ -235,8 +229,7 @@ pub fn start_agent(
     .map_err(|e| format!("dependency_error: Failed to start agent '{agent}': {e}"))?;
 
   let pid = child.id();
-  // Captured while `child` is still unreaped, so the pid cannot have been
-  // recycled yet.
+  // Captured while `child` is unreaped, so the pid can't have been recycled yet.
   let pid_start = process_start_token(pid);
   #[expect(
     clippy::mem_forget,
@@ -261,9 +254,7 @@ pub fn start_agent(
 }
 
 fn resolve_agent_binary(agent: &str) -> Option<String> {
-  // Allow-listed agent names only — never trust a caller-supplied binary
-  // path, so an idempotency-key replay or a compromised UI cannot exec
-  // arbitrary programs on the VM.
+  // Allow-listed names only, so a replayed key or compromised UI can't exec arbitrary VM programs.
   const ALLOWED: &[&str] = &["claude", "codex", "cursor-agent", "copilot"];
   ALLOWED
     .iter()
@@ -285,8 +276,7 @@ fn setup_agent_stdin(fifo_path: &Path) -> Result<(fs::File, Option<KeeperPid>), 
   }
   let c_path = std::ffi::CString::new(fifo_path.as_os_str().as_bytes())
     .map_err(|_| "filesystem_error: Invalid agent stdin path".to_string())?;
-  // SAFETY: `c_path` is a valid C string pointing at a path we own; mkfifo
-  // only creates a filesystem node.
+  // SAFETY: `c_path` is a valid C string for a path we own, and mkfifo only creates a node.
   let rc = unsafe { libc_mkfifo(c_path.as_ptr(), 0o600) };
   if rc != 0 {
     return Err(format!(
@@ -384,8 +374,7 @@ pub fn agent_status(repo_path: &str, workspace: &str) -> Result<AgentStatusResul
       })
     }
     Some(_) => {
-      // Process exited since the last check: clear the stale record and
-      // signal the caller a refresh is due.
+      // The process exited since the last check, so clear the record and ask for a refresh.
       remove_record(repo_path, workspace);
       Ok(AgentStatusResult {
         workspace: workspace.to_string(),
@@ -474,9 +463,7 @@ mod tests {
     fs::create_dir_all(dir.path().join("ws")).unwrap();
     let workspace_path = dir.path().join("ws").to_str().unwrap().to_string();
 
-    // Use a real, short-lived process ("sleep") in place of an actual agent
-    // binary so the test exercises real process tracking without requiring
-    // claude/codex to be installed in this sandbox.
+    // A real `sleep` stands in for the agent, so tracking is real without claude/codex installed.
     let record = start_test_process(repo, "demo", &workspace_path, "sleep");
     assert!(record.pid > 0);
     // Windows `tasklist` can miss a pid that has not yet shown up.
@@ -537,8 +524,7 @@ mod tests {
       repo,
       workspace: "demo",
     };
-    // Unix `cat` echoes stdin into the log. Windows has no FIFO, so the
-    // helper process is only required to stay alive for a successful write.
+    // Unix `cat` echoes stdin to the log. Windows has no FIFO, so `sleep` just has to stay alive.
     let placeholder = if cfg!(windows) { "sleep" } else { "cat" };
     let record = start_test_process(repo, "demo", &workspace_path, placeholder);
     wait_for_process(&record);
@@ -585,8 +571,7 @@ mod tests {
     fs::create_dir_all(dir.path().join("ws")).unwrap();
     let workspace_path = dir.path().join("ws").to_str().unwrap().to_string();
     let mut record = start_test_process(repo, "demo", &workspace_path, "sleep");
-    // Pretend the recorded agent died and an unrelated process now owns the
-    // pid: the live `sleep` reports a different start time than the record.
+    // Fake pid reuse: the live `sleep` reports a different start time than the record.
     record.pid_start = Some("0.0".to_string());
     write_record(repo, &record).unwrap();
 

@@ -1160,8 +1160,7 @@ pub(super) fn fd_has_input(fd: std::os::unix::io::RawFd, timeout: Duration) -> b
     revents: 0,
   };
   let timeout_ms = timeout.as_millis().min(i32::MAX as u128) as i32;
-  // SAFETY: `poll_fd` is a live, initialised `pollfd` and the count is 1, so
-  // `poll` reads and writes only that one struct.
+  // SAFETY: `poll_fd` is a live, initialised `pollfd` and count 1 limits `poll` to that struct.
   let ready = unsafe { libc::poll(&mut poll_fd, 1, timeout_ms) };
   ready > 0 && poll_fd.revents & (libc::POLLIN | libc::POLLHUP) != 0
 }

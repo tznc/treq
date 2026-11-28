@@ -956,8 +956,7 @@ impl Cloud {
     let result = async {
       let key_reference = self.key_reference()?;
       self.register_key(&key_reference).await?;
-      // One idempotency key per attempt: a retry after an unknown outcome
-      // reuses it, a retry after a definite refusal starts a new attempt.
+      // One key per attempt: a retry after an unknown outcome reuses it, not one after a refusal.
       let key = self
         .provision_key
         .lock_or_recover()
@@ -965,8 +964,7 @@ impl Cloud {
         .clone();
       let (tier, byos_kind) = {
         let w = self.workspace.lock_or_recover();
-        // Create on the card is treq managed, unless an organization
-        // allows only its own keys.
+        // Create on the card is treq managed, unless an organization allows only its own keys.
         let byos_kind = kind.map(str::to_string).or_else(|| {
           let profile = w.profile.as_ref().filter(|p| p.org_id.is_some())?;
           let keys = w
@@ -1013,8 +1011,7 @@ impl Cloud {
       }
     });
     if failed.is_some() {
-      // The control plane records the failure; reload so the card offers
-      // a retry instead of a fresh create.
+      // The control plane records the failure, so reloading makes the card offer a retry.
       self.refresh_status().await;
     }
   }
@@ -1090,8 +1087,7 @@ impl Cloud {
         self.update_workspace(|w| w.provisioning_error = None);
         let result = async {
           let key_reference = self.key_reference()?;
-          // A fresh status, so a workspace that went to sleep fails with
-          // "not ready" instead of a certificate for an unreachable host.
+          // A fresh status fails a sleeping workspace as "not ready", not with an unreachable cert.
           let status = control_plane::instance_status(&self.supabase)
             .await
             .map_err(|e| e.friendly())?;
@@ -1481,8 +1477,7 @@ mod tests {
     let (supabase, _) = client(&server.uri());
     let fake = Arc::new(Fake::default());
     let cloud = Cloud::new(Arc::new(supabase), fake.clone());
-    // Reading the plan refreshes the near-expired session, which the
-    // server refuses.
+    // Reading the plan refreshes the near-expired session, which the server refuses.
     cloud.exchange_token("t").await.unwrap();
     let _ = cloud.supabase.auth.access_token().await;
     assert_eq!(cloud.snapshot().auth.session, None);
@@ -2025,8 +2020,7 @@ mod tests {
       .map(|b| b["idempotency_key"].clone())
       .collect();
     assert_eq!(keys.len(), 3);
-    // The retry is the same attempt; the next create, after it went
-    // through, is a new one.
+    // The retry is the same attempt. The next create, after it went through, is a new one.
     assert_eq!(keys[0], keys[1]);
     assert_ne!(keys[1], keys[2]);
   }

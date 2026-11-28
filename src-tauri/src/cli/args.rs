@@ -70,8 +70,7 @@ struct CommandConfig {
   reason = "tauri.conf.json is embedded at build time and checked by tests"
 )]
 fn cli_config() -> &'static CommandConfig {
-  // Only `plugins.cli` is deserialised: serde skips the rest of the 28 KB
-  // file without building a `Value` tree for it.
+  // Only `plugins.cli` is deserialised, so serde skips the rest of the 28 KB file.
   #[derive(Deserialize)]
   struct TauriConfig {
     plugins: Plugins,
@@ -209,9 +208,7 @@ where
     eprintln!("{}", build_command("treq", cli_config()).render_usage());
     return USAGE_ERROR_EXIT_CODE;
   };
-  // No binary detection here: it spawns a login shell and a `which` per
-  // binary on every call, and a remote host runs one process per request.
-  // Push and fetch look their `git` up when they need it.
+  // No binary detection: it spawns processes per call. Push and fetch look up `git` when needed.
   super::handle_cli_command(&subcommand).unwrap_or_else(|| {
     eprintln!("Unknown command: {}", subcommand.name);
     USAGE_ERROR_EXIT_CODE

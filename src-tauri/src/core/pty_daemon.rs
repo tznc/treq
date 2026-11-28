@@ -208,8 +208,7 @@ impl Frame {
       Err(e) => return Err(e),
     }
     let len = u32::from_be_bytes([header[1], header[2], header[3], header[4]]) as usize;
-    // Input arrives a keypress or a paste at a time; anything this large is
-    // not a client of ours.
+    // Input arrives a keypress or paste at a time, so a frame this large isn't from our client.
     if len > 16 * 1024 * 1024 {
       return Err(std::io::Error::new(
         std::io::ErrorKind::InvalidData,
@@ -248,8 +247,7 @@ pub fn replay(parser: &mut vt100::Parser) -> Vec<u8> {
     let total = screen.scrollback_len();
     let mut offset = total;
     while offset > 0 {
-      // At scrollback offset `k` the view starts at history line
-      // `total - k`, so its first `min(k, rows)` rows are history.
+      // At offset `k` the first `min(k, rows)` rows are history, starting at line `total - k`.
       screen.set_scrollback(offset);
       let take = offset.min(rows);
       for line in screen.rows_formatted(0, cols.get()).take(take) {
@@ -307,9 +305,7 @@ impl Session {
   fn kill(&mut self) {
     if let Some(pid) = self.child.process_id() {
       let pgid = pid as libc::pid_t;
-      // SAFETY: `killpg` takes plain integers and has no memory effects.
-      // portable-pty starts each child in its own session, so its pid is
-      // the process group id and this cannot reach the daemon itself.
+      // SAFETY: `killpg` has no memory effects, and the child's own pgid can't include the daemon.
       unsafe { libc::killpg(pgid, libc::SIGHUP) };
       std::thread::sleep(Duration::from_millis(50));
       // SAFETY: as above.
@@ -366,14 +362,12 @@ pub fn serve_with_idle(paths: &DaemonPaths, idle_exit: Duration) -> Result<bool,
     .write(true)
     .open(paths.lock())
     .map_err(|e| format!("Failed to open the daemon lock: {e}"))?;
-  // SAFETY: the fd belongs to `lock`, which outlives this call; flock only
-  // reads it.
+  // SAFETY: the fd belongs to `lock`, which outlives this call, and flock only reads it.
   if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
     return Ok(false);
   }
   let socket = paths.socket();
-  // Holding the lock means any socket file left here is from a daemon that
-  // has gone.
+  // Holding the lock means any socket file here is from a daemon that has gone.
   std::fs::remove_file(&socket).ok();
   let listener =
     UnixListener::bind(&socket).map_err(|e| format!("Failed to bind {}: {e}", socket.display()))?;
@@ -601,8 +595,7 @@ fn ensure_session(daemon: &Arc<Daemon>, name: &str, spec: &StartSpec) -> Result<
         .clients
         .retain_mut(|(_, client)| client.write_all(&buf[..n]).is_ok());
     }
-    // The process exited (or the session was stopped): end its clients'
-    // streams, which is how an attached terminal learns it is over.
+    // The process exited or was stopped. Ending client streams tells attached terminals it's over.
     let ended = daemon.lock().sessions.remove(&name);
     if let Some(mut session) = ended {
       session.child.try_wait().ok();
@@ -623,8 +616,7 @@ fn paste(daemon: &Daemon, name: &str, text: &str, submit: bool) -> Result<(), St
       .get_mut(name)
       .ok_or_else(|| not_found(name))?;
     let mut bytes = Vec::with_capacity(text.len() + 12);
-    // Bracket the paste only for a program that asked for it, as tmux's
-    // `paste-buffer -p` does.
+    // Bracket the paste only for a program that asked, as tmux's `paste-buffer -p` does.
     let bracketed = session.parser.screen().bracketed_paste();
     if bracketed {
       bytes.extend(b"\x1b[200~");
@@ -677,8 +669,7 @@ fn attach(
       return;
     };
     session.resize(cols, rows);
-    // Reply and replay are written under the lock, so no output can land
-    // between the replay and the live stream.
+    // Reply and replay are written under the lock, so no output lands between replay and stream.
     let replayed = replay(&mut session.parser);
     if write_reply(&mut writer, &ok(())).is_err() || writer.write_all(&replayed).is_err() {
       return;
@@ -823,9 +814,7 @@ fn spawn_daemon(paths: &DaemonPaths) -> Result<(), String> {
     .stdin(std::process::Stdio::null())
     .stdout(log)
     .stderr(log_err);
-  // SAFETY: `setsid` is async-signal-safe and touches no memory; it moves
-  // the daemon out of the SSH session, so it outlives the connection that
-  // started it.
+  // SAFETY: `setsid` is async-signal-safe and touches no memory. It detaches from the SSH session.
   unsafe {
     command.pre_exec(|| {
       libc::setsid();
@@ -1144,8 +1133,7 @@ mod tests {
       parser.screen().cursor_position()
     );
 
-    // Lines 396..=399 and the prompt are on screen, so the 250 history
-    // lines are 146..=395.
+    // Lines 396..=399 and the prompt are on screen, so the 250 history lines are 146..=395.
     let text = String::from_utf8_lossy(&replayed).into_owned();
     assert!(text.contains("line 146\x1b"), "oldest history line missing");
     assert!(text.contains("line 395\x1b"), "newest history line missing");

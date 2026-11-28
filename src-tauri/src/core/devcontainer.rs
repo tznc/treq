@@ -127,8 +127,7 @@ fn volume_owner_args(container_id: &str, remote_user: &str, claude_code: bool) -
 /// plus Node (which the Claude Code feature needs) unless the config has it.
 /// Features the config already names are left to the config.
 pub fn additional_features(config_json: &str) -> Option<String> {
-  // Sorted, so the argument is the same whether or not another crate turns
-  // on serde_json's `preserve_order` (GPUI does).
+  // Sorted, so the argument is stable whether or not serde_json's `preserve_order` is on (GPUI).
   let mut features = std::collections::BTreeMap::<String, serde_json::Value>::new();
   if !config_json.contains("anthropics/devcontainer-features/claude-code") {
     if !config_json.contains("devcontainers/features/node") {
@@ -250,8 +249,7 @@ pub fn up(repo_path: &str, claude_code: bool) -> Result<DevcontainerStatus, Stri
     return Err(up_failure_message(&output.stdout, &output.stderr));
   }
   give_volumes_to_remote_user(&output.stdout, claude_code)?;
-  // The container still works without the CLI, so a failed install only
-  // logs: agents lose `treq` commands, not their terminal.
+  // A failed CLI install only logs: agents lose `treq` commands, not their terminal.
   if let Some((container_id, _)) = up_result(&output.stdout) {
     if let Err(e) = install_treq_cli(&container_id) {
       log::warn!("treq CLI not installed in devcontainer: {e}");

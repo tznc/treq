@@ -1684,8 +1684,7 @@ impl TreqCommandRequest {
       Self::PtyStatus => ("pty-remote", "status", "/"),
       Self::PtyReset { backend } => {
         push_backend(&mut fields, *backend);
-        // Reset reaches every repository on the host; `--repo` only
-        // satisfies the CLI's shared argument shape.
+        // Reset reaches every repo on the host. `--repo` only fits the CLI's shared argument shape.
         ("pty-remote", "reset", "/")
       }
       Self::PtyStop {
@@ -1951,10 +1950,7 @@ pub async fn execute_remote_command<T: DeserializeOwned>(
           stdout,
           ..
         } => {
-          // The CLI always emits `{"error":{"code":...,"message":...}}` on
-          // stdout for a structured failure, so prefer that over stderr: it is
-          // what lets the CLI's own error code survive transport mapping rather
-          // than collapsing to a generic string.
+          // Prefer the CLI's stdout `{"error":...}` over stderr so its error code survives.
           if let Ok(body) = serde_json::from_str::<CliErrorBody>(&stdout) {
             RemoteCommandError::Command {
               code: body.error.code,
@@ -2625,8 +2621,7 @@ mod tests {
     let first =
       with_idempotency_key(repo, "test.create", Some(&key), &request, run.clone()).unwrap();
     let second = with_idempotency_key(repo, "test.create", Some(&key), &request, run).unwrap();
-    // The second call must replay the first response rather than invoking
-    // `run` again — a retried "create" mutation must not duplicate work.
+    // The second call replays the first response, so a retried create doesn't duplicate work.
     assert_eq!(first, second);
     assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
   }
@@ -2686,9 +2681,7 @@ mod tests {
     .unwrap_err();
     assert_eq!(error, "workspace_not_found: boom");
 
-    // The failed attempt must not leave a pending claim behind: a retry
-    // with the same key runs the mutation again rather than replaying or
-    // conflicting.
+    // A failed attempt leaves no pending claim, so a same-key retry runs the mutation again.
     let result = with_idempotency_key(repo, "test.create", Some(&key), &request, || {
       Ok(serde_json::json!({ "id": 2 }))
     })
@@ -2868,9 +2861,7 @@ mod tests {
       crate::jj::jj_head_operation_id(&repo_path).unwrap()
     );
 
-    // A mutation (a new commit) must advance the operation log, so the
-    // marker a second client polls for changes even though it never
-    // initiated the mutation itself.
+    // A commit advances the op log, so a second client's polled marker changes too.
     std::fs::write(repo_dir.path().join("a.txt"), "a\n").unwrap();
     execute_local_request(TreqCommandRequest::CreateCommit {
       repo: repo_path.clone(),
@@ -3002,8 +2993,7 @@ mod tests {
       "polling an idle repo must not add operations"
     );
 
-    // A terminal or agent writing a file never runs jj, so only the snapshot
-    // taken while reading the marker can surface it.
+    // A terminal or agent file write never runs jj, so only the marker read's snapshot surfaces it.
     std::fs::write(repo_dir.path().join("agent-output.txt"), "edited\n").unwrap();
     let after_write = marker();
     assert_ne!(first, after_write);
@@ -3289,9 +3279,7 @@ mod tests {
 
   #[test]
   fn restore_file_has_no_verification_recipe() {
-    // Documented carve-out: rather than guess at a false-positive check, a
-    // mutation with no reliable observable-state read falls back to
-    // `MutationVerificationOutcome::Ambiguous` in `retry_after_reconnect`.
+    // Documented carve-out: no reliable state read, so `retry_after_reconnect` reports Ambiguous.
     let request = TreqCommandRequest::RestoreFile {
       repo: "/r".into(),
       workspace: None,
@@ -3354,9 +3342,7 @@ mod tests {
       check(&serde_json::json!([])),
       MutationVerificationOutcome::AlreadyApplied
     );
-    // The discard landed but its reply was lost, and an agent wrote a new
-    // file before reconnect verification. `NotApplied` would make
-    // `retry_after_reconnect` resend RestoreAll and delete that edit.
+    // Lost reply, then a new agent file: `NotApplied` would resend RestoreAll and delete that edit.
     let edited_after_discard = serde_json::json!([{ "path": "agent-new.txt" }]);
     assert_eq!(
       check(&edited_after_discard),
@@ -3640,8 +3626,7 @@ mod tests {
 
   #[test]
   fn create_commit_without_a_baseline_has_no_verification_recipe() {
-    // Matching on the message alone is a false positive for repeated
-    // messages, so without a marker the caller must report ambiguity.
+    // Message-only matching misfires on repeated messages, so no marker means ambiguity.
     assert!(verification_for(&create_commit(None)).is_none());
   }
 
@@ -3727,8 +3712,7 @@ mod tests {
 
   #[test]
   fn create_commit_json_without_an_idempotency_key_is_rejected() {
-    // The desktop client must always send a key: the field is required at the
-    // IPC boundary, so a request without it never reaches the remote.
+    // The key is required at the IPC boundary, so a request without it never reaches the remote.
     let parsed = serde_json::from_value::<TreqCommandRequest>(serde_json::json!({
       "kind": "CreateCommit",
       "repo": "/r",
@@ -3930,8 +3914,7 @@ mod tests {
       let path = workspace_path(&repo, ws.id);
       TestRepo::write_workspace_file(&path, "a.txt", "a\n").unwrap();
       TestRepo::write_workspace_file(&path, "b.txt", "b\n").unwrap();
-      // The desktop snapshots the working copy when it lists changes before a
-      // split; do the same so the split sees both files.
+      // Like the desktop, snapshot the working copy before a split so it sees both files.
       crate::jj::jj_get_changed_files(&path).unwrap();
 
       let refused = execute_local_request(TreqCommandRequest::SplitCommit {
@@ -4079,8 +4062,7 @@ mod tests {
       let repo = TestRepo::new().unwrap();
       assert_ne!(repo.default_branch(), "main");
       let parent = repo.create_workspace_simple("feat-parent").unwrap();
-      // A workspace with no recorded target falls back to the repository
-      // default, which is the branch the old hardcoded "main" got wrong.
+      // No recorded target means the repo default, which the old hardcoded "main" got wrong.
       rusqlite::Connection::open(crate::local_db::get_local_db_path(&repo.repo_path))
         .unwrap()
         .execute(
@@ -4100,8 +4082,7 @@ mod tests {
       .unwrap();
       assert_eq!(child.target_branch.as_deref(), Some("feat-parent"));
 
-      // Moving the parent under its own child lifts the child (the bridge)
-      // onto the parent's old target, which here is the repository default.
+      // Parent under its own child lifts the child onto the parent's old target: the repo default.
       execute_local_request(TreqCommandRequest::RebaseWorkspace {
         repo: repo.repo_path.clone(),
         workspace: parent.id.to_string(),
