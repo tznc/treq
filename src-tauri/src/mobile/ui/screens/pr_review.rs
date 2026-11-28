@@ -1141,10 +1141,12 @@ impl Render for SubmitSheet {
           .disabled(!ready)
           .on_click(cx.listener(|this, _, window, cx| {
             let (event, body) = (this.event, this.body.read(cx).value().trim().to_string());
-            this
+            if let Err(e) = this
               .screen
               .update(cx, |screen, cx| screen.submit(event, body, window, cx))
-              .ok();
+            {
+              log::warn!("Dropped a review submission: the pull request screen closed: {e}");
+            }
             sheet::close(cx);
           }))
           .touch(),

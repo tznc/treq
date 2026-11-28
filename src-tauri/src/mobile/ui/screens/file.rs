@@ -319,12 +319,12 @@ impl Render for FileScreen {
       Some(_) => {
         let this = cx.weak_entity();
         let clear: Handler = Rc::new(move |_, cx| {
-          this
-            .update(cx, |screen, cx| {
-              screen.selection = None;
-              cx.notify();
-            })
-            .ok();
+          if let Err(e) = this.update(cx, |screen, cx| {
+            screen.selection = None;
+            cx.notify();
+          }) {
+            log::debug!("Ignored clearing the selection: the file screen closed: {e}");
+          }
         });
         Some(review::selection_bar(
           &self.opened.review,

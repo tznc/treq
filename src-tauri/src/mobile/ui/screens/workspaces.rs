@@ -66,7 +66,9 @@ pub fn open(repo: String, cx: &mut App) {
       on_title: Some(Rc::new(move |_, cx| switcher(switcher_repo.clone(), cx))),
       more: Some(Rc::new(move |_, cx| {
         if let Some(screen) = menu_screen.borrow().as_ref() {
-          screen.update(cx, |screen, cx| screen.menu(cx)).ok();
+          if let Err(e) = screen.update(cx, |screen, cx| screen.menu(cx)) {
+            log::debug!("Ignored the workspaces menu: the workspaces screen closed: {e}");
+          }
         }
       })),
     },
@@ -390,7 +392,9 @@ impl WorkspacesScreen {
         sheet::MenuEntry::new("menu-select", "Select workspaces", {
           let this = this.clone();
           move |_, cx| {
-            this.update(cx, |screen, cx| screen.select(None, cx)).ok();
+            if let Err(e) = this.update(cx, |screen, cx| screen.select(None, cx)) {
+              log::debug!("Ignored Select workspaces: the workspaces screen closed: {e}");
+            }
           }
         }),
         sheet::MenuEntry::new("menu-github", "GitHub", {
@@ -398,7 +402,9 @@ impl WorkspacesScreen {
           move |_, cx| super::github::open(repo.clone(), cx)
         }),
         sheet::MenuEntry::new("menu-refresh", "Refresh", move |_, cx| {
-          this.update(cx, |screen, cx| screen.reload(cx)).ok();
+          if let Err(e) = this.update(cx, |screen, cx| screen.reload(cx)) {
+            log::debug!("Skipped a workspaces refresh: the workspaces screen closed: {e}");
+          }
         }),
       ];
       return sheet::menu(repo_name(&self.repo).to_string(), entries, cx);
@@ -419,7 +425,9 @@ impl WorkspacesScreen {
         sheet::MenuEntry::new("menu-open", "Open", {
           let this = this.clone();
           move |_, cx| {
-            this.update(cx, |screen, cx| screen.end_selection(cx)).ok();
+            if let Err(e) = this.update(cx, |screen, cx| screen.end_selection(cx)) {
+              log::debug!("Ignored ending the selection: the workspaces screen closed: {e}");
+            }
             workspace::open(repo.clone(), open_ws.id.to_string(), title_of(&open_ws), cx)
           }
         }),
@@ -427,24 +435,24 @@ impl WorkspacesScreen {
           let this = this.clone();
           move |_, cx| {
             let branch = stack_ws.clone();
-            this
-              .update(cx, |screen, cx| {
-                screen.end_selection(cx);
-                screen.new_workspace(Some(branch), cx)
-              })
-              .ok();
+            if let Err(e) = this.update(cx, |screen, cx| {
+              screen.end_selection(cx);
+              screen.new_workspace(Some(branch), cx)
+            }) {
+              log::debug!("Ignored a new workspace: the workspaces screen closed: {e}");
+            }
           }
         }),
         sheet::MenuEntry::new("menu-rename", "Rename…", {
           let this = this.clone();
           move |_, cx| {
             let workspace = rename_ws.clone();
-            this
-              .update(cx, |screen, cx| {
-                screen.end_selection(cx);
-                screen.rename(workspace, cx)
-              })
-              .ok();
+            if let Err(e) = this.update(cx, |screen, cx| {
+              screen.end_selection(cx);
+              screen.rename(workspace, cx)
+            }) {
+              log::debug!("Ignored a rename: the workspaces screen closed: {e}");
+            }
           }
         }),
         sheet::MenuEntry::new("menu-copy", "Copy branch name", move |_, cx| {
@@ -463,11 +471,11 @@ impl WorkspacesScreen {
         {
           let this = this.clone();
           move |_, cx| {
-            this
-              .update(cx, |screen, cx| {
-                screen.confirm_archive(archive_ids.clone(), cx)
-              })
-              .ok();
+            if let Err(e) = this.update(cx, |screen, cx| {
+              screen.confirm_archive(archive_ids.clone(), cx)
+            }) {
+              log::debug!("Ignored an archive: the workspaces screen closed: {e}");
+            }
           }
         },
       ));
@@ -477,9 +485,9 @@ impl WorkspacesScreen {
         sheet::MenuEntry::new("menu-delete", "Delete…", {
           let this = this.clone();
           move |_, cx| {
-            this
-              .update(cx, |screen, cx| screen.confirm_delete(id, cx))
-              .ok();
+            if let Err(e) = this.update(cx, |screen, cx| screen.confirm_delete(id, cx)) {
+              log::debug!("Ignored a delete: the workspaces screen closed: {e}");
+            }
           }
         })
         .danger(),
@@ -488,14 +496,18 @@ impl WorkspacesScreen {
     entries.push(sheet::MenuEntry::new("menu-select-all", "Select all", {
       let this = this.clone();
       move |_, cx| {
-        this.update(cx, |screen, cx| screen.select_all(cx)).ok();
+        if let Err(e) = this.update(cx, |screen, cx| screen.select_all(cx)) {
+          log::debug!("Ignored select all: the workspaces screen closed: {e}");
+        }
       }
     }));
     entries.push(sheet::MenuEntry::new(
       "menu-select-done",
       "Cancel selection",
       move |_, cx| {
-        this.update(cx, |screen, cx| screen.end_selection(cx)).ok();
+        if let Err(e) = this.update(cx, |screen, cx| screen.end_selection(cx)) {
+          log::debug!("Ignored ending the selection: the workspaces screen closed: {e}");
+        }
       },
     ));
     let title = match ids.len() {
@@ -570,9 +582,9 @@ impl WorkspacesScreen {
       label,
       true,
       move |_, cx| {
-        this
-          .update(cx, |screen, cx| screen.archive(ids.clone(), cx))
-          .ok();
+        if let Err(e) = this.update(cx, |screen, cx| screen.archive(ids.clone(), cx)) {
+          log::debug!("Ignored an archive: the workspaces screen closed: {e}");
+        }
       },
       cx,
     );
@@ -655,7 +667,7 @@ impl WorkspacesScreen {
       "Delete workspace",
       true,
       move |_, cx| {
-        this.update(cx, |screen, cx| screen.delete(id, cx)).ok();
+        if let Err(e) = this.update(cx, |screen, cx| screen.delete(id, cx)) { log::debug!("Ignored a delete: the workspaces screen closed: {e}"); }
       },
       cx,
     );
@@ -692,7 +704,9 @@ impl WorkspacesScreen {
       self.repo.clone(),
       workspace,
       std::rc::Rc::new(move |cx| {
-        this.update(cx, |screen, cx| screen.reload(cx)).ok();
+        if let Err(e) = this.update(cx, |screen, cx| screen.reload(cx)) {
+          log::debug!("Skipped the reload after a rename: the workspaces screen closed: {e}");
+        }
       }),
       cx,
     );
@@ -704,12 +718,12 @@ impl WorkspacesScreen {
       self.repo.clone(),
       stacked_on,
       std::rc::Rc::new(move |cx| {
-        this
-          .update(cx, |screen, cx| {
-            screen.message = Some((true, "Workspaces ready.".into()));
-            screen.reload(cx);
-          })
-          .ok();
+        if let Err(e) = this.update(cx, |screen, cx| {
+          screen.message = Some((true, "Workspaces ready.".into()));
+          screen.reload(cx);
+        }) {
+          log::debug!("Skipped the workspaces ready message: the workspaces screen closed: {e}");
+        }
       }),
       cx,
     );
@@ -807,9 +821,9 @@ impl WorkspacesScreen {
       }
     }));
     hold(("ws-hold", id as u64), row, move |_, cx| {
-      screen
-        .update(cx, |screen, cx| screen.select(Some(id), cx))
-        .ok();
+      if let Err(e) = screen.update(cx, |screen, cx| screen.select(Some(id), cx)) {
+        log::debug!("Ignored a row tap: the workspaces screen closed: {e}");
+      }
     })
     .into_any_element()
   }

@@ -173,7 +173,9 @@ mod tests {
         "",
         "",
         move |cx| {
-          weak.update(cx, |s, _| s.0 += 1).ok();
+          weak
+            .update(cx, |s, _| s.0 += 1)
+            .expect("the screen outlives the tap");
         },
         cx,
       );

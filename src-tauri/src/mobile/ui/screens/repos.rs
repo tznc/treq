@@ -57,14 +57,14 @@ impl ReposScreen {
     folder_picker::open(
       start,
       move |path, window, cx| {
-        screen
-          .update(cx, |this, cx| {
-            this
-              .path
-              .update(cx, |input, cx| input.set_value(path.clone(), window, cx));
-            this.inspect(cx);
-          })
-          .ok();
+        if let Err(e) = screen.update(cx, |this, cx| {
+          this
+            .path
+            .update(cx, |input, cx| input.set_value(path.clone(), window, cx));
+          this.inspect(cx);
+        }) {
+          log::debug!("Dropped a browsed path: the repos screen closed: {e}");
+        }
       },
       cx,
     );

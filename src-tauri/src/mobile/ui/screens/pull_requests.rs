@@ -319,9 +319,11 @@ impl PullRequestsScreen {
           format!("state-{}", filter.value()),
           filter.label(),
           move |_, cx| {
-            this
-              .update(cx, |screen, cx| screen.set_filter(filter, cx))
-              .ok();
+            if let Err(e) = this.update(cx, |screen, cx| screen.set_filter(filter, cx)) {
+              log::debug!(
+                "Ignored a pull request state filter: the pull requests screen closed: {e}"
+              );
+            }
           },
         )
         .selected(current == Some(filter))
@@ -337,12 +339,12 @@ impl PullRequestsScreen {
     let set = |apply: fn(&mut PrFilters, Option<String>)| -> widgets::OnPick {
       let this = this.clone();
       Rc::new(move |value, cx| {
-        this
-          .update(cx, |screen, cx| {
-            apply(&mut screen.filters, value);
-            cx.notify();
-          })
-          .ok();
+        if let Err(e) = this.update(cx, |screen, cx| {
+          apply(&mut screen.filters, value);
+          cx.notify();
+        }) {
+          log::debug!("Ignored a pull request filter change: the pull requests screen closed: {e}");
+        }
       })
     };
     let f = &self.filters;
@@ -356,7 +358,9 @@ impl PullRequestsScreen {
           "Only mine: Off"
         },
         move |_, cx| {
-          mine.update(cx, |screen, cx| screen.toggle_mine(cx)).ok();
+          if let Err(e) = mine.update(cx, |screen, cx| screen.toggle_mine(cx)) {
+            log::debug!("Ignored Only mine: the pull requests screen closed: {e}");
+          }
         },
       )
       .selected(self.mine),
@@ -394,15 +398,17 @@ impl PullRequestsScreen {
         "filter-clear",
         "Clear filters",
         move |_, cx| {
-          this
-            .update(cx, |screen, cx| {
-              screen.filters = screen.filters.cleared();
-              if screen.mine {
-                screen.toggle_mine(cx);
-              }
-              cx.notify();
-            })
-            .ok();
+          if let Err(e) = this.update(cx, |screen, cx| {
+            screen.filters = screen.filters.cleared();
+            if screen.mine {
+              screen.toggle_mine(cx);
+            }
+            cx.notify();
+          }) {
+            log::debug!(
+              "Ignored clearing the pull request filters: the pull requests screen closed: {e}"
+            );
+          }
         },
       ));
     }

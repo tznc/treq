@@ -241,13 +241,13 @@ impl WorkspaceScreen {
             &self.review,
             Rc::new(move |at, _, cx| {
               // Hunks are read on tap, not copied into every file's handler each render.
-              this
-                .update(cx, |this, cx| {
-                  if let Some(hunks) = this.picked_hunks(&tap_place.0, tap_place.1) {
-                    this.tap_line(tap_place.clone(), &hunks, at, cx);
-                  }
-                })
-                .ok();
+              if let Err(e) = this.update(cx, |this, cx| {
+                if let Some(hunks) = this.picked_hunks(&tap_place.0, tap_place.1) {
+                  this.tap_line(tap_place.clone(), &hunks, at, cx);
+                }
+              }) {
+                log::debug!("Ignored a line tap: the changes view closed: {e}");
+              }
             }),
             cx,
           ))
@@ -302,12 +302,12 @@ impl WorkspaceScreen {
       pending,
       picked.lines.len() > 1,
       Rc::new(move |_, cx| {
-        this
-          .update(cx, |this, cx| {
-            this.picked = None;
-            cx.notify();
-          })
-          .ok();
+        if let Err(e) = this.update(cx, |this, cx| {
+          this.picked = None;
+          cx.notify();
+        }) {
+          log::debug!("Ignored clearing the picked lines: the changes view closed: {e}");
+        }
       }),
       cx,
     ))
