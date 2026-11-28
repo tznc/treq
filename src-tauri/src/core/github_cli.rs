@@ -206,6 +206,12 @@ pub fn set_reaction(comment_id: &str, content: &str, on: bool) -> Result<(), Str
   github::gh_set_reaction_impl(&gh, comment_id, content, on, &path)
 }
 
+/// Marks a pull request review thread resolved.
+pub fn resolve_review_thread(thread_id: &str) -> Result<(), String> {
+  let (gh, path) = gh()?;
+  github::gh_resolve_review_thread_impl(&gh, thread_id, &path)
+}
+
 pub fn create_issue(repo: &str, title: &str, body: &str) -> Result<u64, String> {
   let (gh, path) = gh()?;
   github::gh_create_issue_impl(&gh, repo, title, body, &path)
