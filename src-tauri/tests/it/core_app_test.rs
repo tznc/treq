@@ -264,6 +264,39 @@ fn init_checks_all_workspaces_and_rebases_only_diverged_ones() {
 }
 
 #[test]
+fn sync_with_remote_rebases_workspace_onto_target_advanced_on_origin() {
+  let repo = TestRepo::with_remote().expect("Failed to create test repo with remote");
+  let default_branch = repo.default_branch();
+  let ws = repo
+    .create_workspace_with_commit("behind-origin", "ws.txt", "ws\n", None)
+    .expect("create workspace");
+  treq_lib::local_db::update_workspace_target_branch(&repo.repo_path, ws.id, default_branch)
+    .expect("set target");
+  repo
+    .remote_commit_file("origin-advance.txt", "origin moved\n", "Advance origin")
+    .expect("advance origin");
+  let remote = repo.remote_path().to_string_lossy().to_string();
+  let origin_tip = TestRepo::run_git(&remote, &["rev-parse", default_branch]).expect("origin tip");
+  let origin_tip = origin_tip.trim();
+
+  treq_lib::core::sync_with_remote(&repo.repo_path, "diff").expect("sync");
+
+  let local_tip = jj::jj_get_commit_id(&repo.repo_path, default_branch).expect("local target");
+  assert!(
+    origin_tip.starts_with(&local_tip),
+    "local target {local_tip} should be fast-forwarded to origin {origin_tip}"
+  );
+  let full_path = repo.workspace_full_path(&ws);
+  let descends =
+    jj::jj_log_revset_commit_ids(&full_path, &format!("{origin_tip} & ::behind-origin"))
+      .expect("ancestry");
+  assert!(
+    !descends.is_empty(),
+    "workspace should be rebased onto origin's tip"
+  );
+}
+
+#[test]
 fn ensure_workspace_rebased_handles_conflicted_bookmark() {
   let repo = TestRepo::with_remote().expect("Failed to create test repo with remote");
 

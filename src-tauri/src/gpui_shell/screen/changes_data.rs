@@ -137,6 +137,13 @@ pub trait ChangesHost: CommitsHost {
     repo_path: &str,
     workspace_id: i64,
   ) -> Result<Vec<AgentReviewComment>, String>;
+  /// Keeps a sent review's line comments on the workspace's diff.
+  fn keep_sent_comments(
+    &self,
+    repo_path: &str,
+    workspace_id: i64,
+    comments: &[crate::core::review::LineComment],
+  ) -> Result<(), String>;
   fn resolve_agent_comment(&self, repo_path: &str, id: &str) -> Result<(), String>;
   fn delete_agent_comment(&self, repo_path: &str, id: &str) -> Result<(), String>;
   /// Splices the comment's suggested change into its file.
@@ -326,6 +333,19 @@ impl ChangesHost for Backend {
     crate::core::agent_review::workspace_comments(&self.state_scope(repo_path), workspace_id)
   }
 
+  fn keep_sent_comments(
+    &self,
+    repo_path: &str,
+    workspace_id: i64,
+    comments: &[crate::core::review::LineComment],
+  ) -> Result<(), String> {
+    crate::core::agent_review::keep_sent_comments(
+      &self.state_scope(repo_path),
+      workspace_id,
+      comments,
+    )
+  }
+
   fn resolve_agent_comment(&self, repo_path: &str, id: &str) -> Result<(), String> {
     crate::core::agent_review::resolve_comment(&self.state_scope(repo_path), id)
   }
@@ -462,7 +482,8 @@ pub struct Snapshot {
   /// Each file's `content_id` in that diff, where known.
   pub content_ids: HashMap<String, String>,
   /// Dirty files also committed, shown as one diff from the fork point to
-  /// the working copy (their `committed_hunks`) while Committed is on.
+  /// the working copy (their `committed_hunks`) wherever Committed is
+  /// offered: hidden, its committed hunks start shut.
   pub branch_diff: HashSet<String>,
 }
 
@@ -487,7 +508,7 @@ impl Snapshot {
   }
 
   /// What `loadChangedFiles` keeps of a workspace's diff.
-  pub fn from_workspace_diff(diff: JjRevisionDiff, show_committed: bool) -> Self {
+  pub fn from_workspace_diff(diff: JjRevisionDiff, show_committed: Option<bool>) -> Self {
     let files = ChangedFile::parse(&diff.uncommitted_files);
     let content_ids = diff
       .uncommitted_files
@@ -509,7 +530,7 @@ impl Snapshot {
         });
       }
     }
-    let branch_diff = if show_committed {
+    let branch_diff = if show_committed.is_some() {
       diff
         .hunks_by_file
         .iter()
@@ -523,7 +544,9 @@ impl Snapshot {
       .hunks_by_file
       .into_iter()
       .filter(|f| {
-        show_committed || uncommitted.contains(f.path.as_str()) || conflicted.contains(&f.path)
+        show_committed == Some(true)
+          || uncommitted.contains(f.path.as_str())
+          || conflicted.contains(&f.path)
       })
       .map(|f| {
         let hunks = FileHunks {
@@ -866,6 +889,50 @@ pub fn line_counts(hunks: &[JjDiffHunk]) -> (usize, usize) {
         (a, d + 1)
       } else {
         (a, d)
+      }
+    })
+}
+
+/// The hunks of a file's branch diff (fork point to working copy) that
+/// hold no change of its working-copy diff (`working`): already committed.
+/// Both diffs number the working copy's lines alike, so a hunk is matched
+/// by the lines it spans there, context included: a diff may place a
+/// change anywhere among identical lines.
+pub fn committed_hunks(branch: &[JjDiffHunk], working: &[JjDiffHunk]) -> HashSet<usize> {
+  let dirty: Vec<u32> = working.iter().flat_map(changed_lines).collect();
+  branch
+    .iter()
+    .enumerate()
+    .filter(|(_, hunk)| {
+      let (_, start) = core::review::hunk_starts(&hunk.header);
+      let len = hunk
+        .lines
+        .iter()
+        .filter(|l| !l.starts_with(['-', '\\']))
+        .count() as u32;
+      !dirty.iter().any(|n| (start..=start + len).contains(n))
+    })
+    .map(|(h, _)| h)
+    .collect()
+}
+
+/// Where a hunk's changes land in the working copy: an added line's number,
+/// and a removed line's as the number of the line it was removed before.
+fn changed_lines(hunk: &JjDiffHunk) -> impl Iterator<Item = u32> + '_ {
+  let (_, mut new) = core::review::hunk_starts(&hunk.header);
+  hunk
+    .lines
+    .iter()
+    .filter_map(move |line| match line.as_bytes().first() {
+      Some(b'+') => {
+        new += 1;
+        Some(new - 1)
+      }
+      Some(b'-') => Some(new),
+      Some(b'\\') => None,
+      _ => {
+        new += 1;
+        None
       }
     })
 }
@@ -1248,6 +1315,30 @@ mod tests {
     paths.iter().map(|p| p.to_string()).collect()
   }
 
+  /// A branch hunk whose span holds no working-copy change is committed;
+  /// one that holds an added or a removed working-copy line is not.
+  #[test]
+  fn committed_hunks_are_those_the_working_copy_does_not_touch() {
+    let branch = [
+      hunk("@@ -8,3 +8,6 @@", &[" a", "+b", "+c", "+d", " e", " f"]),
+      hunk("@@ -40,3 +43,4 @@", &[" g", "+h", " i", " j"]),
+      hunk("@@ -90,4 +94,3 @@", &[" k", "-l", " m", " n"]),
+    ];
+    let working = [
+      hunk("@@ -43,2 +43,3 @@", &[" g", "+h", " i"]),
+      hunk("@@ -94,3 +94,2 @@", &[" k", "-l", " m"]),
+    ];
+    assert_eq!(committed_hunks(&branch, &working), HashSet::from([0]));
+  }
+
+  /// With nothing changed in the working copy, every branch hunk is committed.
+  #[test]
+  fn committed_hunks_are_all_of_them_without_a_working_copy_change() {
+    let branch = [hunk("@@ -1 +1 @@", &["-a", "+b"])];
+    assert_eq!(committed_hunks(&branch, &[]), HashSet::from([0]));
+    assert!(committed_hunks(&[], &branch).is_empty());
+  }
+
   #[test]
   fn click_selects_only_the_row() {
     let fs = files(&["a", "b", "c"]);
@@ -1584,7 +1675,7 @@ mod tests {
       render_block_reason: None,
       working_copy_token: None,
     };
-    let snap = Snapshot::from_workspace_diff(diff, false);
+    let snap = Snapshot::from_workspace_diff(diff, None);
     let committed: Vec<&str> = snap.committed.iter().map(|f| f.path.as_str()).collect();
     assert_eq!(committed, ["done.rs", "clash.rs"]);
     assert_eq!(snap.committed[1].status, "C");
@@ -1617,17 +1708,18 @@ mod tests {
       render_block_reason: None,
       working_copy_token: None,
     };
-    let snap = Snapshot::from_workspace_diff(diff, false);
+    let snap = Snapshot::from_workspace_diff(diff, None);
     assert!(snap.purely_committed("done.rs"));
     assert!(!snap.purely_committed("both.rs"));
     assert!(!snap.purely_committed("dirty.rs"));
   }
 
-  /// With Committed on, a file both committed and dirty shows the branch
-  /// diff (fork point to working copy), not the working copy's own diff;
-  /// with it off, or for dirty-only and conflicted files, the working copy's.
+  /// Where the Committed group is offered, shown or hidden, a file both
+  /// committed and dirty shows the branch diff (fork point to working
+  /// copy), not the working copy's own diff; elsewhere, or for dirty-only
+  /// and conflicted files, the working copy's.
   #[test]
-  fn dirty_committed_file_shows_the_branch_diff_with_committed_on() {
+  fn dirty_committed_file_shows_the_branch_diff_where_committed_is_offered() {
     let change = |path: &str| JjFileChange {
       path: path.into(),
       status: "M".into(),
@@ -1651,12 +1743,14 @@ mod tests {
       render_block_reason: None,
       working_copy_token: None,
     };
-    let on = Snapshot::from_workspace_diff(diff(), true);
+    let on = Snapshot::from_workspace_diff(diff(), Some(true));
     assert!(on.shows_branch_diff("both.rs"));
     assert!(!on.shows_branch_diff("dirty.rs"));
     assert!(!on.shows_branch_diff("clash.rs"));
-    let off = Snapshot::from_workspace_diff(diff(), false);
-    assert!(!off.shows_branch_diff("both.rs"));
+    let hidden = Snapshot::from_workspace_diff(diff(), Some(false));
+    assert!(hidden.shows_branch_diff("both.rs"));
+    let unoffered = Snapshot::from_workspace_diff(diff(), None);
+    assert!(!unoffered.shows_branch_diff("both.rs"));
   }
 
   /// A jj workspace whose working copy is empty but whose branch has
@@ -1680,7 +1774,7 @@ mod tests {
       render_block_reason: None,
       working_copy_token: None,
     };
-    let snap = Snapshot::from_workspace_diff(diff, false);
+    let snap = Snapshot::from_workspace_diff(diff, None);
     assert_eq!(snap.review_file_count(), 3);
   }
 

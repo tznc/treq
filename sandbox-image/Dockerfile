@@ -9,8 +9,8 @@
 #   docker build -f sandbox-image/Dockerfile sandbox-image
 #   docker build -f sandbox-image/Dockerfile --build-arg BASE_IMAGE=docker.io/cloudflare/sandbox:0.4.18 sandbox-image
 #
-# Without bin/treq the build downloads the release, which needs the treq CLI
-# digests pinned in boot-manifest.ts: bootstrap refuses a PLACEHOLDER digest.
+# Without bin/treq the build fails: the committed bootstrap.sh resolves no
+# treq release, so it refuses the PLACEHOLDER digest.
 # .github/workflows/sandbox-image.yml builds and publishes it for release
 # tags and nightlies with bin/treq baked in.
 #
