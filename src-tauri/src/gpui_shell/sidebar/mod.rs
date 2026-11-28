@@ -1054,14 +1054,14 @@ impl Sidebar {
           .child(arrow(
             "nav-back",
             theme::ICON_ARROW_LEFT,
-            "Back",
+            "Previous view",
             self.snapshot.can_back,
             SidebarAction::Back,
           ))
           .child(arrow(
             "nav-forward",
             theme::ICON_ARROW_RIGHT,
-            "Forward",
+            "Next view",
             self.snapshot.can_forward,
             SidebarAction::Forward,
           )),

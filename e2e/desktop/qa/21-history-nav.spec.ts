@@ -7,8 +7,8 @@ import { home, settle } from "./helpers.ts";
 
 test.describe.configure({ mode: "serial" });
 
-const back = (page: Page) => page.getByRole("button", { name: "Back", exact: true });
-const forward = (page: Page) => page.getByRole("button", { name: "Forward", exact: true });
+const back = (page: Page) => page.getByRole("button", { name: "Previous view", exact: true });
+const forward = (page: Page) => page.getByRole("button", { name: "Next view", exact: true });
 const github = (page: Page) => page.getByRole("button", { name: "GitHub", exact: true });
 
 /** X button 8 is the mouse's back button, 9 its forward button. */
