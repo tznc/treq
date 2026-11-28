@@ -40,3 +40,5 @@ teh = "teh"
 abd = "abd"
 # "ATTACHed" (SQL ATTACH).
 Hed = "Hed"
+# Infor, the ERP vendor (Infor M3).
+Infor = "Infor"
